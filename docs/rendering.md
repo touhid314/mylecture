@@ -34,9 +34,26 @@ Override them when needed:
 ```bash
 npm run render:video -- --workers 8 --jpeg-quality 85
 npm run render:video -- --frame-format png --workers 1
+npm run render:video -- --video-codec libx264 --x264-preset ultrafast
 ```
 
 Use PNG only when you need lossless intermediate frames; it is much slower.
+
+Encoding defaults:
+
+- `--video-codec auto` tries hardware H.264 encoders first when ffmpeg exposes them, then falls back to `libx264`.
+- Hardware encoder order is `h264_nvenc`, `h264_qsv`, `h264_amf`, then `libx264`.
+- `--x264-preset veryfast` is used when the selected encoder is `libx264`.
+- Browser capture launches Chromium with GPU/compositor-friendly flags where available.
+
+Benchmark commands:
+
+```bash
+npm run benchmark:480p
+npm run benchmark:1080p
+```
+
+The renderer logs frame-rendering time, effective capture fps, audio mix time, selected video encoder, video encode time, and total command time. If 1080p renders are slow, tune `--workers`; on screenshot-heavy pages, the fastest value can be lower than the logical CPU count.
 
 ## Plan Pipeline
 

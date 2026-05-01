@@ -1,6 +1,7 @@
 import { chromium } from 'playwright';
 import { spawn } from 'node:child_process';
 import os from 'node:os';
+import { performance } from 'node:perf_hooks';
 import { existsSync, mkdirSync, readFileSync, readdirSync, rmSync } from 'node:fs';
 import path from 'node:path';
 import { pathToFileURL } from 'node:url';
@@ -24,6 +25,8 @@ function parseArgs(argv) {
     workers: defaultWorkerCount(),
     autoBuildPlan: true,
     forceAudio: false,
+    videoCodec: 'auto',
+    x264Preset: 'veryfast',
     resolvedHtml: null,
     keepFrames: false,
     maxFrames: null,
@@ -43,6 +46,8 @@ function parseArgs(argv) {
     else if (arg === '--frame-format') args.frameFormat = String(next || '').toLowerCase(), i++;
     else if (arg === '--jpeg-quality') args.jpegQuality = Number(next), i++;
     else if (arg === '--workers') args.workers = Number(next), i++;
+    else if (arg === '--video-codec') args.videoCodec = String(next || '').toLowerCase(), i++;
+    else if (arg === '--x264-preset') args.x264Preset = String(next || '').toLowerCase(), i++;
     else if (arg === '--resolved-html') args.resolvedHtml = next, i++;
     else if (arg === '--max-frames') args.maxFrames = Number(next), i++;
     else if (arg === '--no-auto-build' || arg === '--no-auto-build-plan') args.autoBuildPlan = false;
@@ -65,6 +70,10 @@ function parseArgs(argv) {
     throw new Error('--jpeg-quality must be an integer from 1 to 100');
   }
   if (!Number.isInteger(args.workers) || args.workers <= 0) throw new Error('--workers must be a positive integer');
+  if (!['auto', 'libx264', 'h264_nvenc', 'h264_qsv', 'h264_amf'].includes(args.videoCodec)) {
+    throw new Error('--video-codec must be one of: auto, libx264, h264_nvenc, h264_qsv, h264_amf');
+  }
+  if (!args.x264Preset) throw new Error('--x264-preset must not be empty');
   if (args.maxFrames !== null && (!Number.isInteger(args.maxFrames) || args.maxFrames <= 0)) {
     throw new Error('--max-frames must be a positive integer');
   }
@@ -86,6 +95,8 @@ Options:
   --frame-format <fmt>   Temporary frame format: jpeg or png. Default: jpeg
   --jpeg-quality <1-100> JPEG quality when --frame-format jpeg. Default: 90
   --workers <number>     Parallel Playwright pages for frame rendering. Default: logical CPU core count
+  --video-codec <codec>   MP4 video encoder: auto, libx264, h264_nvenc, h264_qsv, h264_amf. Default: auto
+  --x264-preset <preset>  libx264 speed preset. Default: veryfast
   --resolved-html <file>  Output path for auto-built source HTML. Default: sibling resolved.html
   --no-auto-build         Do not auto-build source HTML before rendering
   --force-audio           Regenerate narration audio when auto-building source HTML
@@ -109,6 +120,58 @@ function run(command, args, options = {}) {
       else reject(new Error(`${command} exited with code ${code}`));
     });
   });
+}
+
+function runCapture(command, args, options = {}) {
+  return new Promise((resolve, reject) => {
+    const child = spawn(command, args, {
+      stdio: ['ignore', 'pipe', 'pipe'],
+      windowsHide: true,
+      ...options
+    });
+
+    let stdout = '';
+    let stderr = '';
+    child.stdout.on('data', data => stdout += data.toString());
+    child.stderr.on('data', data => stderr += data.toString());
+    child.on('error', reject);
+    child.on('close', code => {
+      if (code === 0) resolve({ stdout, stderr });
+      else reject(new Error(`${command} exited with code ${code}: ${stderr || stdout}`));
+    });
+  });
+}
+
+function runExitCode(command, args, options = {}) {
+  return new Promise((resolve, reject) => {
+    const child = spawn(command, args, {
+      stdio: 'inherit',
+      windowsHide: true,
+      ...options
+    });
+
+    child.on('error', reject);
+    child.on('close', code => resolve(code));
+  });
+}
+
+function formatSeconds(ms) {
+  return `${(ms / 1000).toFixed(2)}s`;
+}
+
+function chromiumLaunchArgs() {
+  return [
+    '--allow-file-access-from-files',
+    '--enable-gpu',
+    '--ignore-gpu-blocklist',
+    '--enable-accelerated-2d-canvas',
+    '--enable-webgl',
+    '--no-first-run',
+    '--disable-background-timer-throttling',
+    '--disable-backgrounding-occluded-windows',
+    '--disable-renderer-backgrounding',
+    '--disable-features=CalculateNativeWinOcclusion,BackForwardCache,Translate'
+  ];
 }
 
 function ensureCleanDir(dir) {
@@ -214,6 +277,92 @@ function buildAudioMixArgs(audioTimeline, htmlPath, outputPath, totalDuration) {
   ];
 }
 
+async function availableFfmpegEncoders() {
+  try {
+    const { stdout, stderr } = await runCapture('ffmpeg', ['-hide_banner', '-encoders']);
+    return `${stdout}\n${stderr}`;
+  } catch {
+    return '';
+  }
+}
+
+async function videoCodecCandidates(requestedCodec) {
+  if (requestedCodec !== 'auto') return [requestedCodec];
+
+  const encoders = await availableFfmpegEncoders();
+  const preferred = ['h264_nvenc', 'h264_qsv', 'h264_amf', 'libx264'];
+  const detected = preferred.filter(codec => encoders.includes(codec));
+  return detected.length > 0 ? detected : ['libx264'];
+}
+
+function videoCodecArgs(codec, args) {
+  if (codec === 'h264_nvenc') {
+    return ['-c:v', 'h264_nvenc', '-preset', 'fast'];
+  }
+  if (codec === 'h264_qsv') {
+    return ['-c:v', 'h264_qsv', '-preset', 'veryfast'];
+  }
+  if (codec === 'h264_amf') {
+    return ['-c:v', 'h264_amf', '-quality', 'speed'];
+  }
+  return ['-c:v', 'libx264', '-preset', args.x264Preset, '-threads', '0'];
+}
+
+function buildVideoEncodeArgs({ args, codec, framesDir, fps, audioTimeline, mixedAudioPath, outputPath }) {
+  const ffmpegArgs = [
+    '-y',
+    '-hide_banner',
+    '-loglevel', 'warning',
+    '-framerate', String(fps),
+    '-i', path.join(framesDir, `frame_%06d.${args.frameFormat === 'jpeg' ? 'jpg' : 'png'}`)
+  ];
+
+  if (audioTimeline.length > 0) {
+    ffmpegArgs.push('-i', mixedAudioPath);
+  }
+
+  ffmpegArgs.push(
+    ...videoCodecArgs(codec, args),
+    '-vf', 'scale=in_range=pc:out_range=tv',
+    '-pix_fmt', 'yuv420p',
+    '-r', String(fps)
+  );
+
+  if (audioTimeline.length > 0) {
+    ffmpegArgs.push('-c:a', 'aac', '-b:a', '192k', '-shortest');
+  }
+
+  ffmpegArgs.push(outputPath);
+  return ffmpegArgs;
+}
+
+async function encodeVideoWithFallback({ args, framesDir, fps, audioTimeline, mixedAudioPath, outputPath }) {
+  const candidates = await videoCodecCandidates(args.videoCodec);
+
+  for (let index = 0; index < candidates.length; index++) {
+    const codec = candidates[index];
+    console.log(`Encoding video with ${codec}...`);
+    const code = await runExitCode('ffmpeg', buildVideoEncodeArgs({
+      args,
+      codec,
+      framesDir,
+      fps,
+      audioTimeline,
+      mixedAudioPath,
+      outputPath
+    }));
+
+    if (code === 0) return codec;
+    if (args.videoCodec !== 'auto' || index === candidates.length - 1) {
+      throw new Error(`ffmpeg video encode failed with ${codec} (exit code ${code})`);
+    }
+
+    console.log(`Encoder ${codec} failed; trying ${candidates[index + 1]}...`);
+  }
+
+  throw new Error('No usable video encoder found.');
+}
+
 async function getTimelineFromPage(page) {
   return await page.evaluate(() => ({
     duration: window.__VIDEO_DURATION__,
@@ -248,28 +397,25 @@ async function preparePage(browser, url, width, height) {
   return page;
 }
 
-async function renderFrameRange(page, framesDir, frameStart, frameEnd, fps, options, totalFrames) {
+async function renderSingleFrame(page, framesDir, frame, fps, options, totalFrames) {
   const extension = options.frameFormat === 'jpeg' ? 'jpg' : 'png';
+  const time = frame / fps;
+  await page.evaluate((t) => window.renderAt(t), time);
+  const screenshotOptions = {
+    path: path.join(framesDir, frameName(frame, extension)),
+    type: 'png',
+    animations: 'disabled'
+  };
 
-  for (let frame = frameStart; frame < frameEnd; frame++) {
-    const time = frame / fps;
-    await page.evaluate((t) => window.renderAt(t), time);
-    const screenshotOptions = {
-      path: path.join(framesDir, frameName(frame, extension)),
-      type: 'png',
-      animations: 'disabled'
-    };
+  if (options.frameFormat === 'jpeg') {
+    screenshotOptions.type = 'jpeg';
+    screenshotOptions.quality = options.jpegQuality;
+  }
 
-    if (options.frameFormat === 'jpeg') {
-      screenshotOptions.type = 'jpeg';
-      screenshotOptions.quality = options.jpegQuality;
-    }
+  await page.screenshot(screenshotOptions);
 
-    await page.screenshot(screenshotOptions);
-
-    if (frame === 0 || frame === totalFrames - 1 || frame % Math.max(1, Math.floor(fps * 2)) === 0) {
-      console.log(`Rendered frame ${frame + 1}/${totalFrames} at ${time.toFixed(3)}s`);
-    }
+  if (frame === 0 || frame === totalFrames - 1 || frame % Math.max(1, Math.floor(fps * 2)) === 0) {
+    console.log(`Rendered frame ${frame + 1}/${totalFrames} at ${time.toFixed(3)}s`);
   }
 }
 
@@ -279,18 +425,19 @@ async function renderFrames(browser, url, framesDir, frameCount, fps, args) {
     Array.from({ length: workerCount }, () => preparePage(browser, url, args.width, args.height))
   );
 
-  const chunkSize = Math.ceil(frameCount / workerCount);
-  await Promise.all(pages.map((page, index) => {
-    const start = index * chunkSize;
-    const end = Math.min(frameCount, start + chunkSize);
-    if (start >= end) return Promise.resolve();
-    return renderFrameRange(page, framesDir, start, end, fps, args, frameCount);
+  let nextFrame = 0;
+  await Promise.all(pages.map(async (page) => {
+    while (nextFrame < frameCount) {
+      const frame = nextFrame++;
+      await renderSingleFrame(page, framesDir, frame, fps, args, frameCount);
+    }
   }));
 
   await Promise.all(pages.map(page => page.close()));
 }
 
 async function main() {
+  const totalStart = performance.now();
   const args = parseArgs(process.argv.slice(2));
   const sourceHtmlPath = resolveProjectPath(args.html);
   assertFileExists(sourceHtmlPath, 'HTML file');
@@ -305,7 +452,7 @@ async function main() {
   ensureCleanDir(framesDir);
 
   const browser = await chromium.launch({
-    args: ['--allow-file-access-from-files']
+    args: chromiumLaunchArgs()
   });
   const url = `${pathToFileURL(htmlPath).href}?export=1`;
   const timelinePage = await preparePage(browser, url, args.width, args.height);
@@ -328,45 +475,35 @@ async function main() {
   console.log(`Output: ${outputPath}`);
   console.log(`Viewport: ${args.width}x${args.height}, fps: ${args.fps}`);
   console.log(`Frame format: ${args.frameFormat}${args.frameFormat === 'jpeg' ? ` quality ${args.jpegQuality}` : ''}, workers: ${Math.min(args.workers, frameCount)}`);
+  console.log(`Video codec: ${args.videoCodec}${args.videoCodec === 'libx264' || args.videoCodec === 'auto' ? `, x264 preset: ${args.x264Preset}` : ''}`);
   console.log(`Timeline duration: ${totalDuration.toFixed(3)}s, frames: ${frameCount}${args.maxFrames ? `/${fullFrameCount}` : ''}`);
   console.log(`Audio cues: ${audioTimeline.length}`);
 
+  const renderStart = performance.now();
   await renderFrames(browser, url, framesDir, frameCount, args.fps, args);
   await browser.close();
+  const renderElapsed = performance.now() - renderStart;
+  console.log(`Frame rendering time: ${formatSeconds(renderElapsed)} (${(frameCount / (renderElapsed / 1000)).toFixed(2)} fps effective)`);
 
   const audioDuration = args.maxFrames ? renderDuration : totalDuration;
   if (audioTimeline.length > 0) {
     console.log('Mixing audio...');
+    const audioStart = performance.now();
     await run('ffmpeg', buildAudioMixArgs(audioTimeline, htmlPath, mixedAudioPath, audioDuration));
+    console.log(`Audio mix time: ${formatSeconds(performance.now() - audioStart)}`);
   }
 
   if (!args.skipVideo) {
-    console.log('Encoding video...');
-    const ffmpegArgs = [
-      '-y',
-      '-hide_banner',
-      '-loglevel', 'warning',
-      '-framerate', String(args.fps),
-      '-i', path.join(framesDir, `frame_%06d.${args.frameFormat === 'jpeg' ? 'jpg' : 'png'}`)
-    ];
-
-    if (audioTimeline.length > 0) {
-      ffmpegArgs.push('-i', mixedAudioPath);
-    }
-
-    ffmpegArgs.push(
-      '-c:v', 'libx264',
-      '-vf', 'scale=in_range=pc:out_range=tv',
-      '-pix_fmt', 'yuv420p',
-      '-r', String(args.fps)
-    );
-
-    if (audioTimeline.length > 0) {
-      ffmpegArgs.push('-c:a', 'aac', '-b:a', '192k', '-shortest');
-    }
-
-    ffmpegArgs.push(outputPath);
-    await run('ffmpeg', ffmpegArgs);
+    const encodeStart = performance.now();
+    const encoder = await encodeVideoWithFallback({
+      args,
+      framesDir,
+      fps: args.fps,
+      audioTimeline,
+      mixedAudioPath,
+      outputPath
+    });
+    console.log(`Video encode time: ${formatSeconds(performance.now() - encodeStart)} using ${encoder}`);
 
     rmSync(mixedAudioPath, { force: true });
   }
@@ -378,6 +515,7 @@ async function main() {
     console.log(`Kept ${renderedCount} frames in ${framesDir}`);
   }
 
+  console.log(`Total render command time: ${formatSeconds(performance.now() - totalStart)}`);
   console.log('Render complete.');
 }
 

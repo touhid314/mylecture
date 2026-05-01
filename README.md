@@ -35,6 +35,12 @@ Render it at 4K and 120 fps:
 npm run render:video -- --html tests/fixtures/visual-only-3d-test/index.html --out tests/fixtures/visual-only-3d-test/rendered-4k-120fps.mp4 --width 3840 --height 2160 --fps 120
 ```
 
+Run the low-resolution narration benchmark:
+
+```bash
+npm run test:narration
+```
+
 ## Docs
 
 - [HTML input contract](docs/html-input-contract.md)

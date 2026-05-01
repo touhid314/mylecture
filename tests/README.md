@@ -148,6 +148,17 @@ Output:
 
 This test is intended to stay small enough for regular smoke testing while still being useful as a baseline speed benchmark later.
 
+## Benchmark Commands
+
+```bash
+npm run benchmark:480p
+npm run benchmark:1080p
+```
+
+`benchmark:480p` is the same as `test:narration`.
+
+`benchmark:1080p` renders the first 300 frames of the mixed narration/silent-section fixture at 1920x1080 and 30 fps. The renderer logs effective frame-capture fps and selected encoder timing.
+
 ## Generated Artifacts
 
 These files may appear inside fixture folders after local renders:
