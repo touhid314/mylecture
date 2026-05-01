@@ -9,7 +9,6 @@ Each fixture is a source HTML file or a small fixture folder that can be passed 
 ```text
 fixtures/
   input-contract-test/            Contract smoke test with narration and visual-only segments
-  visual-narration-benchmark/     Fast 480p/15fps narration+visual benchmark render
   input-contract-4k-sync-test/    Text-heavy synchronized animation test
   visual-only-3d-test/            Visual-only Three.js stress test
   plan-pipeline/                  Full plan-resolution pipeline fixture
@@ -111,11 +110,13 @@ Output:
 
 ### `npm run test:narration`
 
-Runs a full visual+narration benchmark render from:
+Runs a full mixed timeline benchmark render from:
 
 ```text
-tests/fixtures/visual-narration-benchmark/index.html
+tests/fixtures/input-contract-test/index.html
 ```
+
+This fixture includes narration+visual sections, visual-only silent sections, and then narration again.
 
 Render settings:
 
@@ -130,9 +131,10 @@ real audio mix
 Validates:
 
 ```text
-narration+visual-only timeline can be resolved
+mixed narration+visual and visual-only timeline can be resolved
 TTS audio is found or generated
 audio durations control segment durations
+silent visual-only gaps stay in the video
 frames render at low benchmark resolution
 audio is muxed into the final MP4
 ```
