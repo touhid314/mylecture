@@ -32,6 +32,81 @@ npm run test:render
 npm run test:visual
 ```
 
+### `npm run test:build`
+
+Builds a resolved timeline from:
+
+```text
+tests/fixtures/input-contract-test/index.html
+```
+
+Validates:
+
+```text
+plan-source HTML can be loaded
+window.__VIDEO_PLAN__ is detected
+narration audio is found or generated
+audio durations are measured
+visual-only durations are resolved
+resolved HTML can be written
+```
+
+Output:
+
+```text
+.render/tests/input-contract-resolved.html
+.render/tests/audio/*.wav
+```
+
+### `npm run test:render`
+
+Runs a short render smoke test from:
+
+```text
+tests/fixtures/input-contract-test/index.html
+```
+
+Validates:
+
+```text
+auto-build from plan source works
+renderAt(time) is available in the resolved page
+first frames can be captured through Playwright
+audio cues can be mixed for the shortened render
+the fixture folder does not need to be modified
+```
+
+Output:
+
+```text
+.render/tests/input-contract-render-resolved.html
+.render/tests/input-contract-smoke.mp4
+```
+
+### `npm run test:visual`
+
+Runs a short visual-only 3D render smoke test from:
+
+```text
+tests/fixtures/visual-only-3d-test/index.html
+```
+
+Validates:
+
+```text
+visual-only plans work with zero audio cues
+local Three.js module imports load correctly
+WebGL content can be rendered by Playwright
+frames can be captured without narration audio
+```
+
+Output:
+
+```text
+.render/tests/visual-3d-resolved.html
+.render/tests/visual-3d-smoke.mp4
+```
+
 ## Generated Artifacts
 
 These files may appear inside fixture folders after local renders:
