@@ -1,0 +1,660 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>myLecture: Diameter of Binary Tree</title>
+<style>
+    @import url('https://cdn.jsdelivr.net/gh/dreampulse/computer-modern-web-font@master/fonts.css');
+
+    :root {
+        --bg-color: #1e1e1e;
+        --text-color: #eceff4;
+        --accent-blue: #61AFEF;
+        --accent-green: #98c379;
+        --accent-yellow: #E5C07B;
+        --node-bg: #282c34;
+        --edge-color: #5c6370;
+    }
+
+    body {
+        margin: 0;
+        display: flex;
+        justify-content: center;
+        align-items: center;
+        height: 100vh;
+        background-color: #000;
+        font-family: 'Computer Modern Serif', serif;
+    }
+
+    /* 9:16 Aspect Ratio Container */
+    #player-container {
+        position: relative;
+        width: 100%;
+        max-width: 50vh;
+        aspect-ratio: 9 / 16;
+        background-color: var(--bg-color);
+        color: var(--text-color);
+        overflow: hidden;
+        box-shadow: 0 0 20px rgba(0,0,0,0.5);
+    }
+
+    #progress-container {
+        position: absolute;
+        bottom: 0;
+        left: 0;
+        width: 100%;
+        height: 6px;
+        background: #333;
+        z-index: 100;
+    }
+
+    #progress-bar {
+        height: 100%;
+        width: 0%;
+        background: var(--accent-blue);
+        transition: width 0.3s linear;
+    }
+
+    #play-overlay {
+        position: absolute;
+        inset: 0;
+        background: rgba(0,0,0,0.8);
+        display: flex;
+        justify-content: center;
+        align-items: center;
+        z-index: 200;
+        cursor: pointer;
+    }
+
+    #play-btn {
+        font-size: 24px;
+        padding: 15px 30px;
+        background: var(--accent-blue);
+        color: #fff;
+        border: none;
+        border-radius: 8px;
+        font-family: inherit;
+        cursor: pointer;
+    }
+
+    /* Scene Layouts */
+    .scene {
+        position: absolute;
+        inset: 0;
+        padding: 20px;
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        opacity: 0;
+        transition: opacity 0.5s ease;
+        pointer-events: none;
+    }
+
+    .scene.active {
+        opacity: 1;
+        pointer-events: auto;
+    }
+
+    .title {
+        color: var(--accent-blue);
+        font-size: 28px;
+        font-weight: bold;
+        margin-top: 20px;
+        text-align: center;
+        border: 2px solid var(--accent-blue);
+        padding: 10px 20px;
+        background: rgba(97, 175, 239, 0.1);
+        border-radius: 8px;
+        opacity: 0;
+        transition: opacity 0.3s;
+    }
+
+    /* SVGs */
+    svg {
+        width: 100%;
+        height: 45%;
+        margin-top: 20px;
+    }
+
+    .node {
+        fill: var(--node-bg);
+        stroke: #fff;
+        stroke-width: 2;
+        transition: all 0.3s;
+    }
+
+    .node-text {
+        fill: #fff;
+        font-size: 20px;
+        font-family: inherit;
+        text-anchor: middle;
+        dominant-baseline: central;
+    }
+
+    .edge {
+        stroke: var(--edge-color);
+        stroke-width: 3;
+        transition: all 0.3s;
+        fill: none;
+    }
+
+    .highlight-green { stroke: var(--accent-green); stroke-width: 5; }
+    .highlight-yellow { stroke: var(--accent-yellow); stroke-width: 5; }
+    .circle-green { stroke: var(--accent-green); stroke-width: 4; }
+
+    #pointer {
+        font-size: 18px; /* Reduced to align perfectly with one line */
+        line-height: 1;
+        position: absolute;
+        transition: top 0.4s ease, left 0.4s ease;
+        opacity: 0;
+        z-index: 50;
+    }
+
+    /* Text Boxes */
+    .info-box {
+        margin-top: auto;
+        margin-bottom: 40px;
+        padding: 15px;
+        border: 1px solid #555;
+        background: #2a2a2a;
+        font-size: 18px;
+        line-height: 1.5;
+        border-radius: 8px;
+        opacity: 0;
+        transition: opacity 0.3s;
+    }
+
+    .text-green { color: var(--accent-green); font-weight: bold; }
+    .text-yellow { color: var(--accent-yellow); font-weight: bold;}
+    .text-blue { color: var(--accent-blue); font-weight: bold;}
+
+    /* Code Display */
+    #code-container {
+        font-family: 'Courier New', Courier, monospace;
+        background: #282c34;
+        padding: 15px;
+        border-radius: 8px;
+        font-size: 14px;
+        line-height: 1.6;
+        width: 90%;
+        margin-top: 20px;
+        opacity: 0;
+        transition: opacity 0.3s;
+        text-align: left;
+    }
+
+    /* Scene 3: Fixed Flexbox Layout to prevent cutoff */
+    .walkthrough-layout {
+        display: flex;
+        flex-direction: column;
+        width: 100%;
+        height: 100%;
+        padding: 10px 0;
+        box-sizing: border-box;
+    }
+
+    .wt-tree {
+        flex: 0 0 45%;
+        width: 100%;
+        display: flex;
+        justify-content: center;
+    }
+
+    .wt-tree svg {
+        width: 100%;
+        height: 100%;
+        margin-top: 0;
+    }
+
+    .wt-state {
+        flex: 0 0 10%;
+        width: 100%;
+        display: flex;
+        flex-direction: row;
+        justify-content: space-evenly;
+        align-items: center;
+    }
+
+    .wt-state .title {
+        font-size: 18px;
+        padding: 6px 12px;
+        margin: 0;
+        opacity: 1;
+    }
+
+    .wt-state #max-diam {
+        font-size: 18px;
+        margin: 0;
+    }
+
+    .wt-code {
+        flex: 0 0 45%;
+        width: 100%;
+        display: flex;
+        justify-content: center;
+    }
+
+    /* Reflow the code naturally for walkthrough instead of CSS scaling */
+    .wt-code #code-container {
+        font-size: 11.5px;
+        line-height: 1.4;
+        width: 85%;
+        margin-top: 10px;
+        padding: 10px;
+        opacity: 1;
+    }
+
+    .return-val {
+        fill: var(--accent-blue);
+        font-size: 16px;
+        font-weight: bold;
+        opacity: 0;
+        transition: opacity 0.3s;
+    }
+</style>
+</head>
+<body>
+
+<div id="player-container">
+    <div id="play-overlay">
+        <button id="play-btn" onclick="recordAndStartLecture()">Record + Play Lecture</button>
+    </div>
+
+    <div id="scene1" class="scene active">
+        <div id="main-title" class="title">Diameter of Binary Tree</div>
+        
+        <svg id="tree1" viewBox="0 0 400 300">
+            <defs>
+                <marker id="arrow" viewBox="0 0 10 10" refX="5" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+                    <path d="M 0 0 L 10 5 L 0 10 z" fill="var(--accent-green)" />
+                </marker>
+            </defs>
+            <path id="e1-2" class="edge" d="M 200 50 L 120 130" />
+            <path id="e1-3" class="edge" d="M 200 50 L 280 130" />
+            <path id="e2-4" class="edge" d="M 120 130 L 60 210" />
+            <path id="e2-5" class="edge" d="M 120 130 L 180 210" />
+            
+            <circle id="n1" class="node" cx="200" cy="50" r="20" /> <text class="node-text" x="200" y="50">1</text>
+            <circle id="n2" class="node" cx="120" cy="130" r="20" /> <text class="node-text" x="120" y="130">2</text>
+            <circle id="n3" class="node" cx="280" cy="130" r="20" /> <text class="node-text" x="280" y="130">3</text>
+            <circle id="n4" class="node" cx="60" cy="210" r="20" /> <text class="node-text" x="60" y="210">4</text>
+            <circle id="n5" class="node" cx="180" cy="210" r="20" /> <text class="node-text" x="180" y="210">5</text>
+        </svg>
+
+        <svg id="tree2" viewBox="0 0 400 300" style="display: none; position: absolute; top: 100px; left:0; width: 100%;">
+            <path id="t2-e1-2" class="edge" d="M 200 40 L 140 100" />
+            <path id="t2-e2-3" class="edge" d="M 140 100 L 80 160" />
+            <path id="t2-e2-4" class="edge" d="M 140 100 L 200 160" />
+            <path id="t2-e3-5" class="edge" d="M 80 160 L 40 220" />
+            <path id="t2-e4-6" class="edge" d="M 200 160 L 260 220" />
+
+            <circle id="t2-n1" class="node" cx="200" cy="40" r="20" /> <text class="node-text" x="200" y="40">1</text>
+            <circle id="t2-n2" class="node" cx="140" cy="100" r="20" /> <text class="node-text" x="140" y="100">2</text>
+            <circle id="t2-n3" class="node" cx="80" cy="160" r="20" /> <text class="node-text" x="80" y="160">3</text>
+            <circle id="t2-n4" class="node" cx="200" cy="160" r="20" /> <text class="node-text" x="200" y="160">4</text>
+            <circle id="t2-n5" class="node" cx="40" cy="220" r="20" /> <text class="node-text" x="40" y="220">5</text>
+            <circle id="t2-n6" class="node" cx="260" cy="220" r="20" /> <text class="node-text" x="260" y="220">6</text>
+        </svg>
+
+        <div id="def-box" class="info-box">
+            Diameter = the <span class="text-green">number of edges</span> on the longest path between any two nodes.
+        </div>
+    </div>
+
+    <div id="scene2" class="scene">
+        <div id="code-title" class="title">Idea and Code</div>
+        <div id="code-bullets" class="info-box" style="margin-bottom: 10px;">
+            <ul style="margin: 0; padding-left: 20px;">
+                <li>Check every node and keep a global maximum</li>
+                <li>Candidate diameter = <span class="text-green">left depth + right depth</span></li>
+            </ul>
+        </div>
+        <div id="code-container">
+<pre style="margin:0;"><span id="l1" style="color:#c678dd;">def</span> <span style="color:#61afef;">diameterOfBinaryTree</span>(root):
+  <span id="l2">ans = [0]</span>
+  <span id="l3" style="color:#c678dd;">def</span> <span style="color:#61afef;">depth</span>(node):
+    <span id="l4"><span style="color:#c678dd;">if not</span> node: <span style="color:#c678dd;">return</span> 0</span>
+    <span id="l5">left = depth(node.left)</span>
+    <span id="l6">right = depth(node.right)</span>
+    <span id="l7">ans[0] = max(ans[0], left + right)</span>
+    <span id="l8"><span style="color:#c678dd;">return</span> max(left, right) + 1</span>
+  
+  <span id="l9">depth(root)</span>
+  <span id="l10"><span style="color:#c678dd;">return</span> ans[0]</span></pre>
+        </div>
+        <div id="complexity" style="margin-top: 20px; font-size: 18px; opacity: 0;">
+            <div class="text-yellow">Time: O(n)</div>
+            <div class="text-blue">Space: O(h)</div>
+        </div>
+    </div>
+
+    <div id="scene3" class="scene walkthrough-layout">
+        <div class="wt-tree">
+            <svg id="tree-wt" viewBox="0 0 400 350" preserveAspectRatio="xMidYMid meet">
+                <path class="edge" d="M 200 50 L 120 130" />
+                <path class="edge" d="M 200 50 L 280 130" />
+                <path class="edge" d="M 120 130 L 60 210" />
+                <path class="edge" d="M 120 130 L 180 210" />
+                
+                <circle class="node" cx="200" cy="50" r="20" /> <text class="node-text" x="200" y="50">1</text>
+                <circle class="node" cx="120" cy="130" r="20" /> <text class="node-text" x="120" y="130">2</text>
+                <circle class="node" cx="280" cy="130" r="20" /> <text class="node-text" x="280" y="130">3</text>
+                <circle class="node" cx="60" cy="210" r="20" /> <text class="node-text" x="60" y="210">4</text>
+                <circle class="node" cx="180" cy="210" r="20" /> <text class="node-text" x="180" y="210">5</text>
+
+                <text id="ret-4" class="return-val" x="30" y="180">↑ 1</text>
+                <text id="ret-5" class="return-val" x="210" y="180">↑ 1</text>
+                <text id="ret-2" class="return-val" x="90" y="100">↑ 2</text>
+                <text id="ret-3" class="return-val" x="310" y="100">↑ 1</text>
+            </svg>
+        </div>
+        <div class="wt-state">
+            <div class="title">Walkthrough</div>
+            <div id="max-diam" class="text-green">maxDiameter: 0</div>
+        </div>
+        <div class="wt-code" id="wt-code-clone">
+            </div>
+    </div>
+
+    <div id="pointer">👉</div>
+    
+    <div id="progress-container">
+        <div id="progress-bar"></div>
+    </div>
+</div>
+
+<script>
+    const synth = window.speechSynthesis;
+    let voiceEnGB = null;
+
+    function initVoices() {
+        const voices = synth.getVoices();
+        voiceEnGB = voices.find(v => v.lang === 'en-GB' && (v.name.includes('Female') || v.name.includes('Google'))) 
+                 || voices.find(v => v.lang === 'en-GB')
+                 || voices.find(v => v.lang.startsWith('en'))
+                 || voices[0];
+    }
+    if (speechSynthesis.onvoiceschanged !== undefined) {
+        speechSynthesis.onvoiceschanged = initVoices;
+    }
+
+    const scriptSteps = [
+        {
+            text: "Today we are solving Diameter of Binary Tree, LeetCode 543.",
+            action: () => {
+                document.getElementById('main-title').style.opacity = 1;
+                document.getElementById('n1').classList.add('circle-green');
+                document.getElementById('n2').classList.add('circle-green');
+                document.getElementById('n4').classList.add('circle-green');
+                ['e1-2', 'e2-4', 'e1-3'].forEach(id => {
+                    let el = document.getElementById(id);
+                    el.classList.add('highlight-green');
+                    el.setAttribute('marker-end', 'url(#arrow)');
+                });
+            }
+        },
+        {
+            text: "The diameter is the number of edges on the longest path between any two nodes.",
+            action: () => {
+                resetTree1();
+                document.getElementById('def-box').style.opacity = 1;
+            }
+        },
+        {
+            text: "Here is a quick example. The root is 1, with children 2 and 3, and node 2 has children 4 and 5.",
+            action: () => {
+                const ptr = document.getElementById('pointer');
+                ptr.style.opacity = 1;
+                movePointer(ptr, 200, 50); 
+                setTimeout(() => movePointer(ptr, 280, 130), 2500); 
+                setTimeout(() => movePointer(ptr, 60, 210), 4500); 
+            }
+        },
+        {
+            text: "In this tree, the longest path is 4 to 2 to 1 to 3, which has 3 edges, so the diameter is 3.",
+            action: () => {
+                document.getElementById('pointer').style.opacity = 0;
+                ['e2-4', 'e1-2', 'e1-3'].forEach(id => document.getElementById(id).classList.add('highlight-green'));
+            }
+        },
+        {
+            text: "Now here is the trap. Many people only check the root, using left height plus right height. That works sometimes, but not always. The real diameter does not have to pass through the root.",
+            action: () => {
+                resetTree1();
+                document.getElementById('def-box').style.opacity = 0;
+            }
+        },
+        {
+            text: "In another tree, the longest path from the root side might look like 1 to 2 to 3 to 5, which is length 3.",
+            action: () => {
+                document.getElementById('tree1').style.display = 'none';
+                document.getElementById('tree2').style.display = 'block';
+                ['t2-e1-2', 't2-e2-3', 't2-e3-5'].forEach(id => document.getElementById(id).classList.add('highlight-yellow'));
+            }
+        },
+        {
+            text: "But the true longest path can be 5 to 3 to 2 to 4 to 6, which is length 4. That path stays inside a subtree and never goes through the root. So if we only check the root, we can miss the correct answer.",
+            action: () => {
+                ['t2-e1-2', 't2-e2-3', 't2-e3-5'].forEach(id => document.getElementById(id).classList.remove('highlight-yellow'));
+                ['t2-e3-5', 't2-e2-3', 't2-e2-4', 't2-e4-6'].forEach(id => document.getElementById(id).classList.add('highlight-green'));
+            }
+        },
+        {
+            text: "So what is the reliable approach? We visit every node. At each node, we compute a candidate diameter: left depth plus right depth. Then we keep a global maximum across all nodes. The largest candidate we ever see is the final diameter.",
+            action: () => {
+                switchScene('scene2');
+                document.getElementById('code-title').style.opacity = 1;
+                document.getElementById('code-bullets').style.opacity = 1;
+                setTimeout(() => document.getElementById('code-container').style.opacity = 1, 3000);
+            }
+        },
+        {
+            text: "We do this with post-order traversal. Define a helper function called depth. If the node is null, return 0.",
+            action: () => {
+                const ptr = document.getElementById('pointer');
+                ptr.style.opacity = 1;
+                movePointerCode('l3');
+                setTimeout(() => movePointerCode('l4'), 3000);
+            }
+        },
+        {
+            text: "Recursively get the left depth and right depth first.",
+            action: () => {
+                movePointerCode('l5');
+                setTimeout(() => movePointerCode('l6'), 2000);
+            }
+        },
+        {
+            text: "Then left plus right is the candidate diameter through this node, so use it to update the global max.",
+            action: () => movePointerCode('l7')
+        },
+        {
+            text: "Finally, return this node's depth to its parent, which is max of left and right, plus 1.",
+            action: () => movePointerCode('l8')
+        },
+        {
+            text: "In Python, one common trick is to store the answer in a one element list, so the inner depth function can update it.",
+            action: () => movePointerCode('l2')
+        },
+        {
+            text: "The complexity is efficient. Time complexity is O of n because every node is visited once. Space complexity is O of h, where h is the tree height, from the recursion stack.",
+            action: () => {
+                document.getElementById('pointer').style.opacity = 0;
+                document.getElementById('complexity').style.opacity = 1;
+            }
+        },
+        {
+            text: "Let us run the first example quickly with post-order. We visit node 4 first. Both child depths are 0, so candidate is 0, and node 4 returns depth 1.",
+            action: () => {
+                document.getElementById('wt-code-clone').innerHTML = document.getElementById('code-container').outerHTML;
+                switchScene('scene3');
+                const ptr = document.getElementById('pointer');
+                ptr.style.opacity = 1;
+                movePointerWalkthrough(60, 210);
+                setTimeout(() => document.getElementById('ret-4').style.opacity = 1, 4000);
+            }
+        },
+        {
+            text: "Node 5 is the same, and also returns 1.",
+            action: () => {
+                movePointerWalkthrough(180, 210);
+                setTimeout(() => document.getElementById('ret-5').style.opacity = 1, 2000);
+            }
+        },
+        {
+            text: "Back at node 2, left depth is 1, and right depth is 1, so candidate is 2. Update global max to 2. Node 2 returns depth 2.",
+            action: () => {
+                movePointerWalkthrough(120, 130);
+                setTimeout(() => document.getElementById('max-diam').innerText = "maxDiameter: 2", 3000);
+                setTimeout(() => document.getElementById('ret-2').style.opacity = 1, 5000);
+            }
+        },
+        {
+            text: "Node 3 has no children, so it returns depth 1.",
+            action: () => {
+                movePointerWalkthrough(280, 130);
+                setTimeout(() => document.getElementById('ret-3').style.opacity = 1, 2000);
+            }
+        },
+        {
+            text: "Back at root 1, left depth is 2, and right depth is 1, so candidate is 3. Update global max to 3. Traversal ends, and the final answer is 3. That is the whole method.",
+            action: () => {
+                movePointerWalkthrough(200, 50);
+                setTimeout(() => {
+                    document.getElementById('max-diam').innerText = "maxDiameter: 3";
+                    document.getElementById('pointer').style.opacity = 0;
+                }, 3000);
+            }
+        }
+    ];
+
+    let currentStep = 0;
+    let mediaRecorder;
+    let recordedChunks = [];
+
+    async function recordAndStartLecture() {
+        const stream = await navigator.mediaDevices.getDisplayMedia({
+            video: {
+                frameRate: 30,
+                width: 1080,
+                height: 1920
+            },
+            audio: true
+        });
+
+        recordedChunks = [];
+
+        mediaRecorder = new MediaRecorder(stream, {
+            mimeType: "video/webm; codecs=vp9,opus"
+        });
+
+        mediaRecorder.ondataavailable = e => {
+            if (e.data.size > 0) recordedChunks.push(e.data);
+        };
+
+        mediaRecorder.onstop = () => {
+            const blob = new Blob(recordedChunks, { type: "video/webm" });
+            const url = URL.createObjectURL(blob);
+
+            const a = document.createElement("a");
+            a.href = url;
+            a.download = "bloom-filter-lecture.webm";
+            a.click();
+
+            URL.revokeObjectURL(url);
+        };
+
+        mediaRecorder.start();
+
+        startLecture();
+    }
+
+    function startLecture() {
+        if (!voiceEnGB) initVoices();
+        document.getElementById('play-overlay').style.display = 'none';
+        playStep();
+    }
+
+    function playStep() {
+        if (currentStep >= scriptSteps.length) {
+            if (mediaRecorder && mediaRecorder.state !== "inactive") {
+                mediaRecorder.stop();
+            }
+            return;
+        }
+
+        let progressPercent = 0;
+        if (currentStep > 0) {
+            progressPercent = (currentStep / (scriptSteps.length - 1)) * 100;
+        }
+        document.getElementById('progress-bar').style.width = progressPercent + '%';
+
+        const step = scriptSteps[currentStep];
+        if (step.action) step.action();
+
+        const utterance = new SpeechSynthesisUtterance(step.text);
+        if (voiceEnGB) utterance.voice = voiceEnGB;
+        utterance.rate = 1.05; 
+        
+        utterance.onend = () => {
+            currentStep++;
+            playStep();
+        };
+
+        synth.speak(utterance);
+    }
+
+    function resetTree1() {
+        ['n1', 'n2', 'n4'].forEach(id => document.getElementById(id).classList.remove('circle-green'));
+        ['e1-2', 'e2-4', 'e1-3'].forEach(id => {
+            let el = document.getElementById(id);
+            el.classList.remove('highlight-green');
+            el.removeAttribute('marker-end');
+        });
+    }
+
+    function switchScene(sceneId) {
+        document.querySelectorAll('.scene').forEach(s => s.classList.remove('active'));
+        document.getElementById(sceneId).classList.add('active');
+    }
+
+    function movePointer(el, cx, cy) {
+        const svgRect = document.getElementById('tree1').getBoundingClientRect();
+        const containerRect = document.getElementById('player-container').getBoundingClientRect();
+        const scaleX = svgRect.width / 400;
+        const scaleY = svgRect.height / 300;
+        
+        el.style.left = (svgRect.left - containerRect.left + cx * scaleX - 25) + 'px';
+        el.style.top = (svgRect.top - containerRect.top + cy * scaleY - 9) + 'px';
+    }
+
+    function movePointerCode(lineId) {
+        const el = document.getElementById('pointer');
+        const line = document.querySelector('#scene2 #' + lineId);
+        if(!line) return;
+        
+        const lineRect = line.getBoundingClientRect();
+        const containerRect = document.getElementById('player-container').getBoundingClientRect();
+        
+        // Exact left alignment: target text left bound minus spacing for the icon
+        el.style.left = (lineRect.left - containerRect.left - 22) + 'px';
+        // Exact vertical alignment: center of the line height
+        el.style.top = (lineRect.top - containerRect.top + (lineRect.height / 2) - 9) + 'px';
+    }
+
+    function movePointerWalkthrough(cx, cy) {
+        const el = document.getElementById('pointer');
+        const svgRect = document.getElementById('tree-wt').getBoundingClientRect();
+        const containerRect = document.getElementById('player-container').getBoundingClientRect();
+        const scaleX = svgRect.width / 400;
+        const scaleY = svgRect.height / 350;
+        
+        el.style.left = (svgRect.left - containerRect.left + cx * scaleX - 25) + 'px';
+        el.style.top = (svgRect.top - containerRect.top + cy * scaleY - 9) + 'px';
+    }
+</script>
+
+</body>
+</html>

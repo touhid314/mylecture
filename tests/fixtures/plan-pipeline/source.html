@@ -1,0 +1,509 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Plan Pipeline Example</title>
+<style>
+    :root {
+        --bg: #0e1116;
+        --panel: #171d25;
+        --text: #edf2f7;
+        --muted: #9aa7b6;
+        --blue: #4b9fff;
+        --green: #38d39f;
+        --yellow: #f6c44f;
+        --line: rgba(237, 242, 247, 0.15);
+    }
+
+    * {
+        box-sizing: border-box;
+    }
+
+    html,
+    body {
+        width: 100%;
+        height: 100%;
+        margin: 0;
+        overflow: hidden;
+        background: var(--bg);
+        color: var(--text);
+        font-family: "Segoe UI", Arial, sans-serif;
+    }
+
+    #stage {
+        position: relative;
+        width: 100vw;
+        height: 100vh;
+        overflow: hidden;
+        background:
+            linear-gradient(90deg, rgba(255,255,255,0.035) 1px, transparent 1px),
+            linear-gradient(0deg, rgba(255,255,255,0.035) 1px, transparent 1px),
+            radial-gradient(circle at 50% 18%, rgba(75, 159, 255, 0.12), transparent 34%),
+            var(--bg);
+        background-size: 96px 96px, 96px 96px, 100% 100%, 100% 100%;
+    }
+
+    .topbar {
+        position: absolute;
+        top: 54px;
+        left: 58px;
+        right: 58px;
+        display: flex;
+        align-items: flex-start;
+        justify-content: space-between;
+    }
+
+    .eyebrow {
+        color: var(--muted);
+        font-size: 24px;
+        margin-bottom: 10px;
+    }
+
+    #title {
+        max-width: 720px;
+        font-size: 52px;
+        line-height: 1.08;
+        font-weight: 750;
+        letter-spacing: 0;
+    }
+
+    #clock {
+        color: var(--green);
+        font-size: 34px;
+        font-weight: 700;
+        font-variant-numeric: tabular-nums;
+    }
+
+    #diagram {
+        position: absolute;
+        left: 90px;
+        right: 90px;
+        top: 350px;
+        height: 720px;
+    }
+
+    #diagram svg {
+        width: 100%;
+        height: 100%;
+        overflow: visible;
+    }
+
+    .node {
+        fill: var(--panel);
+        stroke: var(--line);
+        stroke-width: 3;
+    }
+
+    .node.active {
+        stroke: var(--green);
+        stroke-width: 6;
+    }
+
+    .node-label {
+        fill: var(--text);
+        font-size: 22px;
+        font-weight: 700;
+        text-anchor: middle;
+        dominant-baseline: middle;
+    }
+
+    .edge {
+        stroke: rgba(237, 242, 247, 0.2);
+        stroke-width: 8;
+        stroke-linecap: round;
+    }
+
+    .edge.active {
+        stroke: var(--blue);
+    }
+
+    #marker {
+        position: absolute;
+        width: 42px;
+        height: 42px;
+        border-radius: 50%;
+        background: var(--yellow);
+        box-shadow: 0 0 28px rgba(246, 196, 79, 0.8);
+        transform: translate(-50%, -50%);
+    }
+
+    #caption {
+        position: absolute;
+        left: 70px;
+        right: 70px;
+        bottom: 260px;
+        min-height: 142px;
+        padding: 26px 30px;
+        border: 1px solid rgba(237, 242, 247, 0.14);
+        background: rgba(23, 29, 37, 0.82);
+        border-radius: 8px;
+        font-size: 31px;
+        line-height: 1.32;
+    }
+
+    #caption .muted {
+        color: var(--muted);
+    }
+
+    #progress {
+        position: absolute;
+        left: 58px;
+        right: 58px;
+        bottom: 120px;
+        height: 14px;
+        border-radius: 999px;
+        background: rgba(237, 242, 247, 0.12);
+        overflow: hidden;
+    }
+
+    #progress-fill {
+        width: 0;
+        height: 100%;
+        background: linear-gradient(90deg, var(--blue), var(--green), var(--yellow));
+    }
+
+    #controls {
+        position: fixed;
+        left: 50%;
+        bottom: 22px;
+        z-index: 10;
+        display: flex;
+        align-items: center;
+        gap: 12px;
+        width: min(720px, calc(100vw - 32px));
+        padding: 10px 12px;
+        border: 1px solid rgba(255, 255, 255, 0.16);
+        border-radius: 8px;
+        background: rgba(14, 17, 22, 0.92);
+        transform: translateX(-50%);
+    }
+
+    #play-toggle {
+        min-width: 74px;
+        padding: 8px 12px;
+        border: 0;
+        border-radius: 6px;
+        background: var(--green);
+        color: #06100d;
+        font: inherit;
+        font-weight: 700;
+    }
+
+    #scrubber {
+        flex: 1;
+    }
+
+    #readout {
+        min-width: 112px;
+        text-align: right;
+        font-variant-numeric: tabular-nums;
+    }
+
+    body.hide-controls #controls {
+        display: none;
+    }
+
+    body.export-mode * {
+        animation: none !important;
+        transition-duration: 0s !important;
+    }
+</style>
+</head>
+<body>
+<main id="stage">
+    <div class="topbar">
+        <div>
+            <div class="eyebrow">Plan source example</div>
+            <div id="title">A renderable video can be built from sections, not fixed timestamps.</div>
+        </div>
+        <div id="clock">00.00s</div>
+    </div>
+
+    <div id="diagram">
+        <svg viewBox="0 0 900 620">
+            <line id="edge-a" class="edge" x1="160" y1="170" x2="450" y2="310" />
+            <line id="edge-b" class="edge" x1="450" y1="310" x2="740" y2="170" />
+            <line id="edge-c" class="edge" x1="450" y1="310" x2="450" y2="520" />
+
+            <circle id="node-plan" class="node" cx="160" cy="170" r="72" />
+            <text class="node-label" x="160" y="170">PLAN</text>
+
+            <circle id="node-audio" class="node" cx="450" cy="310" r="78" />
+            <text class="node-label" x="450" y="310">AUDIO</text>
+
+            <circle id="node-time" class="node" cx="740" cy="170" r="72" />
+            <text class="node-label" x="740" y="170">TIME</text>
+
+            <circle id="node-render" class="node" cx="450" cy="520" r="78" />
+            <text class="node-label" x="450" y="520">RENDER</text>
+        </svg>
+        <div id="marker"></div>
+    </div>
+
+    <div id="caption">
+        <span class="muted">Waiting for a resolved timeline.</span>
+    </div>
+
+    <div id="progress">
+        <div id="progress-fill"></div>
+    </div>
+</main>
+
+<div id="controls">
+    <button id="play-toggle" type="button">Play</button>
+    <input id="scrubber" type="range" min="0" max="1" step="0.01" value="0" aria-label="Timeline">
+    <span id="readout">0.00 / 0.00</span>
+</div>
+
+<script>
+    const VIDEO_PLAN = [
+        {
+            id: "silent-intro",
+            kind: "visual-only",
+            duration: 5,
+            title: "Visual-only introduction",
+            caption: "The source plan specifies this section's visual duration: five seconds, with no narration."
+        },
+        {
+            id: "first-narration",
+            kind: "narration+visual",
+            audio: "audio/first-narration.wav",
+            text: "When a section has narration, the generated audio decides the section duration.",
+            title: "Narration controls duration",
+            caption: "The build step generates this audio, measures it, and assigns the exact timeline length."
+        },
+        {
+            id: "silent-bridge",
+            kind: "visual-only",
+            duration: 5,
+            title: "Visual-only bridge",
+            caption: "This bridge has no voice, so the source plan must explicitly declare how long the visual should run."
+        },
+        {
+            id: "second-narration",
+            kind: "narration+visual",
+            audio: "audio/second-narration.wav",
+            text: "The second narration cue starts only after previous sections have been resolved.",
+            title: "Audio cue is placed automatically",
+            caption: "No manual start time is written by the source file. The builder places this cue after earlier sections."
+        },
+        {
+            id: "silent-finale",
+            kind: "visual-only",
+            duration: 15,
+            title: "Long silent finale",
+            caption: "The final section is visual-only for fifteen seconds, proving rendering can continue after audio ends."
+        }
+    ];
+
+    window.__VIDEO_PLAN__ = VIDEO_PLAN;
+
+    let activeTime = 0;
+    let playback = {
+        playing: false,
+        startedAt: 0,
+        rafId: null,
+        audio: null,
+        audioCueIndex: -1
+    };
+
+    function clamp(value, min, max) {
+        return Math.max(min, Math.min(max, value));
+    }
+
+    function easeInOut(value) {
+        return 0.5 - Math.cos(clamp(value, 0, 1) * Math.PI) / 2;
+    }
+
+    function setActive(ids) {
+        document.querySelectorAll(".node, .edge").forEach(el => el.classList.remove("active"));
+        ids.forEach(id => {
+            const el = document.getElementById(id);
+            if (el) el.classList.add("active");
+        });
+    }
+
+    function moveMarker(x, y) {
+        const diagram = document.getElementById("diagram");
+        const marker = document.getElementById("marker");
+        const rect = diagram.getBoundingClientRect();
+        marker.style.left = `${(x / 900) * rect.width}px`;
+        marker.style.top = `${(y / 620) * rect.height}px`;
+    }
+
+    function renderSection(section, localTime, globalTime) {
+        const localDuration = section.duration || Math.max(1, section.resolvedDuration || 1);
+        const p = clamp(localTime / localDuration, 0, 1);
+        const eased = easeInOut(p);
+
+        document.getElementById("title").textContent = section.title;
+        document.getElementById("caption").textContent = section.caption;
+
+        if (section.id === "silent-intro") {
+            setActive(["node-plan"]);
+            moveMarker(160 + 290 * eased, 170 + 140 * eased);
+        } else if (section.id === "first-narration") {
+            setActive(["edge-a", "node-plan", "node-audio"]);
+            moveMarker(450 + Math.sin(localTime * 4) * 34, 310 + Math.cos(localTime * 4) * 34);
+        } else if (section.id === "silent-bridge") {
+            setActive(["edge-b", "node-audio", "node-time"]);
+            moveMarker(450 + 290 * eased, 310 - 140 * eased);
+        } else if (section.id === "second-narration") {
+            setActive(["edge-c", "node-audio", "node-render"]);
+            moveMarker(450 + Math.sin(localTime * 5) * 28, 310 + 210 * eased);
+        } else {
+            setActive(["node-plan", "node-audio", "node-time", "node-render", "edge-a", "edge-b", "edge-c"]);
+            const orbit = globalTime * 0.9;
+            moveMarker(450 + Math.cos(orbit) * 250, 330 + Math.sin(orbit) * 155);
+        }
+    }
+
+    window.__RENDER_SECTION__ = renderSection;
+
+    function buildDraftTimeline() {
+        let cursor = 0;
+        const videoTimeline = VIDEO_PLAN.map(section => {
+            const duration = section.kind === "visual-only" ? section.duration : 4;
+            const cue = {
+                start: cursor,
+                end: cursor + duration,
+                duration,
+                sectionId: section.id,
+                item: { ...section, resolvedDuration: duration }
+            };
+            cursor += duration;
+            return cue;
+        });
+
+        return {
+            duration: cursor,
+            videoTimeline,
+            audioTimeline: []
+        };
+    }
+
+    function installTimeline(payload) {
+        const videoTimeline = payload.videoTimeline || [];
+        const audioTimeline = payload.audioTimeline || [];
+        const totalDuration = payload.duration || 1;
+
+        window.__VIDEO_DURATION__ = totalDuration;
+        window.__VIDEO_TIMELINE__ = videoTimeline;
+        window.__AUDIO_TIMELINE__ = audioTimeline;
+
+        window.renderAt = function renderAt(time) {
+            activeTime = clamp(Number(time) || 0, 0, totalDuration);
+            let cue = videoTimeline[0];
+            for (const current of videoTimeline) {
+                if (current.start <= activeTime) cue = current;
+                if (current.start > activeTime) break;
+            }
+
+            const localTime = Math.max(0, activeTime - cue.start);
+            renderSection(cue.item, localTime, activeTime);
+            document.getElementById("clock").textContent = `${activeTime.toFixed(2).padStart(5, "0")}s`;
+            document.getElementById("progress-fill").style.width = `${(activeTime / totalDuration) * 100}%`;
+            updateControls();
+            return activeTime;
+        };
+
+        window.renderAt(0);
+    }
+
+    function getAudioCueIndexAt(time) {
+        const audioTimeline = window.__AUDIO_TIMELINE__ || [];
+        for (let i = audioTimeline.length - 1; i >= 0; i--) {
+            const cue = audioTimeline[i];
+            if (cue.start <= time && time < cue.start + cue.duration) return i;
+        }
+        return -1;
+    }
+
+    function stopAudio() {
+        if (playback.audio) {
+            playback.audio.pause();
+            playback.audio = null;
+        }
+    }
+
+    function syncAudio(time) {
+        const audioTimeline = window.__AUDIO_TIMELINE__ || [];
+        const index = getAudioCueIndexAt(time);
+        if (index === playback.audioCueIndex) return;
+
+        stopAudio();
+        playback.audioCueIndex = index;
+        if (!playback.playing || index < 0) return;
+
+        const cue = audioTimeline[index];
+        const audio = new Audio(cue.src);
+        audio.currentTime = Math.max(0, time - cue.start);
+        playback.audio = audio;
+        audio.play().catch(() => {});
+    }
+
+    function tick() {
+        if (!playback.playing) return;
+
+        window.renderAt((performance.now() / 1000) - playback.startedAt);
+        syncAudio(activeTime);
+
+        if (activeTime >= window.__VIDEO_DURATION__) {
+            pause();
+            return;
+        }
+
+        playback.rafId = requestAnimationFrame(tick);
+    }
+
+    function play() {
+        if (activeTime >= window.__VIDEO_DURATION__) window.renderAt(0);
+        playback.playing = true;
+        playback.audioCueIndex = -1;
+        playback.startedAt = (performance.now() / 1000) - activeTime;
+        document.getElementById("play-toggle").textContent = "Pause";
+        tick();
+    }
+
+    function pause() {
+        playback.playing = false;
+        cancelAnimationFrame(playback.rafId);
+        playback.audioCueIndex = -1;
+        stopAudio();
+        document.getElementById("play-toggle").textContent = "Play";
+    }
+
+    function updateControls() {
+        const total = window.__VIDEO_DURATION__ || 1;
+        document.getElementById("scrubber").max = total.toFixed(2);
+        document.getElementById("scrubber").value = activeTime.toFixed(2);
+        document.getElementById("readout").textContent = `${activeTime.toFixed(2)} / ${total.toFixed(2)}`;
+    }
+
+    document.addEventListener("DOMContentLoaded", () => {
+        const params = new URLSearchParams(window.location.search);
+        if (params.get("controls") === "0" || params.get("export") === "1") {
+            document.body.classList.add("hide-controls");
+        }
+        if (params.get("export") === "1") {
+            document.body.classList.add("export-mode");
+        }
+
+        installTimeline(window.__RESOLVED_TIMELINE__ || buildDraftTimeline());
+
+        document.getElementById("play-toggle").addEventListener("click", () => {
+            playback.playing ? pause() : play();
+        });
+
+        document.getElementById("scrubber").addEventListener("input", event => {
+            window.renderAt(Number(event.target.value));
+            playback.startedAt = (performance.now() / 1000) - activeTime;
+            playback.audioCueIndex = -1;
+            stopAudio();
+            if (playback.playing) syncAudio(activeTime);
+        });
+    });
+</script>
+</body>
+</html>

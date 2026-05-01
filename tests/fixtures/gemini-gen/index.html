@@ -1,0 +1,465 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Bubble Sort Animation - 16:9</title>
+<style>
+* { box-sizing: border-box; }
+
+html, body {
+  margin: 0;
+  width: 100%;
+  height: 100%;
+  overflow: hidden;
+  font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+  background: #0a0e14;
+  color: white;
+}
+
+#stage {
+  position: relative;
+  width: 100vw;
+  height: 56.25vw; /* 16:9 Aspect Ratio */
+  max-height: 100vh;
+  max-width: 177.78vh; /* 16:9 Aspect Ratio */
+  margin: auto;
+  top: 50%;
+  transform: translateY(-50%);
+  background: radial-gradient(circle at center, #1a222f 0%, #0a0e14 100%);
+  overflow: hidden;
+}
+
+#title {
+  position: absolute;
+  top: 40px;
+  left: 60px;
+  font-size: 42px;
+  font-weight: 800;
+  color: #4b9fff;
+  text-transform: uppercase;
+  letter-spacing: 2px;
+}
+
+#subtitle-container {
+  position: absolute;
+  left: 10%;
+  right: 10%;
+  bottom: 60px;
+  min-height: 100px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+}
+
+#subtitle {
+  padding: 20px 40px;
+  border-radius: 12px;
+  background: rgba(0, 0, 0, 0.7);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  font-size: 24px;
+  line-height: 1.4;
+  color: #fff;
+  text-shadow: 0 2px 4px rgba(0,0,0,0.5);
+}
+
+#canvas {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding-bottom: 100px; /* Space for subtitles */
+}
+
+.bar-container {
+  position: absolute;
+  bottom: 220px;
+  display: flex;
+  align-items: flex-end;
+  gap: 15px;
+  height: 300px;
+  width: 800px;
+  justify-content: center;
+}
+
+.bar {
+  position: absolute;
+  bottom: 0;
+  width: 80px;
+  background: linear-gradient(to top, #4b9fff, #38d39f);
+  border-radius: 8px 8px 0 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-weight: bold;
+  font-size: 24px;
+  box-shadow: 0 4px 15px rgba(75, 159, 255, 0.3);
+  transition: none; /* Controlled by JS */
+}
+
+.bar.comparing {
+  background: linear-gradient(to top, #f6c44f, #f39c12);
+  box-shadow: 0 0 20px rgba(246, 196, 79, 0.6);
+  z-index: 2;
+}
+
+.bar.sorted {
+  background: linear-gradient(to top, #2ecc71, #27ae60);
+}
+
+#indicator {
+  position: absolute;
+  bottom: 180px;
+  width: 175px;
+  height: 4px;
+  background: #f6c44f;
+  border-radius: 2px;
+  box-shadow: 0 0 10px #f6c44f;
+  display: none;
+}
+
+#progress-bar {
+  position: absolute;
+  bottom: 0;
+  left: 0;
+  height: 6px;
+  background: #4b9fff;
+  width: 0%;
+}
+
+#controls {
+  position: fixed;
+  bottom: 10px;
+  left: 50%;
+  transform: translateX(-50%);
+  background: rgba(0,0,0,0.8);
+  padding: 10px 20px;
+  border-radius: 30px;
+  display: flex;
+  gap: 15px;
+  align-items: center;
+  z-index: 100;
+}
+
+#scrubber { width: 300px; }
+#readout { font-family: monospace; color: #aaa; font-size: 14px; }
+
+body.hide-controls #controls { display: none; }
+body.export-mode * { animation: none !important; transition: none !important; }
+</style>
+</head>
+<body>
+
+<div id="stage">
+  <div id="title">Bubble Sort</div>
+  <div id="canvas">
+    <div class="bar-container" id="bar-wrapper">
+      </div>
+    <div id="indicator"></div>
+  </div>
+  <div id="subtitle-container">
+    <div id="subtitle"></div>
+  </div>
+  <div id="progress-bar"></div>
+</div>
+
+<div id="controls">
+  <button id="play-toggle">Play</button>
+  <input id="scrubber" type="range" min="0" max="1" step="0.001" value="0">
+  <span id="readout">0:00 / 1:00</span>
+</div>
+
+<script>
+// --- CONFIGURATION ---
+const INITIAL_ARRAY = [60, 40, 90, 20, 50, 70, 30];
+const BAR_WIDTH = 80;
+const BAR_GAP = 20;
+
+// Pre-calculate steps for Bubble Sort to ensure determinism
+function generateBubbleSortSteps(arr) {
+  let steps = [];
+  let workingArr = [...arr];
+  let n = workingArr.length;
+  
+  // Step 0: Initial state
+  steps.push({ array: [...workingArr], i: -1, j: -1, swapping: false, sortedCount: 0 });
+
+  for (let i = 0; i < n - 1; i++) {
+    for (let j = 0; j < n - i - 1; j++) {
+      // Comparison step
+      steps.push({ array: [...workingArr], i: i, j: j, swapping: false, sortedCount: i });
+      
+      if (workingArr[j] > workingArr[j+1]) {
+        // Swap step start
+        steps.push({ array: [...workingArr], i: i, j: j, swapping: true, sortedCount: i });
+        [workingArr[j], workingArr[j+1]] = [workingArr[j+1], workingArr[j]];
+        // Swap step end
+        steps.push({ array: [...workingArr], i: i, j: j, swapping: true, sortedCount: i });
+      }
+    }
+    steps.push({ array: [...workingArr], i: i, j: -1, swapping: false, sortedCount: i + 1 });
+  }
+  // Final state
+  steps.push({ array: [...workingArr], i: -1, j: -1, swapping: false, sortedCount: n });
+  return steps;
+}
+
+const SORT_STEPS = generateBubbleSortSteps(INITIAL_ARRAY);
+
+// --- VIDEO PLAN ---
+const VIDEO_PLAN = [
+  {
+    id: "intro",
+    kind: "narration+visual",
+    audio: "audio/intro.mp3",
+    text: "Bubble Sort is one of the simplest sorting algorithms. It works by repeatedly stepping through the list.",
+    title: "Bubble Sort Intro",
+    subtitle: "Bubble Sort is one of the simplest sorting algorithms."
+  },
+  {
+    id: "explain",
+    kind: "narration+visual",
+    audio: "audio/explain.mp3",
+    text: "It compares adjacent elements and swaps them if they are in the wrong order. This repeats until the list is sorted.",
+    title: "How it works",
+    subtitle: "It compares adjacent elements and swaps them if they are in the wrong order."
+  },
+  {
+    id: "setup-animation",
+    kind: "narration+visual",
+    audio: "audio/setup.mp3",
+    text: "Let's watch a single pass. Notice how the largest element 'bubbles up' to its correct position at the end.",
+    title: "First Pass",
+    subtitle: "Let's watch a single pass. The largest element will 'bubble up' to the end."
+  },
+  {
+    id: "pass-one",
+    kind: "visual-only",
+    duration: 12,
+    title: "Pass 1 Animation",
+    subtitle: ""
+  },
+  {
+    id: "reflection",
+    kind: "narration+visual",
+    audio: "audio/reflection.mp3",
+    text: "Great! One element is now sorted. Now, we repeat the process for the remaining unsorted items.",
+    title: "Iterative Process",
+    subtitle: "One element is sorted. Now we repeat for the rest."
+  },
+  {
+    id: "full-sort",
+    kind: "visual-only",
+    duration: 18,
+    title: "Completing Sort",
+    subtitle: ""
+  },
+  {
+    id: "conclusion",
+    kind: "narration+visual",
+    audio: "audio/conclusion.mp3",
+    text: "And there we have it! The array is fully sorted. While simple to understand, Bubble Sort is mostly used for educational purposes.",
+    title: "Sorted!",
+    subtitle: "The array is fully sorted. Simple and educational!"
+  }
+];
+
+window.__VIDEO_PLAN__ = VIDEO_PLAN;
+
+// --- RENDER ENGINE ---
+
+function renderSection(segment, localTime, globalTime) {
+  const duration = segment.resolvedDuration || segment.duration || 4;
+  const progress = localTime / duration;
+  
+  const title = document.getElementById("title");
+  const subtitle = document.getElementById("subtitle");
+  const wrapper = document.getElementById("bar-wrapper");
+  const indicator = document.getElementById("indicator");
+
+  title.textContent = segment.title;
+  subtitle.textContent = segment.subtitle || "";
+  
+  // Logic to determine which step of SORT_STEPS to show
+  let stepIndex = 0;
+  let t = 0; // internal lerp within steps
+  
+  if (segment.id === "intro" || segment.id === "explain") {
+    stepIndex = 0;
+  } else if (segment.id === "setup-animation") {
+    stepIndex = 0;
+  } else if (segment.id === "pass-one") {
+    // Show only the first pass (roughly first 15 steps of SORT_STEPS)
+    const passSteps = 14; 
+    const scaledTime = progress * passSteps;
+    stepIndex = Math.floor(scaledTime);
+    t = scaledTime % 1;
+  } else if (segment.id === "reflection") {
+    stepIndex = 14; 
+  } else if (segment.id === "full-sort") {
+    // Show from step 14 to end
+    const remainingSteps = SORT_STEPS.length - 15;
+    const scaledTime = 14 + progress * remainingSteps;
+    stepIndex = Math.floor(scaledTime);
+    t = scaledTime % 1;
+  } else {
+    stepIndex = SORT_STEPS.length - 1;
+  }
+
+  const step = SORT_STEPS[Math.min(stepIndex, SORT_STEPS.length - 1)];
+  const nextStep = SORT_STEPS[Math.min(stepIndex + 1, SORT_STEPS.length - 1)];
+
+  // Update Bars
+  renderBars(wrapper, step, nextStep, t, indicator);
+
+  // Update Global Progress
+  if (window.__VIDEO_DURATION__) {
+    document.getElementById("progress-bar").style.width = `${(globalTime / window.__VIDEO_DURATION__) * 100}%`;
+  }
+}
+
+function renderBars(container, current, next, t, indicator) {
+  // Clear and redraw is easiest for this demo, though slightly less efficient
+  // In a real production environment, we'd update existing DOM nodes
+  if (container.children.length === 0) {
+    INITIAL_ARRAY.forEach((val, idx) => {
+      const bar = document.createElement('div');
+      bar.className = 'bar';
+      bar.id = `bar-${idx}`;
+      bar.textContent = val;
+      container.appendChild(bar);
+    });
+  }
+
+  const n = INITIAL_ARRAY.length;
+  const totalWidth = n * BAR_WIDTH + (n - 1) * BAR_GAP;
+  const startX = -totalWidth / 2 + BAR_WIDTH / 2;
+
+  current.array.forEach((val, idx) => {
+    const bar = document.getElementById(`bar-${idx}`);
+    
+    // Find where this specific value is in the current and next steps
+    const currentPos = current.array.indexOf(INITIAL_ARRAY[idx]);
+    const nextPos = next.array.indexOf(INITIAL_ARRAY[idx]);
+    
+    // Linear interpolation of position if swapping
+    const lerpPos = currentPos + (nextPos - currentPos) * t;
+    const x = startX + lerpPos * (BAR_WIDTH + BAR_GAP);
+    const h = (INITIAL_ARRAY[idx] / 100) * 300;
+    
+    bar.style.height = `${h}px`;
+    bar.style.width = `${BAR_WIDTH}px`;
+    bar.style.left = `calc(50% + ${x}px)`;
+    
+    // Styling based on state
+    bar.classList.remove('comparing', 'sorted');
+    if (current.j !== -1 && (currentPos === current.j || currentPos === current.j + 1)) {
+        bar.classList.add('comparing');
+    }
+    
+    // Elements at the end are sorted
+    if (currentPos >= n - current.sortedCount) {
+        bar.classList.add('sorted');
+    }
+  });
+
+  // Position indicator
+  if (current.j !== -1) {
+    indicator.style.display = 'block';
+    const indicatorX = startX + (current.j + 0.5) * (BAR_WIDTH + BAR_GAP);
+    indicator.style.left = `calc(50% + ${indicatorX}px)`;
+    indicator.style.transform = 'translateX(-50%)';
+  } else {
+    indicator.style.display = 'none';
+  }
+}
+
+window.__RENDER_SECTION__ = renderSection;
+
+// --- RUNTIME SYSTEM ---
+
+let activeTime = 0;
+const playback = { playing: false, startedAt: 0, rafId: null, audio: null, audioCueIndex: -1 };
+
+function buildDraftTimeline() {
+  let cursor = 0;
+  const videoTimeline = [];
+  const audioTimeline = [];
+  for (const segment of VIDEO_PLAN) {
+    const duration = segment.kind === "visual-only" ? segment.duration : 6;
+    const item = { ...segment, resolvedDuration: duration };
+    videoTimeline.push({ start: cursor, end: cursor + duration, duration, sectionId: segment.id, item });
+    if (segment.kind === "narration+visual") {
+      audioTimeline.push({ start: cursor, duration, src: segment.audio, text: segment.text });
+    }
+    cursor += duration;
+  }
+  return { duration: cursor, videoTimeline, audioTimeline };
+}
+
+function installTimeline(timeline) {
+  window.__VIDEO_DURATION__ = timeline.duration;
+  window.__VIDEO_TIMELINE__ = timeline.videoTimeline;
+  window.__AUDIO_TIMELINE__ = timeline.audioTimeline;
+  window.renderAt = (time) => {
+    activeTime = Math.max(0, Math.min(time, window.__VIDEO_DURATION__));
+    let cue = window.__VIDEO_TIMELINE__[0];
+    for (const c of window.__VIDEO_TIMELINE__) {
+      if (c.start <= activeTime) cue = c;
+    }
+    window.__RENDER_SECTION__(cue.item, activeTime - cue.start, activeTime);
+    updateControls();
+  };
+  window.renderAt(0);
+}
+
+function updateControls() {
+  const scrubber = document.getElementById("scrubber");
+  const readout = document.getElementById("readout");
+  scrubber.value = activeTime / window.__VIDEO_DURATION__;
+  const m = Math.floor(activeTime / 60);
+  const s = Math.floor(activeTime % 60).toString().padStart(2, '0');
+  const tm = Math.floor(window.__VIDEO_DURATION__ / 60);
+  const ts = Math.floor(window.__VIDEO_DURATION__ % 60).toString().padStart(2, '0');
+  readout.textContent = `${m}:${s} / ${tm}:${ts}`;
+}
+
+const playToggle = document.getElementById("play-toggle");
+playToggle.onclick = () => {
+  playback.playing = !playback.playing;
+  playToggle.textContent = playback.playing ? "Pause" : "Play";
+  if (playback.playing) {
+    playback.startedAt = performance.now() - activeTime * 1000;
+    requestAnimationFrame(tick);
+  }
+};
+
+function tick() {
+  if (!playback.playing) return;
+  const now = (performance.now() - playback.startedAt) / 1000;
+  window.renderAt(now);
+  if (now >= window.__VIDEO_DURATION__) {
+    playback.playing = false;
+    playToggle.textContent = "Play";
+  } else {
+    requestAnimationFrame(tick);
+  }
+}
+
+document.getElementById("scrubber").oninput = (e) => {
+  const time = e.target.value * window.__VIDEO_DURATION__;
+  window.renderAt(time);
+  if (playback.playing) playback.startedAt = performance.now() - activeTime * 1000;
+};
+
+document.addEventListener("DOMContentLoaded", () => {
+  const params = new URLSearchParams(window.location.search);
+  if (params.get("export") === "1") document.body.classList.add("hide-controls", "export-mode");
+  installTimeline(window.__RESOLVED_TIMELINE__ || buildDraftTimeline());
+});
+
+</script>
+</body>
+</html>

@@ -1,0 +1,11 @@
+node_modules/
+.render/
+.tmp/
+__pycache__/
+*.pyc
+.env
+output*.mp4
+tests/fixtures/*/rendered*.mp4
+tests/fixtures/*/resolved.html
+tests/fixtures/*/audio/
+outputs/

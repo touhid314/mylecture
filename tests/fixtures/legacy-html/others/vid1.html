@@ -1,0 +1,639 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Fork Bomb Explained</title>
+
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/aaaakshat/cm-web-fonts@latest/fonts.css">
+
+    <style>
+        * {
+            box-sizing: border-box;
+            margin: 0;
+            padding: 0;
+        }
+
+        body {
+            background-color: #050505;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            height: 100vh;
+            font-family: "Computer Modern Serif", serif;
+            overflow: hidden;
+            color: #fff;
+        }
+
+        #phone-container {
+            width: 100%;
+            max-width: 400px;
+            aspect-ratio: 9 / 16;
+            background: radial-gradient(circle at 50% 30%, #1a1a2e 0%, #0a0a12 100%);
+            position: relative;
+            border-radius: 20px;
+            box-shadow: 0 10px 30px rgba(0, 0, 0, 0.8), 0 0 0 4px #222;
+            overflow: hidden;
+            display: flex;
+            flex-direction: column;
+        }
+
+        #visual-area {
+            flex: 1;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            padding: 20px;
+            position: relative;
+        }
+
+        #caption-area {
+            height: 25%;
+            padding: 20px;
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+            align-items: center;
+            text-align: center;
+            background: linear-gradient(to top, rgba(0, 0, 0, 0.9) 0%, rgba(0, 0, 0, 0.6) 70%, transparent 100%);
+            z-index: 10;
+        }
+
+        .caption-text {
+            font-family: "Computer Modern Serif", serif;
+            font-size: 1.4rem;
+            font-weight: bold;
+            line-height: 1.3;
+            text-shadow: 2px 2px 4px rgba(0, 0, 0, 0.8), -1px -1px 0 rgba(0, 0, 0, 0.5);
+            color: #fff;
+            animation: popIn 0.3s cubic-bezier(0.175, 0.885, 0.32, 1.275);
+        }
+
+        .highlight {
+            color: #ff3366;
+        }
+
+        .highlight-green {
+            color: #00ffcc;
+        }
+
+        #start-overlay {
+            position: absolute;
+            inset: 0;
+            background: rgba(0, 0, 0, 0.8);
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+            align-items: center;
+            z-index: 100;
+            backdrop-filter: blur(5px);
+        }
+
+        .play-btn {
+            font-family: "Computer Modern Serif", serif;
+            background: #ff3366;
+            color: white;
+            border: none;
+            padding: 15px 40px;
+            font-size: 1.5rem;
+            font-weight: bold;
+            border-radius: 30px;
+            cursor: pointer;
+            box-shadow: 0 0 20px rgba(255, 51, 102, 0.4);
+            transition: transform 0.2s, box-shadow 0.2s;
+            animation: pulse 2s infinite;
+        }
+
+        .play-btn:active {
+            transform: scale(0.95);
+        }
+
+
+
+        /* SVG Animations */
+        @keyframes pulse {
+            0% {
+                transform: scale(1);
+                box-shadow: 0 0 10px rgba(255, 51, 102, 0.4);
+            }
+
+            50% {
+                transform: scale(1.05);
+                box-shadow: 0 0 30px rgba(255, 51, 102, 0.8);
+            }
+
+            100% {
+                transform: scale(1);
+                box-shadow: 0 0 10px rgba(255, 51, 102, 0.4);
+            }
+        }
+
+        @keyframes popIn {
+            0% {
+                opacity: 0;
+                transform: translateY(10px) scale(0.95);
+            }
+
+            100% {
+                opacity: 1;
+                transform: translateY(0) scale(1);
+            }
+        }
+
+        @keyframes float {
+
+            0%,
+            100% {
+                transform: translateY(0);
+            }
+
+            50% {
+                transform: translateY(-10px);
+            }
+        }
+
+        @keyframes spin {
+            100% {
+                transform: rotate(360deg);
+            }
+        }
+
+        @keyframes glitch {
+            0% {
+                transform: translate(0)
+            }
+
+            20% {
+                transform: translate(-2px, 2px)
+            }
+
+            40% {
+                transform: translate(-2px, -2px)
+            }
+
+            60% {
+                transform: translate(2px, 2px)
+            }
+
+            80% {
+                transform: translate(2px, -2px)
+            }
+
+            100% {
+                transform: translate(0)
+            }
+        }
+
+        /* Fixed CPU Animation */
+        @keyframes cpuFillFixed {
+            0% {
+                stroke-dashoffset: 50;
+                stroke: #00ffcc;
+            }
+
+            60% {
+                stroke: #ffcc00;
+            }
+
+            100% {
+                stroke-dashoffset: 0;
+                stroke: #ff3366;
+            }
+        }
+
+        .anim-cpu-fill {
+            stroke-dasharray: 50;
+            stroke-dashoffset: 50;
+            animation: cpuFillFixed 2.5s ease-in forwards;
+        }
+
+        .anim-float {
+            animation: float 3s ease-in-out infinite;
+        }
+
+        .anim-spin {
+            animation: spin 8s linear infinite;
+            transform-origin: center;
+        }
+
+        .anim-glitch {
+            animation: glitch 0.2s linear infinite;
+        }
+
+        .anim-pop {
+            animation: popIn 0.5s cubic-bezier(0.175, 0.885, 0.32, 1.275) forwards;
+        }
+
+        .anim-pulse {
+            animation: pulse 2s infinite;
+            transform-origin: center;
+        }
+
+        .progress-bar {
+            position: absolute;
+            top: 0;
+            left: 0;
+            height: 4px;
+            background: #ff3366;
+            width: 0%;
+            transition: width 0.1s linear;
+            z-index: 50;
+        }
+
+        svg {
+            width: 100%;
+            height: 100%;
+            max-height: 300px;
+            filter: drop-shadow(0 0 15px rgba(255, 255, 255, 0.1));
+        }
+
+        text {
+            font-family: "Computer Modern Serif", serif;
+        }
+
+        .code-text {
+            font-family: "Courier New", monospace;
+        }
+    </style>
+</head>
+
+<body>
+
+    <div id="phone-container">
+        <div id="progress" class="progress-bar"></div>
+
+        <div id="start-overlay">
+            <h2 style="margin-bottom: 20px; text-align: center; color: #fff;">Turn on sound 🔊</h2>
+            <button class="play-btn" onclick="startVideo()">PLAY VIDEO</button>
+        </div>
+
+        <div id="visual-area">
+        </div>
+
+        <div id="caption-area">
+            <div id="caption" class="caption-text"></div>
+        </div>
+    </div>
+
+    <script>
+        const scriptData = [
+            {
+                speak: "This 1 Line of Code Can Crash Your Computer. Don’t run this… seriously.",
+                caption: "This <span class='highlight'>1 Line of Code</span> Can Crash Your Computer 😈<br>Don't run this... seriously.",
+                svg: `
+                    <svg viewBox="0 0 100 100" class="anim-float">
+                        <path d="M50 10 L90 85 L10 85 Z" fill="none" stroke="#ff3366" stroke-width="6" stroke-linejoin="round" />
+                        <text x="50" y="65" font-size="40" fill="#ff3366" text-anchor="middle" font-weight="bold">!</text>
+                        <circle cx="50" cy="75" r="4" fill="#ff3366" />
+                    </svg>
+                `
+            },
+            {
+                speak: "This one line of code can freeze your entire computer in seconds. I know that sounds fake… like how can ONE line break a whole system?",
+                caption: "This one line of code can <span class='highlight'>freeze</span> your entire computer in seconds ❄️",
+                svg: `
+                    <svg viewBox="0 0 100 100" class="anim-float">
+                        <rect x="20" y="25" width="60" height="40" rx="4" fill="none" stroke="#00ffcc" stroke-width="4"/>
+                        <path d="M40 65 L60 65 M50 65 L50 75 M30 75 L70 75" stroke="#00ffcc" stroke-width="4" stroke-linecap="round"/>
+                        <path d="M30 40 L40 50 L30 60" fill="none" stroke="#ff3366" stroke-width="3" stroke-linecap="round"/>
+                        <line x1="45" y1="60" x2="55" y2="60" stroke="#ff3366" stroke-width="3" stroke-linecap="round"/>
+                        <circle cx="80" cy="20" r="15" fill="#ff3366" opacity="0.8" class="anim-pop"/>
+                        <text x="80" y="27" font-size="20" fill="white" text-anchor="middle" font-weight="bold">!</text>
+                    </svg>
+                `
+            },
+            {
+                speak: "But it’s real—and it exploits something your computer does automatically. Here’s the concept: your computer can run multiple programs at the same time, right?",
+                caption: "It exploits something your computer does <span class='highlight-green'>automatically</span> ⚙️",
+                svg: `
+                    <svg viewBox="0 0 100 100">
+                        <g class="anim-spin" transform="origin(50px 50px)">
+                            <circle cx="50" cy="50" r="25" fill="none" stroke="#555" stroke-width="8" stroke-dasharray="10 5"/>
+                            <circle cx="50" cy="50" r="10" fill="#00ffcc"/>
+                        </g>
+                        <rect x="15" y="15" width="25" height="20" rx="3" fill="#ff3366" opacity="0.8" class="anim-float"/>
+                        <rect x="60" y="25" width="25" height="20" rx="3" fill="#00ffcc" opacity="0.8" class="anim-float" style="animation-delay: 0.5s"/>
+                        <rect x="30" y="70" width="40" height="20" rx="3" fill="#a033ff" opacity="0.8" class="anim-float" style="animation-delay: 1s"/>
+                    </svg>
+                `
+            },
+            {
+                speak: "Each one is called a process. Now imagine a program that doesn’t just run… but keeps creating more copies of itself. And each copy creates even more copies.",
+                caption: "Imagine a program that keeps creating <span class='highlight'>copies of itself</span> 👯",
+                svg: `
+                    <svg viewBox="0 0 100 100">
+                        <rect x="40" y="10" width="20" height="20" rx="4" fill="#00ffcc" class="anim-pop"/>
+                        
+                        <path d="M 50 30 L 50 40 M 50 40 L 25 40 L 25 50 M 50 40 L 75 40 L 75 50" stroke="#fff" stroke-width="2" fill="none" class="anim-pop" style="animation-delay: 0.5s; opacity: 0;"/>
+                        
+                        <rect x="15" y="50" width="20" height="20" rx="4" fill="#ff3366" class="anim-pop" style="animation-delay: 0.7s; opacity: 0;"/>
+                        <rect x="65" y="50" width="20" height="20" rx="4" fill="#ff3366" class="anim-pop" style="animation-delay: 0.7s; opacity: 0;"/>
+                        
+                        <path d="M 25 70 L 25 75 M 25 75 L 12.5 75 L 12.5 80 M 25 75 L 37.5 75 L 37.5 80 M 75 70 L 75 75 M 75 75 L 62.5 75 L 62.5 80 M 75 75 L 87.5 75 L 87.5 80" stroke="#fff" stroke-width="2" fill="none" class="anim-pop" style="animation-delay: 1.2s; opacity: 0;"/>
+                        
+                        <rect x="7.5" y="80" width="10" height="10" rx="2" fill="#a033ff" class="anim-pop" style="animation-delay: 1.4s; opacity: 0;"/>
+                        <rect x="32.5" y="80" width="10" height="10" rx="2" fill="#a033ff" class="anim-pop" style="animation-delay: 1.4s; opacity: 0;"/>
+                        <rect x="57.5" y="80" width="10" height="10" rx="2" fill="#a033ff" class="anim-pop" style="animation-delay: 1.4s; opacity: 0;"/>
+                        <rect x="82.5" y="80" width="10" height="10" rx="2" fill="#a033ff" class="anim-pop" style="animation-delay: 1.4s; opacity: 0;"/>
+                    </svg>
+                `
+            },
+            {
+                speak: "Here’s a Python example. The 'while True' creates an endless loop. Inside it, 'os dot fork' creates a clone of the program. Then, each clone enters its own loop, creating a chain reaction!",
+                caption: "The <span class='highlight'>Loop</span> runs forever.<br><span class='highlight-green'>os.fork()</span> clones the program 🐍",
+                svg: `
+                    <svg viewBox="0 0 100 100" class="anim-pop">
+                        <rect x="5" y="10" width="90" height="80" rx="5" fill="#1e1e2e" stroke="#333" stroke-width="2"/>
+                        <circle cx="15" cy="20" r="3" fill="#ff5f56"/>
+                        <circle cx="25" cy="20" r="3" fill="#ffbd2e"/>
+                        <circle cx="35" cy="20" r="3" fill="#27c93f"/>
+                        <line x1="5" y1="30" x2="95" y2="30" stroke="#333" stroke-width="2"/>
+                        
+                        <text x="10" y="45" class="code-text" font-size="6" fill="#cba6f7">import</text>
+                        <text x="35" y="45" class="code-text" font-size="6" fill="#89b4fa">os, time</text>
+                        
+                        <!-- Highlight Loop -->
+                        <rect x="8" y="53" width="35" height="10" fill="#a033ff" opacity="0.3" rx="2" />
+                        <text x="10" y="60" class="code-text" font-size="6" fill="#cba6f7">while</text>
+                        <text x="30" y="60" class="code-text" font-size="6" fill="#fab387">True:</text>
+                        
+                        <!-- Highlight Fork -->
+                        <rect x="18" y="68" width="55" height="10" fill="#ff3366" opacity="0.4" rx="2" class="anim-pulse" />
+                        <text x="20" y="75" class="code-text" font-size="6" fill="#89b4fa">os</text>
+                        <text x="28" y="75" class="code-text" font-size="6" fill="#cdd6f4">.</text>
+                        <text x="31" y="75" class="code-text" font-size="6" fill="#89dceb">fork()</text>
+                        <text x="53" y="75" class="code-text" font-size="4" fill="#6c7086"># duplicate!</text>
+                        
+                        <text x="20" y="85" class="code-text" font-size="6" fill="#89b4fa">time</text>
+                        <text x="35" y="85" class="code-text" font-size="6" fill="#cdd6f4">.sleep(0.1)</text>
+                    </svg>
+                `
+            },
+            {
+                speak: "So instead of 1... 2... 3... It becomes 1... 2... 4... 8... 16... 32... That’s exponential growth.",
+                caption: "1 → 2 → 4 → 8 → 16 → 32...<br><span class='highlight'>Exponential growth 📈</span>",
+                svg: `
+                    <svg viewBox="0 0 100 100">
+                        <path d="M 15 85 Q 60 85, 90 10" fill="none" stroke="#555" stroke-width="2" stroke-dasharray="2 2" />
+                        
+                        <circle cx="15" cy="85" r="3" fill="#00ffcc" class="anim-pop" />
+                        <text x="15" y="95" font-size="5" fill="white" text-anchor="middle" class="anim-pop">1</text>
+                        
+                        <circle cx="35" cy="80" r="4" fill="#00ffcc" class="anim-pop" style="animation-delay: 0.4s; opacity:0;"/>
+                        <text x="35" y="90" font-size="5" fill="white" text-anchor="middle" class="anim-pop" style="animation-delay: 0.4s; opacity:0;">2</text>
+                        
+                        <circle cx="55" cy="65" r="5" fill="#00ffcc" class="anim-pop" style="animation-delay: 0.8s; opacity:0;"/>
+                        <text x="55" y="76" font-size="6" fill="white" text-anchor="middle" class="anim-pop" style="animation-delay: 0.8s; opacity:0;">4</text>
+                        
+                        <circle cx="72" cy="40" r="6" fill="#ffbd2e" class="anim-pop" style="animation-delay: 1.2s; opacity:0;"/>
+                        <text x="72" y="52" font-size="7" fill="white" text-anchor="middle" class="anim-pop" style="animation-delay: 1.2s; opacity:0;">8</text>
+                        
+                        <circle cx="82" cy="22" r="7" fill="#ff3366" class="anim-pop" style="animation-delay: 1.6s; opacity:0;"/>
+                        <text x="82" y="35" font-size="8" fill="#ff3366" font-weight="bold" text-anchor="middle" class="anim-pop" style="animation-delay: 1.6s; opacity:0;">16</text>
+                        
+                        <circle cx="90" cy="8" r="8" fill="#ff3366" class="anim-pop" style="animation-delay: 2.0s; opacity:0;"/>
+                        <text x="80" y="11" font-size="10" fill="#ff3366" font-weight="bold" text-anchor="end" class="anim-pop" style="animation-delay: 2.0s; opacity:0;">32!</text>
+                    </svg>
+                `
+            },
+            {
+                speak: "Things get out of control fast. Within seconds, your computer runs out of memory and CPU. It’s like 1,000 people trying to squeeze through one door at the same time.",
+                caption: "Your computer runs out of <span class='highlight'>Memory & CPU</span> 📉",
+                svg: `
+                    <svg viewBox="0 0 100 100">
+                        <rect x="25" y="20" width="50" height="60" rx="5" fill="none" stroke="#fff" stroke-width="3"/>
+                        <text x="50" y="15" font-size="8" fill="white" text-anchor="middle">CPU USAGE</text>
+                        
+                        <rect x="30" y="25" width="40" height="50" fill="#222"/>
+                        
+                        <line x1="50" y1="75" x2="50" y2="25" stroke-width="40" class="anim-cpu-fill" />
+                        
+                        <text x="50" y="55" font-size="12" fill="white" font-weight="bold" text-anchor="middle" class="anim-glitch" style="animation-delay: 2s; opacity:0; animation-fill-mode: forwards;">100%</text>
+                    </svg>
+                `
+            },
+            {
+                speak: "Your system starts slowing down… Mouse stops responding… Everything freezes. This type of attack is called a fork bomb.",
+                caption: "Everything <span class='highlight'>Freezes</span> 🧊<br>This is a FORK BOMB 💣",
+                svg: `
+                    <svg viewBox="0 0 100 100" class="anim-glitch">
+                        <circle cx="50" cy="50" r="30" fill="#111" stroke="#ff3366" stroke-width="4"/>
+                        <circle cx="45" cy="55" r="15" fill="#fff"/>
+                        <path d="M55 45 Q 65 35 70 40" fill="none" stroke="#fff" stroke-width="2" stroke-dasharray="2 2"/>
+                        <circle cx="70" cy="40" r="3" fill="#ff3366" class="anim-pulse"/>
+                        
+                        <path d="M20 20 L 30 45 L 35 35 L 45 45 L 50 40 L 40 30 L 45 20 Z" fill="#00ffcc" stroke="#000" stroke-width="1" class="anim-pop"/>
+                        <text x="50" y="95" font-size="8" fill="#ff3366" font-weight="bold" text-anchor="middle" letter-spacing="1">SYSTEM HALTED</text>
+                    </svg>
+                `
+            },
+            {
+                speak: "And yeah—it can literally crash your system if protections aren’t in place. Your operating system tries to manage resources… But it assumes programs behave normally. A fork bomb breaks that assumption.",
+                caption: "It assumes programs behave normally... A fork bomb <span class='highlight'>breaks</span> that assumption 🛡️",
+                svg: `
+                    <svg viewBox="0 0 100 100">
+                        <path d="M50 10 L80 25 L80 50 Q80 80 50 90 Q20 80 20 50 L20 25 Z" fill="none" stroke="#00ffcc" stroke-width="5" class="anim-pop"/>
+                        <path d="M50 10 L50 90" stroke="#00ffcc" stroke-width="5" class="anim-pop"/>
+                        <line x1="10" y1="40" x2="90" y2="60" stroke="#ff3366" stroke-width="8" stroke-linecap="round" class="anim-pop" style="animation-delay: 1.5s; opacity:0;"/>
+                        <line x1="30" y1="20" x2="70" y2="80" stroke="#ff3366" stroke-width="8" stroke-linecap="round" class="anim-pop" style="animation-delay: 1.7s; opacity:0;"/>
+                    </svg>
+                `
+            },
+            {
+                speak: "It floods the system faster than it can react. This isn’t just a hack—It’s the same idea behind many system crashes and even some cyberattacks.",
+                caption: "It floods the system faster than it can react 🌊",
+                svg: `
+                    <svg viewBox="0 0 100 100">
+                        <rect x="25" y="10" width="50" height="20" rx="2" fill="#222" stroke="#444" stroke-width="2"/>
+                        <circle cx="35" cy="20" r="3" fill="#00ffcc" class="anim-glitch"/>
+                        <circle cx="45" cy="20" r="3" fill="#00ffcc"/>
+                        
+                        <rect x="25" y="40" width="50" height="20" rx="2" fill="#222" stroke="#444" stroke-width="2"/>
+                        <circle cx="35" cy="50" r="3" fill="#ffbd2e" class="anim-glitch"/>
+                        <circle cx="45" cy="50" r="3" fill="#ffbd2e"/>
+                        
+                        <rect x="25" y="70" width="50" height="20" rx="2" fill="#222" stroke="#ff3366" stroke-width="2" class="anim-glitch"/>
+                        <circle cx="35" cy="80" r="3" fill="#ff3366"/>
+                        <circle cx="45" cy="80" r="3" fill="#ff3366"/>
+                        <line x1="20" y1="80" x2="80" y2="80" stroke="#ff3366" stroke-width="2" class="anim-glitch"/>
+                    </svg>
+                `
+            },
+            {
+                speak: "Overload the system… and it collapses. Don’t try running random code like this on your own machine. Modern systems have protections—but not always enough.",
+                caption: "Modern systems have protections... but not always enough 🔐",
+                svg: `
+                    <svg viewBox="0 0 100 100" class="anim-float">
+                        <rect x="30" y="45" width="40" height="35" rx="5" fill="#fff"/>
+                        <path d="M35 45 L35 30 Q50 10 65 30 L65 45" fill="none" stroke="#fff" stroke-width="6"/>
+                        <circle cx="50" cy="62" r="5" fill="#222"/>
+                        <path d="M50 62 L50 72" stroke="#222" stroke-width="3"/>
+                        <text x="50" y="95" font-size="7" fill="#00ffcc" text-anchor="middle">SAFEGUARD_ACTIVE</text>
+                    </svg>
+                `
+            },
+            {
+                speak: "The big takeaway? Computers aren’t fragile… but they do have limits. And if you push those limits the wrong way… even the simplest code can bring everything down.",
+                caption: "Computers aren’t fragile…<br>but they do have <span class='highlight'>limits</span> ⚠️",
+                svg: `
+                    <svg viewBox="0 0 100 100">
+                        <circle cx="50" cy="50" r="40" fill="none" stroke="#444" stroke-width="2"/>
+                        <circle cx="50" cy="50" r="30" fill="none" stroke="#00ffcc" stroke-width="4"/>
+                        <path d="M50 20 L50 10 M50 80 L50 90 M20 50 L10 50 M80 50 L90 50" stroke="#fff" stroke-width="3"/>
+                        <circle cx="50" cy="50" r="10" fill="#ff3366" class="anim-pulse"/>
+                    </svg>
+                `
+            },
+            {
+                speak: "Want more “this should NOT work but does” tech secrets? Follow for more.",
+                caption: "Want more tech secrets?<br><span class='highlight-green'>Follow for more 🔥</span>",
+                svg: `
+                    <svg viewBox="0 0 100 100" class="anim-pop">
+                        <defs>
+                            <linearGradient id="followGrad" x1="0%" y1="0%" x2="100%" y2="0%">
+                                <stop offset="0%" stop-color="#ff0055" />
+                                <stop offset="100%" stop-color="#ff3366" />
+                            </linearGradient>
+                            <filter id="shadow" x="-20%" y="-20%" width="140%" height="140%">
+                                <feDropShadow dx="0" dy="4" stdDeviation="4" flood-color="#ff0055" flood-opacity="0.5" />
+                            </filter>
+                        </defs>
+                        <rect x="15" y="38" width="70" height="24" rx="12" fill="url(#followGrad)" filter="url(#shadow)" class="anim-pulse" style="cursor: pointer;" />
+                        <path d="M 27 50 L 33 50 M 30 47 L 30 53" stroke="white" stroke-width="2.5" stroke-linecap="round" />
+                        <text x="55" y="52.5" font-size="8" font-family="sans-serif" fill="white" font-weight="bold" text-anchor="middle" letter-spacing="1.5">FOLLOW</text>
+                    </svg>
+                `
+            }
+        ];
+
+        let currentScene = 0;
+        let synth = window.speechSynthesis;
+        let selectedVoice = null;
+        let currentUtterance = null;
+        let isVideoRunning = false;
+        let skipTimeout = null;
+
+        function initVoices() {
+            const voices = synth.getVoices();
+            if (voices.length > 0) {
+                selectedVoice = voices.find(v => v.lang === 'en-GB' || v.lang === 'en_GB') ||
+                    voices.find(v => v.lang.startsWith('en')) ||
+                    voices[0];
+            }
+        }
+
+        if (speechSynthesis.onvoiceschanged !== undefined) {
+            speechSynthesis.onvoiceschanged = initVoices;
+        } else {
+            initVoices();
+        }
+
+        function startVideo() {
+            document.getElementById('start-overlay').style.display = 'none';
+            isVideoRunning = true;
+
+            // Kickstart audio context
+            let u = new SpeechSynthesisUtterance('');
+            synth.speak(u);
+
+            setTimeout(() => {
+                playScene();
+                updateProgress();
+            }, 500);
+        }
+
+        function playScene() {
+            if (currentScene >= scriptData.length || currentScene < 0) {
+                document.getElementById('progress').style.width = '100%';
+                return;
+            }
+
+            const scene = scriptData[currentScene];
+
+            currentUtterance = new SpeechSynthesisUtterance(scene.speak);
+            if (selectedVoice) {
+                currentUtterance.voice = selectedVoice;
+            }
+            currentUtterance.rate = 1.1;
+            currentUtterance.pitch = 1.0;
+
+            currentUtterance.onstart = () => {
+                const visualArea = document.getElementById('visual-area');
+                visualArea.innerHTML = scene.svg;
+
+                const captionArea = document.getElementById('caption');
+                captionArea.innerHTML = scene.caption;
+
+                // Force reflow
+                captionArea.style.animation = 'none';
+                void captionArea.offsetHeight;
+                captionArea.style.animation = '';
+            };
+
+            currentUtterance.onend = () => {
+                currentScene++;
+                playScene();
+            };
+
+            currentUtterance.onerror = (e) => {
+                console.warn("Speech synthesis error", e);
+                setTimeout(() => {
+                    currentScene++;
+                    playScene();
+                }, 1000);
+            };
+
+            synth.speak(currentUtterance);
+        }
+
+        function skipToScene(index) {
+            if (!isVideoRunning) return;
+
+            // Cleanup current utterance to prevent double firing
+            if (currentUtterance) {
+                currentUtterance.onend = null;
+                currentUtterance.onerror = null;
+            }
+            synth.cancel();
+
+            if (skipTimeout) {
+                clearTimeout(skipTimeout);
+            }
+
+            // Clamp bounds
+            if (index < 0) index = 0;
+            if (index >= scriptData.length) index = scriptData.length - 1;
+
+            currentScene = index;
+
+            // Small delay to ensure synth completely stops before queueing next
+            skipTimeout = setTimeout(() => {
+                playScene();
+            }, 50);
+        }
+
+        document.addEventListener('keydown', (e) => {
+            if (!isVideoRunning) return;
+
+            if (e.key === 'ArrowRight') {
+                skipToScene(currentScene + 1);
+            } else if (e.key === 'ArrowLeft') {
+                skipToScene(currentScene - 1);
+            }
+        });
+
+        function updateProgress() {
+            if (!isVideoRunning) return;
+            const progressPct = (currentScene / scriptData.length) * 100;
+            document.getElementById('progress').style.width = progressPct + '%';
+            requestAnimationFrame(updateProgress);
+        }
+
+        window.onbeforeunload = function () {
+            synth.cancel();
+        };
+    </script>
+</body>
+
+</html>

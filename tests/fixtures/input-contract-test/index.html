@@ -1,0 +1,325 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Input Contract Test</title>
+<style>
+* {
+  box-sizing: border-box;
+}
+
+html,
+body {
+  margin: 0;
+  width: 100%;
+  height: 100%;
+  overflow: hidden;
+  font-family: Arial, Helvetica, sans-serif;
+  background: #0f141b;
+  color: #f8fafc;
+}
+
+body.export-mode *,
+body.export-mode *::before,
+body.export-mode *::after {
+  animation: none !important;
+  transition: none !important;
+}
+
+#stage {
+  position: relative;
+  width: 100vw;
+  height: 100vh;
+  overflow: hidden;
+  background:
+    linear-gradient(90deg, rgba(255, 255, 255, 0.04) 1px, transparent 1px),
+    linear-gradient(0deg, rgba(255, 255, 255, 0.04) 1px, transparent 1px),
+    radial-gradient(circle at 18% 18%, rgba(60, 180, 216, 0.22), transparent 28%),
+    #0f141b;
+  background-size: 72px 72px, 72px 72px, auto, auto;
+}
+
+#heading {
+  position: absolute;
+  left: 6vw;
+  top: 6vh;
+  right: 6vw;
+  font-size: clamp(34px, 5vw, 68px);
+  line-height: 1.05;
+  font-weight: 800;
+  letter-spacing: 0;
+}
+
+#caption {
+  position: absolute;
+  left: 6vw;
+  right: 6vw;
+  bottom: 8vh;
+  min-height: 80px;
+  font-size: clamp(20px, 2.6vw, 36px);
+  line-height: 1.28;
+  color: #dbeafe;
+}
+
+#bars {
+  position: absolute;
+  left: 8vw;
+  right: 8vw;
+  bottom: 25vh;
+  height: 42vh;
+}
+
+.bar {
+  position: absolute;
+  bottom: 0;
+  width: 10%;
+  border-radius: 8px 8px 0 0;
+  background: #38bdf8;
+  box-shadow: 0 0 28px rgba(56, 189, 248, 0.28);
+}
+
+.bar-label {
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: -44px;
+  text-align: center;
+  font-size: clamp(18px, 2vw, 28px);
+  font-weight: 700;
+}
+
+#marker {
+  position: absolute;
+  width: 7vw;
+  height: 7vw;
+  min-width: 62px;
+  min-height: 62px;
+  max-width: 96px;
+  max-height: 96px;
+  border-radius: 50%;
+  background: #facc15;
+  box-shadow: 0 0 34px rgba(250, 204, 21, 0.55);
+  transform: translate(-50%, -50%);
+}
+
+#status {
+  position: absolute;
+  right: 6vw;
+  top: 20vh;
+  width: min(360px, 30vw);
+  padding: 18px 20px;
+  border: 2px solid rgba(255, 255, 255, 0.18);
+  border-radius: 8px;
+  background: rgba(15, 23, 42, 0.76);
+  font-size: clamp(18px, 2vw, 26px);
+  line-height: 1.3;
+}
+
+#progress {
+  position: absolute;
+  left: 6vw;
+  right: 6vw;
+  bottom: 4vh;
+  height: 10px;
+  border-radius: 999px;
+  overflow: hidden;
+  background: rgba(255, 255, 255, 0.14);
+}
+
+#progress-fill {
+  width: 0%;
+  height: 100%;
+  background: linear-gradient(90deg, #38bdf8, #facc15, #22c55e);
+}
+</style>
+</head>
+<body>
+<div id="stage">
+  <div id="heading"></div>
+  <div id="bars"></div>
+  <div id="marker"></div>
+  <div id="status"></div>
+  <div id="caption"></div>
+  <div id="progress"><div id="progress-fill"></div></div>
+</div>
+
+<script>
+const VIDEO_PLAN = [
+  {
+    id: "intro",
+    kind: "narration+visual",
+    audio: "audio/intro.wav",
+    text: "This is a renderer contract test. The input file declares only the plan and a deterministic render function."
+  },
+  {
+    id: "silent-scan",
+    kind: "visual-only",
+    duration: 5
+  },
+  {
+    id: "compare",
+    kind: "narration+visual",
+    audio: "audio/compare.wav",
+    text: "Now the visual compares neighboring bars. The narration duration will decide this segment length."
+  },
+  {
+    id: "silent-swap",
+    kind: "visual-only",
+    duration: 6
+  },
+  {
+    id: "wrap",
+    kind: "narration+visual",
+    audio: "audio/wrap.wav",
+    text: "The test is complete. Silent visual sections and narration sections share the same deterministic clock."
+  }
+];
+
+window.__VIDEO_PLAN__ = VIDEO_PLAN;
+
+const VALUES = [42, 78, 35, 92, 58, 70];
+const SCREEN_TEXT = {
+  intro: {
+    heading: "Renderer Input Contract",
+    body: "Only plan fields plus renderSection. No resolved timing in the source."
+  },
+  "silent-scan": {
+    heading: "Silent Visual Scan",
+    body: "No voiceover here. Duration is declared in the visual-only segment."
+  },
+  compare: {
+    heading: "Narration + Visual",
+    body: "The audio length controls this section. The visual still updates from time."
+  },
+  "silent-swap": {
+    heading: "Silent Swap Animation",
+    body: "Motion continues without audio, driven only by localTime."
+  },
+  wrap: {
+    heading: "Resolved By Software",
+    body: "The build step creates the final duration, video timeline, and audio timeline."
+  }
+};
+
+function clamp(value, min, max) {
+  return Math.max(min, Math.min(max, value));
+}
+
+function smooth(value) {
+  value = clamp(value, 0, 1);
+  return value * value * (3 - 2 * value);
+}
+
+function ensureBars() {
+  const bars = document.getElementById("bars");
+  if (bars.children.length === VALUES.length) return;
+
+  bars.textContent = "";
+  for (let i = 0; i < VALUES.length; i++) {
+    const bar = document.createElement("div");
+    const label = document.createElement("div");
+    bar.className = "bar";
+    bar.dataset.index = String(i);
+    label.className = "bar-label";
+    label.textContent = String(VALUES[i]);
+    bar.appendChild(label);
+    bars.appendChild(bar);
+  }
+}
+
+function drawBars(order, highlightA, highlightB, liftPair) {
+  ensureBars();
+  const nodes = Array.from(document.querySelectorAll(".bar"));
+  const slot = 100 / VALUES.length;
+
+  for (let slotIndex = 0; slotIndex < order.length; slotIndex++) {
+    const originalIndex = order[slotIndex];
+    const bar = nodes[originalIndex];
+    const value = VALUES[originalIndex];
+    const isHot = slotIndex === highlightA || slotIndex === highlightB;
+    const lift = liftPair && isHot ? -42 : 0;
+
+    bar.style.left = `${slotIndex * slot + 1}%`;
+    bar.style.height = `${24 + value * 0.58}%`;
+    bar.style.background = isHot ? "#facc15" : originalIndex === 3 ? "#22c55e" : "#38bdf8";
+    bar.style.transform = `translateY(${lift}px)`;
+  }
+}
+
+function renderSection(segment, localTime, globalTime) {
+  const text = SCREEN_TEXT[segment.id] || SCREEN_TEXT.intro;
+  const heading = document.getElementById("heading");
+  const caption = document.getElementById("caption");
+  const status = document.getElementById("status");
+  const marker = document.getElementById("marker");
+  const progressFill = document.getElementById("progress-fill");
+
+  heading.textContent = text.heading;
+  caption.textContent = segment.kind === "narration+visual" ? segment.text : text.body;
+  progressFill.style.width = `${clamp((globalTime % 24) / 24, 0, 1) * 100}%`;
+
+  if (segment.id === "intro") {
+    const p = smooth(localTime / 4);
+    drawBars([0, 1, 2, 3, 4, 5], -1, -1, false);
+    marker.style.left = `${12 + p * 72}vw`;
+    marker.style.top = `${72 - p * 38}vh`;
+    marker.style.background = "#38bdf8";
+    status.textContent = "Source file: plan + render function";
+    return;
+  }
+
+  if (segment.id === "silent-scan") {
+    const p = clamp(localTime / 5, 0, 1);
+    const pair = Math.min(4, Math.floor(p * 5));
+    drawBars([0, 1, 2, 3, 4, 5], pair, pair + 1, false);
+    marker.style.left = `${14 + pair * 12.2 + smooth((p * 5) % 1) * 10}vw`;
+    marker.style.top = "68vh";
+    marker.style.background = "#facc15";
+    status.textContent = "visual-only: 5 seconds";
+    return;
+  }
+
+  if (segment.id === "compare") {
+    const beat = Math.floor(localTime * 1.7) % 5;
+    drawBars([0, 1, 2, 3, 4, 5], beat, beat + 1, true);
+    marker.style.left = `${20 + beat * 10.8}vw`;
+    marker.style.top = `${34 + Math.sin(localTime * 4) * 4}vh`;
+    marker.style.background = "#facc15";
+    status.textContent = VALUES[beat] > VALUES[beat + 1] ? "compare: swap needed" : "compare: keep order";
+    return;
+  }
+
+  if (segment.id === "silent-swap") {
+    const p = clamp(localTime / 6, 0, 1);
+    const swap = smooth(clamp((p - 0.18) / 0.52, 0, 1));
+    const order = swap < 0.5 ? [0, 1, 2, 3, 4, 5] : [0, 2, 1, 3, 4, 5];
+    drawBars(order, 1, 2, true);
+    marker.style.left = `${31 + Math.sin(swap * Math.PI) * 11}vw`;
+    marker.style.top = `${64 - Math.sin(swap * Math.PI) * 18}vh`;
+    marker.style.background = "#22c55e";
+    status.textContent = "visual-only: deterministic swap";
+    return;
+  }
+
+  drawBars([0, 2, 1, 4, 5, 3], -1, -1, false);
+  marker.style.left = `${50 + Math.cos(localTime * 2.2) * 16}vw`;
+  marker.style.top = `${52 + Math.sin(localTime * 2.2) * 10}vh`;
+  marker.style.background = "#22c55e";
+  status.textContent = "audio measured, timeline resolved";
+}
+
+window.__RENDER_SECTION__ = renderSection;
+
+const params = new URLSearchParams(window.location.search);
+if (params.get("export") === "1") {
+  document.body.classList.add("export-mode");
+}
+
+document.addEventListener("DOMContentLoaded", () => {
+  ensureBars();
+  renderSection(VIDEO_PLAN[0], 0, 0);
+});
+</script>
+</body>
+</html>
