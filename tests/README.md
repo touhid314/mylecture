@@ -9,6 +9,7 @@ Each fixture is a source HTML file or a small fixture folder that can be passed 
 ```text
 fixtures/
   input-contract-test/            Contract smoke test with narration and visual-only segments
+  visual-narration-benchmark/     Fast 480p/15fps narration+visual benchmark render
   input-contract-4k-sync-test/    Text-heavy synchronized animation test
   visual-only-3d-test/            Visual-only Three.js stress test
   plan-pipeline/                  Full plan-resolution pipeline fixture
@@ -30,6 +31,7 @@ Run individual checks:
 npm run test:build
 npm run test:render
 npm run test:visual
+npm run test:narration
 ```
 
 ### `npm run test:build`
@@ -106,6 +108,43 @@ Output:
 .render/tests/visual-3d-resolved.html
 .render/tests/visual-3d-smoke.mp4
 ```
+
+### `npm run test:narration`
+
+Runs a full visual+narration benchmark render from:
+
+```text
+tests/fixtures/visual-narration-benchmark/index.html
+```
+
+Render settings:
+
+```text
+854x480
+15 fps
+full duration
+real MP4 encode
+real audio mix
+```
+
+Validates:
+
+```text
+narration+visual-only timeline can be resolved
+TTS audio is found or generated
+audio durations control segment durations
+frames render at low benchmark resolution
+audio is muxed into the final MP4
+```
+
+Output:
+
+```text
+.render/tests/visual-narration-resolved.html
+.render/tests/visual-narration-480p15.mp4
+```
+
+This test is intended to stay small enough for regular smoke testing while still being useful as a baseline speed benchmark later.
 
 ## Generated Artifacts
 
