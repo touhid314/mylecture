@@ -1,0 +1,757 @@
+import { createReadStream, existsSync, statSync } from 'node:fs';
+import { createServer } from 'node:http';
+import { spawn } from 'node:child_process';
+import path from 'node:path';
+
+const rootDir = process.cwd();
+const defaultPort = 4307;
+
+function parseArgs(argv) {
+  const args = {
+    port: defaultPort,
+    openPath: '',
+    openBrowser: false
+  };
+
+  for (let i = 0; i < argv.length; i++) {
+    const arg = argv[i];
+    const next = argv[i + 1];
+
+    if (arg === '--port') args.port = Number(next), i++;
+    else if (arg === '--file') args.openPath = next, i++;
+    else if (arg === '--open') args.openBrowser = true;
+    else if (arg === '--help') {
+      printHelp();
+      process.exit(0);
+    } else {
+      throw new Error(`Unknown argument: ${arg}`);
+    }
+  }
+
+  if (!Number.isInteger(args.port) || args.port <= 0 || args.port > 65535) {
+    throw new Error('--port must be a valid TCP port');
+  }
+
+  return args;
+}
+
+function printHelp() {
+  console.log(`Usage:
+  node scripts/viewer-server.mjs [options]
+
+Options:
+  --port <number>   Local server port. Default: ${defaultPort}
+  --file <path>     HTML file to preselect in the viewer
+  --open            Open the viewer in the default browser
+`);
+}
+
+function openBrowser(url) {
+  const command = process.platform === 'win32' ? 'cmd' : process.platform === 'darwin' ? 'open' : 'xdg-open';
+  const browserArgs = process.platform === 'win32'
+    ? ['/c', 'start', '', url]
+    : [url];
+
+  const child = spawn(command, browserArgs, {
+    detached: true,
+    stdio: 'ignore',
+    windowsHide: true
+  });
+  child.unref();
+}
+
+const mimeTypes = new Map([
+  ['.html', 'text/html; charset=utf-8'],
+  ['.js', 'text/javascript; charset=utf-8'],
+  ['.mjs', 'text/javascript; charset=utf-8'],
+  ['.css', 'text/css; charset=utf-8'],
+  ['.json', 'application/json; charset=utf-8'],
+  ['.svg', 'image/svg+xml'],
+  ['.png', 'image/png'],
+  ['.jpg', 'image/jpeg'],
+  ['.jpeg', 'image/jpeg'],
+  ['.gif', 'image/gif'],
+  ['.webp', 'image/webp'],
+  ['.mp3', 'audio/mpeg'],
+  ['.wav', 'audio/wav'],
+  ['.mp4', 'video/mp4']
+]);
+
+function sendText(response, status, body, contentType = 'text/plain; charset=utf-8') {
+  response.writeHead(status, { 'content-type': contentType });
+  response.end(body);
+}
+
+function resolveWorkspacePath(urlPath) {
+  const rawPath = decodeURIComponent(urlPath.replace(/^\/files\/?/, ''));
+  const resolvedPath = path.resolve(rootDir, rawPath || '.');
+  if (resolvedPath !== rootDir && !resolvedPath.startsWith(rootDir + path.sep)) {
+    return null;
+  }
+  return resolvedPath;
+}
+
+function serveFile(request, response) {
+  const requestUrl = new URL(request.url, 'http://localhost');
+  const resolvedPath = resolveWorkspacePath(requestUrl.pathname);
+
+  if (!resolvedPath || !existsSync(resolvedPath) || !statSync(resolvedPath).isFile()) {
+    sendText(response, 404, 'Not found');
+    return;
+  }
+
+  const extension = path.extname(resolvedPath).toLowerCase();
+  response.writeHead(200, {
+    'content-type': mimeTypes.get(extension) || 'application/octet-stream',
+    'cache-control': 'no-cache'
+  });
+  createReadStream(resolvedPath).pipe(response);
+}
+
+function runCapture(command, args, options = {}) {
+  return new Promise((resolve, reject) => {
+    const child = spawn(command, args, {
+      stdio: ['ignore', 'pipe', 'pipe'],
+      windowsHide: false,
+      ...options
+    });
+
+    let stdout = '';
+    let stderr = '';
+    child.stdout.on('data', chunk => stdout += chunk);
+    child.stderr.on('data', chunk => stderr += chunk);
+    child.on('error', reject);
+    child.on('close', code => {
+      if (code === 0) resolve(stdout.trim());
+      else reject(new Error(stderr.trim() || `${command} exited with code ${code}`));
+    });
+  });
+}
+
+async function pickHtmlFile() {
+  if (process.platform !== 'win32') {
+    throw new Error('Native file picker is only implemented for Windows in this viewer.');
+  }
+
+  const escapedRoot = rootDir.replaceAll("'", "''");
+  const script = [
+    'Add-Type -AssemblyName System.Windows.Forms',
+    'Add-Type -AssemblyName System.Drawing',
+    '$form = New-Object System.Windows.Forms.Form',
+    '$form.TopMost = $true',
+    '$form.ShowInTaskbar = $false',
+    '$form.StartPosition = [System.Windows.Forms.FormStartPosition]::CenterScreen',
+    '$form.Size = New-Object System.Drawing.Size(1, 1)',
+    '$form.Opacity = 0',
+    '$form.Show()',
+    '$form.Activate()',
+    '$dialog = New-Object System.Windows.Forms.OpenFileDialog',
+    `$dialog.InitialDirectory = '${escapedRoot}'`,
+    "$dialog.Filter = 'HTML files (*.html)|*.html|All files (*.*)|*.*'",
+    "$dialog.Title = 'Open render-friendly HTML'",
+    'if ($dialog.ShowDialog($form) -eq [System.Windows.Forms.DialogResult]::OK) {',
+    '  [Console]::OutputEncoding = [System.Text.Encoding]::UTF8',
+    '  Write-Output $dialog.FileName',
+    '}',
+    '$form.Dispose()'
+  ].join('; ');
+
+  const selectedPath = await runCapture('powershell', [
+    '-NoProfile',
+    '-STA',
+    '-ExecutionPolicy', 'Bypass',
+    '-Command', script
+  ]);
+
+  if (!selectedPath) return null;
+
+  const resolvedPath = path.resolve(selectedPath);
+  if (resolvedPath !== rootDir && !resolvedPath.startsWith(rootDir + path.sep)) {
+    throw new Error('Selected file must be inside this repo workspace.');
+  }
+  if (!existsSync(resolvedPath) || !statSync(resolvedPath).isFile()) {
+    throw new Error('Selected file does not exist.');
+  }
+
+  return path.relative(rootDir, resolvedPath).replaceAll(path.sep, '/');
+}
+
+function viewerHtml(openPath) {
+  const normalizedOpenPath = openPath ? openPath.replaceAll('\\', '/') : '';
+  return `<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Render HTML Viewer</title>
+<style>
+* { box-sizing: border-box; }
+html, body {
+  margin: 0;
+  width: 100%;
+  height: 100%;
+  overflow: hidden;
+  background: #101317;
+  color: #e5e7eb;
+  font-family: Arial, Helvetica, sans-serif;
+}
+body {
+  display: grid;
+  grid-template-rows: 1fr auto;
+}
+#frame-wrap {
+  min-height: 0;
+  display: grid;
+  place-items: center;
+  padding: 16px;
+  background:
+    linear-gradient(90deg, rgba(255,255,255,0.04) 1px, transparent 1px),
+    linear-gradient(0deg, rgba(255,255,255,0.04) 1px, transparent 1px),
+    #101317;
+  background-size: 32px 32px;
+}
+#preview-shell {
+  width: min(calc(100vh - 128px) * 9 / 16, calc(100vw - 32px));
+  height: min(calc(100vh - 128px), calc((100vw - 32px) * 16 / 9));
+  border: 1px solid rgba(255,255,255,0.16);
+  background: #000;
+  overflow: hidden;
+}
+#preview {
+  width: 1080px;
+  height: 1920px;
+  border: 0;
+  background: #000;
+  transform-origin: 0 0;
+}
+#controls {
+  display: grid;
+  grid-template-columns: auto auto auto 1fr auto auto auto auto auto auto;
+  gap: 12px;
+  align-items: center;
+  padding: 12px 16px;
+  border-top: 1px solid rgba(255,255,255,0.12);
+  background: #181d24;
+}
+#file-row {
+  grid-column: 1 / -1;
+  display: grid;
+  grid-template-columns: 1fr auto auto;
+  gap: 10px;
+}
+#current-file {
+  min-width: 0;
+  padding: 9px 11px;
+  border: 1px solid rgba(255,255,255,0.12);
+  border-radius: 6px;
+  background: #111820;
+  color: #cbd5e1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+input, button, select {
+  font: inherit;
+  color: #e5e7eb;
+  background: #242b35;
+  border: 1px solid rgba(255,255,255,0.16);
+  border-radius: 6px;
+}
+button {
+  padding: 9px 13px;
+  cursor: pointer;
+}
+button:hover { background: #2d3541; }
+input[type="text"] {
+  width: 100%;
+  padding: 9px 11px;
+}
+#seek-time {
+  width: 108px;
+  padding: 9px 11px;
+  font-variant-numeric: tabular-nums;
+}
+input[type="range"] {
+  width: 100%;
+  cursor: pointer;
+}
+#time {
+  min-width: 128px;
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+  color: #cbd5e1;
+}
+#status {
+  color: #94a3b8;
+  white-space: nowrap;
+}
+#viewport {
+  color: #94a3b8;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+</style>
+</head>
+<body>
+<main id="frame-wrap">
+  <div id="preview-shell">
+    <iframe id="preview" title="Render preview" width="1080" height="1920"></iframe>
+  </div>
+</main>
+<section id="controls">
+  <div id="file-row">
+    <div id="current-file">${escapeHtml(normalizedOpenPath || 'No file selected')}</div>
+    <button id="load">Load</button>
+    <button id="reload">Reload</button>
+  </div>
+  <button id="play">Play</button>
+  <button id="seek-back" title="Back 5 seconds">&#8592; 5s</button>
+  <button id="seek-forward" title="Forward 5 seconds">5s &#8594;</button>
+  <input id="scrub" type="range" min="0" max="1" step="0.001" value="0">
+  <div id="time">0.00 / 0.00</div>
+  <input id="seek-time" type="text" placeholder="1:23.5">
+  <button id="seek-go">Go</button>
+  <select id="speed">
+    <option value="0.5">0.5x</option>
+    <option value="1" selected>1x</option>
+    <option value="1.5">1.5x</option>
+    <option value="2">2x</option>
+  </select>
+  <div id="viewport">1080x1920</div>
+  <div id="status">No file loaded</div>
+</section>
+<script>
+const RENDER_WIDTH = 1080;
+const RENDER_HEIGHT = 1920;
+const frameWrap = document.getElementById('frame-wrap');
+const previewShell = document.getElementById('preview-shell');
+const frame = document.getElementById('preview');
+const currentFileLabel = document.getElementById('current-file');
+const loadButton = document.getElementById('load');
+const reloadButton = document.getElementById('reload');
+const playButton = document.getElementById('play');
+const seekBackButton = document.getElementById('seek-back');
+const seekForwardButton = document.getElementById('seek-forward');
+const scrubber = document.getElementById('scrub');
+const timeReadout = document.getElementById('time');
+const seekTimeInput = document.getElementById('seek-time');
+const seekGoButton = document.getElementById('seek-go');
+const speedSelect = document.getElementById('speed');
+const viewportText = document.getElementById('viewport');
+const statusText = document.getElementById('status');
+let currentFilePath = '${escapeJsString(normalizedOpenPath)}';
+
+let playback = {
+  loaded: false,
+  playing: false,
+  duration: 0,
+  time: 0,
+  startedAt: 0,
+  startTime: 0,
+  raf: 0,
+  timeline: [],
+  audioTimeline: [],
+  audio: null,
+  audioCue: null
+};
+
+function resizePreview() {
+  const wrapRect = frameWrap.getBoundingClientRect();
+  const availableWidth = Math.max(1, wrapRect.width - 32);
+  const availableHeight = Math.max(1, wrapRect.height - 32);
+  const scale = Math.min(availableWidth / RENDER_WIDTH, availableHeight / RENDER_HEIGHT);
+
+  previewShell.style.width = Math.floor(RENDER_WIDTH * scale) + 'px';
+  previewShell.style.height = Math.floor(RENDER_HEIGHT * scale) + 'px';
+  frame.width = RENDER_WIDTH;
+  frame.height = RENDER_HEIGHT;
+  frame.style.width = RENDER_WIDTH + 'px';
+  frame.style.height = RENDER_HEIGHT + 'px';
+  frame.style.transform = 'scale(' + scale + ')';
+  viewportText.textContent = RENDER_WIDTH + 'x' + RENDER_HEIGHT + ' @ ' + scale.toFixed(3) + 'x';
+}
+
+function setStatus(message) {
+  statusText.textContent = message;
+}
+
+function formatTime(seconds) {
+  seconds = Math.max(0, Number(seconds) || 0);
+  const minutes = Math.floor(seconds / 60);
+  const secs = seconds % 60;
+  return minutes + ':' + secs.toFixed(2).padStart(5, '0');
+}
+
+function updateControls() {
+  scrubber.max = String(playback.duration || 1);
+  scrubber.value = String(playback.time || 0);
+  timeReadout.textContent = formatTime(playback.time) + ' / ' + formatTime(playback.duration);
+  if (document.activeElement !== seekTimeInput) {
+    seekTimeInput.value = playback.loaded ? formatTime(playback.time) : '';
+  }
+  playButton.textContent = playback.playing ? 'Pause' : 'Play';
+}
+
+function parseTime(value) {
+  const text = String(value || '').trim();
+  if (!text) return NaN;
+  const parts = text.split(':').map(Number);
+  if (parts.some(part => !Number.isFinite(part))) return NaN;
+  if (parts.length === 1) return parts[0];
+  if (parts.length === 2) return parts[0] * 60 + parts[1];
+  if (parts.length === 3) return parts[0] * 3600 + parts[1] * 60 + parts[2];
+  return NaN;
+}
+
+function fileUrl(filePath) {
+  const cleaned = filePath.trim().replaceAll('\\\\', '/').replace(/^\\/+/, '');
+  return '/files/' + cleaned + '?export=1&viewer=1&t=' + Date.now();
+}
+
+function setCurrentFile(filePath) {
+  currentFilePath = String(filePath || '').replaceAll('\\\\', '/');
+  currentFileLabel.textContent = currentFilePath || 'No file selected';
+  currentFileLabel.title = currentFilePath;
+}
+
+function estimateTextDuration(text) {
+  const words = String(text || '').trim().split(/\\s+/).filter(Boolean).length;
+  return Math.max(2.5, words / 2.65);
+}
+
+function buildPreviewTimeline(win) {
+  if (win.__RESOLVED_TIMELINE__?.videoTimeline?.length) {
+    return win.__RESOLVED_TIMELINE__.videoTimeline.map(cue => ({
+      start: cue.start,
+      end: cue.end,
+      duration: cue.duration,
+      item: cue.item
+    }));
+  }
+
+  if (Array.isArray(win.__VIDEO_TIMELINE__) && win.__VIDEO_TIMELINE__.length) {
+    return win.__VIDEO_TIMELINE__.map(cue => ({
+      start: cue.start,
+      end: cue.end,
+      duration: cue.duration,
+      item: cue.item || cue
+    }));
+  }
+
+  const plan = Array.isArray(win.__VIDEO_PLAN__) ? win.__VIDEO_PLAN__ : [];
+  let cursor = 0;
+  return plan.map(item => {
+    const duration = Number(item.resolvedDuration) ||
+      Number(item.duration) ||
+      estimateTextDuration(item.text);
+    const cue = {
+      start: cursor,
+      end: cursor + duration,
+      duration,
+      item
+    };
+    cursor += duration;
+    return cue;
+  });
+}
+
+function buildAudioTimeline(win, videoTimeline) {
+  if (Array.isArray(win.__AUDIO_TIMELINE__) && win.__AUDIO_TIMELINE__.length) {
+    return win.__AUDIO_TIMELINE__;
+  }
+
+  if (Array.isArray(win.__RESOLVED_TIMELINE__?.audioTimeline) && win.__RESOLVED_TIMELINE__.audioTimeline.length) {
+    return win.__RESOLVED_TIMELINE__.audioTimeline;
+  }
+
+  return videoTimeline
+    .filter(cue => cue.item?.audio)
+    .map(cue => ({
+      start: cue.start,
+      duration: cue.duration,
+      src: cue.item.audio,
+      sectionId: cue.item.id
+    }));
+}
+
+function audioUrl(src) {
+  return new URL(src, frame.contentWindow.location.href).href;
+}
+
+function stopAudio() {
+  if (!playback.audio) return;
+  playback.audio.pause();
+  playback.audio = null;
+  playback.audioCue = null;
+}
+
+function syncAudio() {
+  if (!playback.playing) return;
+
+  const cue = playback.audioTimeline.find(candidate =>
+    playback.time >= candidate.start && playback.time < candidate.start + candidate.duration
+  );
+
+  if (!cue) {
+    stopAudio();
+    return;
+  }
+
+  const offset = playback.time - cue.start;
+  if (playback.audioCue !== cue) {
+    stopAudio();
+    playback.audioCue = cue;
+    playback.audio = new Audio(audioUrl(cue.src));
+    playback.audio.playbackRate = Number(speedSelect.value) || 1;
+    playback.audio.currentTime = Math.max(0, offset);
+    playback.audio.play().catch(() => setStatus('Audio blocked until play is clicked again'));
+    return;
+  }
+
+  playback.audio.playbackRate = Number(speedSelect.value) || 1;
+  if (Math.abs(playback.audio.currentTime - offset) > 0.22) {
+    playback.audio.currentTime = Math.max(0, offset);
+  }
+  if (playback.audio.paused) {
+    playback.audio.play().catch(() => setStatus('Audio blocked until play is clicked again'));
+  }
+}
+
+function renderAt(time) {
+  if (!playback.loaded) return;
+  const win = frame.contentWindow;
+  const activeTime = Math.max(0, Math.min(Number(time) || 0, playback.duration));
+  playback.time = activeTime;
+
+  if (typeof win.renderAt === 'function') {
+    win.renderAt(activeTime);
+  } else {
+    let cue = playback.timeline[0];
+    for (const candidate of playback.timeline) {
+      if (candidate.start <= activeTime) cue = candidate;
+      if (candidate.start > activeTime) break;
+    }
+    const renderSection = win.__RENDER_SECTION__ || win.__HTML_RENDER_SECTION__ || win.__AI_RENDER_SECTION__;
+    if (cue && typeof renderSection === 'function') {
+      renderSection(cue.item, activeTime - cue.start, activeTime);
+    }
+  }
+
+  updateControls();
+  syncAudio();
+}
+
+function tick(now) {
+  if (!playback.playing) return;
+  const speed = Number(speedSelect.value) || 1;
+  const nextTime = playback.startTime + ((now - playback.startedAt) / 1000) * speed;
+  renderAt(nextTime);
+
+  if (playback.time >= playback.duration) {
+    playback.playing = false;
+    updateControls();
+    return;
+  }
+
+  playback.raf = requestAnimationFrame(tick);
+}
+
+function play() {
+  if (!playback.loaded) return;
+  if (playback.time >= playback.duration) renderAt(0);
+  playback.playing = true;
+  playback.startedAt = performance.now();
+  playback.startTime = playback.time;
+  updateControls();
+  syncAudio();
+  playback.raf = requestAnimationFrame(tick);
+}
+
+function pause() {
+  playback.playing = false;
+  cancelAnimationFrame(playback.raf);
+  stopAudio();
+  updateControls();
+}
+
+function togglePlay() {
+  if (playback.playing) pause();
+  else play();
+}
+
+function seekTo(time, resume = playback.playing) {
+  const shouldResume = Boolean(resume && playback.loaded);
+  playback.playing = false;
+  cancelAnimationFrame(playback.raf);
+  if (!shouldResume) stopAudio();
+
+  renderAt(time);
+
+  if (shouldResume) {
+    playback.playing = true;
+    playback.startedAt = performance.now();
+    playback.startTime = playback.time;
+    updateControls();
+    syncAudio();
+    playback.raf = requestAnimationFrame(tick);
+  }
+}
+
+function seekBy(deltaSeconds) {
+  if (!playback.loaded) return;
+  seekTo(playback.time + deltaSeconds);
+}
+
+async function loadFile(filePath = currentFilePath) {
+  if (!filePath) {
+    setStatus('Select an HTML file first');
+    return;
+  }
+  pause();
+  setCurrentFile(filePath);
+  playback.loaded = false;
+  playback.duration = 0;
+  playback.time = 0;
+  playback.timeline = [];
+  playback.audioTimeline = [];
+  stopAudio();
+  updateControls();
+  setStatus('Loading...');
+
+  frame.src = fileUrl(currentFilePath);
+}
+
+async function pickAndLoadFile() {
+  pause();
+  setStatus('Opening file picker...');
+  try {
+    const response = await fetch('/pick');
+    const payload = await response.json();
+    if (!response.ok) throw new Error(payload.error || 'File picker failed');
+    if (!payload.path) {
+      setStatus('File picker cancelled');
+      return;
+    }
+    await loadFile(payload.path);
+  } catch (error) {
+    setStatus(error.message);
+  }
+}
+
+function seekToInput() {
+  const target = parseTime(seekTimeInput.value);
+  if (!Number.isFinite(target)) {
+    setStatus('Enter time as seconds, mm:ss, or hh:mm:ss');
+    return;
+  }
+  seekTo(target);
+}
+
+function seekFromPointer(event) {
+  if (!playback.loaded) return;
+  const rect = scrubber.getBoundingClientRect();
+  const ratio = Math.max(0, Math.min(1, (event.clientX - rect.left) / rect.width));
+  seekTo(ratio * playback.duration);
+}
+
+frame.addEventListener('load', () => {
+  try {
+    const win = frame.contentWindow;
+    playback.timeline = buildPreviewTimeline(win);
+    playback.audioTimeline = buildAudioTimeline(win, playback.timeline);
+    playback.duration = Number(win.__VIDEO_DURATION__) ||
+      Number(win.__RESOLVED_TIMELINE__?.duration) ||
+      (playback.timeline.at(-1)?.end || 0);
+
+    if (!playback.timeline.length || !Number.isFinite(playback.duration) || playback.duration <= 0) {
+      setStatus('No render timeline found');
+      return;
+    }
+
+    playback.loaded = true;
+    renderAt(0);
+    setStatus(win.renderAt ? 'Resolved timeline loaded' : 'Preview timeline estimated');
+  } catch (error) {
+    setStatus(error.message);
+  }
+});
+
+loadButton.addEventListener('click', pickAndLoadFile);
+reloadButton.addEventListener('click', () => loadFile());
+playButton.addEventListener('click', togglePlay);
+seekBackButton.addEventListener('click', () => seekBy(-5));
+seekForwardButton.addEventListener('click', () => seekBy(5));
+scrubber.addEventListener('input', event => {
+  seekTo(Number(event.target.value));
+});
+scrubber.addEventListener('pointerdown', seekFromPointer);
+scrubber.addEventListener('click', seekFromPointer);
+seekGoButton.addEventListener('click', seekToInput);
+seekTimeInput.addEventListener('keydown', event => {
+  if (event.key === 'Enter') seekToInput();
+});
+document.addEventListener('keydown', event => {
+  if (event.code === 'Space') {
+    event.preventDefault();
+    togglePlay();
+  }
+});
+window.addEventListener('resize', resizePreview);
+
+setCurrentFile(currentFilePath);
+resizePreview();
+if (currentFilePath) loadFile();
+</script>
+</body>
+</html>`;
+}
+
+function escapeHtml(value) {
+  return String(value)
+    .replaceAll('&', '&amp;')
+    .replaceAll('<', '&lt;')
+    .replaceAll('>', '&gt;')
+    .replaceAll('"', '&quot;');
+}
+
+function escapeJsString(value) {
+  return String(value)
+    .replaceAll('\\', '\\\\')
+    .replaceAll("'", "\\'")
+    .replaceAll('\r', '\\r')
+    .replaceAll('\n', '\\n');
+}
+
+const args = parseArgs(process.argv.slice(2));
+const server = createServer(async (request, response) => {
+  const requestUrl = new URL(request.url, 'http://localhost');
+
+  if (requestUrl.pathname === '/' || requestUrl.pathname === '/viewer') {
+    sendText(response, 200, viewerHtml(requestUrl.searchParams.get('file') || args.openPath), 'text/html; charset=utf-8');
+    return;
+  }
+
+  if (requestUrl.pathname === '/pick') {
+    try {
+      const pickedPath = await pickHtmlFile();
+      sendText(response, 200, JSON.stringify({ path: pickedPath }), 'application/json; charset=utf-8');
+    } catch (error) {
+      sendText(response, 500, JSON.stringify({ error: error.message }), 'application/json; charset=utf-8');
+    }
+    return;
+  }
+
+  if (requestUrl.pathname.startsWith('/files/')) {
+    serveFile(request, response);
+    return;
+  }
+
+  sendText(response, 404, 'Not found');
+});
+
+server.listen(args.port, '127.0.0.1', () => {
+  const encodedFile = args.openPath ? `?file=${encodeURIComponent(args.openPath)}` : '';
+  const url = `http://127.0.0.1:${args.port}/${encodedFile}`;
+  console.log(`Render HTML viewer running at ${url}`);
+  if (args.openBrowser) openBrowser(url);
+});

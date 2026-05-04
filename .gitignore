@@ -8,4 +8,6 @@ output*.mp4
 tests/fixtures/*/rendered*.mp4
 tests/fixtures/*/resolved.html
 tests/fixtures/*/audio/
+inputs/
 outputs/
+*.mp4

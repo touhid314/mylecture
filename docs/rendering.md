@@ -28,6 +28,8 @@ Speed defaults:
 
 - Frames are written as JPEG at quality `90`.
 - Frame rendering uses parallel Playwright pages equal to the logical CPU core count by default.
+- Source HTML auto-build uses Kokoro voice `am_puck` at speed `1.2`.
+- Video renders default to vertical 1080p: `1080x1920` at `30` fps.
 
 Override them when needed:
 
@@ -38,6 +40,14 @@ npm run render:video -- --video-codec libx264 --x264-preset ultrafast
 ```
 
 Use PNG only when you need lossless intermediate frames; it is much slower.
+
+Choose a TTS voice when rendering plan-source HTML:
+
+```bash
+npm run render:video -- --html inputs/power-analysis-attack/index.html --out .render/inference/power-analysis-attack-ampuck.mp4 --tts-voice am_puck --force-audio
+```
+
+Use `--force-audio` when changing voices; otherwise existing narration files are reused.
 
 Encoding defaults:
 

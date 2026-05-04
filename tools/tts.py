@@ -114,7 +114,7 @@ _ALLOWED_GEMINI_MODELS = {
 
 DEFAULT_KOKORO_MODEL = os.getenv("KOKORO_MODEL") or "onnx-community/Kokoro-82M-ONNX"
 DEFAULT_KOKORO_DTYPE = os.getenv("KOKORO_DTYPE") or "q8"
-DEFAULT_KOKORO_VOICE = os.getenv("KOKORO_VOICE") or "af_sky"
+DEFAULT_KOKORO_VOICE = os.getenv("KOKORO_VOICE") or "am_puck"
 DEFAULT_KOKORO_DEVICE = "cuda"
 
 KOKORO_JS = r"""
@@ -122,7 +122,7 @@ import { KokoroTTS } from "kokoro-js";
 
 const model = process.env.KOKORO_MODEL ?? "onnx-community/Kokoro-82M-ONNX";
 const dtype = process.env.KOKORO_DTYPE ?? "q8";
-const voice = process.env.KOKORO_VOICE ?? "af_sky";
+const voice = process.env.KOKORO_VOICE ?? "am_puck";
 const speedRaw = process.env.KOKORO_SPEED ?? "1";
 const speed = Number(speedRaw);
 const deviceRaw = (process.env.KOKORO_DEVICE ?? "").trim();

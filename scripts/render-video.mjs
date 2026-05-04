@@ -25,6 +25,9 @@ function parseArgs(argv) {
     workers: defaultWorkerCount(),
     autoBuildPlan: true,
     forceAudio: false,
+    ttsProvider: 'kokoro',
+    ttsVoice: 'am_puck',
+    ttsSpeed: 1.2,
     videoCodec: 'auto',
     x264Preset: 'veryfast',
     resolvedHtml: null,
@@ -50,6 +53,9 @@ function parseArgs(argv) {
     else if (arg === '--x264-preset') args.x264Preset = String(next || '').toLowerCase(), i++;
     else if (arg === '--resolved-html') args.resolvedHtml = next, i++;
     else if (arg === '--max-frames') args.maxFrames = Number(next), i++;
+    else if (arg === '--tts-provider') args.ttsProvider = next, i++;
+    else if (arg === '--tts-voice') args.ttsVoice = next, i++;
+    else if (arg === '--tts-speed') args.ttsSpeed = Number(next), i++;
     else if (arg === '--no-auto-build' || arg === '--no-auto-build-plan') args.autoBuildPlan = false;
     else if (arg === '--force-audio') args.forceAudio = true;
     else if (arg === '--keep-frames') args.keepFrames = true;
@@ -70,6 +76,9 @@ function parseArgs(argv) {
     throw new Error('--jpeg-quality must be an integer from 1 to 100');
   }
   if (!Number.isInteger(args.workers) || args.workers <= 0) throw new Error('--workers must be a positive integer');
+  if (!args.ttsProvider) throw new Error('--tts-provider must not be empty');
+  if (!args.ttsVoice) throw new Error('--tts-voice must not be empty');
+  if (!Number.isFinite(args.ttsSpeed) || args.ttsSpeed <= 0) throw new Error('--tts-speed must be a positive number');
   if (!['auto', 'libx264', 'h264_nvenc', 'h264_qsv', 'h264_amf'].includes(args.videoCodec)) {
     throw new Error('--video-codec must be one of: auto, libx264, h264_nvenc, h264_qsv, h264_amf');
   }
@@ -100,6 +109,9 @@ Options:
   --resolved-html <file>  Output path for auto-built source HTML. Default: sibling resolved.html
   --no-auto-build         Do not auto-build source HTML before rendering
   --force-audio           Regenerate narration audio when auto-building source HTML
+  --tts-provider <name>   TTS provider for auto-build. Default: kokoro
+  --tts-voice <name>      TTS voice for auto-build. Default: am_puck
+  --tts-speed <number>    TTS speed for auto-build. Default: 1.2
   --max-frames <number>  Render only the first N frames for a smoke test
   --keep-frames          Do not delete rendered PNG frames
   --skip-video           Render frames and audio only; do not mux final MP4
@@ -235,7 +247,10 @@ async function resolveRenderableHtml(htmlPath, args) {
   const buildArgs = [
     'scripts/build-plan.mjs',
     '--input', htmlPath,
-    '--out', resolvedPath
+    '--out', resolvedPath,
+    '--provider', args.ttsProvider,
+    '--voice', args.ttsVoice,
+    '--speed', String(args.ttsSpeed)
   ];
 
   if (args.forceAudio) buildArgs.push('--force-audio');
