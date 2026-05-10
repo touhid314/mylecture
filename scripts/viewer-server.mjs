@@ -10,7 +10,9 @@ function parseArgs(argv) {
   const args = {
     port: defaultPort,
     openPath: '',
-    openBrowser: false
+    openBrowser: false,
+    width: 1080,
+    height: 1920
   };
 
   for (let i = 0; i < argv.length; i++) {
@@ -19,6 +21,8 @@ function parseArgs(argv) {
 
     if (arg === '--port') args.port = Number(next), i++;
     else if (arg === '--file') args.openPath = next, i++;
+    else if (arg === '--width') args.width = Number(next), i++;
+    else if (arg === '--height') args.height = Number(next), i++;
     else if (arg === '--open') args.openBrowser = true;
     else if (arg === '--help') {
       printHelp();
@@ -31,6 +35,12 @@ function parseArgs(argv) {
   if (!Number.isInteger(args.port) || args.port <= 0 || args.port > 65535) {
     throw new Error('--port must be a valid TCP port');
   }
+  if (!Number.isInteger(args.width) || args.width <= 0) {
+    throw new Error('--width must be a positive integer');
+  }
+  if (!Number.isInteger(args.height) || args.height <= 0) {
+    throw new Error('--height must be a positive integer');
+  }
 
   return args;
 }
@@ -42,6 +52,8 @@ function printHelp() {
 Options:
   --port <number>   Local server port. Default: ${defaultPort}
   --file <path>     HTML file to preselect in the viewer
+  --width <pixels>  Preview viewport width. Default: 1080
+  --height <pixels> Preview viewport height. Default: 1920
   --open            Open the viewer in the default browser
 `);
 }
@@ -176,8 +188,10 @@ async function pickHtmlFile() {
   return path.relative(rootDir, resolvedPath).replaceAll(path.sep, '/');
 }
 
-function viewerHtml(openPath) {
+function viewerHtml(openPath, initialWidth = 1080, initialHeight = 1920) {
   const normalizedOpenPath = openPath ? openPath.replaceAll('\\', '/') : '';
+  const safeInitialWidth = Number.isInteger(initialWidth) && initialWidth > 0 ? initialWidth : 1080;
+  const safeInitialHeight = Number.isInteger(initialHeight) && initialHeight > 0 ? initialHeight : 1920;
   return `<!DOCTYPE html>
 <html lang="en">
 <head>
@@ -211,22 +225,18 @@ body {
   background-size: 32px 32px;
 }
 #preview-shell {
-  width: min(calc(100vh - 128px) * 9 / 16, calc(100vw - 32px));
-  height: min(calc(100vh - 128px), calc((100vw - 32px) * 16 / 9));
   border: 1px solid rgba(255,255,255,0.16);
   background: #000;
   overflow: hidden;
 }
 #preview {
-  width: 1080px;
-  height: 1920px;
   border: 0;
   background: #000;
   transform-origin: 0 0;
 }
 #controls {
   display: grid;
-  grid-template-columns: auto auto auto 1fr auto auto auto auto auto auto;
+  grid-template-columns: auto auto auto 1fr auto auto auto auto auto auto auto;
   gap: 12px;
   align-items: center;
   padding: 12px 16px;
@@ -295,7 +305,7 @@ input[type="range"] {
 <body>
 <main id="frame-wrap">
   <div id="preview-shell">
-    <iframe id="preview" title="Render preview" width="1080" height="1920"></iframe>
+    <iframe id="preview" title="Render preview"></iframe>
   </div>
 </main>
 <section id="controls">
@@ -317,12 +327,15 @@ input[type="range"] {
     <option value="1.5">1.5x</option>
     <option value="2">2x</option>
   </select>
-  <div id="viewport">1080x1920</div>
+  <select id="viewport-preset" title="Preview viewport">
+    <option value="1080x1920">9:16 1080x1920</option>
+    <option value="1920x1080">16:9 1920x1080</option>
+    <option value="custom">Custom</option>
+  </select>
+  <div id="viewport">${safeInitialWidth}x${safeInitialHeight}</div>
   <div id="status">No file loaded</div>
 </section>
 <script>
-const RENDER_WIDTH = 1080;
-const RENDER_HEIGHT = 1920;
 const frameWrap = document.getElementById('frame-wrap');
 const previewShell = document.getElementById('preview-shell');
 const frame = document.getElementById('preview');
@@ -337,9 +350,14 @@ const timeReadout = document.getElementById('time');
 const seekTimeInput = document.getElementById('seek-time');
 const seekGoButton = document.getElementById('seek-go');
 const speedSelect = document.getElementById('speed');
+const viewportPreset = document.getElementById('viewport-preset');
 const viewportText = document.getElementById('viewport');
 const statusText = document.getElementById('status');
 let currentFilePath = '${escapeJsString(normalizedOpenPath)}';
+let renderViewport = {
+  width: ${safeInitialWidth},
+  height: ${safeInitialHeight}
+};
 
 let playback = {
   loaded: false,
@@ -359,16 +377,71 @@ function resizePreview() {
   const wrapRect = frameWrap.getBoundingClientRect();
   const availableWidth = Math.max(1, wrapRect.width - 32);
   const availableHeight = Math.max(1, wrapRect.height - 32);
-  const scale = Math.min(availableWidth / RENDER_WIDTH, availableHeight / RENDER_HEIGHT);
+  const scale = Math.min(availableWidth / renderViewport.width, availableHeight / renderViewport.height);
 
-  previewShell.style.width = Math.floor(RENDER_WIDTH * scale) + 'px';
-  previewShell.style.height = Math.floor(RENDER_HEIGHT * scale) + 'px';
-  frame.width = RENDER_WIDTH;
-  frame.height = RENDER_HEIGHT;
-  frame.style.width = RENDER_WIDTH + 'px';
-  frame.style.height = RENDER_HEIGHT + 'px';
+  previewShell.style.width = Math.floor(renderViewport.width * scale) + 'px';
+  previewShell.style.height = Math.floor(renderViewport.height * scale) + 'px';
+  frame.width = renderViewport.width;
+  frame.height = renderViewport.height;
+  frame.style.width = renderViewport.width + 'px';
+  frame.style.height = renderViewport.height + 'px';
   frame.style.transform = 'scale(' + scale + ')';
-  viewportText.textContent = RENDER_WIDTH + 'x' + RENDER_HEIGHT + ' @ ' + scale.toFixed(3) + 'x';
+  viewportText.textContent = renderViewport.width + 'x' + renderViewport.height + ' @ ' + scale.toFixed(3) + 'x';
+  syncViewportPreset();
+}
+
+function syncViewportPreset() {
+  const value = renderViewport.width + 'x' + renderViewport.height;
+  const hasPreset = Array.from(viewportPreset.options).some(option => option.value === value);
+  viewportPreset.value = hasPreset ? value : 'custom';
+}
+
+function setPreviewViewport(width, height, reload = false) {
+  const nextWidth = Number(width);
+  const nextHeight = Number(height);
+  if (!Number.isInteger(nextWidth) || nextWidth <= 0 || !Number.isInteger(nextHeight) || nextHeight <= 0) return;
+  if (renderViewport.width === nextWidth && renderViewport.height === nextHeight) return;
+
+  renderViewport = { width: nextWidth, height: nextHeight };
+  resizePreview();
+
+  if (reload && currentFilePath) {
+    loadFile(currentFilePath);
+  } else if (playback.loaded) {
+    renderAt(playback.time);
+  }
+}
+
+function detectDocumentViewport(win) {
+  const doc = win.document;
+  const candidates = [
+    doc.getElementById('frame'),
+    doc.querySelector('.video-frame'),
+    doc.getElementById('video-frame'),
+    doc.getElementById('player-container')
+  ].filter(Boolean);
+
+  for (const el of candidates) {
+    const style = win.getComputedStyle(el);
+    const cssWidth = parseFloat(style.width);
+    const cssHeight = parseFloat(style.height);
+    if (Number.isFinite(cssWidth) && Number.isFinite(cssHeight) && cssWidth >= 320 && cssHeight >= 240) {
+      const rounded = { width: Math.round(cssWidth), height: Math.round(cssHeight) };
+      const ratio = rounded.width / rounded.height;
+      if (ratio > 1.2 || ratio < 0.85) return rounded;
+    }
+  }
+
+  const canvas = doc.querySelector('canvas[width][height]');
+  if (canvas) {
+    const width = Number(canvas.getAttribute('width'));
+    const height = Number(canvas.getAttribute('height'));
+    if (Number.isFinite(width) && Number.isFinite(height) && width >= 320 && height >= 240) {
+      return { width, height };
+    }
+  }
+
+  return null;
 }
 
 function setStatus(message) {
@@ -657,6 +730,11 @@ function seekFromPointer(event) {
 frame.addEventListener('load', () => {
   try {
     const win = frame.contentWindow;
+    const detectedViewport = detectDocumentViewport(win);
+    if (detectedViewport) {
+      setPreviewViewport(detectedViewport.width, detectedViewport.height);
+    }
+
     playback.timeline = buildPreviewTimeline(win);
     playback.audioTimeline = buildAudioTimeline(win, playback.timeline);
     playback.duration = Number(win.__VIDEO_DURATION__) ||
@@ -689,6 +767,12 @@ scrubber.addEventListener('click', seekFromPointer);
 seekGoButton.addEventListener('click', seekToInput);
 seekTimeInput.addEventListener('keydown', event => {
   if (event.key === 'Enter') seekToInput();
+});
+viewportPreset.addEventListener('change', event => {
+  const value = event.target.value;
+  if (value === 'custom') return;
+  const [width, height] = value.split('x').map(Number);
+  setPreviewViewport(width, height, true);
 });
 document.addEventListener('keydown', event => {
   if (event.code === 'Space') {
@@ -727,7 +811,14 @@ const server = createServer(async (request, response) => {
   const requestUrl = new URL(request.url, 'http://localhost');
 
   if (requestUrl.pathname === '/' || requestUrl.pathname === '/viewer') {
-    sendText(response, 200, viewerHtml(requestUrl.searchParams.get('file') || args.openPath), 'text/html; charset=utf-8');
+    const width = Number(requestUrl.searchParams.get('width')) || args.width;
+    const height = Number(requestUrl.searchParams.get('height')) || args.height;
+    sendText(
+      response,
+      200,
+      viewerHtml(requestUrl.searchParams.get('file') || args.openPath, width, height),
+      'text/html; charset=utf-8'
+    );
     return;
   }
 
