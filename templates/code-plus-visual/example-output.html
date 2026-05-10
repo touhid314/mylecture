@@ -1,0 +1,718 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Tower of Hanoi Lecture • N=5</title>
+    <style>
+        * {
+            box-sizing: border-box;
+            margin: 0;
+            padding: 0;
+        }
+        
+        body {
+            background-color: #000000;
+            color: #ffffff;
+            font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            height: 100vh;
+            width: 100vw;
+            overflow: hidden;
+        }
+
+        /* Strict 9:16 Video Frame */
+        .video-frame {
+            width: 1080px;
+            height: 1920px;
+            position: relative;
+            background-color: #121212;
+            transform-origin: center center;
+            overflow: hidden;
+        }
+
+        /* Fluid background canvas */
+        #bgCanvas {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 1080px;
+            height: 1920px;
+            z-index: 0;
+            pointer-events: none;
+        }
+
+        .app-content {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            z-index: 1;
+        }
+
+        .header {
+            margin-top: 140px; 
+            text-align: center;
+        }
+
+        .title {
+            font-size: 56px;
+            letter-spacing: 6px;
+            color: #f4f4f5;
+            margin-bottom: 40px;
+            font-weight: 600;
+        }
+
+        .counter {
+            font-size: 36px;
+            color: #d1d5db;
+            letter-spacing: 2px;
+        }
+
+        .svg-container {
+            width: 100%;
+            height: 750px;
+            margin-top: 40px;
+        }
+
+        svg {
+            width: 100%;
+            height: 100%;
+            display: block;
+        }
+
+        .pole-label {
+            fill: #f4f4f5;
+            font-size: 40px;
+            font-family: monospace;
+            font-weight: bold;
+            text-anchor: middle;
+        }
+
+        /* CRITICAL: No CSS transitions allowed per contract. */
+        .disk rect {
+            fill: #3b4b66; 
+            stroke: #64748b;
+            stroke-width: 4;
+        }
+
+        .disk text {
+            fill: #ffffff;
+            font-size: 36px;
+            font-family: sans-serif;
+            font-weight: bold;
+            text-anchor: middle;
+            pointer-events: none;
+        }
+
+        .disk.moving rect {
+            fill: #eab308; 
+            stroke: #a16207;
+        }
+
+        .disk.moving text {
+            fill: #18181b; 
+        }
+
+        .disk.success rect {
+            fill: #10b981; 
+            stroke: #047857;
+        }
+
+        .disk.ghost rect {
+            fill: transparent;
+            stroke: #38bdf8;
+            stroke-dasharray: 8 4;
+            stroke-width: 4;
+        }
+        .disk.ghost text {
+            fill: #38bdf8;
+        }
+
+        .code-container {
+            width: 980px; 
+            margin-top: auto;
+            margin-bottom: 380px; 
+            display: flex;
+            flex-direction: column;
+        }
+
+        .code-header {
+            color: #10b981; 
+            text-align: center;
+            margin-bottom: 24px;
+            font-size: 30px;
+            font-weight: 500;
+        }
+
+        .code-block {
+            background-color: #18181b;
+            border: 2px solid #27272a;
+            border-radius: 16px;
+            padding: 24px 0;
+            font-size: 26px; 
+            line-height: 1.8;
+            position: relative;
+        }
+
+        .code-line {
+            display: flex;
+            padding: 8px 32px;
+            white-space: pre;
+        }
+
+        .code-line.highlight {
+            background-color: rgba(16, 185, 129, 0.2); 
+        }
+
+        .line-num {
+            color: #52525b;
+            width: 40px;
+            user-select: none;
+            margin-right: 24px;
+            text-align: right;
+        }
+
+        .code-text {
+            color: #d1d5db; 
+        }
+
+        .kw-blue { color: #60a5fa; } 
+        .kw-white { color: #f4f4f5; } 
+
+        /* Subtitles Overlay */
+        .subtitles {
+            position: absolute;
+            bottom: 190px; 
+            left: 50%;
+            transform: translateX(-50%);
+            width: 90%;
+            text-align: center;
+            font-family: sans-serif;
+            font-size: 34px;
+            font-weight: 800;
+            color: #facc15; 
+            background: transparent;
+            text-shadow: 3px 3px 8px rgba(0, 0, 0, 0.95), -1px -1px 4px rgba(0, 0, 0, 0.8);
+            padding: 10px;
+            z-index: 10;
+            display: none;
+            line-height: 1.5;
+        }
+
+        /* Mock Player Start Button */
+        .overlay {
+            position: absolute;
+            top: 0; left: 0; width: 100%; height: 100%;
+            background: rgba(0, 0, 0, 0.85);
+            display: none;
+            justify-content: center;
+            align-items: center;
+            z-index: 50;
+            flex-direction: column;
+            backdrop-filter: blur(10px);
+        }
+
+        .start-btn {
+            background-color: #10b981;
+            color: #000;
+            border: none;
+            padding: 30px 60px;
+            font-size: 40px;
+            font-weight: bold;
+            border-radius: 20px;
+            cursor: pointer;
+            box-shadow: 0 10px 30px rgba(16, 185, 129, 0.3);
+            font-family: sans-serif;
+        }
+
+        .overlay-text {
+            margin-top: 40px;
+            font-size: 28px;
+            color: #a1a1aa;
+            font-family: sans-serif;
+            text-align: center;
+            line-height: 1.5;
+        }
+
+    </style>
+</head>
+<body>
+
+<div class="video-frame" id="frame">
+    <canvas id="bgCanvas"></canvas>
+
+    <div class="app-content">
+        <div class="header">
+            <div class="title">TOWER OF HANOI &bull; N=5</div>
+            <div class="counter" id="counter">Move 0 / 31</div>
+        </div>
+
+        <div class="svg-container">
+            <svg id="svgArea" viewBox="0 0 1080 800">
+                <line x1="60" y1="660" x2="1020" y2="660" stroke="#475569" stroke-width="16" stroke-linecap="round" />
+                
+                <line x1="216" y1="180" x2="216" y2="652" stroke="#475569" stroke-width="16" stroke-linecap="round" />
+                <line x1="540" y1="180" x2="540" y2="652" stroke="#475569" stroke-width="16" stroke-linecap="round" />
+                <line x1="864" y1="180" x2="864" y2="652" stroke="#475569" stroke-width="16" stroke-linecap="round" />
+
+                <text x="216" y="740" class="pole-label">A</text>
+                <text x="540" y="740" class="pole-label">B</text>
+                <text x="864" y="740" class="pole-label">C</text>
+
+                <g id="disksLayer"></g>
+            </svg>
+        </div>
+
+        <div class="code-container">
+            <div class="code-header">Solving Tower of Hanoi for N = 5..</div>
+            <div class="code-block">
+                <div class="code-line" id="line1"><span class="line-num">1</span><span class="code-text"><span class="kw-blue">void</span> <span class="kw-white">solve</span>(<span class="kw-blue">int</span> n, <span class="kw-blue">char</span> from, <span class="kw-blue">char</span> to, <span class="kw-blue">char</span> via) {</span></div>
+                <div class="code-line" id="line2"><span class="line-num">2</span><span class="code-text">  <span class="kw-blue">if</span> <span class="kw-white">(</span>n == <span class="kw-white">0)</span> <span class="kw-blue">return</span><span class="kw-white">;</span></span></div>
+                <div class="code-line" id="line3"><span class="line-num">3</span><span class="code-text">  <span class="kw-white">solve(</span>n - <span class="kw-white">1,</span> from, via, to<span class="kw-white">);</span></span></div>
+                <div class="code-line" id="line4"><span class="line-num">4</span><span class="code-text">  <span class="kw-white">move(</span>from, to<span class="kw-white">);</span></span></div>
+                <div class="code-line" id="line5"><span class="line-num">5</span><span class="code-text">  <span class="kw-white">solve(</span>n - <span class="kw-white">1,</span> via, to, from<span class="kw-white">);</span></span></div>
+                <div class="code-line" id="line6"><span class="line-num">6</span><span class="code-text"><span class="kw-white">}</span></span></div>
+            </div>
+        </div>
+    </div>
+
+    <div class="subtitles" id="subtitles"></div>
+
+    <div class="overlay" id="startOverlay">
+        <button class="start-btn" onclick="startMockPlayer()">Play Preview</button>
+        <div class="overlay-text">The render pipeline evaluates this file headlessly.<br>Click here to preview the timeline execution locally.</div>
+    </div>
+</div>
+
+<script>
+    function fitFrameToScreen() {
+        const frame = document.getElementById('frame');
+        const scale = Math.min(window.innerWidth / 1080, window.innerHeight / 1920);
+        frame.style.transform = `scale(${scale})`;
+    }
+    window.addEventListener('resize', fitFrameToScreen);
+    fitFrameToScreen();
+
+    // ---- GLOBALS & CONSTANTS ----
+    const svgNS = "http://www.w3.org/2000/svg";
+    const N_DISKS = 5;
+    const poleX = { 'A': 216, 'B': 540, 'C': 864 };
+    const baseY = 652; 
+    const diskHeight = 50;
+    const diskGap = 4; 
+    const totalDiskSpacing = diskHeight + diskGap;
+    const diskWidths = { 1: 100, 2: 140, 3: 180, 4: 220, 5: 260 };
+
+    let isDOMInitialized = false;
+    let lastPlayedMove = 0;
+    
+    // Audio elements
+    const popAudio = new Audio('pop4.mp3');
+    const bgAudio = new Audio('bg_theme1.mp3'); 
+    bgAudio.loop = true;
+    const bgSpeechAudio = new Audio('bg_theme3.mp3'); 
+    bgSpeechAudio.loop = true;
+
+    // ---- TIMELINE PRE-COMPUTATION ----
+    const simTimeline = { highlights: [], moves: [], totalTime: 0 };
+
+    function buildTimeline() {
+        let simTime = 0.5; 
+        let simPoles = { 'A': [5,4,3,2,1], 'B': [], 'C': [] };
+        let moveCount = 0;
+
+        function traceHanoi(n, from, to, via) {
+            // Speed up calculation: exponentially faster towards the end
+            let progress = moveCount / 31;
+            // Starts normal (1.0), drops rapidly to 0.04 speed multiplier by the end
+            let speedMult = 0.04 + 0.96 * Math.pow(1.0 - progress, 3); 
+            
+            let stepDur = 0.3 * speedMult;
+            let moveDur = 0.9 * speedMult;
+
+            simTimeline.highlights.push({ time: simTime, line: 2 }); simTime += stepDur;
+            if (n === 0) return;
+
+            simTimeline.highlights.push({ time: simTime, line: 3 }); simTime += stepDur;
+            traceHanoi(n - 1, from, via, to);
+
+            simTimeline.highlights.push({ time: simTime, line: 4 });
+            let start = simTime;
+            simTime += moveDur;
+            
+            simTimeline.moves.push({
+                n, from, to, start, end: simTime,
+                sourceIndex: simPoles[from].length - 1,
+                targetIndex: simPoles[to].length
+            });
+            
+            simPoles[from].pop(); simPoles[to].push(n);
+            moveCount++;
+
+            simTimeline.highlights.push({ time: simTime, line: 5 }); simTime += stepDur;
+            traceHanoi(n - 1, via, to, from);
+        }
+
+        traceHanoi(N_DISKS, 'A', 'C', 'B');
+        simTimeline.highlights.push({ time: simTime + 0.5, line: 0 });
+        simTimeline.totalTime = simTime + 1.0; 
+    }
+    
+    buildTimeline();
+
+    // ============================================================================
+    // HTML INPUT CONTRACT: VIDEO PLAN
+    // ============================================================================
+    const VIDEO_PLAN = [
+        { id: "intro", kind: "narration+visual", audio: "audio/intro.wav", text: "Today, we will solve the classic Tower of Hanoi problem for 5 disks. The goal is to move all disks from pole A to pole C." },
+        { id: "rules", kind: "narration+visual", audio: "audio/rules.wav", text: "We must move one disk at a time, and a larger disk can never sit on a smaller one." },
+        { id: "code-base", kind: "narration+visual", audio: "audio/code_base.wav", text: "Let's break down the recursive C function. First is our base case. If 'n' is zero, there are no disks left to move, so we simply return." },
+        { id: "code-rec1", kind: "narration+visual", audio: "audio/code_rec1.wav", text: "Otherwise, we recursively move 'n minus 1' disks out of the way. We conceptually move them from the source to the via pole." },
+        { id: "code-move", kind: "narration+visual", audio: "audio/code_move.wav", text: "Once they are out of the way, we can safely move the largest 'nth' disk directly from the source to our target." },
+        { id: "code-rec2", kind: "narration+visual", audio: "audio/code_rec2.wav", text: "Finally, we execute another recursive call to conceptually move the 'n minus 1' disks from the via pole onto our final target." },
+        { id: "watch-intro", kind: "narration+visual", audio: "audio/watch.wav", text: "Now, let's watch the computer execute all 31 steps. Notice how it speeds up as the recursive pattern unfolds." },
+        { id: "simulation", kind: "visual-only", duration: Math.ceil(simTimeline.totalTime) }, 
+        { id: "conclusion", kind: "narration+visual", audio: "audio/conclusion.wav", text: "And there we have it. The recursive algorithm successfully solved the puzzle." }
+    ];
+
+    window.__VIDEO_PLAN__ = VIDEO_PLAN;
+
+    const PRE_SIM_SEGMENTS = ["intro", "rules", "code-base", "code-rec1", "code-move", "code-rec2", "watch-intro"];
+
+    // ---- DOM INITIALIZATION ----
+    function initDOM() {
+        const layer = document.getElementById('disksLayer');
+        for (let i = N_DISKS; i >= 1; i--) {
+            layer.appendChild(createDiskSVG(`disk-${i}`, i));
+        }
+        for (let i = N_DISKS; i >= 1; i--) {
+            let ghost = createDiskSVG(`ghost-${i}`, i);
+            ghost.classList.add('ghost');
+            ghost.style.display = 'none';
+            layer.appendChild(ghost);
+        }
+        const canvas = document.getElementById('bgCanvas');
+        canvas.width = 1080;
+        canvas.height = 1920;
+        isDOMInitialized = true;
+    }
+
+    function createDiskSVG(id, n) {
+        let g = document.createElementNS(svgNS, 'g');
+        g.setAttribute('id', id);
+        g.classList.add('disk');
+        let rect = document.createElementNS(svgNS, 'rect');
+        let w = diskWidths[n];
+        rect.setAttribute('x', -w/2);
+        rect.setAttribute('y', -diskHeight/2);
+        rect.setAttribute('width', w);
+        rect.setAttribute('height', diskHeight);
+        rect.setAttribute('rx', 16); 
+        let text = document.createElementNS(svgNS, 'text');
+        text.setAttribute('x', 0);
+        text.setAttribute('y', 12); 
+        text.textContent = n;
+        g.appendChild(rect);
+        g.appendChild(text);
+        return g;
+    }
+
+    // ---- RENDERING MATH ----
+    function easeInOutQuad(t) { return t < 0.5 ? 2 * t * t : 1 - Math.pow(-2 * t + 2, 2) / 2; }
+    function clamp(val, min, max) { return Math.max(min, Math.min(max, val)); }
+    
+    function getStackPos(pole, index) {
+        return { x: poleX[pole], y: baseY - (diskHeight/2) - (index * totalDiskSpacing) };
+    }
+
+    function interpolateArc(start, end, p, archHeight) {
+        return {
+            x: start.x + (end.x - start.x) * p,
+            y: start.y + (end.y - start.y) * p - Math.sin(p * Math.PI) * archHeight
+        };
+    }
+
+    function drawFluidBackground(globalTime) {
+        const canvas = document.getElementById('bgCanvas');
+        if(!canvas) return;
+        const ctx = canvas.getContext('2d');
+        ctx.clearRect(0, 0, canvas.width, canvas.height);
+        ctx.fillStyle = 'rgba(255, 255, 255, 0.08)';
+        
+        const spacing = 48; 
+        for(let x = 0; x < canvas.width; x += spacing) {
+            for(let y = 0; y < canvas.height; y += spacing) {
+                 let dx = Math.sin(x * 0.005 + globalTime * 1.2) * 10;
+                 let dy = Math.cos(y * 0.005 + globalTime * 1.2) * 10;
+                 ctx.beginPath();
+                 ctx.arc(x + dx, y + dy, 3, 0, Math.PI * 2);
+                 ctx.fill();
+            }
+        }
+    }
+
+    // ============================================================================
+    // HTML INPUT CONTRACT: RENDER SECTION
+    // ============================================================================
+    window.__RENDER_SECTION__ = function(segment, localTime, globalTime) {
+        if (!isDOMInitialized) initDOM();
+
+        // 1. Fluid Background
+        drawFluidBackground(globalTime);
+
+        // 2. Subtitles (Native overlay rendering derived from contract script)
+        const subEl = document.getElementById('subtitles');
+        if (segment.text) {
+            subEl.innerText = segment.text;
+            subEl.style.display = 'block';
+        } else {
+            subEl.style.display = 'none';
+        }
+
+        // --- State Variables for current frame ---
+        let activeHighlight = 0;
+        let counterText = "Move 0 / 31";
+        
+        let diskPos = {};
+        let isMoving = {};
+        let isSuccess = {};
+        let ghosts = {};
+        for(let i=1; i<=5; i++) {
+            diskPos[i] = getStackPos('A', 5-i);
+            isMoving[i] = false;
+            isSuccess[i] = false;
+            ghosts[i] = { active: false };
+        }
+
+        const sid = segment.id;
+
+        // --- AUDIO MANAGEMENT ACROSS SEGMENTS ---
+        if (PRE_SIM_SEGMENTS.includes(sid)) {
+            if (bgSpeechAudio.paused) {
+                bgSpeechAudio.volume = 0.15;
+                bgSpeechAudio.play().catch(e => {});
+            }
+            if (!bgAudio.paused) {
+                bgAudio.pause();
+                bgAudio.currentTime = 0;
+            }
+        }
+
+        // --- ANIMATION CHOREOGRAPHY ---
+        if (sid === "intro") {
+            let alpha = Math.abs(Math.sin(localTime * 2.5)) * 0.4 + 0.1;
+            for(let i=1; i<=5; i++) {
+                ghosts[i] = { active: true, x: poleX['C'], y: getStackPos('C', 5-i).y, opacity: alpha };
+            }
+        } else if (sid === "rules") {
+            let p = easeInOutQuad(clamp(localTime / 2.0, 0, 1));
+            let pDown = easeInOutQuad(clamp((localTime - 3.5) / 1.5, 0, 1));
+            let totalP = p - pDown; 
+            diskPos[1].y -= (totalP * 150);
+            isMoving[1] = totalP > 0.05;
+        } else if (sid === "code-base") {
+            activeHighlight = (localTime > 3) ? 2 : 1;
+        } else if (sid === "code-rec1") {
+            activeHighlight = 3;
+            let p = easeInOutQuad(clamp((localTime - 1.0) / 2.0, 0, 1));
+            for(let i=1; i<=4; i++) {
+                let startPos = getStackPos('A', 5-i);
+                let endPos = getStackPos('B', 4-i);
+                diskPos[i] = interpolateArc(startPos, endPos, p, 200);
+                if(p > 0 && p < 1) isMoving[i] = true;
+            }
+        } else if (sid === "code-move") {
+            activeHighlight = 4;
+            for(let i=1; i<=4; i++) diskPos[i] = getStackPos('B', 4-i);
+            let p = easeInOutQuad(clamp((localTime - 1.0) / 2.0, 0, 1));
+            let startPos = getStackPos('A', 0);
+            let endPos = getStackPos('C', 0);
+            diskPos[5] = interpolateArc(startPos, endPos, p, 200);
+            if(p > 0 && p < 1) isMoving[5] = true;
+        } else if (sid === "code-rec2") {
+            activeHighlight = 5;
+            diskPos[5] = getStackPos('C', 0);
+            let p = easeInOutQuad(clamp((localTime - 1.0) / 2.0, 0, 1));
+            for(let i=1; i<=4; i++) {
+                let startPos = getStackPos('B', 4-i);
+                let endPos = getStackPos('C', 5-i);
+                diskPos[i] = interpolateArc(startPos, endPos, p, 200);
+                if(p > 0 && p < 1) isMoving[i] = true;
+            }
+        } else if (sid === "simulation") {
+
+            if (!bgSpeechAudio.paused) {
+                if (localTime < 1.0) bgSpeechAudio.volume = Math.max(0, 0.15 * (1.0 - localTime));
+                else bgSpeechAudio.pause();
+            }
+            if (bgAudio.paused) {
+                bgAudio.volume = 0;
+                bgAudio.play().catch(e => {});
+            }
+            if (localTime < 2.0) bgAudio.volume = Math.min(1.0, localTime / 2.0);
+            else bgAudio.volume = 1.0;
+
+            let poles = { A: [5,4,3,2,1], B: [], C: [] };
+            let completedMoves = 0;
+
+            for (let h of simTimeline.highlights) {
+                if (localTime >= h.time) activeHighlight = h.line;
+                else break;
+            }
+
+            for (let m of simTimeline.moves) {
+                if (localTime >= m.end) {
+                    poles[m.from].pop(); poles[m.to].push(m.n);
+                    completedMoves++;
+                } else if (localTime >= m.start && localTime < m.end) {
+                    poles[m.from].pop();
+                    completedMoves++;
+                    isMoving[m.n] = true;
+                    
+                    let p = (localTime - m.start) / (m.end - m.start);
+                    let startPos = getStackPos(m.from, m.sourceIndex);
+                    let endPos = getStackPos(m.to, m.targetIndex);
+                    diskPos[m.n] = interpolateArc(startPos, endPos, easeInOutQuad(p), 250);
+                    break;
+                } else {
+                    break;
+                }
+            }
+
+            for (let pName of ['A', 'B', 'C']) {
+                poles[pName].forEach((n, idx) => {
+                    if (!isMoving[n]) diskPos[n] = getStackPos(pName, idx);
+                });
+            }
+            counterText = `Move ${completedMoves} / 31`;
+
+            if (completedMoves > lastPlayedMove) {
+                popAudio.currentTime = 0;
+                popAudio.play().catch(e => {});
+                lastPlayedMove = completedMoves;
+            } else if (completedMoves < lastPlayedMove) {
+                lastPlayedMove = completedMoves;
+            }
+
+        } else if (sid === "conclusion") {
+            for(let i=1; i<=5; i++) {
+                diskPos[i] = getStackPos('C', 5-i);
+                isSuccess[i] = true;
+            }
+            counterText = "Move 31 / 31";
+            lastPlayedMove = 0;
+
+            if (localTime < 2.0) {
+                bgAudio.volume = Math.max(0, 1.0 - (localTime / 2.0));
+            } else {
+                bgAudio.volume = 0;
+                if (!bgAudio.paused) bgAudio.pause();
+            }
+
+        } else {
+            lastPlayedMove = 0;
+        }
+
+        // --- DOM Application (No CSS Transitions) ---
+        document.getElementById('counter').innerText = counterText;
+        
+        for (let i = 1; i <= 6; i++) {
+            const el = document.getElementById(`line${i}`);
+            if (i === activeHighlight) el.classList.add('highlight');
+            else el.classList.remove('highlight');
+        }
+
+        for (let i = 1; i <= 5; i++) {
+            const diskEl = document.getElementById(`disk-${i}`);
+            diskEl.setAttribute('transform', `translate(${diskPos[i].x}, ${diskPos[i].y})`);
+            
+            if (isMoving[i]) diskEl.classList.add('moving');
+            else diskEl.classList.remove('moving');
+
+            if (isSuccess[i]) diskEl.classList.add('success');
+            else diskEl.classList.remove('success');
+        }
+
+        for (let i = 1; i <= 5; i++) {
+            const ghostEl = document.getElementById(`ghost-${i}`);
+            if (ghosts[i].active) {
+                ghostEl.style.display = 'block';
+                ghostEl.setAttribute('transform', `translate(${ghosts[i].x}, ${ghosts[i].y})`);
+                ghostEl.style.opacity = ghosts[i].opacity;
+            } else {
+                ghostEl.style.display = 'none';
+            }
+        }
+    };
+
+    // ============================================================================
+    // EXPORT & MOCK PLAYER LOGIC (Allows local browser preview)
+    // ============================================================================
+    const isExport = new URLSearchParams(window.location.search).get('export') === '1';
+
+    if (!isExport) {
+        document.getElementById('startOverlay').style.display = 'flex';
+        initDOM();
+    }
+
+    function startMockPlayer() {
+        document.getElementById('startOverlay').style.display = 'none';
+        
+        popAudio.load();
+        bgAudio.load();
+        bgSpeechAudio.load();
+
+        let currentSegmentIdx = 0;
+        let segmentStartTime = performance.now() / 1000;
+        
+        const speakSegment = (text) => {
+            window.speechSynthesis.cancel();
+            if(text) {
+                const utterance = new SpeechSynthesisUtterance(text);
+                utterance.rate = 0.95;
+                window.speechSynthesis.speak(utterance);
+            }
+        };
+
+        speakSegment(window.__VIDEO_PLAN__[0].text);
+
+        function tick(timestamp) {
+            let now = timestamp / 1000;
+            let segment = window.__VIDEO_PLAN__[currentSegmentIdx];
+            
+            let duration = segment.duration;
+            if (!duration) {
+                duration = Math.max(3, (segment.text.split(" ").length * 0.35) + 1.0);
+            }
+            
+            let localTime = now - segmentStartTime;
+            
+            if (localTime >= duration) {
+                currentSegmentIdx++;
+                segmentStartTime = now;
+                
+                if (currentSegmentIdx >= window.__VIDEO_PLAN__.length) {
+                    return; 
+                }
+                
+                segment = window.__VIDEO_PLAN__[currentSegmentIdx];
+                localTime = 0;
+                speakSegment(segment.text);
+            }
+            
+            window.__RENDER_SECTION__(segment, localTime, now);
+            requestAnimationFrame(tick);
+        }
+        
+        requestAnimationFrame(tick);
+    }
+</script>
+</body>
+</html>

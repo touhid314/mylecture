@@ -11,3 +11,4 @@ tests/fixtures/*/audio/
 inputs/
 outputs/
 *.mp4
+assets/

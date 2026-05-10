@@ -31,9 +31,11 @@ function parseArgs(argv) {
     videoCodec: 'auto',
     x264Preset: 'veryfast',
     resolvedHtml: null,
+    premixedAudio: null,
     keepFrames: false,
     maxFrames: null,
-    skipVideo: false
+    skipVideo: false,
+    colorRange: 'tv'
   };
 
   for (let i = 0; i < argv.length; i++) {
@@ -52,6 +54,7 @@ function parseArgs(argv) {
     else if (arg === '--video-codec') args.videoCodec = String(next || '').toLowerCase(), i++;
     else if (arg === '--x264-preset') args.x264Preset = String(next || '').toLowerCase(), i++;
     else if (arg === '--resolved-html') args.resolvedHtml = next, i++;
+    else if (arg === '--premixed-audio') args.premixedAudio = next, i++;
     else if (arg === '--max-frames') args.maxFrames = Number(next), i++;
     else if (arg === '--tts-provider') args.ttsProvider = next, i++;
     else if (arg === '--tts-voice') args.ttsVoice = next, i++;
@@ -60,6 +63,7 @@ function parseArgs(argv) {
     else if (arg === '--force-audio') args.forceAudio = true;
     else if (arg === '--keep-frames') args.keepFrames = true;
     else if (arg === '--skip-video') args.skipVideo = true;
+    else if (arg === '--color-range') args.colorRange = String(next || '').toLowerCase(), i++;
     else if (arg === '--help') {
       printHelp();
       process.exit(0);
@@ -83,6 +87,7 @@ function parseArgs(argv) {
     throw new Error('--video-codec must be one of: auto, libx264, h264_nvenc, h264_qsv, h264_amf');
   }
   if (!args.x264Preset) throw new Error('--x264-preset must not be empty');
+  if (!['tv', 'pc'].includes(args.colorRange)) throw new Error('--color-range must be "tv" or "pc"');
   if (args.maxFrames !== null && (!Number.isInteger(args.maxFrames) || args.maxFrames <= 0)) {
     throw new Error('--max-frames must be a positive integer');
   }
@@ -107,6 +112,7 @@ Options:
   --video-codec <codec>   MP4 video encoder: auto, libx264, h264_nvenc, h264_qsv, h264_amf. Default: auto
   --x264-preset <preset>  libx264 speed preset. Default: veryfast
   --resolved-html <file>  Output path for auto-built source HTML. Default: sibling resolved.html
+  --premixed-audio <file> Use an already mixed audio file instead of building the audio mix
   --no-auto-build         Do not auto-build source HTML before rendering
   --force-audio           Regenerate narration audio when auto-building source HTML
   --tts-provider <name>   TTS provider for auto-build. Default: kokoro
@@ -115,6 +121,7 @@ Options:
   --max-frames <number>  Render only the first N frames for a smoke test
   --keep-frames          Do not delete rendered PNG frames
   --skip-video           Render frames and audio only; do not mux final MP4
+  --color-range <tv|pc>  Encoded video color range. Use pc for full-range browser colors. Default: tv
 `);
 }
 
@@ -338,8 +345,12 @@ function buildVideoEncodeArgs({ args, codec, framesDir, fps, audioTimeline, mixe
 
   ffmpegArgs.push(
     ...videoCodecArgs(codec, args),
-    '-vf', 'scale=in_range=pc:out_range=tv',
+    '-vf', `scale=in_range=pc:out_range=${args.colorRange}`,
     '-pix_fmt', 'yuv420p',
+    '-color_range', args.colorRange,
+    '-colorspace', 'bt709',
+    '-color_primaries', 'bt709',
+    '-color_trc', 'bt709',
     '-r', String(fps)
   );
 
@@ -461,6 +472,7 @@ async function main() {
   const framesDir = resolveProjectPath(args.framesDir);
   const renderDir = path.dirname(framesDir);
   const mixedAudioPath = path.join(renderDir, 'mixed-audio.wav');
+  const premixedAudioPath = args.premixedAudio ? resolveProjectPath(args.premixedAudio) : null;
 
   assertFileExists(htmlPath, 'Renderable HTML file');
   mkdirSync(renderDir, { recursive: true });
@@ -501,7 +513,14 @@ async function main() {
   console.log(`Frame rendering time: ${formatSeconds(renderElapsed)} (${(frameCount / (renderElapsed / 1000)).toFixed(2)} fps effective)`);
 
   const audioDuration = args.maxFrames ? renderDuration : totalDuration;
-  if (audioTimeline.length > 0) {
+  let audioInputPath = mixedAudioPath;
+  let encodeAudioTimeline = audioTimeline;
+  if (premixedAudioPath) {
+    assertFileExists(premixedAudioPath, 'Premixed audio');
+    audioInputPath = premixedAudioPath;
+    encodeAudioTimeline = [{ start: 0, duration: totalDuration, src: premixedAudioPath }];
+    console.log(`Using premixed audio: ${premixedAudioPath}`);
+  } else if (audioTimeline.length > 0) {
     console.log('Mixing audio...');
     const audioStart = performance.now();
     await run('ffmpeg', buildAudioMixArgs(audioTimeline, htmlPath, mixedAudioPath, audioDuration));
@@ -514,13 +533,13 @@ async function main() {
       args,
       framesDir,
       fps: args.fps,
-      audioTimeline,
-      mixedAudioPath,
+      audioTimeline: encodeAudioTimeline,
+      mixedAudioPath: audioInputPath,
       outputPath
     });
     console.log(`Video encode time: ${formatSeconds(performance.now() - encodeStart)} using ${encoder}`);
 
-    rmSync(mixedAudioPath, { force: true });
+    if (!premixedAudioPath) rmSync(mixedAudioPath, { force: true });
   }
 
   if (!args.keepFrames) {

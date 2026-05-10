@@ -1,0 +1,521 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Bubble Sort Lecture • N=5</title>
+    <style>
+        * {
+            box-sizing: border-box;
+            margin: 0;
+            padding: 0;
+        }
+        
+        body {
+            background-color: #000000;
+            color: #ffffff;
+            font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            height: 100vh;
+            width: 100vw;
+            overflow: hidden;
+        }
+
+        /* Strict 9:16 Video Frame */
+        .video-frame {
+            width: 1080px;
+            height: 1920px;
+            position: relative;
+            background-color: #121212;
+            transform-origin: center center;
+            overflow: hidden;
+        }
+
+        /* Fixed background canvas */
+        #bgCanvas {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 1080px;
+            height: 1920px;
+            z-index: 0;
+            pointer-events: none;
+        }
+
+        .app-content {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            z-index: 1;
+        }
+
+        .header {
+            margin-top: 140px; 
+            text-align: center;
+        }
+
+        .title {
+            font-size: 56px;
+            letter-spacing: 6px;
+            color: #f4f4f5;
+            margin-bottom: 40px;
+            font-weight: 600;
+        }
+
+        .counter {
+            font-size: 36px;
+            color: #d1d5db;
+            letter-spacing: 2px;
+        }
+
+        .svg-container {
+            width: 100%;
+            height: 750px;
+            margin-top: 40px;
+        }
+
+        svg {
+            width: 100%;
+            height: 100%;
+            display: block;
+        }
+
+        /* CRITICAL: No CSS transitions allowed per contract. */
+        .bar rect {
+            fill: #3b4b66; 
+            stroke: #64748b;
+            stroke-width: 4;
+        }
+
+        .bar text {
+            fill: #ffffff;
+            font-size: 36px;
+            font-family: sans-serif;
+            font-weight: bold;
+            text-anchor: middle;
+            pointer-events: none;
+        }
+
+        .bar.active rect {
+            fill: #eab308; 
+            stroke: #a16207;
+        }
+
+        .bar.sorted rect {
+            fill: #3d5a45; 
+            stroke: #047857;
+        }
+
+        .bar.success rect {
+            fill: #10b981; 
+            stroke: #047857;
+        }
+
+        .bracket {
+            fill: none;
+            stroke: #ffffff;
+            stroke-width: 6;
+            stroke-linecap: round;
+        }
+
+        .code-container {
+            width: 980px; 
+            margin-top: auto;
+            margin-bottom: 380px; 
+            display: flex;
+            flex-direction: column;
+        }
+
+        .code-header {
+            color: #10b981; 
+            text-align: center;
+            margin-bottom: 24px;
+            font-size: 30px;
+            font-weight: 500;
+        }
+
+        .code-block {
+            background-color: #18181b;
+            border: 2px solid #27272a;
+            border-radius: 16px;
+            padding: 24px 0;
+            font-size: 26px; 
+            line-height: 1.8;
+            position: relative;
+        }
+
+        .code-line {
+            display: flex;
+            padding: 8px 32px;
+            white-space: pre;
+        }
+
+        .code-line.highlight {
+            background-color: rgba(16, 185, 129, 0.2); 
+        }
+
+        .line-num {
+            color: #52525b;
+            width: 40px;
+            user-select: none;
+            margin-right: 24px;
+            text-align: right;
+        }
+
+        .code-text {
+            color: #d1d5db; 
+        }
+
+        .kw-blue { color: #60a5fa; } 
+        .kw-white { color: #f4f4f5; } 
+
+        /* Subtitles Overlay */
+        .subtitles {
+            position: absolute;
+            bottom: 190px; 
+            left: 50%;
+            transform: translateX(-50%);
+            width: 90%;
+            text-align: center;
+            font-family: sans-serif;
+            font-size: 34px;
+            font-weight: 800;
+            color: #facc15; 
+            background: transparent;
+            text-shadow: 3px 3px 8px rgba(0, 0, 0, 0.95), -1px -1px 4px rgba(0, 0, 0, 0.8);
+            padding: 10px;
+            z-index: 10;
+            display: none;
+            line-height: 1.5;
+        }
+
+        .overlay {
+            position: absolute;
+            top: 0; left: 0; width: 100%; height: 100%;
+            background: rgba(0, 0, 0, 0.85);
+            display: none;
+            justify-content: center;
+            align-items: center;
+            z-index: 50;
+            flex-direction: column;
+            backdrop-filter: blur(10px);
+        }
+
+        .start-btn {
+            background-color: #10b981;
+            color: #000;
+            border: none;
+            padding: 30px 60px;
+            font-size: 40px;
+            font-weight: bold;
+            border-radius: 20px;
+            cursor: pointer;
+            box-shadow: 0 10px 30px rgba(16, 185, 129, 0.3);
+            font-family: sans-serif;
+        }
+    </style>
+</head>
+<body>
+
+<div class="video-frame" id="frame">
+    <canvas id="bgCanvas"></canvas>
+
+    <div class="app-content">
+        <div class="header">
+            <div class="title">BUBBLE SORT &bull; N=5</div>
+            <div class="counter" id="counter">Swap 0 / 6</div>
+        </div>
+
+        <div class="svg-container">
+            <svg id="svgArea" viewBox="0 0 1080 800">
+                <line x1="140" y1="660" x2="940" y2="660" stroke="#475569" stroke-width="8" stroke-linecap="round" />
+                <path id="bracket" class="bracket" d="M 0 0" />
+                <g id="barsLayer"></g>
+            </svg>
+        </div>
+
+        <div class="code-container">
+            <div class="code-header">Sorting [4, 2, 5, 1, 3]...</div>
+            <div class="code-block">
+                <div class="code-line" id="line1"><span class="line-num">1</span><span class="code-text"><span class="kw-blue">void</span> <span class="kw-white">bubbleSort</span>(<span class="kw-blue">int</span> arr[], <span class="kw-blue">int</span> n) {</span></div>
+                <div class="code-line" id="line2"><span class="line-num">2</span><span class="code-text">  <span class="kw-blue">for</span> <span class="kw-white">(</span><span class="kw-blue">int</span> i = 0; i < n - 1; i++<span class="kw-white">)</span></span></div>
+                <div class="code-line" id="line3"><span class="line-num">3</span><span class="code-text">    <span class="kw-blue">for</span> <span class="kw-white">(</span><span class="kw-blue">int</span> j = 0; j < n - i - 1; j++<span class="kw-white">)</span></span></div>
+                <div class="code-line" id="line4"><span class="line-num">4</span><span class="code-text">      <span class="kw-blue">if</span> <span class="kw-white">(</span>arr[j] > arr[j + 1]<span class="kw-white">)</span></span></div>
+                <div class="code-line" id="line5"><span class="line-num">5</span><span class="code-text">        <span class="kw-white">swap(</span>arr[j], arr[j + 1]<span class="kw-white">);</span></span></div>
+                <div class="code-line" id="line6"><span class="line-num">6</span><span class="code-text"><span class="kw-white">}</span></span></div>
+            </div>
+        </div>
+    </div>
+
+    <div class="subtitles" id="subtitles"></div>
+
+    <div class="overlay" id="startOverlay">
+        <button class="start-btn" onclick="startMockPlayer()">Play Preview</button>
+    </div>
+</div>
+
+<script>
+    function fitFrameToScreen() {
+        const frame = document.getElementById('frame');
+        const scale = Math.min(window.innerWidth / 1080, window.innerHeight / 1920);
+        frame.style.transform = `scale(${scale})`;
+    }
+    window.addEventListener('resize', fitFrameToScreen);
+    fitFrameToScreen();
+
+    // ---- GLOBALS ----
+    const svgNS = "http://www.w3.org/2000/svg";
+    const initialArr = [4, 2, 5, 1, 3]; // Random initial layout
+    const N_ELEMENTS = initialArr.length;
+    const startX = 220;
+    const gapX = 160;
+    const baseY = 650;
+    const barWidth = 100;
+    const baseHeight = 80;
+
+    let isDOMInitialized = false;
+
+    const simTimeline = { comparisons: [], swaps: [], totalTime: 0, totalSwaps: 0 };
+
+    function buildTimeline() {
+        let simTime = 0.5;
+        let arr = [...initialArr];
+        let n = arr.length;
+        let swapCount = 0;
+        let stepDur = 0.5; // Constant speed applied here
+
+        for (let i = 0; i < n - 1; i++) {
+            for (let j = 0; j < n - i - 1; j++) {
+                simTimeline.comparisons.push({ time: simTime, indices: [j, j + 1], line: 4 });
+                simTime += stepDur;
+
+                if (arr[j] > arr[j + 1]) {
+                    let start = simTime;
+                    simTime += stepDur * 1.5; 
+                    swapCount++;
+                    simTimeline.swaps.push({
+                        indices: [j, j+1],
+                        values: [arr[j], arr[j+1]],
+                        start, end: simTime,
+                        swapIdx: swapCount
+                    });
+                    [arr[j], arr[j + 1]] = [arr[j + 1], arr[j]];
+                }
+            }
+        }
+        simTimeline.totalTime = simTime + 1.0;
+        simTimeline.totalSwaps = swapCount;
+    }
+    buildTimeline();
+
+    window.__VIDEO_PLAN__ = [
+        { id: "intro", kind: "narration+visual", text: "Today, we will learn how Bubble Sort works by sorting an array of 5 numbers. The goal is to arrange these elements from smallest to largest." },
+        { id: "logic", kind: "narration+visual", text: "The algorithm works by repeatedly stepping through the list, comparing adjacent elements, and swapping them if they are in the wrong order." },
+        { id: "outer-loop", kind: "narration+visual", text: "Let's look at the code. First, our outer loop dictates how many passes we need to make over the array to ensure everything is fully sorted." },
+        { id: "inner-loop", kind: "narration+visual", text: "Inside, the inner loop traverses the unsorted portion of the array, comparing each adjacent pair from left to right." },
+        { id: "swap-cond", kind: "narration+visual", text: "If the current element is strictly greater than the one next to it, we swap their positions." },
+        { id: "bubbling", kind: "narration+visual", text: "Through this process, the largest unsorted element repeatedly 'bubbles' up to its correct position at the end of the list." },
+        { id: "watch-intro", kind: "narration+visual", text: "Now, let's watch the computer execute all necessary swaps. Notice how the unsorted section shrinks with every pass." },
+        { id: "simulation", kind: "visual-only", duration: Math.ceil(simTimeline.totalTime) },
+        { id: "conclusion", kind: "narration+visual", text: "And there we have it. The array is completely sorted, and the algorithm is finished." }
+    ];
+
+    function initDOM() {
+        const layer = document.getElementById('barsLayer');
+        for (let i = 0; i < N_ELEMENTS; i++) {
+            layer.appendChild(createBarSVG(initialArr[i]));
+        }
+        isDOMInitialized = true;
+    }
+
+    function createBarSVG(value) {
+        let g = document.createElementNS(svgNS, 'g');
+        g.setAttribute('id', `bar-v${value}`);
+        g.classList.add('bar');
+        let h = value * baseHeight;
+        let rect = document.createElementNS(svgNS, 'rect');
+        rect.setAttribute('x', -barWidth/2);
+        rect.setAttribute('y', -h);
+        rect.setAttribute('width', barWidth);
+        rect.setAttribute('height', h);
+        rect.setAttribute('rx', 12);
+        let text = document.createElementNS(svgNS, 'text');
+        text.setAttribute('x', 0);
+        text.setAttribute('y', -h - 20);
+        text.textContent = value;
+        g.appendChild(rect);
+        g.appendChild(text);
+        return g;
+    }
+
+    function drawFluidBackground(globalTime) {
+        const canvas = document.getElementById('bgCanvas');
+        const ctx = canvas.getContext('2d');
+        ctx.clearRect(0, 0, canvas.width, canvas.height);
+        
+        // Fixed zooming issue by shrinking dot scale, tightening spacing, and lowering amplitude
+        ctx.fillStyle = 'rgba(255, 255, 255, 0.15)';
+        const spacing = 32; 
+        for(let x = 0; x < canvas.width; x += spacing) {
+            for(let y = 0; y < canvas.height; y += spacing) {
+                 let dx = Math.sin(x * 0.02 + globalTime * 0.8) * 4;
+                 let dy = Math.cos(y * 0.02 + globalTime * 0.8) * 4;
+                 ctx.beginPath();
+                 ctx.arc(x + dx, y + dy, 1.5, 0, Math.PI * 2);
+                 ctx.fill();
+            }
+        }
+    }
+
+    function easeInOutQuad(t) { return t < 0.5 ? 2 * t * t : 1 - Math.pow(-2 * t + 2, 2) / 2; }
+    function clamp(val, min, max) { return Math.max(min, Math.min(max, val)); }
+
+    window.__RENDER_SECTION__ = function(segment, localTime, globalTime) {
+        if (!isDOMInitialized) initDOM();
+        drawFluidBackground(globalTime);
+
+        const subEl = document.getElementById('subtitles');
+        subEl.innerText = segment.text || "";
+        subEl.style.display = segment.text ? 'block' : 'none';
+
+        let activeHighlight = 0;
+        let counterText = `Swap 0 / ${simTimeline.totalSwaps}`;
+        let barX = {};
+        initialArr.forEach((v, i) => barX[v] = i);
+        let barActive = { 1:false, 2:false, 3:false, 4:false, 5:false };
+        let barSorted = { 1:false, 2:false, 3:false, 4:false, 5:false };
+        let bracketPos = null;
+
+        const sid = segment.id;
+
+        if (sid === "intro") {
+            // Static setup
+        } else if (sid === "logic") {
+            barActive[4] = true; barActive[2] = true;
+            bracketPos = 0;
+        } else if (sid === "outer-loop") {
+            activeHighlight = 2;
+        } else if (sid === "inner-loop") {
+            activeHighlight = 3;
+            bracketPos = Math.floor(localTime * 2) % 4;
+        } else if (sid === "swap-cond") {
+            activeHighlight = 4;
+            let p = easeInOutQuad(clamp(localTime / 1.5, 0, 1));
+            barX[4] = 0 + p;
+            barX[2] = 1 - p;
+            barActive[4] = true; barActive[2] = true;
+        } else if (sid === "bubbling") {
+            activeHighlight = 5;
+            // First swap executed
+            barX[4] = 1; barX[2] = 0;
+            
+            // Move 5 from index 2 to index 4 over 2 seconds
+            let p = easeInOutQuad(clamp(localTime / 2.0, 0, 1));
+            barX[5] = 2 + (p * 2);
+            
+            // 5 passes elements 1 and 3
+            if (barX[5] > 2.5) barX[1] = 2; else barX[1] = 3;
+            if (barX[5] > 3.5) barX[3] = 3; else barX[3] = 4;
+            
+            barActive[5] = true;
+            if (p === 1) barSorted[5] = true;
+        } else if (sid === "watch-intro") {
+            counterText = `Swap 0 / ${simTimeline.totalSwaps}`;
+        } else if (sid === "simulation") {
+            let currentArr = [...initialArr];
+            let swapsDone = 0;
+
+            for (let c of simTimeline.comparisons) {
+                if (localTime >= c.time) {
+                    activeHighlight = c.line;
+                    bracketPos = c.indices[0];
+                }
+            }
+
+            for (let s of simTimeline.swaps) {
+                if (localTime >= s.end) {
+                    let i = s.indices[0], j = s.indices[1];
+                    [currentArr[i], currentArr[j]] = [currentArr[j], currentArr[i]];
+                    swapsDone = s.swapIdx;
+                } else if (localTime >= s.start) {
+                    activeHighlight = 5;
+                    swapsDone = s.swapIdx;
+                    let p = easeInOutQuad((localTime - s.start) / (s.end - s.start));
+                    let v1 = s.values[0], v2 = s.values[1];
+                    barX[v1] = s.indices[0] + p;
+                    barX[v2] = s.indices[1] - p;
+                    barActive[v1] = true; barActive[v2] = true;
+                }
+            }
+
+            currentArr.forEach((v, i) => {
+                if (!barActive[v]) barX[v] = i;
+            });
+
+            // Hardcoded lock timings for [4, 2, 5, 1, 3] layout
+            if (swapsDone >= 3) barSorted[5] = true;
+            if (swapsDone >= 5) barSorted[4] = true;
+            if (swapsDone >= 6) { barSorted[3] = true; barSorted[2] = true; barSorted[1] = true; }
+
+            counterText = `Swap ${swapsDone} / ${simTimeline.totalSwaps}`;
+        } else if (sid === "conclusion") {
+            counterText = `Swap ${simTimeline.totalSwaps} / ${simTimeline.totalSwaps}`;
+            barX = { 1:0, 2:1, 3:2, 4:3, 5:4 };
+            for(let i=1; i<=5; i++) barSorted[i] = true;
+        }
+
+        // Apply visual states to DOM
+        document.getElementById('counter').innerText = counterText;
+        for (let i = 1; i <= 6; i++) {
+            document.getElementById(`line${i}`).classList.toggle('highlight', i === activeHighlight);
+        }
+
+        for (let v = 1; v <= N_ELEMENTS; v++) {
+            const el = document.getElementById(`bar-v${v}`);
+            const x = startX + barX[v] * gapX;
+            el.setAttribute('transform', `translate(${x}, ${baseY})`);
+            el.classList.toggle('active', barActive[v]);
+            el.classList.toggle('sorted', barSorted[v]);
+            if (sid === "conclusion") el.classList.add('success');
+        }
+
+        const br = document.getElementById('bracket');
+        if (bracketPos !== null) {
+            const bx = startX + bracketPos * gapX;
+            br.setAttribute('d', `M ${bx - 60} ${baseY + 20} L ${bx - 60} ${baseY + 40} L ${bx + gapX + 60} ${baseY + 40} L ${bx + gapX + 60} ${baseY + 20}`);
+            br.style.display = 'block';
+        } else {
+            br.style.display = 'none';
+        }
+    };
+
+    const isExport = new URLSearchParams(window.location.search).get('export') === '1';
+    if (!isExport) document.getElementById('startOverlay').style.display = 'flex';
+
+    function startMockPlayer() {
+        document.getElementById('startOverlay').style.display = 'none';
+        let currentIdx = 0, startTime = performance.now() / 1000;
+        const tick = (ts) => {
+            let now = ts / 1000, seg = window.__VIDEO_PLAN__[currentIdx];
+            let dur = seg.duration || Math.max(3, (seg.text.split(" ").length * 0.4) + 1);
+            let local = now - startTime;
+            if (local >= dur) {
+                currentIdx++; startTime = now;
+                if (currentIdx >= window.__VIDEO_PLAN__.length) return;
+                seg = window.__VIDEO_PLAN__[currentIdx]; local = 0;
+            }
+            window.__RENDER_SECTION__(seg, local, now);
+            requestAnimationFrame(tick);
+        };
+        requestAnimationFrame(tick);
+    }
+</script>
+</body>
+</html>
