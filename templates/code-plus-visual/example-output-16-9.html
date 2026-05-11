@@ -284,7 +284,7 @@
 
     <div class="app-content">
         <div class="header">
-            <div class="title">Tower of Hanoi <span>Code + Visual</span></div>
+            <div class="title">Tower of Hanoi</div>
             <div class="counter" id="counter">Move 0 / 31</div>
         </div>
 
@@ -395,15 +395,15 @@
     buildTimeline();
 
     const VIDEO_PLAN = [
-        { id: "intro", kind: "narration+visual", audio: "audio/intro.wav", text: "This is Tower of Hanoi in landscape mode: code on the right, motion on the left, and one recursive idea driving everything." },
-        { id: "rules", kind: "narration+visual", audio: "audio/rules.wav", text: "The rule is simple. Move one disk at a time, and never place a larger disk on top of a smaller disk." },
-        { id: "code-base", kind: "narration+visual", audio: "audio/code-base.wav", text: "The base case stops the recursion. When n is zero, there are no disks left to move, so the function returns." },
-        { id: "code-rec1", kind: "narration+visual", audio: "audio/code-rec1.wav", text: "The first recursive call moves n minus one disks away from the source, using the target as a temporary helper." },
-        { id: "code-move", kind: "narration+visual", audio: "audio/code-move.wav", text: "Then the largest remaining disk can move directly from the source pole to the target pole." },
-        { id: "code-rec2", kind: "narration+visual", audio: "audio/code-rec2.wav", text: "The final recursive call stacks those n minus one disks back on top of the largest disk." },
-        { id: "watch", kind: "narration+visual", audio: "audio/watch.wav", text: "Now watch all thirty-one moves execute. The highlighted code line shows which part of the recursion is active." },
+        { id: "intro", kind: "narration+visual", audio: "audio/intro.wav", text: "Today, we will learn the classic Tower of Hanoi problem for 5 disks. The goal is to move all disks from pole A to pole C." },
+        { id: "rules", kind: "narration+visual", audio: "audio/rules.wav", text: "We must move one disk at a time, and a larger disk can never sit on a smaller one." },
+        { id: "code-base", kind: "narration+visual", audio: "audio/code-base.wav", text: "Let's break down the recursive C function. First is our base case. If n is zero, there are no disks left to move, so we simply return." },
+        { id: "code-rec1", kind: "narration+visual", audio: "audio/code-rec1.wav", text: "Otherwise, we recursively move n minus 1 disks out of the way. We conceptually move them from the source to the via pole." },
+        { id: "code-move", kind: "narration+visual", audio: "audio/code-move.wav", text: "Once they are out of the way, we can safely move the largest nth disk directly from the source to our target." },
+        { id: "code-rec2", kind: "narration+visual", audio: "audio/code-rec2.wav", text: "Finally, we execute another recursive call to conceptually move the n minus 1 disks from the via pole onto our final target." },
+        { id: "watch", kind: "narration+visual", audio: "audio/watch.wav", text: "Now, let's watch the computer execute all 31 steps. Notice how it speeds up as the recursive pattern unfolds." },
         { id: "simulation", kind: "visual-only", duration: Math.ceil(simTimeline.totalTime) },
-        { id: "conclusion", kind: "narration+visual", audio: "audio/conclusion.wav", text: "That is the whole trick: move a smaller tower, move the big disk, then rebuild the smaller tower on top." }
+        { id: "conclusion", kind: "narration+visual", audio: "audio/conclusion.wav", text: "And there we have it. The recursive algorithm successfully solved the puzzle." }
     ];
 
     window.__VIDEO_PLAN__ = VIDEO_PLAN;

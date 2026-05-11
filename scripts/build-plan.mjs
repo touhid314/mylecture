@@ -106,6 +106,8 @@ function jsString(value) {
 function normalizeSectionKind(kind) {
   if (kind === 'visual-only' || kind === 'visual') return 'visual-only';
   if (kind === 'narration+visual' || kind === 'narration') return 'narration+visual';
+  if (kind === 'interactive') return 'interactive';
+  if (kind === 'game') return 'game';
   return kind;
 }
 
@@ -208,6 +210,8 @@ async function resolveTimeline(plan, inputPath, outputPath, args) {
   let cursor = 0;
   const videoTimeline = [];
   const audioTimeline = [];
+  const interactiveTimeline = [];
+  const gameTimeline = [];
 
   for (const [index, section] of plan.entries()) {
     if (!section || typeof section !== 'object') {
@@ -218,6 +222,22 @@ async function resolveTimeline(plan, inputPath, outputPath, args) {
     }
 
     const sectionKind = normalizeSectionKind(section.kind);
+
+    if (sectionKind === 'interactive' || sectionKind === 'game') {
+      if (section.audio) {
+        throw new Error(`${sectionKind} section "${section.id}" must not include audio.`);
+      }
+      if (section.duration !== undefined) {
+        throw new Error(`${sectionKind} section "${section.id}" must not include duration.`);
+      }
+
+      const targetTimeline = sectionKind === 'game' ? gameTimeline : interactiveTimeline;
+      targetTimeline.push({
+        sectionId: section.id,
+        item: { ...section, kind: sectionKind }
+      });
+      continue;
+    }
 
     if (sectionKind === 'visual-only') {
       const duration = Number(section.duration);
@@ -285,13 +305,15 @@ async function resolveTimeline(plan, inputPath, outputPath, args) {
       continue;
     }
 
-    throw new Error(`Plan item "${section.id}" has unsupported kind: ${section.kind}. Use "visual-only" or "narration+visual".`);
+    throw new Error(`Plan item "${section.id}" has unsupported kind: ${section.kind}. Use "visual-only", "narration+visual", "interactive", or "game".`);
   }
 
   return {
     duration: cursor,
     videoTimeline,
-    audioTimeline
+    audioTimeline,
+    interactiveTimeline,
+    gameTimeline
   };
 }
 
@@ -306,7 +328,7 @@ function writeResolvedHtml(inputPath, outputPath, timeline) {
     : source;
   const injection = [
     '<style id="resolved-export-motion-guard">',
-    'body.export-mode *, body.export-mode *::before, body.export-mode *::after {',
+    'body.export-mode:not(.viewer-mode) *, body.export-mode:not(.viewer-mode) *::before, body.export-mode:not(.viewer-mode) *::after {',
     '  animation: none !important;',
     '  transition: none !important;',
     '}',
@@ -326,6 +348,8 @@ function writeResolvedHtml(inputPath, outputPath, timeline) {
   window.__VIDEO_DURATION__ = Number(timeline.duration) || 0;
   window.__VIDEO_TIMELINE__ = videoTimeline;
   window.__AUDIO_TIMELINE__ = audioTimeline;
+  window.__INTERACTIVE_TIMELINE__ = Array.isArray(timeline.interactiveTimeline) ? timeline.interactiveTimeline : [];
+  window.__GAME_TIMELINE__ = Array.isArray(timeline.gameTimeline) ? timeline.gameTimeline : [];
 
   function updateOptionalControls(time) {
     const total = window.__VIDEO_DURATION__ || 0;
@@ -406,6 +430,8 @@ async function main() {
 
   console.log(`Resolved duration: ${timeline.duration.toFixed(3)}s`);
   console.log(`Audio cues: ${timeline.audioTimeline.length}`);
+  console.log(`Interactive sections: ${timeline.interactiveTimeline.length}`);
+  console.log(`Game sections: ${timeline.gameTimeline.length}`);
   console.log(`Wrote ${outputPath}`);
 }
 

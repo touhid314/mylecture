@@ -213,6 +213,9 @@ body {
   display: grid;
   grid-template-rows: 1fr auto;
 }
+body.fullscreen-active {
+  grid-template-rows: 1fr;
+}
 #frame-wrap {
   min-height: 0;
   display: grid;
@@ -224,10 +227,16 @@ body {
     #101317;
   background-size: 32px 32px;
 }
+body.fullscreen-active #frame-wrap {
+  padding: 0;
+}
 #preview-shell {
   border: 1px solid rgba(255,255,255,0.16);
   background: #000;
   overflow: hidden;
+}
+body.fullscreen-active #preview-shell {
+  border: 0;
 }
 #preview {
   border: 0;
@@ -236,12 +245,27 @@ body {
 }
 #controls {
   display: grid;
-  grid-template-columns: auto auto auto 1fr auto auto auto auto auto auto auto;
+  grid-template-columns: auto auto auto 1fr auto auto auto auto auto auto auto auto;
   gap: 12px;
   align-items: center;
   padding: 12px 16px;
   border-top: 1px solid rgba(255,255,255,0.12);
   background: #181d24;
+}
+body.fullscreen-active #controls {
+  position: fixed;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  z-index: 1000;
+  transform: translateY(calc(100% - 10px));
+  opacity: 0;
+  transition: transform 160ms ease, opacity 160ms ease;
+}
+body.fullscreen-active.controls-visible #controls,
+body.fullscreen-active #controls:hover {
+  transform: translateY(0);
+  opacity: 1;
 }
 #file-row {
   grid-column: 1 / -1;
@@ -281,9 +305,46 @@ input[type="text"] {
   padding: 9px 11px;
   font-variant-numeric: tabular-nums;
 }
+#scrub-wrap {
+  position: relative;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
 input[type="range"] {
+  flex: 1 1 auto;
+  min-width: 0;
   width: 100%;
   cursor: pointer;
+}
+#interactive-marker,
+#game-marker {
+  flex: 0 0 auto;
+  position: relative;
+  width: 18px;
+  height: 18px;
+  border: 2px solid #04110d;
+  display: none;
+  pointer-events: auto;
+  cursor: pointer;
+}
+#interactive-marker {
+  border-radius: 50%;
+  background: #facc15;
+  box-shadow: 0 0 16px rgba(250,204,21,0.9);
+}
+#game-marker {
+  border-radius: 5px;
+  background: #22c55e;
+  box-shadow: 0 0 16px rgba(34,197,94,0.9);
+  transform: rotate(45deg);
+}
+#interactive-marker.visible {
+  display: block;
+}
+#game-marker.visible {
+  display: block;
 }
 #time {
   min-width: 128px;
@@ -294,11 +355,13 @@ input[type="range"] {
 #status {
   color: #94a3b8;
   white-space: nowrap;
+  display: none;
 }
 #viewport {
   color: #94a3b8;
   font-variant-numeric: tabular-nums;
   white-space: nowrap;
+  display: none;
 }
 </style>
 </head>
@@ -317,7 +380,11 @@ input[type="range"] {
   <button id="play">Play</button>
   <button id="seek-back" title="Back 5 seconds">&#8592; 5s</button>
   <button id="seek-forward" title="Forward 5 seconds">5s &#8594;</button>
-  <input id="scrub" type="range" min="0" max="1" step="0.001" value="0">
+  <div id="scrub-wrap">
+    <input id="scrub" type="range" min="0" max="1" step="0.001" value="0">
+    <div id="interactive-marker" title="Interactive segment"></div>
+    <div id="game-marker" title="Game segment"></div>
+  </div>
   <div id="time">0.00 / 0.00</div>
   <input id="seek-time" type="text" placeholder="1:23.5">
   <button id="seek-go">Go</button>
@@ -332,6 +399,7 @@ input[type="range"] {
     <option value="1920x1080">16:9 1920x1080</option>
     <option value="custom">Custom</option>
   </select>
+  <button id="fullscreen" type="button">Fullscreen</button>
   <div id="viewport">${safeInitialWidth}x${safeInitialHeight}</div>
   <div id="status">No file loaded</div>
 </section>
@@ -339,6 +407,7 @@ input[type="range"] {
 const frameWrap = document.getElementById('frame-wrap');
 const previewShell = document.getElementById('preview-shell');
 const frame = document.getElementById('preview');
+const controls = document.getElementById('controls');
 const currentFileLabel = document.getElementById('current-file');
 const loadButton = document.getElementById('load');
 const reloadButton = document.getElementById('reload');
@@ -346,11 +415,14 @@ const playButton = document.getElementById('play');
 const seekBackButton = document.getElementById('seek-back');
 const seekForwardButton = document.getElementById('seek-forward');
 const scrubber = document.getElementById('scrub');
+const interactiveMarker = document.getElementById('interactive-marker');
+const gameMarker = document.getElementById('game-marker');
 const timeReadout = document.getElementById('time');
 const seekTimeInput = document.getElementById('seek-time');
 const seekGoButton = document.getElementById('seek-go');
 const speedSelect = document.getElementById('speed');
 const viewportPreset = document.getElementById('viewport-preset');
+const fullscreenButton = document.getElementById('fullscreen');
 const viewportText = document.getElementById('viewport');
 const statusText = document.getElementById('status');
 let currentFilePath = '${escapeJsString(normalizedOpenPath)}';
@@ -369,14 +441,21 @@ let playback = {
   raf: 0,
   timeline: [],
   audioTimeline: [],
+  interactiveTimeline: [],
+  gameTimeline: [],
   audio: null,
-  audioCue: null
+  audioCue: null,
+  completed: false,
+  interactiveActive: false,
+  gameActive: false
 };
+let controlsHideTimer = 0;
 
 function resizePreview() {
   const wrapRect = frameWrap.getBoundingClientRect();
-  const availableWidth = Math.max(1, wrapRect.width - 32);
-  const availableHeight = Math.max(1, wrapRect.height - 32);
+  const margin = isFullscreenActive() ? 0 : 32;
+  const availableWidth = Math.max(1, wrapRect.width - margin);
+  const availableHeight = Math.max(1, wrapRect.height - margin);
   const scale = Math.min(availableWidth / renderViewport.width, availableHeight / renderViewport.height);
 
   previewShell.style.width = Math.floor(renderViewport.width * scale) + 'px';
@@ -448,6 +527,48 @@ function setStatus(message) {
   statusText.textContent = message;
 }
 
+function isFullscreenActive() {
+  return Boolean(document.fullscreenElement);
+}
+
+function showFullscreenControls() {
+  if (!isFullscreenActive()) return;
+  document.body.classList.add('controls-visible');
+  clearTimeout(controlsHideTimer);
+  controlsHideTimer = setTimeout(() => {
+    document.body.classList.remove('controls-visible');
+  }, 1200);
+}
+
+function hideFullscreenControls() {
+  if (!isFullscreenActive()) return;
+  document.body.classList.remove('controls-visible');
+}
+
+function updateFullscreenState() {
+  const active = isFullscreenActive();
+  document.body.classList.toggle('fullscreen-active', active);
+  document.body.classList.remove('controls-visible');
+  clearTimeout(controlsHideTimer);
+  if (active && document.activeElement instanceof HTMLElement) {
+    document.activeElement.blur();
+  }
+  fullscreenButton.textContent = active ? 'Exit Fullscreen' : 'Fullscreen';
+  resizePreview();
+}
+
+async function toggleFullscreen() {
+  try {
+    if (isFullscreenActive()) {
+      await document.exitFullscreen();
+    } else {
+      await document.documentElement.requestFullscreen();
+    }
+  } catch (error) {
+    setStatus(error.message || 'Fullscreen failed');
+  }
+}
+
 function formatTime(seconds) {
   seconds = Math.max(0, Number(seconds) || 0);
   const minutes = Math.floor(seconds / 60);
@@ -463,6 +584,8 @@ function updateControls() {
     seekTimeInput.value = playback.loaded ? formatTime(playback.time) : '';
   }
   playButton.textContent = playback.playing ? 'Pause' : 'Play';
+  interactiveMarker.classList.toggle('visible', playback.interactiveTimeline.length > 0);
+  gameMarker.classList.toggle('visible', playback.gameTimeline.length > 0);
 }
 
 function parseTime(value) {
@@ -492,6 +615,14 @@ function estimateTextDuration(text) {
   return Math.max(2.5, words / 2.65);
 }
 
+function normalizeSectionKind(kind) {
+  if (kind === 'visual-only' || kind === 'visual') return 'visual-only';
+  if (kind === 'narration+visual' || kind === 'narration') return 'narration+visual';
+  if (kind === 'interactive') return 'interactive';
+  if (kind === 'game') return 'game';
+  return kind;
+}
+
 function buildPreviewTimeline(win) {
   if (win.__RESOLVED_TIMELINE__?.videoTimeline?.length) {
     return win.__RESOLVED_TIMELINE__.videoTimeline.map(cue => ({
@@ -513,7 +644,7 @@ function buildPreviewTimeline(win) {
 
   const plan = Array.isArray(win.__VIDEO_PLAN__) ? win.__VIDEO_PLAN__ : [];
   let cursor = 0;
-  return plan.map(item => {
+  return plan.filter(item => !['interactive', 'game'].includes(normalizeSectionKind(item?.kind))).map(item => {
     const duration = Number(item.resolvedDuration) ||
       Number(item.duration) ||
       estimateTextDuration(item.text);
@@ -526,6 +657,36 @@ function buildPreviewTimeline(win) {
     cursor += duration;
     return cue;
   });
+}
+
+function buildInteractiveTimeline(win) {
+  if (Array.isArray(win.__INTERACTIVE_TIMELINE__) && win.__INTERACTIVE_TIMELINE__.length) {
+    return win.__INTERACTIVE_TIMELINE__;
+  }
+
+  if (Array.isArray(win.__RESOLVED_TIMELINE__?.interactiveTimeline) && win.__RESOLVED_TIMELINE__.interactiveTimeline.length) {
+    return win.__RESOLVED_TIMELINE__.interactiveTimeline;
+  }
+
+  const plan = Array.isArray(win.__VIDEO_PLAN__) ? win.__VIDEO_PLAN__ : [];
+  return plan
+    .filter(item => normalizeSectionKind(item?.kind) === 'interactive')
+    .map(item => ({ sectionId: item.id, item: { ...item, kind: 'interactive' } }));
+}
+
+function buildGameTimeline(win) {
+  if (Array.isArray(win.__GAME_TIMELINE__) && win.__GAME_TIMELINE__.length) {
+    return win.__GAME_TIMELINE__;
+  }
+
+  if (Array.isArray(win.__RESOLVED_TIMELINE__?.gameTimeline) && win.__RESOLVED_TIMELINE__.gameTimeline.length) {
+    return win.__RESOLVED_TIMELINE__.gameTimeline;
+  }
+
+  const plan = Array.isArray(win.__VIDEO_PLAN__) ? win.__VIDEO_PLAN__ : [];
+  return plan
+    .filter(item => normalizeSectionKind(item?.kind) === 'game')
+    .map(item => ({ sectionId: item.id, item: { ...item, kind: 'game' } }));
 }
 
 function buildAudioTimeline(win, videoTimeline) {
@@ -595,6 +756,10 @@ function renderAt(time) {
   const win = frame.contentWindow;
   const activeTime = Math.max(0, Math.min(Number(time) || 0, playback.duration));
   playback.time = activeTime;
+  if (activeTime < playback.duration) {
+    if (playback.interactiveActive) stopInteractiveSection();
+    if (playback.gameActive) stopGameSection();
+  }
 
   if (typeof win.renderAt === 'function') {
     win.renderAt(activeTime);
@@ -614,6 +779,26 @@ function renderAt(time) {
   syncAudio();
 }
 
+function stopInteractiveSection() {
+  const win = frame.contentWindow;
+  playback.interactiveActive = false;
+  if (typeof win.__STOP_INTERACTIVE__ === 'function') {
+    win.__STOP_INTERACTIVE__();
+  } else if (typeof win.__RENDER_SECTION__ === 'function' && playback.timeline[0]) {
+    win.__RENDER_SECTION__(playback.timeline[0].item, 0, 0);
+  }
+}
+
+function stopGameSection() {
+  const win = frame.contentWindow;
+  playback.gameActive = false;
+  if (typeof win.__STOP_GAME__ === 'function') {
+    win.__STOP_GAME__();
+  } else if (typeof win.__RENDER_SECTION__ === 'function' && playback.timeline[0]) {
+    win.__RENDER_SECTION__(playback.timeline[0].item, 0, 0);
+  }
+}
+
 function tick(now) {
   if (!playback.playing) return;
   const speed = Number(speedSelect.value) || 1;
@@ -622,6 +807,8 @@ function tick(now) {
 
   if (playback.time >= playback.duration) {
     playback.playing = false;
+    playback.completed = true;
+    startInteractiveSection();
     updateControls();
     return;
   }
@@ -631,7 +818,10 @@ function tick(now) {
 
 function play() {
   if (!playback.loaded) return;
-  if (playback.time >= playback.duration) renderAt(0);
+  if (playback.time >= playback.duration) {
+    playback.completed = false;
+    renderAt(0);
+  }
   playback.playing = true;
   playback.startedAt = performance.now();
   playback.startTime = playback.time;
@@ -647,6 +837,34 @@ function pause() {
   updateControls();
 }
 
+function startInteractiveSection() {
+  const win = frame.contentWindow;
+  const interactive = playback.interactiveTimeline[0]?.item || null;
+  if (playback.gameActive) stopGameSection();
+  if (interactive && typeof win.__START_INTERACTIVE__ === 'function') {
+    playback.interactiveActive = true;
+    win.__START_INTERACTIVE__(interactive);
+    setStatus('Interactive: ' + (interactive.title || interactive.id || 'ready'));
+    return;
+  }
+  if (typeof win.__ON_VIEWER_COMPLETE__ === 'function') {
+    playback.interactiveActive = true;
+    win.__ON_VIEWER_COMPLETE__(interactive);
+    setStatus('Interactive ready');
+  }
+}
+
+function startGameSection() {
+  const win = frame.contentWindow;
+  const game = playback.gameTimeline[0]?.item || null;
+  if (playback.interactiveActive) stopInteractiveSection();
+  if (game && typeof win.__START_GAME__ === 'function') {
+    playback.gameActive = true;
+    win.__START_GAME__(game);
+    setStatus('Game: ' + (game.title || game.id || 'ready'));
+  }
+}
+
 function togglePlay() {
   if (playback.playing) pause();
   else play();
@@ -659,6 +877,7 @@ function seekTo(time, resume = playback.playing) {
   if (!shouldResume) stopAudio();
 
   renderAt(time);
+  playback.completed = playback.time >= playback.duration;
 
   if (shouldResume) {
     playback.playing = true;
@@ -675,6 +894,24 @@ function seekBy(deltaSeconds) {
   seekTo(playback.time + deltaSeconds);
 }
 
+function seekToInteractive() {
+  if (!playback.loaded || playback.interactiveTimeline.length === 0) return;
+  pause();
+  renderAt(playback.duration);
+  playback.completed = true;
+  startInteractiveSection();
+  updateControls();
+}
+
+function seekToGame() {
+  if (!playback.loaded || playback.gameTimeline.length === 0) return;
+  pause();
+  renderAt(playback.duration);
+  playback.completed = true;
+  startGameSection();
+  updateControls();
+}
+
 async function loadFile(filePath = currentFilePath) {
   if (!filePath) {
     setStatus('Select an HTML file first');
@@ -683,10 +920,15 @@ async function loadFile(filePath = currentFilePath) {
   pause();
   setCurrentFile(filePath);
   playback.loaded = false;
+  playback.completed = false;
+  playback.interactiveActive = false;
+  playback.gameActive = false;
   playback.duration = 0;
   playback.time = 0;
   playback.timeline = [];
   playback.audioTimeline = [];
+  playback.interactiveTimeline = [];
+  playback.gameTimeline = [];
   stopAudio();
   updateControls();
   setStatus('Loading...');
@@ -737,6 +979,8 @@ frame.addEventListener('load', () => {
 
     playback.timeline = buildPreviewTimeline(win);
     playback.audioTimeline = buildAudioTimeline(win, playback.timeline);
+    playback.interactiveTimeline = buildInteractiveTimeline(win);
+    playback.gameTimeline = buildGameTimeline(win);
     playback.duration = Number(win.__VIDEO_DURATION__) ||
       Number(win.__RESOLVED_TIMELINE__?.duration) ||
       (playback.timeline.at(-1)?.end || 0);
@@ -764,6 +1008,26 @@ scrubber.addEventListener('input', event => {
 });
 scrubber.addEventListener('pointerdown', seekFromPointer);
 scrubber.addEventListener('click', seekFromPointer);
+interactiveMarker.addEventListener('pointerdown', event => {
+  event.preventDefault();
+  event.stopPropagation();
+  seekToInteractive();
+});
+interactiveMarker.addEventListener('click', event => {
+  event.preventDefault();
+  event.stopPropagation();
+  seekToInteractive();
+});
+gameMarker.addEventListener('pointerdown', event => {
+  event.preventDefault();
+  event.stopPropagation();
+  seekToGame();
+});
+gameMarker.addEventListener('click', event => {
+  event.preventDefault();
+  event.stopPropagation();
+  seekToGame();
+});
 seekGoButton.addEventListener('click', seekToInput);
 seekTimeInput.addEventListener('keydown', event => {
   if (event.key === 'Enter') seekToInput();
@@ -774,10 +1038,23 @@ viewportPreset.addEventListener('change', event => {
   const [width, height] = value.split('x').map(Number);
   setPreviewViewport(width, height, true);
 });
+fullscreenButton.addEventListener('click', toggleFullscreen);
+document.addEventListener('fullscreenchange', updateFullscreenState);
+document.addEventListener('mousemove', event => {
+  if (!isFullscreenActive()) return;
+  if (event.clientY >= window.innerHeight - 92) {
+    showFullscreenControls();
+  } else {
+    hideFullscreenControls();
+  }
+});
 document.addEventListener('keydown', event => {
   if (event.code === 'Space') {
     event.preventDefault();
     togglePlay();
+  } else if (event.key.toLowerCase() === 'f') {
+    event.preventDefault();
+    toggleFullscreen();
   }
 });
 window.addEventListener('resize', resizePreview);
