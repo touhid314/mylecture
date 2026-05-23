@@ -1,0 +1,505 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Red-Black Trees Presentation</title>
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/aaaakshat/cm-web-fonts@latest/fonts.css">
+    <style>
+        body, html {
+            margin: 0;
+            padding: 0;
+            width: 100vw;
+            height: 100vh;
+            background: #000;
+            color: #fff;
+            font-family: "Computer Modern Serif", serif;
+            overflow: hidden;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+
+        #presentation {
+            aspect-ratio: 16 / 9;
+            width: 100%;
+            max-width: 1920px;
+            max-height: 1080px;
+            position: relative;
+            background: #000;
+            display: flex;
+            box-sizing: border-box;
+            padding-top: 100px; /* Space for title */
+        }
+
+        #main_title {
+            position: absolute;
+            top: 40px;
+            width: 100%;
+            text-align: center;
+            font-size: 36pt;
+            z-index: 100;
+        }
+
+        .pane {
+            width: 50%;
+            height: 100%;
+            padding: 40px 60px;
+            box-sizing: border-box;
+            position: relative;
+        }
+
+        #right_pane {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+
+        .body-text, .rule, #definitions {
+            font-size: 28pt;
+            line-height: 1.5;
+            margin-bottom: 25px;
+        }
+
+        #definitions ul {
+            list-style-type: none;
+            padding: 0;
+            margin: 0;
+        }
+
+        .hidden {
+            display: none !important;
+        }
+
+        /* SVG Styling */
+        svg {
+            width: 100%;
+            height: auto;
+            max-height: 100%;
+            overflow: visible;
+        }
+
+        .node circle, .null-node rect, .node text, .null-node text, .edge {
+            transition: all 0.8s ease;
+        }
+
+        .node circle {
+            stroke-width: 2px;
+            stroke: #fff;
+        }
+
+        .node text {
+            font-size: 20pt;
+            fill: #fff;
+            text-anchor: middle;
+            dominant-baseline: central;
+        }
+
+        .c-red circle { fill: #d32f2f; }
+        .c-black circle { fill: #222; }
+
+        .null-node rect {
+            width: 30px;
+            height: 30px;
+            transform: translate(-15px, -15px);
+            stroke: #fff;
+            stroke-width: 2px;
+        }
+
+        .c-black.null-node rect { fill: #222; }
+
+        .null-node text {
+            font-size: 18pt; /* Minimum font size constraint */
+            fill: #fff;
+            text-anchor: middle;
+            dominant-baseline: central;
+        }
+
+        .edge {
+            stroke-width: 4px;
+            stroke-linecap: round;
+            stroke: #fff; /* All edges white in node view */
+        }
+
+        /* Edge Mode Transformations */
+        .edge-mode .node circle, .edge-mode .null-node rect {
+            fill: #444 !important;
+            stroke: #777 !important;
+        }
+
+        .edge-mode .node text, .edge-mode .null-node text {
+            fill: #aaa !important;
+        }
+
+        .edge-mode .edge.c-red {
+            stroke: #d32f2f !important;
+            stroke-width: 6px;
+        }
+
+        .edge-mode .edge.c-black {
+            stroke: #fff !important; 
+            stroke-width: 6px;
+        }
+
+        /* Highlights */
+        .highlight circle, .highlight rect {
+            stroke: #ffeb3b !important;
+            stroke-width: 6px !important;
+            filter: drop-shadow(0 0 15px rgba(255,235,59,0.8));
+        }
+
+        line.highlight {
+            stroke: #ffeb3b !important;
+            stroke-width: 8px !important;
+            filter: drop-shadow(0 0 15px rgba(255,235,59,0.8));
+        }
+
+        .html-highlight {
+            color: #ffeb3b;
+            text-shadow: 0 0 15px rgba(255,235,59,0.6);
+            font-weight: bold;
+            transition: all 0.3s ease;
+        }
+
+        /* Mirror Comparison Container */
+        #mirror_comparison {
+            width: 100%;
+            height: 100%;
+            display: flex;
+            justify-content: space-around;
+            align-items: center;
+        }
+
+        #mirror-left-container, #mirror-right-container {
+            width: 45%;
+            transform: scale(0.85);
+        }
+
+        /* Start Button & Instructions */
+        #overlay {
+            position: absolute;
+            top: 0; left: 0; right: 0; bottom: 0;
+            background: rgba(0,0,0,0.9);
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            z-index: 1000;
+        }
+
+        button {
+            padding: 20px 40px;
+            font-size: 28pt;
+            font-family: inherit;
+            background: #fff;
+            color: #000;
+            border: none;
+            cursor: pointer;
+            border-radius: 10px;
+            transition: transform 0.2s;
+        }
+
+        button:hover { transform: scale(1.05); }
+
+        .instructions {
+            margin-top: 30px;
+            font-size: 18pt;
+            color: #aaa;
+        }
+
+        /* Opacity fades */
+        .fade-element {
+            opacity: 0;
+            transition: opacity 0.5s ease;
+        }
+    </style>
+</head>
+<body>
+
+    <div id="presentation">
+        <div id="main_title" class="fade-element hidden"></div>
+        
+        <div id="left_pane" class="pane">
+            <div id="definitions" class="fade-element body-text hidden"></div>
+            <div id="rule1" class="fade-element rule hidden"></div>
+            <div id="rule2" class="fade-element rule hidden"></div>
+            <div id="rule3" class="fade-element rule hidden"></div>
+            <div id="rule4" class="fade-element rule hidden"></div>
+            <div id="rule5" class="fade-element rule hidden"></div>
+        </div>
+
+        <div id="right_pane" class="pane">
+            <div id="rb_tree" class="fade-element hidden" style="width: 100%;">
+                <svg viewBox="0 0 800 500" id="main-tree-svg">
+                    <g id="edges">
+                        <line id="e-10-5" x1="400" y1="50" x2="200" y2="150" class="edge c-red" />
+                        <line id="e-10-15" x1="400" y1="50" x2="600" y2="150" class="edge c-red" />
+                        <line id="e-5-3" x1="200" y1="150" x2="100" y2="250" class="edge c-black" />
+                        <line id="e-5-7" x1="200" y1="150" x2="300" y2="250" class="edge c-black" />
+                        <line id="e-15-13" x1="600" y1="150" x2="500" y2="250" class="edge c-black" />
+                        <line id="e-15-18" x1="600" y1="150" x2="700" y2="250" class="edge c-black" />
+                        <line id="e-3-1" x1="100" y1="250" x2="50" y2="350" class="edge c-red" />
+                        <line id="e-3-3R" x1="100" y1="250" x2="150" y2="350" class="edge c-black" />
+                        <line id="e-7-7L" x1="300" y1="250" x2="250" y2="350" class="edge c-black" />
+                        <line id="e-7-7R" x1="300" y1="250" x2="350" y2="350" class="edge c-black" />
+                        <line id="e-13-13L" x1="500" y1="250" x2="450" y2="350" class="edge c-black" />
+                        <line id="e-13-13R" x1="500" y1="250" x2="550" y2="350" class="edge c-black" />
+                        <line id="e-18-18L" x1="700" y1="250" x2="650" y2="350" class="edge c-black" />
+                        <line id="e-18-18R" x1="700" y1="250" x2="750" y2="350" class="edge c-black" />
+                        <line id="e-1-1L" x1="50" y1="350" x2="25" y2="450" class="edge c-black" />
+                        <line id="e-1-1R" x1="50" y1="350" x2="75" y2="450" class="edge c-black" />
+                    </g>
+                    <g id="nodes">
+                        <g id="n-10" class="node c-black" transform="translate(400, 50)"><circle r="22"/><text>10</text></g>
+                        <g id="n-5" class="node c-red" transform="translate(200, 150)"><circle r="22"/><text>5</text></g>
+                        <g id="n-15" class="node c-red" transform="translate(600, 150)"><circle r="22"/><text>15</text></g>
+                        <g id="n-3" class="node c-black" transform="translate(100, 250)"><circle r="22"/><text>3</text></g>
+                        <g id="n-7" class="node c-black" transform="translate(300, 250)"><circle r="22"/><text>7</text></g>
+                        <g id="n-13" class="node c-black" transform="translate(500, 250)"><circle r="22"/><text>13</text></g>
+                        <g id="n-18" class="node c-black" transform="translate(700, 250)"><circle r="22"/><text>18</text></g>
+                        <g id="n-1" class="node c-red" transform="translate(50, 350)"><circle r="22"/><text>1</text></g>
+                        
+                        <g id="n-3R" class="null-node c-black" transform="translate(150, 350)"><rect/><text>N</text></g>
+                        <g id="n-7L" class="null-node c-black" transform="translate(250, 350)"><rect/><text>N</text></g>
+                        <g id="n-7R" class="null-node c-black" transform="translate(350, 350)"><rect/><text>N</text></g>
+                        <g id="n-13L" class="null-node c-black" transform="translate(450, 350)"><rect/><text>N</text></g>
+                        <g id="n-13R" class="null-node c-black" transform="translate(550, 350)"><rect/><text>N</text></g>
+                        <g id="n-18L" class="null-node c-black" transform="translate(650, 350)"><rect/><text>N</text></g>
+                        <g id="n-18R" class="null-node c-black" transform="translate(750, 350)"><rect/><text>N</text></g>
+                        <g id="n-1L" class="null-node c-black" transform="translate(25, 450)"><rect/><text>N</text></g>
+                        <g id="n-1R" class="null-node c-black" transform="translate(75, 450)"><rect/><text>N</text></g>
+                    </g>
+                </svg>
+            </div>
+
+            <div id="mirror_comparison" class="fade-element hidden">
+                <div id="mirror-left-container">
+                    <svg viewBox="0 0 800 500" id="mirror-left"></svg>
+                </div>
+                <div id="mirror-right-container">
+                    <svg viewBox="0 0 800 500" id="mirror-right" class="edge-mode"></svg>
+                </div>
+            </div>
+        </div>
+
+        <div id="overlay">
+            <button onclick="startPresentation()">START PRESENTATION</button>
+            <div class="instructions">Use Left &amp; Right arrow keys to navigate manually.</div>
+            <div class="instructions" style="font-size: 16pt; margin-top: 10px;">Requires Chrome/Edge for optimal Web Speech API voiceover.</div>
+        </div>
+    </div>
+
+    <script>
+        const scriptSteps = [
+            { text: "The Red-Black Tree is governed by a strict set of rules that ensure the tree stays balanced. You can basically think of these rules as the \"physics\" of the data structure... as long as they are maintained, the tree's performance is, you know, it’s guaranteed.",
+              persist: (inst) => { show('main_title', "Red-Black Trees: Core Rules", inst); document.getElementById('main_title').style.fontWeight = 'bold'; } },
+            { text: "We can define a Red-Black tree in two equivalent ways:",
+              persist: (inst) => show('definitions', "<ul><li>1. Colored Nodes</li><li>2. Colored Edges</li></ul>", inst) },
+            { text: "by coloring the nodes or by coloring the edges." },
+            { text: "First, let's look at the tree from the perspective of its nodes." },
+            { text: "This is the Colored Nodes Definition.",
+              temp: () => document.querySelector('#definitions li:first-child').classList.add('html-highlight') },
+            { text: "As you can see on the diagram here, we have a sample tree populated with red and black nodes. To be a Red-Black search tree, there are five specific rules that must hold... let me walk you through them.",
+              persist: (inst) => { hide('definitions', inst); show('rb_tree', null, inst); } },
+            { text: "First, it has to be a Binary Search Tree. That’s the foundation. It must first and foremost be a standard B-S-T... where the left child is less than the parent, which is less than the right child.",
+              persist: (inst) => show('rule1', "1. Binary Search Tree Property", inst) },
+            { text: "Notice in our tree..." },
+            { text: "5 is less than 10, and 15 is greater than 10, just exactly like any valid BST.",
+              temp: () => highlightSVG(['n-5', 'n-10', 'n-15']) },
+            { text: "Second, node color. Every single node is assigned a color: it’s either Red or Black.",
+              persist: (inst) => show('rule2', "2. Nodes are Red or Black", inst) },
+            { text: "Looking at our diagram," },
+            { text: "you can see nodes 5, 15, and 1 are explicitly red,",
+              temp: () => highlightSVG(['n-5', 'n-15', 'n-1']) },
+            { text: "while the rest of the internal nodes are black.",
+              temp: () => highlightSVG(['n-10', 'n-3', 'n-7', 'n-13', 'n-18']) },
+            { text: "Third, we have the Black Anchors. The root of the tree must be Black.",
+              persist: (inst) => show('rule3', "3. Root and External Nodes are Black", inst) },
+            { text: "See right here at the very top," },
+            { text: "our root node 10 is indeed black.",
+              temp: () => highlightSVG(['n-10']) },
+            { text: "Additionally, all external nodes—basically the null pointers at the ends of branches—are considered Black." },
+            { text: "If we look at the very bottom of our branches," },
+            { text: "these small null leaves are treated as black nodes too.",
+              temp: () => highlightSVG(['n-1L', 'n-1R', 'n-3R', 'n-7L', 'n-7R', 'n-13L', 'n-13R', 'n-18L', 'n-18R']) },
+            { text: "Fourth, no Red Duos. This one is very, very important. You cannot have two Red nodes in a row. If a node is Red, its children must be Black.",
+              persist: (inst) => show('rule4', "4. No Consecutive Red Nodes", inst) },
+            { text: "Take a quick look at node 5." },
+            { text: "It's a red node.",
+              temp: () => highlightSVG(['n-5']) },
+            { text: "Notice how both of its children," },
+            { text: "3 and 7, are strictly black. You can kind of think of this as a \"no consecutive red\" rule on any path from the root.",
+              temp: () => highlightSVG(['n-3', 'n-7']) },
+            { text: "And finally, the fifth rule... the Black Equilibrium. This is really the most critical rule. Every path from the root to an external node must contain the exact same number of Black nodes. Let me say it again, every path must have the same number of Black nodes.",
+              persist: (inst) => show('rule5', "5. Constant Black Depth", inst) },
+            { text: "Let's trace a path to verify this on our screen." },
+            { text: "If we go down 10, 5, 3, 1, and then to a null leaf, we count exactly three black nodes: the 10, the 3, and the null.",
+              temp: () => highlightSVG(['n-10', 'n-5', 'n-3', 'n-1', 'n-1L', 'e-10-5', 'e-5-3', 'e-3-1', 'e-1-1L']) },
+            { text: "Now let's try another path." },
+            { text: "Going down 10, 15, 18, and then to a null leaf... again, we count exactly three black nodes: 10, 18, and the null. The equilibrium holds.",
+              temp: () => highlightSVG(['n-10', 'n-15', 'n-18', 'n-18R', 'e-10-15', 'e-15-18', 'e-18-18R']) },
+            { text: "Now, sometimes... actually, it’s often more intuitive to think about the \"links\" or the pointers between nodes rather than the nodes themselves. This is the Colored Edges Definition.",
+              persist: (inst) => { 
+                  hide('rule1', inst); hide('rule2', inst); hide('rule3', inst); hide('rule4', inst); hide('rule5', inst);
+                  show('main_title', "Colored Edges Definition", inst);
+                  document.getElementById('main_title').style.fontWeight = 'normal';
+              } },
+            { text: "As you can see, the color has visually shifted from the nodes into the edges themselves. In this view, the child pointers—the edges—are colored Red or Black. Pointers leading to external null nodes are always Black.",
+              persist: (inst) => document.getElementById('main-tree-svg').classList.add('edge-mode') },
+            { text: "Look at the bottom again," },
+            { text: "these pointers to the nulls remain definitively black.",
+              temp: () => highlightSVG(['e-1-1L', 'e-1-1R', 'e-3-3R', 'e-7-7L', 'e-7-7R', 'e-13-13L', 'e-13-13R', 'e-18-18L', 'e-18-18R']) },
+            { text: "Just like before, no two Red pointers can appear consecutively on a path." },
+            { text: "Notice our red edge going to 5",
+              temp: () => highlightSVG(['e-10-5']) },
+            { text: "is immediately followed by black edges.",
+              temp: () => highlightSVG(['e-10-5', 'e-5-3', 'e-5-7']) },
+            { text: "And, every path from the root to an external node must have the same number of Black pointers." },
+            { text: "Tracing down the far left" },
+            { text: "gives us exactly two black pointers... and tracing down the far right",
+              temp: () => highlightSVG(['e-10-5', 'e-5-3', 'e-3-1', 'e-1-1L']) },
+            { text: "also gives us exactly two black pointers.",
+              temp: () => highlightSVG(['e-10-15', 'e-15-18', 'e-18-18R']) },
+            { text: "So, how do these two ideas connect? Well, these two definitions aren't just similar—they are mirror images of each other." },
+            { text: "There’s a seamless correspondence between them. By looking at them side-by-side,",
+              persist: (inst) => { hide('rb_tree', inst); show('mirror_comparison', null, inst); } },
+            { text: "you can easily see how a red node in the first definition maps perfectly to a red incoming edge in the second definition.",
+              temp: () => { highlightSVG(['n-5'], '#mirror-left'); highlightSVG(['e-10-5'], '#mirror-right'); } }
+        ];
+
+        let currentStep = 0;
+        let synth = window.speechSynthesis;
+        let isPlaying = false;
+
+        window.onload = () => {
+            // Setup mirror comparison svgs
+            let treeHTML = document.getElementById('main-tree-svg').innerHTML;
+            document.getElementById('mirror-left').innerHTML = treeHTML;
+            document.getElementById('mirror-right').innerHTML = treeHTML;
+        };
+
+        function show(id, content = null, instant = false) {
+            let el = document.getElementById(id);
+            if(content) el.innerHTML = content;
+            el.classList.remove('hidden');
+            if(instant) {
+                el.style.transition = 'none';
+                el.style.opacity = 1;
+            } else {
+                el.style.transition = 'opacity 0.5s ease';
+                setTimeout(() => el.style.opacity = 1, 50);
+            }
+        }
+
+        function hide(id, instant = false) {
+            let el = document.getElementById(id);
+            if(instant) {
+                el.style.transition = 'none';
+                el.style.opacity = 0;
+                el.classList.add('hidden');
+            } else {
+                el.style.transition = 'opacity 0.5s ease';
+                el.style.opacity = 0;
+                setTimeout(() => el.classList.add('hidden'), 500);
+            }
+        }
+
+        function highlightSVG(ids, context = '') {
+            ids.forEach(id => {
+                let sel = context ? `${context} #${id}` : `#main-tree-svg #${id}`;
+                let el = document.querySelector(sel);
+                if(el) el.classList.add('highlight');
+            });
+        }
+
+        function unhighlightAll() {
+            document.querySelectorAll('.highlight').forEach(el => el.classList.remove('highlight'));
+            document.querySelectorAll('.html-highlight').forEach(el => el.classList.remove('html-highlight'));
+        }
+
+        function rebuildState(targetStep) {
+            // Reset state
+            document.querySelectorAll('.fade-element').forEach(el => {
+                el.style.transition = 'none';
+                el.style.opacity = 0;
+                el.classList.add('hidden');
+            });
+            document.getElementById('main-tree-svg').classList.remove('edge-mode');
+            unhighlightAll();
+            
+            // Reapply persist actions up to current step
+            for(let i = 0; i <= targetStep; i++) {
+                if(scriptSteps[i] && scriptSteps[i].persist) scriptSteps[i].persist(true);
+            }
+            
+            // Reapply current temp action
+            if(scriptSteps[targetStep] && scriptSteps[targetStep].temp) scriptSteps[targetStep].temp();
+        }
+
+        function startPresentation() {
+            document.getElementById('overlay').style.display = 'none';
+            if (document.documentElement.requestFullscreen) {
+                document.documentElement.requestFullscreen().catch(err => console.log(err));
+            }
+            isPlaying = true;
+            rebuildState(0);
+            playStep();
+        }
+
+        function playStep() {
+            if(currentStep >= scriptSteps.length || !isPlaying) return;
+            
+            let step = scriptSteps[currentStep];
+            
+            // Setup visual transition (animated if standard flow)
+            unhighlightAll();
+            if(step.persist) step.persist(false);
+            if(step.temp) step.temp();
+            
+            let utterance = new SpeechSynthesisUtterance(step.text);
+            
+            // Select en-GB Female voice
+            let voices = synth.getVoices();
+            let voice = voices.find(v => v.lang === 'en-GB' && (v.name.includes('Female') || v.name.includes('Google UK English Female'))) 
+                     || voices.find(v => v.lang === 'en-GB') 
+                     || voices[0];
+            if(voice) utterance.voice = voice;
+            
+            utterance.rate = 1.0;
+
+            utterance.onend = () => {
+                if(!isPlaying) return; // aborted by keypress
+                currentStep++;
+                playStep();
+            };
+
+            synth.speak(utterance);
+        }
+
+        window.addEventListener('keydown', (e) => {
+            if(e.key === 'ArrowRight' || e.key === 'ArrowLeft') {
+                isPlaying = false;
+                synth.cancel(); // Stop current speech
+                
+                if(e.key === 'ArrowRight') {
+                    currentStep = Math.min(currentStep + 1, scriptSteps.length - 1);
+                } else {
+                    currentStep = Math.max(currentStep - 1, 0);
+                }
+                
+                rebuildState(currentStep);
+                
+                // Restart playback from new step shortly after
+                setTimeout(() => {
+                    isPlaying = true;
+                    playStep();
+                }, 100);
+            }
+        });
+
+        // Preload voices
+        if (speechSynthesis.onvoiceschanged !== undefined) {
+            speechSynthesis.onvoiceschanged = () => synth.getVoices();
+        }
+    </script>
+</body>
+</html>

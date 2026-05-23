@@ -1,0 +1,314 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Bubble Sort Algorithm</title>
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/aaaakshat/cm-web-fonts@latest/fonts.css">
+    <style>
+        * {
+            box-sizing: border-box;
+            margin: 0;
+            padding: 0;
+        }
+
+        body {
+            font-family: "Computer Modern Serif", serif;
+            background-color: #000;
+            color: #fff;
+            width: 100vw;
+            height: 100vh;
+            overflow: hidden;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-weight: 300;
+        }
+
+        #presentation-container {
+            width: 100%;
+            height: 100%;
+            aspect-ratio: 16 / 9;
+            max-width: 177.78vh; 
+            max-height: 56.25vw;
+            position: relative;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            background-color: #000;
+        }
+
+        #start-screen {
+            position: absolute;
+            top: 0; left: 0; right: 0; bottom: 0;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 28pt;
+            background: rgba(0, 0, 0, 0.9);
+            z-index: 100;
+            cursor: pointer;
+            transition: opacity 0.5s ease;
+        }
+
+        #main_title {
+            font-size: 36pt;
+            position: absolute;
+            top: 20%;
+            opacity: 0;
+            transition: opacity 1s ease-in-out;
+            text-align: center;
+            width: 100%;
+        }
+
+        #array_diagram {
+            position: absolute;
+            top: 45%;
+            width: 480px; 
+            height: 80px;
+            opacity: 0;
+            transition: opacity 1s ease-in-out;
+        }
+
+        .block {
+            position: absolute;
+            width: 80px;
+            height: 80px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 28pt;
+            border: 2px solid #fff;
+            background-color: #000;
+            transition: left 0.6s ease-in-out, border-color 0.4s ease, box-shadow 0.4s ease, background-color 0.4s ease, color 0.4s ease;
+        }
+
+        .highlight {
+            border-color: red !important;
+            box-shadow: 0 0 15px red;
+        }
+
+        .locked {
+            background-color: lightgreen !important;
+            border-color: lightgreen !important;
+            color: #000 !important;
+        }
+
+        #termination_rule {
+            position: absolute;
+            bottom: 20%;
+            font-size: 28pt;
+            font-weight: bold;
+            opacity: 0;
+            transition: opacity 1s ease-in-out;
+            text-align: center;
+            width: 100%;
+        }
+
+        #controls-hint {
+            position: absolute;
+            bottom: 20px;
+            font-size: 16pt;
+            color: #555;
+        }
+    </style>
+</head>
+<body>
+
+    <div id="presentation-container">
+        <div id="start-screen">Click anywhere or press Right Arrow to start</div>
+        
+        <div id="main_title">Bubble Sort Algorithm</div>
+        
+        <div id="array_diagram">
+            <div class="block" id="block-5">5</div>
+            <div class="block" id="block-1">1</div>
+            <div class="block" id="block-4">4</div>
+            <div class="block" id="block-2">2</div>
+            <div class="block" id="block-8">8</div>
+        </div>
+
+        <div id="termination_rule">Rule: 0 swaps in a full pass = Array is sorted</div>
+
+        <div id="controls-hint">Use Left / Right Arrow keys to navigate</div>
+    </div>
+
+    <script>
+        const slideStates = [
+            {
+                text: "Bubble sort is, basically, one of the most fundamental... and, you know, intuitive sorting algorithms in all of computer science. While it is rarely used in actual production environments because of its inefficiency with large datasets, it serves as just a really excellent introductory tool for understanding algorithmic logic, array manipulation, and the whole concept of time complexity.",
+                title: true, array: false, positions: null, highlight: [], locked: [], rule: false
+            },
+            {
+                text: "The algorithm actually gets its name from the way larger elements bubble up to the top... or, you know, the end of the list... very much like air bubbles rising to the surface of water.",
+                title: true, array: false, positions: null, highlight: [], locked: [], rule: false
+            },
+            {
+                text: "Let's use this unsorted array right here as an example. It is a comparison-based algorithm that operates by repeatedly stepping through the list that needs to be sorted.",
+                title: true, array: true, positions: ['5','1','4','2','8'], highlight: [], locked: [], rule: false
+            },
+            {
+                text: "So, let me walk you through exactly how the core mechanism works.",
+                title: true, array: true, positions: ['5','1','4','2','8'], highlight: [], locked: [], rule: false
+            },
+            {
+                text: "First, for initialization, the algorithm starts right at the very beginning of the data array.",
+                title: true, array: true, positions: ['5','1','4','2','8'], highlight: [], locked: [], rule: false
+            },
+            {
+                text: "Second, it moves on to comparison... where it compares the first two adjacent elements.",
+                title: true, array: true, positions: ['5','1','4','2','8'], highlight: [], locked: [], rule: false
+            },
+            {
+                text: "Notice how we highlight our starting pair: the 5 and the 1.",
+                title: true, array: true, positions: ['5','1','4','2','8'], highlight: ['5','1'], locked: [], rule: false
+            },
+            {
+                text: "Next is swapping. If the first element is strictly greater than the second... assuming we are doing an ascending sort here... the algorithm swaps them.",
+                title: true, array: true, positions: ['5','1','4','2','8'], highlight: ['5','1'], locked: [], rule: false
+            },
+            {
+                text: "Since 5 is greater than 1, watch how they swap places. If not, they simply remain in their current positions.",
+                title: true, array: true, positions: ['1','5','4','2','8'], highlight: ['5','1'], locked: [], rule: false
+            },
+            {
+                text: "Then, we have iteration. The algorithm moves one step forward to the next adjacent pair...",
+                title: true, array: true, positions: ['1','5','4','2','8'], highlight: ['5','1'], locked: [], rule: false
+            },
+            {
+                text: "which would be the second and third elements... as you can see, it's now looking at 5 and 4... and it repeats the comparison and potential swap.",
+                title: true, array: true, positions: ['1','5','4','2','8'], highlight: ['5','4'], locked: [], rule: false
+            },
+            {
+                text: "So 5 and 4 swap as well.",
+                title: true, array: true, positions: ['1','4','5','2','8'], highlight: ['5','4'], locked: [], rule: false
+            },
+            {
+                text: "This step-by-step evaluation basically continues until the end of the array is reached.",
+                title: true, array: true, positions: ['1','4','5','2','8'], highlight: ['5','4'], locked: [], rule: false
+            },
+            {
+                text: "We swap the 5 and 2, and finally compare the 5 and 8, which don't swap because 8 is larger.",
+                title: true, array: true, positions: ['1','4','2','5','8'], highlight: ['5','8'], locked: [], rule: false
+            },
+            {
+                text: "Now, this is very, very important. At the conclusion of this first complete pass, the largest element in the entire array is guaranteed to have bubbled its way down to the very last position.",
+                title: true, array: true, positions: ['1','4','2','5','8'], highlight: ['5','8'], locked: [], rule: false
+            },
+            {
+                text: "Take a look at the end of the list. The number 8 is now locked in. Because this final position is now correctly sorted—actually, let me rephrase that—because we absolutely know that final spot is in its correct place, the algorithm just ignores it in all subsequent passes.",
+                title: true, array: true, positions: ['1','4','2','5','8'], highlight: [], locked: ['8'], rule: false
+            },
+            {
+                text: "The whole process repeats from the beginning, comparing and swapping the remaining unsorted elements. The algorithm safely terminates when it completes a full pass without needing to make any swaps.",
+                title: true, array: true, positions: ['1','4','2','5','8'], highlight: [], locked: ['8'], rule: false
+            },
+            {
+                text: "I repeat, if a full pass happens with absolutely no swaps... that indicates that the entire list is fully sorted.",
+                title: true, array: true, positions: ['1','4','2','5','8'], highlight: [], locked: ['8'], rule: true
+            }
+        ];
+
+        let currentStep = -1;
+        let selectedVoice = null;
+        let started = false;
+
+        // Web Speech API Voice Setup
+        function loadVoices() {
+            const voices = window.speechSynthesis.getVoices();
+            selectedVoice = voices.find(v => v.lang.includes('en-GB') && v.name.toLowerCase().includes('female'))
+                         || voices.find(v => v.name.includes('Google UK English Female'))
+                         || voices.find(v => v.lang.includes('en-GB'))
+                         || voices[0];
+        }
+
+        if (speechSynthesis.onvoiceschanged !== undefined) {
+            speechSynthesis.onvoiceschanged = loadVoices;
+        }
+        loadVoices();
+
+        function renderVisuals(stepIndex) {
+            const state = slideStates[stepIndex];
+
+            document.getElementById('main_title').style.opacity = state.title ? "1" : "0";
+            document.getElementById('array_diagram').style.opacity = state.array ? "1" : "0";
+            document.getElementById('termination_rule').style.opacity = state.rule ? "1" : "0";
+
+            if (state.array && state.positions) {
+                state.positions.forEach((val, index) => {
+                    const block = document.getElementById(`block-${val}`);
+                    // 80px block width + 20px gap = 100px stride
+                    block.style.left = `${index * 100}px`;
+
+                    if (state.highlight.includes(val)) {
+                        block.classList.add('highlight');
+                    } else {
+                        block.classList.remove('highlight');
+                    }
+
+                    if (state.locked.includes(val)) {
+                        block.classList.add('locked');
+                    } else {
+                        block.classList.remove('locked');
+                    }
+                });
+            }
+        }
+
+        function playStep(stepIndex) {
+            renderVisuals(stepIndex);
+
+            window.speechSynthesis.cancel();
+            
+            const state = slideStates[stepIndex];
+            if (state.text) {
+                const utterance = new SpeechSynthesisUtterance(state.text);
+                if (selectedVoice) {
+                    utterance.voice = selectedVoice;
+                }
+                utterance.lang = 'en-GB';
+                window.speechSynthesis.speak(utterance);
+            }
+        }
+
+        function initPresentation() {
+            if (started) return;
+            started = true;
+            document.getElementById('start-screen').style.opacity = '0';
+            setTimeout(() => {
+                document.getElementById('start-screen').style.display = 'none';
+            }, 500);
+            
+            // Push dummy utterance to initialize audio context securely
+            const dummy = new SpeechSynthesisUtterance("");
+            dummy.volume = 0;
+            window.speechSynthesis.speak(dummy);
+            
+            currentStep = 0;
+            playStep(currentStep);
+        }
+
+        document.getElementById('start-screen').addEventListener('click', initPresentation);
+
+        document.addEventListener('keydown', (e) => {
+            if (!started && (e.key === 'ArrowRight' || e.key === 'ArrowLeft')) {
+                initPresentation();
+                return;
+            }
+
+            if (e.key === 'ArrowRight') {
+                if (currentStep < slideStates.length - 1) {
+                    currentStep++;
+                    playStep(currentStep);
+                }
+            } else if (e.key === 'ArrowLeft') {
+                if (currentStep > 0) {
+                    currentStep--;
+                    playStep(currentStep);
+                }
+            }
+        });
+    </script>
+</body>
+</html>

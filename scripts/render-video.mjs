@@ -284,7 +284,19 @@ function buildAudioMixArgs(audioTimeline, htmlPath, outputPath, totalDuration) {
     labels.push(`[${label}]`);
   });
 
-  const filterComplex = `${filters.join(';')};${labels.join('')}amix=inputs=${labels.length}:duration=longest:normalize=0,apad,atrim=0:${totalDuration.toFixed(3)}[aout]`;
+  let filterComplex = filters.join(';') + ';';
+  if (labels.length === 1) {
+    filterComplex += `${labels[0]}apad,atrim=0:${totalDuration.toFixed(3)}[aout]`;
+  } else {
+    let currentMix = labels[0];
+    for (let i = 1; i < labels.length; i++) {
+      const isLast = i === labels.length - 1;
+      const nextMix = isLast ? '[aout]' : `[m${i}]`;
+      filterComplex += `${currentMix}${labels[i]}amix=inputs=2:duration=longest:normalize=0${isLast ? `,apad,atrim=0:${totalDuration.toFixed(3)}` : ''}${nextMix};`;
+      currentMix = nextMix;
+    }
+    if (filterComplex.endsWith(';')) filterComplex = filterComplex.slice(0, -1);
+  }
 
   return [
     '-y',
@@ -390,11 +402,24 @@ async function encodeVideoWithFallback({ args, framesDir, fps, audioTimeline, mi
 }
 
 async function getTimelineFromPage(page) {
-  return await page.evaluate(() => ({
-    duration: window.__VIDEO_DURATION__,
-    videoTimeline: window.__VIDEO_TIMELINE__,
-    audioTimeline: window.__AUDIO_TIMELINE__
-  }));
+  return await page.evaluate(() => {
+    // Inject SFX for Quick Sort Comparison
+    if (window.__RESOLVED_TIMELINE__ && window.__RESOLVED_TIMELINE__.videoTimeline) {
+      const plan = window.__RESOLVED_TIMELINE__.videoTimeline;
+      const audioTimeline = window.__RESOLVED_TIMELINE__.audioTimeline;
+      for (const segment of plan) {
+          const id = segment.item ? segment.item.id : segment.id;
+          if (id && (id.includes('-outro') || id === "winner")) {
+              audioTimeline.push({
+                  src: '../../../assets/sfx/correct.mp3',
+                  start: segment.start,
+                  duration: 2
+              });
+          }
+      }
+    }
+    return window.__RESOLVED_TIMELINE__;
+  });
 }
 
 async function preparePage(browser, url, width, height) {
@@ -486,6 +511,17 @@ async function main() {
 
   const timeline = await getTimelineFromPage(timelinePage);
   await timelinePage.close();
+
+  if (timeline && Array.isArray(timeline.audioTimeline)) {
+    for (const cue of timeline.audioTimeline) {
+      if (cue.src && cue.src.includes('assets/sfx/correct.mp3')) {
+        const absoluteCorrectPath = path.resolve(rootDir, 'assets', 'sfx', 'correct.mp3');
+        const htmlDir = path.dirname(htmlPath);
+        const relativeSrc = path.relative(htmlDir, absoluteCorrectPath);
+        cue.src = relativeSrc.replace(/\\/g, '/');
+      }
+    }
+  }
   const totalDuration = Number(timeline.duration);
   const audioTimeline = Array.isArray(timeline.audioTimeline) ? timeline.audioTimeline : [];
 

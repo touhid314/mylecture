@@ -1,0 +1,386 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Bubble Sort Builder</title>
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/aaaakshat/cm-web-fonts@latest/fonts.css">
+    <style>
+        :root {
+            --bg-color: #000;
+            --text-color: #fff;
+            --border-color: #444;
+            --highlight-color: #00ffcc;
+            --card-bg: #111;
+            --sorted-color: #555;
+            --transition-speed: 0.4s;
+        }
+
+        body, html {
+            margin: 0;
+            padding: 0;
+            width: 100%;
+            height: 100%;
+            background-color: var(--bg-color);
+            color: var(--text-color);
+            font-family: "Computer Modern Serif", serif;
+            overflow: hidden;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+        }
+
+        #game-container {
+            width: 1000px;
+            height: 562.5px; /* 16:9 Aspect Ratio */
+            position: relative;
+            border: 1px solid #222;
+        }
+
+        .fade-update {
+            transition: opacity var(--transition-speed), transform var(--transition-speed), color var(--transition-speed), background-color var(--transition-speed);
+        }
+
+        #game_title {
+            position: absolute;
+            top: 20px;
+            width: 100%;
+            text-align: center;
+            font-size: 36px;
+            font-weight: 200;
+        }
+
+        #goal_text {
+            position: absolute;
+            top: 70px;
+            width: 100%;
+            text-align: center;
+            font-size: 18px;
+            color: #aaa;
+        }
+
+        #score_text {
+            position: absolute;
+            top: 100px;
+            left: 80px;
+            font-size: 18px;
+        }
+
+        #mistake_text {
+            position: absolute;
+            top: 100px;
+            right: 80px;
+            font-size: 18px;
+        }
+
+        #playfield {
+            position: absolute;
+            left: 80px;
+            top: 130px;
+            width: 840px;
+            height: 380px;
+            border: 1px solid var(--border-color);
+            background-color: #050505;
+        }
+
+        #pass_label {
+            position: absolute;
+            top: 10px;
+            left: 20px;
+            font-size: 16px;
+            color: #888;
+        }
+
+        #list_label {
+            position: absolute;
+            top: 40px;
+            width: 100%;
+            text-align: center;
+            font-size: 14px;
+            letter-spacing: 2px;
+            text-transform: uppercase;
+        }
+
+        .card-container {
+            position: absolute;
+            top: 80px;
+            left: 0;
+            width: 100%;
+            display: flex;
+            justify-content: center;
+            gap: 20px;
+        }
+
+        .number-card {
+            width: 80px;
+            height: 80px;
+            border: 1px solid var(--border-color);
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            font-size: 28px;
+            background: var(--card-bg);
+            position: relative;
+        }
+
+        .number-card.active {
+            border-color: var(--highlight-color);
+            box-shadow: 0 0 10px rgba(0, 255, 204, 0.3);
+        }
+
+        .number-card.sorted {
+            color: #666;
+            border-style: dashed;
+        }
+
+        #comparison_text {
+            position: absolute;
+            top: 180px;
+            width: 100%;
+            text-align: center;
+            font-size: 20px;
+            color: var(--highlight-color);
+        }
+
+        .controls {
+            position: absolute;
+            bottom: 60px;
+            width: 100%;
+            display: flex;
+            justify-content: center;
+            gap: 30px;
+        }
+
+        button {
+            background: none;
+            border: 1px solid var(--text-color);
+            color: var(--text-color);
+            padding: 10px 30px;
+            font-family: "Computer Modern Serif", serif;
+            font-size: 16px;
+            cursor: pointer;
+            transition: all 0.3s;
+        }
+
+        button:hover:not(:disabled) {
+            background: var(--text-color);
+            color: var(--bg-color);
+        }
+
+        button:disabled {
+            opacity: 0.3;
+            cursor: default;
+        }
+
+        #rule_text {
+            position: absolute;
+            bottom: 25px;
+            width: 100%;
+            text-align: center;
+            font-size: 14px;
+            color: #666;
+        }
+
+        #status_text {
+            position: absolute;
+            bottom: -40px;
+            width: 100%;
+            text-align: center;
+            font-size: 16px;
+            color: #eee;
+        }
+
+        #win_message {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            text-align: center;
+            background: rgba(0,0,0,0.9);
+            padding: 40px;
+            border: 1px solid var(--highlight-color);
+            display: none;
+            z-index: 10;
+        }
+
+        #restart_text {
+            position: absolute;
+            bottom: 10px;
+            width: 100%;
+            text-align: center;
+            font-size: 12px;
+            color: #444;
+        }
+    </style>
+</head>
+<body>
+
+<div id="game-container">
+    <h1 id="game_title" class="fade-update">Bubble Sort Builder</h1>
+    <p id="goal_text" class="fade-update">Swap adjacent numbers to sort the list from smallest to largest.</p>
+    
+    <div id="score_text" class="fade-update">Correct Steps: 0</div>
+    <div id="mistake_text" class="fade-update">Mistakes: 0</div>
+
+    <div id="playfield">
+        <div id="pass_label" class="fade-update">Pass 1 of 4</div>
+        <div id="list_label">CURRENT LIST</div>
+        
+        <div class="card-container" id="card_row">
+            </div>
+
+        <div id="comparison_text" class="fade-update">Compare 5 and 2</div>
+
+        <div class="controls">
+            <button id="swap_button" onclick="handleAction('swap')">Swap</button>
+            <button id="keep_button" onclick="handleAction('keep')">Keep</button>
+            <button id="auto_pass_button" onclick="useHelper()">Show Next Pass</button>
+        </div>
+
+        <div id="rule_text">Rule: if the left number is greater than the right number, swap them.</div>
+        <div id="status_text" class="fade-update">Largest unsorted values will bubble to the right.</div>
+    </div>
+
+    <div id="win_message" class="fade-update">
+        <h2 style="font-weight: 200; font-size: 32px;">List Sorted!</h2>
+        <p>You completed bubble sort. Every pass moved the largest unsorted value to the right place.</p>
+    </div>
+
+    <div id="restart_text">Press R to restart with a new shuffled list.</div>
+</div>
+
+<script>
+    let state = {
+        list: [5, 2, 8, 3, 1],
+        currentIndex: 0,
+        currentPass: 1,
+        correctSteps: 0,
+        mistakes: 0,
+        mode: 'playing',
+        sortedSuffixStart: 5
+    };
+
+    function initGame() {
+        state = {
+            list: [5, 2, 8, 3, 1],
+            currentIndex: 0,
+            currentPass: 1,
+            correctSteps: 0,
+            mistakes: 0,
+            mode: 'playing',
+            sortedSuffixStart: 5
+        };
+        render();
+    }
+
+    function render() {
+        // Update Stats
+        document.getElementById('score_text').innerText = `Correct Steps: ${state.correctSteps}`;
+        document.getElementById('mistake_text').innerText = `Mistakes: ${state.mistakes}`;
+        document.getElementById('pass_label').innerText = `Pass ${state.currentPass} of 4`;
+
+        // Render Cards
+        const container = document.getElementById('card_row');
+        container.innerHTML = '';
+        state.list.forEach((val, i) => {
+            const card = document.createElement('div');
+            card.className = 'number-card fade-update';
+            card.innerText = val;
+            if (state.mode === 'playing' && (i === state.currentIndex || i === state.currentIndex + 1)) {
+                card.classList.add('active');
+            }
+            if (i >= state.sortedSuffixStart || state.mode === 'won') {
+                card.classList.add('sorted');
+            }
+            container.appendChild(card);
+        });
+
+        // Update Instruction
+        if (state.mode === 'playing') {
+            const val1 = state.list[state.currentIndex];
+            const val2 = state.list[state.currentIndex + 1];
+            document.getElementById('comparison_text').innerText = `Compare ${val1} and ${val2}`;
+            document.getElementById('win_message').style.display = 'none';
+        } else if (state.mode === 'won') {
+            document.getElementById('comparison_text').innerText = "Sorting Complete";
+            document.getElementById('win_message').style.display = 'block';
+        }
+    }
+
+    function handleAction(action) {
+        if (state.mode !== 'playing') return;
+
+        const i = state.currentIndex;
+        const shouldSwap = state.list[i] > state.list[i+1];
+        const correctAction = shouldSwap ? 'swap' : 'keep';
+
+        if (action === correctAction) {
+            state.correctSteps++;
+            if (action === 'swap') {
+                [state.list[i], state.list[i+1]] = [state.list[i+1], state.list[i]];
+                updateStatus(`Correct: ${state.list[i+1]} and ${state.list[i]} should be swapped`, "#00ffcc");
+            } else {
+                updateStatus(`Correct: ${state.list[i]} and ${state.list[i+1]} stay in place`, "#00ffcc");
+            }
+            advancePointer();
+        } else {
+            state.mistakes++;
+            const msg = shouldSwap ? 
+                `Incorrect: ${state.list[i]} is greater than ${state.list[i+1]}, so they must be swapped.` : 
+                `Incorrect: ${state.list[i]} is not greater than ${state.list[i+1]}, no swap needed.`;
+            updateStatus(msg, "#ff5555");
+        }
+        render();
+        checkWin();
+    }
+
+    function advancePointer() {
+        state.currentIndex++;
+        
+        // End of pass
+        if (state.currentIndex >= state.sortedSuffixStart - 1) {
+            state.sortedSuffixStart--;
+            state.currentIndex = 0;
+            state.currentPass++;
+            updateStatus(`Pass complete! Largest value bubbled to the end.`, "#fff");
+        }
+    }
+
+    function updateStatus(text, color) {
+        const el = document.getElementById('status_text');
+        el.style.opacity = 0;
+        setTimeout(() => {
+            el.innerText = text;
+            el.style.color = color;
+            el.style.opacity = 1;
+        }, 200);
+    }
+
+    function useHelper() {
+        if (state.mode !== 'playing') return;
+        const i = state.currentIndex;
+        const action = state.list[i] > state.list[i+1] ? 'swap' : 'keep';
+        updateStatus("Helper used: observe why this action is correct", "#aaa");
+        handleAction(action);
+    }
+
+    function checkWin() {
+        if (state.sortedSuffixStart <= 1) {
+            state.mode = 'won';
+            render();
+        }
+    }
+
+    window.addEventListener('keydown', (e) => {
+        if (e.key.toLowerCase() === 'r') {
+            initGame();
+            updateStatus("Restarted with original list.", "#eee");
+        }
+    });
+
+    // Start
+    initGame();
+</script>
+
+</body>
+</html>

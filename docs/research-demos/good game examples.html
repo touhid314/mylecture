@@ -1,0 +1,392 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Hardware Security: CIA Triad</title>
+    <!-- Computer Modern Font -->
+    <link href="https://cdn.jsdelivr.net/gh/aaaakshat/cm-web-fonts/fonts.css" rel="stylesheet">
+    <!-- KaTeX for LaTeX Rendering -->
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.css">
+    <script src="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/contrib/auto-render.min.js"></script>
+    
+    <style>
+        body { 
+            font-family: "Computer Modern Serif", serif; 
+            background-color: #0b0809; 
+            color: #ccc; 
+            margin: 0; 
+            padding: 20px; 
+            display: flex; 
+            flex-direction: column; 
+            align-items: center; 
+        }
+        h1 { color: #d3c1af; text-align: center; margin-bottom: 10px; }
+        #game-container { 
+            background: #000; 
+            border-radius: 10px; 
+            box-shadow: 0 4px 8px rgba(255,255,255,0.1); 
+            padding: 20px; 
+            max-width: 900px; 
+            width: 100%; 
+            box-sizing: border-box;
+            text-align: center;
+        }
+        .legend { 
+            text-align: left;
+            background: #17070a; 
+            padding: 15px; 
+            border-radius: 5px; 
+            border: 1px solid #2e0d14;
+            margin-bottom: 15px; 
+            font-size: 15px; 
+            line-height: 1.5;
+        }
+        #instruction { 
+            font-size: 18px; 
+            font-weight: bold; 
+            margin-bottom: 10px; 
+            min-height: 80px; 
+            color: #d3c1af;
+        }
+        #feedback { 
+            font-size: 16px; 
+            font-weight: bold; 
+            min-height: 24px; 
+            margin-bottom: 15px; 
+        }
+        .candidates { 
+            display: flex; 
+            justify-content: center; 
+            flex-wrap: wrap;
+            gap: 10px; 
+            margin-bottom: 15px;
+        }
+        button { 
+            padding: 10px 15px; 
+            border: none; 
+            border-radius: 5px; 
+            cursor: pointer; 
+            font-size: 15px; 
+            font-weight: bold;
+            transition: 0.2s; 
+            font-family: "Computer Modern Serif", serif;
+        }
+        button:disabled { opacity: 0.5; cursor: not-allowed; }
+        .btn-candidate { background-color: #cb6724; color: #000; }
+        .btn-candidate:hover:not(:disabled) { background-color: #d67f46; }
+        .btn-action { background-color: #0c63ed; color: #000; }
+        .btn-action:hover:not(:disabled) { background-color: #2976ef; }
+        .btn-pass { background-color: #18b3c3; color: #000; }
+        .btn-pass:hover:not(:disabled) { background-color: #3fc6d4; }
+        .btn-replay { background-color: #d1338e; color: #000; display: none; }
+        
+        .controls {
+            margin-top: 10px;
+            margin-bottom: 20px;
+            display: flex;
+            justify-content: center;
+            gap: 10px;
+        }
+        
+        canvas { 
+            background: #020101; 
+            border-radius: 8px; 
+            border: 1px solid #333; 
+            width: 100%; 
+            max-width: 650px;
+            height: auto;
+            display: block;
+            margin: 0 auto;
+        }
+    </style>
+</head>
+<body>
+
+    <h1>Hardware Security: The CIA Triad</h1>
+    <div id="game-container">
+        <div class="legend" id="legend">
+            <strong>The CIA Triad in Hardware:</strong><br>
+            1. <strong>Confidentiality ($C$):</strong> Protecting secret data (e.g., cryptographic keys) stored in hardware or traveling over buses from being read by unauthorized probes.<br>
+            2. <strong>Integrity ($I$):</strong> Ensuring the hardware behaves exactly as designed and data hasn't been maliciously altered (e.g., via fault injection).<br>
+            3. <strong>Availability ($A$):</strong> Ensuring the hardware remains operational and accessible, resisting Denial of Service (DoS) and physical sabotage.
+        </div>
+
+        <div id="instruction">Loading...</div>
+        <div id="feedback"></div>
+
+        <div class="candidates" id="candidates"></div>
+
+        <div class="controls" id="controls">
+            <button class="btn-action" id="btn-hint" onclick="showHint()">Hint</button>
+            <button class="btn-pass" id="btn-pass" onclick="passStep()">Pass</button>
+            <button class="btn-candidate" id="btn-replay" onclick="location.reload()">Replay ↺</button>
+        </div>
+
+        <canvas id="hwCanvas" width="650" height="350"></canvas>
+    </div>
+
+    <script>
+        function renderMath(element) {
+            if (!element) return;
+            if (typeof renderMathInElement === 'function') {
+                renderMathInElement(element, {
+                    delimiters: [
+                        {left: '$$', right: '$$', display: true},
+                        {left: '$', right: '$', display: false}
+                    ],
+                    throwOnError: false
+                });
+            }
+        }
+
+        const canvas = document.getElementById('hwCanvas');
+        const ctx = canvas.getContext('2d');
+
+        let currentStep = 0;
+        let isProcessing = false;
+        
+        // Hardware State Modifiers
+        let busEncrypted = false;
+        let eccEnabled = false;
+        let rateLimited = false;
+
+        const steps = [
+            {
+                instruction: "Step 1: **Confidentiality ($C$)**. An attacker places a physical logic probe on the memory bus between the CPU and RAM to steal a cryptographic key in plaintext. How do we defend against this?",
+                candidates: ["Add Redundant Power", "Encrypt the Memory Bus", "Overclock the CPU"],
+                correct: "Encrypt the Memory Bus",
+                hint: "If they can physically tap the wires, the data travelling across those wires must be unreadable to them."
+            },
+            {
+                instruction: "Step 2: **Integrity ($I$)**. The attacker uses an optical laser to induce a glitch (Fault Injection), flipping a bit in the CPU register to bypass a password check ($0 \\to 1$). How do we detect and prevent this?",
+                candidates: ["Error Correction Codes (ECC)", "Use a Smaller Laser", "Add a Firewall"],
+                correct: "Error Correction Codes (ECC)",
+                hint: "We need a mathematical way to verify that the data in the register hasn't changed unexpectedly. Parity and ECC solve this."
+            },
+            {
+                instruction: "Step 3: **Availability ($A$)**. The attacker floods the I/O interface with thousands of junk hardware interrupts, overwhelming the CPU and causing a Denial of Service (DoS). What is the hardware mitigation?",
+                candidates: ["Hardware Rate Limiting", "Send Junk Back", "Encrypt the I/O"],
+                correct: "Hardware Rate Limiting",
+                hint: "We need a hardware module that drops excess packets and ensures the CPU only processes a safe number of interrupts."
+            }
+        ];
+
+        function drawChip(x, y, w, h, label, color) {
+            ctx.fillStyle = '#15050e';
+            ctx.fillRect(x, y, w, h);
+            ctx.strokeStyle = color;
+            ctx.lineWidth = 3;
+            ctx.strokeRect(x, y, w, h);
+            
+            // Draw pins
+            ctx.fillStyle = '#666';
+            for (let i = 10; i < w; i += 15) {
+                ctx.fillRect(x + i, y - 5, 5, 5); // Top
+                ctx.fillRect(x + i, y + h, 5, 5); // Bottom
+            }
+
+            ctx.fillStyle = '#fff';
+            ctx.font = 'bold 18px "Computer Modern Serif"';
+            ctx.textAlign = 'center';
+            ctx.textBaseline = 'middle';
+            ctx.fillText(label, x + w/2, y + h/2);
+        }
+
+        function drawArrow(x1, y1, x2, y2, color) {
+            ctx.strokeStyle = color;
+            ctx.lineWidth = 4;
+            ctx.beginPath();
+            ctx.moveTo(x1, y1);
+            ctx.lineTo(x2, y2);
+            ctx.stroke();
+
+            // Arrowhead
+            const angle = Math.atan2(y2 - y1, x2 - x1);
+            ctx.fillStyle = color;
+            ctx.beginPath();
+            ctx.moveTo(x2, y2);
+            ctx.lineTo(x2 - 15 * Math.cos(angle - Math.PI / 6), y2 - 15 * Math.sin(angle - Math.PI / 6));
+            ctx.lineTo(x2 - 15 * Math.cos(angle + Math.PI / 6), y2 - 15 * Math.sin(angle + Math.PI / 6));
+            ctx.fill();
+        }
+
+        function drawHardware() {
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+            // Base Layout
+            const ioX = 50, ioY = 130, ioW = 100, ioH = 100;
+            const cpuX = 275, cpuY = 110, cpuW = 120, cpuH = 140;
+            const memX = 500, memY = 130, memW = 100, memH = 100;
+
+            // Draw Buses
+            drawArrow(ioX + ioW, ioY + 50, cpuX - 5, cpuY + 70, '#555'); // I/O to CPU
+            drawArrow(cpuX + cpuW + 5, cpuY + 70, memX, memY + 50, '#555'); // CPU to RAM
+
+            // Draw Chips
+            drawChip(ioX, ioY, ioW, ioH, "I/O Port", "#cb6724"); // Orange
+            drawChip(cpuX, cpuY, cpuW, cpuH, "Main CPU", "#d1338e"); // Pink
+            drawChip(memX, memY, memW, memH, "RAM", "#18b3c3"); // Cyan
+
+            // Step 1: Confidentiality
+            if (currentStep === 0 || busEncrypted) {
+                ctx.fillStyle = '#fff';
+                ctx.font = '14px "Computer Modern Serif"';
+                ctx.fillText("Data Bus", (cpuX + cpuW + memX) / 2, memY + 35);
+                
+                if (!busEncrypted) {
+                    // Attacker Probe
+                    ctx.strokeStyle = '#e74c3c'; // Red
+                    ctx.beginPath(); ctx.moveTo(450, 40); ctx.lineTo(450, memY + 50); ctx.stroke();
+                    ctx.fillStyle = '#e74c3c';
+                    ctx.fillRect(430, 20, 40, 20);
+                    ctx.fillStyle = '#000';
+                    ctx.fillText("Probe", 450, 30);
+                    // Plaintext
+                    ctx.fillStyle = '#e74c3c';
+                    ctx.fillText("Key: 1101", 450, 150);
+                } else {
+                    // Encrypted
+                    ctx.fillStyle = '#2ecc71'; // Green
+                    ctx.fillText("Encrypted: $*&#!", 450, 150);
+                    ctx.strokeStyle = '#2ecc71';
+                    ctx.lineWidth = 2;
+                    ctx.strokeRect(cpuX + cpuW, cpuY + 60, memX - cpuX - cpuW, 20);
+                }
+            }
+
+            // Step 2: Integrity
+            if (currentStep === 1 || eccEnabled) {
+                if (!eccEnabled && currentStep === 1) {
+                    // Laser Glitch
+                    ctx.strokeStyle = '#e74c3c';
+                    ctx.beginPath(); ctx.moveTo(280, 40); ctx.lineTo(330, cpuY + 20); ctx.stroke();
+                    ctx.fillStyle = '#e74c3c';
+                    ctx.beginPath(); ctx.arc(330, cpuY + 20, 8, 0, Math.PI*2); ctx.fill();
+                    ctx.fillText("Laser Fault!", 280, 30);
+                    
+                    ctx.fillStyle = '#fff';
+                    ctx.fillText("Reg: 0 -> 1", cpuX + 60, cpuY + 100);
+                } else if (eccEnabled) {
+                    // ECC Module
+                    ctx.fillStyle = 'rgba(46, 204, 113, 0.2)';
+                    ctx.fillRect(cpuX + 10, cpuY + 10, cpuW - 20, 40);
+                    ctx.strokeStyle = '#2ecc71';
+                    ctx.strokeRect(cpuX + 10, cpuY + 10, cpuW - 20, 40);
+                    ctx.fillStyle = '#2ecc71';
+                    ctx.fillText("ECC Active", cpuX + 60, cpuY + 30);
+                    ctx.fillText("Fault Detected", cpuX + 60, cpuY + 100);
+                }
+            }
+
+            // Step 3: Availability
+            if (currentStep === 2 || rateLimited) {
+                if (!rateLimited && currentStep === 2) {
+                    // DoS Flood
+                    ctx.fillStyle = '#e74c3c';
+                    ctx.fillText("JUNK", 200, ioY + 30);
+                    ctx.fillText("JUNK", 200, ioY + 50);
+                    ctx.fillText("JUNK", 200, ioY + 70);
+                    ctx.fillText("JUNK", 200, ioY + 90);
+                    ctx.fillText("CPU Overload!", cpuX + 60, cpuY - 15);
+                } else if (rateLimited) {
+                    // Rate Limiter Block
+                    ctx.fillStyle = '#2ecc71';
+                    ctx.fillRect(ioX + ioW + 20, ioY + 20, 10, 80);
+                    ctx.fillText("Rate Limiter", ioX + ioW + 25, ioY + 10);
+                    
+                    ctx.fillStyle = '#e74c3c';
+                    ctx.fillText("X JUNK", 180, ioY + 30);
+                    ctx.fillStyle = '#2ecc71';
+                    ctx.fillText("Valid", 230, ioY + 70);
+                }
+            }
+        }
+
+        function renderUI() {
+            const instEl = document.getElementById('instruction');
+            if(currentStep >= steps.length) {
+                instEl.innerHTML = "🎉 **Hardware Secured!** You successfully defended the system by ensuring <strong>Confidentiality</strong> (Encryption), <strong>Integrity</strong> (ECC), and <strong>Availability</strong> (Rate Limiting).";
+                document.getElementById('candidates').innerHTML = "";
+                document.getElementById('btn-hint').style.display = 'none';
+                document.getElementById('btn-pass').style.display = 'none';
+                document.getElementById('btn-replay').style.display = 'inline-block';
+                document.getElementById('feedback').innerText = "";
+                drawHardware();
+                renderMath(instEl);
+                return;
+            }
+
+            const step = steps[currentStep];
+            instEl.innerHTML = step.instruction;
+            document.getElementById('feedback').innerText = "";
+
+            const candDiv = document.getElementById('candidates');
+            candDiv.innerHTML = "";
+            step.candidates.forEach(c => {
+                const btn = document.createElement('button');
+                btn.className = 'btn-candidate';
+                btn.innerText = c;
+                btn.onclick = () => checkAnswer(c);
+                candDiv.appendChild(btn);
+            });
+            isProcessing = false;
+            
+            drawHardware();
+            renderMath(instEl);
+            renderMath(document.getElementById('legend'));
+        }
+
+        function processCorrect() {
+            if (currentStep === 0) busEncrypted = true;
+            if (currentStep === 1) eccEnabled = true;
+            if (currentStep === 2) rateLimited = true;
+
+            drawHardware();
+            setTimeout(() => {
+                currentStep++;
+                renderUI();
+                const btns = document.querySelectorAll('button');
+                btns.forEach(b => b.disabled = false);
+            }, 2000);
+        }
+
+        function checkAnswer(selected) {
+            if (isProcessing) return;
+            const step = steps[currentStep];
+            if(selected === step.correct || selected.includes(step.correct)) {
+                isProcessing = true;
+                const btns = document.querySelectorAll('button');
+                btns.forEach(b => b.disabled = true);
+                document.getElementById('feedback').innerText = "Correct! Hardware defense deployed.";
+                document.getElementById('feedback').style.color = "#d1338e";
+                processCorrect();
+            } else {
+                document.getElementById('feedback').innerText = "Vulnerability exploited! Try a different defense.";
+                document.getElementById('feedback').style.color = "#18b3c3";
+            }
+        }
+
+        function showHint() {
+            const step = steps[currentStep];
+            document.getElementById('feedback').innerText = "Hint: " + step.hint;
+            document.getElementById('feedback').style.color = "#cb6724";
+            renderMath(document.getElementById('feedback'));
+        }
+
+        function passStep() {
+            if (isProcessing) return;
+            isProcessing = true;
+            document.getElementById('feedback').innerText = "Auto-deploying: " + steps[currentStep].correct;
+            document.getElementById('feedback').style.color = "#0c63ed";
+            processCorrect();
+        }
+
+        window.onload = () => {
+            renderMath(document.body);
+            renderUI();
+        };
+    </script>
+</body>
+</html>

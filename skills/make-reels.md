@@ -1,24 +1,65 @@
-Make a video on the topic: {INSERT TOPIC HERE}
+# Task
+Make a video on the topic: {CDN, content delivery network}
 
-Approximate length: 1 minute
-Aspect ratio: 9:16 (vertical)
+- Length: 130-140 words of narration.
+- Aspect ratio: 9:16 (vertical)
 
-Follow constrains at: docs\html-input-contract.md
-Example output html: inputs\bloomfilter-modifier\index.html,
-inputs\bsp-tree\index.html6, inputs\cnn-shorts\index.html
+# Workflow
+You will work in multi step method. First you write a best-effort draft, then you read it back and check against the requirement and improvise by editing the original.
+## Script writing
+- First make a script of the visual and the exact audio transcript. Then act upon it to make the html file. Make the visual plan very detailed, so that the visuals can be regenerated exactly by any agent.
+- Script is the most important part of the whole thing. Make sure the content is coherent, interesting and properly teaches a thing. 
+- Write and plan visuals that is realizable with simple 2D svg and animations. Avoid unnecessary complexity and camera movement plans.
+- If needed, Refer to visuals while explaining things, like: "As you can see here {highlight something}...". You need not follow this exact saying, but you should try to refer to the visual in the audio, with proper sync, so that the thing is easily understandable. 
+- Script should start with a strong hook with a catchy introductory hook sentence and with a great hook visual.
+- Remember that it takes about 1 minute to narrate 140 words.
+- Script should also include plan of what image to add if needed. You can later on download and use relevant image from the internet if it helps to explain the topic better.
+- Revise the script and check whether the length criteria is met, visual plan is detailed enough, if not, improvise by editing the script.
 
-First make a detailed script of the visual and the exact audio transcript. Then act upon it to make the html file.
+- Write script in the following format:
+```
+# Scene 1: <scene title>
+Audio: <audio transcript>
+Visuals: <detailed visual plan>
 
-The html will later be rendered in the inputs folder, you don't have to worry about the rendering process.
+# Scene 2: <scene title>
+Audio: <audio transcript>
+Visuals: <detailed visual plan>
 
-Theme guide:
-- Follow the theme of inputs\bloomfilter-modifier\index.html
-- Don't put content in: top 15%, bottom 20%. Center 65% = safe for key content.
+...continue 
 
-Additional instructions:
-- In script.md while making timing plans, remember that it takes about 1 minute to say 140 words.
-- Download and use relevant image from the internet if it helps to explain the topic better. 
-- subtitle should be exactly same as the audio transcript with emoji.
+End
+```
+
+## Webpage writing
+- Now you will write a webpage to realize the script. 
+- Animation sizes should be big enough to be easily visible by the viewer in phone.
+- Write a best effort initial index.html, revise it and check against the theme requirement, and evaluate the overall quality yourself. Edit the index.html and make it better.
+- Your main problem is often times, you place elements in wrong positions. For example a slider should go over the middle of a block, it's going over the top of the block for misplacement. In your revision make sure you fix such misplacement issues.
+- Keep engaging animation with movement to keep viewer attracted. Especially in the first scene use great engaging animations and try to download and use some relevant image if possible for greater hook.
+
+### Theme:
+- background: #1e1e1e 
+- font-family: 'Roboto', sans-serif;
+- Font size: Content 42px, Subtitle 48px
+- Titles are blue (#61AFEF), bold, centered, and boxed with a blue border. 
+- Don't put content in: top 15%, bottom 20%. Center 65% = safe for key content. Because it will be uploaded to fb/insta/yt reels/shorts.
+- Example theme: inputs\bloomfilter-modifier\index.html
+### Constraint
+- You should write the webpage following the constraints at: docs\html-input-contract.md
+- Don't put any start button or overlay.
+### Subtitle
+- Embed subtitle.
+- Subtitle should be exactly same as the audio transcript (don't use emoji), no concise version of what is being spoken.
+- Caption style: white, centered near the lower third, with a strong black text shadow for readability.
+- Subtitle should not overlap with other elements.
+- Subtitle should be around 7-8 words and not long so that it overlaps with visuals.
+
+# Example output html: 
+- inputs\bloomfilter-modifier\index.html
+- inputs\bsp-tree\index.html6
+- inputs\cnn-shorts\index.html
+
 
 # Deliverables:
 output folder: inputs/<topic-slug>/
@@ -26,4 +67,6 @@ outputs:
 - script.md: Detailed script of the visual and the exact audio transcript.
 - index.html: The html file that will be rendered.
 - description.txt: One liner description and hashtags for facebook/instagram upload.
-- resolved.html: use the command `npm run build:plan -- --input path/to/index.html --out path/to/resolved.html` to generate the resolved html from the index.html. (you don't need to render, i will do this later.)
+## What not to deliver 
+- You don't have to resolve. If later asked to resolve, use the command `npm run build:plan -- --input path/to/index.html --out path/to/resolved.html` to generate the resolved html from the index.html. 
+- You don't need to render the resolved html. If later asked to render, use command: `npm run render:video -- --html path/to/index.html --resolved-html path/to/resolved.html --out path/to/output.mp4`

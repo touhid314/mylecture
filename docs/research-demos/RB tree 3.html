@@ -1,0 +1,396 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Red-Black Tree Rules</title>
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/aaaakshat/cm-web-fonts@latest/fonts.css">
+    <style>
+        body {
+            margin: 0;
+            padding: 0;
+            background-color: #000;
+            color: #fff;
+            font-family: "Computer Modern Serif", serif;
+            font-weight: normal; /* Ensuring no bold as requested */
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            height: 100vh;
+            overflow: hidden;
+        }
+
+        #presentation-area {
+            width: 100vw;
+            height: 56.25vw;
+            max-height: 100vh;
+            max-width: 177.78vh;
+            display: flex;
+            position: relative;
+            background: #000;
+        }
+
+        #left-panel {
+            flex: 0.9;
+            padding: 4vw 2vw 4vw 6vw;
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+            z-index: 10;
+        }
+
+        #right-panel {
+            flex: 1.1;
+            position: relative;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+
+        #title {
+            font-size: 36pt;
+            color: #1F77B4;
+            margin-bottom: 2vw;
+            opacity: 0;
+            transition: opacity 0.5s ease;
+        }
+
+        .bullet {
+            font-size: 28pt;
+            margin-bottom: 1vw;
+            margin-left: 2vw;
+            opacity: 0;
+            transition: opacity 0.5s ease;
+        }
+
+        .rule {
+            font-size: 28pt;
+            margin-bottom: 1.5vw;
+            opacity: 0;
+            transition: opacity 0.5s ease;
+            line-height: 1.2;
+        }
+
+        #overlay {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: rgba(0, 0, 0, 0.85);
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            font-size: 28pt;
+            z-index: 100;
+            cursor: pointer;
+        }
+
+        /* SVG Styling */
+        svg {
+            width: 100%;
+            height: 100%;
+        }
+
+        .edge {
+            stroke: #555;
+            stroke-width: 4px;
+            opacity: 0;
+            transition: opacity 0.5s ease;
+        }
+
+        .node {
+            opacity: 0;
+            transition: opacity 0.5s ease;
+        }
+
+        .node circle {
+            fill: #777; /* Default grey before coloring */
+            stroke: #fff;
+            stroke-width: 3px;
+            transition: fill 0.5s ease, stroke 0.5s ease, stroke-width 0.5s ease;
+        }
+
+        .node text {
+            font-size: 28pt;
+            fill: #fff;
+            text-anchor: middle;
+            dominant-baseline: central;
+        }
+
+        .null-node {
+            opacity: 0;
+            transition: opacity 0.5s ease;
+        }
+
+        .null-node rect {
+            fill: #222;
+            stroke: #fff;
+            stroke-width: 2px;
+        }
+
+        .null-node text {
+            font-size: 16pt;
+            fill: #fff;
+            text-anchor: middle;
+            dominant-baseline: central;
+        }
+
+        .path-hl {
+            fill: none;
+            stroke: #1F77B4;
+            stroke-width: 24px;
+            stroke-linecap: round;
+            stroke-linejoin: round;
+            opacity: 0;
+            transition: opacity 0.5s ease;
+        }
+
+        .path-hl.orange {
+            stroke: #FF7F0E;
+        }
+    </style>
+</head>
+<body>
+
+    <div id="presentation-area">
+        <div id="overlay">Press Right Arrow Key to Start</div>
+        
+        <div id="left-panel">
+            <div id="title">Red-Black Tree Rules</div>
+            
+            <div id="bullet1" class="bullet">- By coloring nodes</div>
+            <div id="bullet2" class="bullet">- By coloring edges</div>
+
+            <div id="rule1" class="rule">1. Must be a Binary Search Tree</div>
+            <div id="rule2" class="rule">2. Every node is Red or Black</div>
+            <div id="rule3" class="rule">3. Root and external nodes are Black</div>
+            <div id="rule4" class="rule">4. No consecutive Red nodes</div>
+            <div id="rule5" class="rule">5. All paths have same number of Black nodes</div>
+        </div>
+
+        <div id="right-panel">
+            <svg viewBox="0 0 800 800">
+                <polyline id="path_left" class="path-hl" points="400,150 250,300 150,450 80,580" />
+                <polyline id="path_right" class="path-hl orange" points="400,150 550,300 650,450" />
+
+                <line id="e1" class="edge" x1="400" y1="150" x2="250" y2="300" />
+                <line id="e2" class="edge" x1="400" y1="150" x2="550" y2="300" />
+                
+                <line id="e3" class="edge" x1="250" y1="300" x2="150" y2="450" />
+                
+                <line id="e_null_5l" class="edge" x1="250" y1="300" x2="150" y2="450" />
+                <line id="e_null_5r" class="edge" x1="250" y1="300" x2="350" y2="450" />
+                
+                <line id="e_null_15l" class="edge" x1="550" y1="300" x2="450" y2="450" />
+                <line id="e_null_15r" class="edge" x1="550" y1="300" x2="650" y2="450" />
+                
+                <line id="e_null_3l" class="edge" x1="150" y1="450" x2="80" y2="580" />
+                <line id="e_null_3r" class="edge" x1="150" y1="450" x2="220" y2="580" />
+
+                <g id="null_5l" class="null-node">
+                    <rect x="135" y="435" width="30" height="30" />
+                    <text x="150" y="450">N</text>
+                </g>
+                <g id="null_5r" class="null-node">
+                    <rect x="335" y="435" width="30" height="30" />
+                    <text x="350" y="450">N</text>
+                </g>
+                <g id="null_15l" class="null-node">
+                    <rect x="435" y="435" width="30" height="30" />
+                    <text x="450" y="450">N</text>
+                </g>
+                <g id="null_15r" class="null-node">
+                    <rect x="635" y="435" width="30" height="30" />
+                    <text x="650" y="450">N</text>
+                </g>
+                <g id="null_3l" class="null-node">
+                    <rect x="65" y="565" width="30" height="30" />
+                    <text x="80" y="580">N</text>
+                </g>
+                <g id="null_3r" class="null-node">
+                    <rect x="205" y="565" width="30" height="30" />
+                    <text x="220" y="580">N</text>
+                </g>
+
+                <g id="n10" class="node">
+                    <circle cx="400" cy="150" r="40" />
+                    <text x="400" y="150">10</text>
+                </g>
+                <g id="n5" class="node">
+                    <circle cx="250" cy="300" r="40" />
+                    <text x="250" y="300">5</text>
+                </g>
+                <g id="n15" class="node">
+                    <circle cx="550" cy="300" r="40" />
+                    <text x="550" y="300">15</text>
+                </g>
+                <g id="n3" class="node">
+                    <circle cx="150" cy="450" r="40" />
+                    <text x="150" y="450">3</text>
+                </g>
+            </svg>
+        </div>
+    </div>
+
+    <script>
+        const steps = [
+            { text: "The Red-Black Tree is governed by a strict set of rules that ensure the tree stays balanced. You can basically think of these rules as the physics of the data structure... as long as they are maintained, the tree's performance is, you know, it’s guaranteed.", action: 0 },
+            { text: "We can define a Red-Black tree in two equivalent ways: by coloring the nodes or by coloring the edges.", action: 1 },
+            { text: "First, let's look at the tree from the perspective of its nodes. This is the Colored Nodes Definition.", action: 2 },
+            { text: "To be a Red-Black search tree, there are five specific rules that must hold... let me walk you through them. First, it has to be a Binary Search Tree. That’s the foundation.", action: 3 },
+            { text: "It must first and foremost be a standard B-S-T... where the left child is less than the parent, which is less than the right child. Let's put a quick example up to visualize this.", action: 4 },
+            { text: "As you can see in this diagram, the 5 goes left of 10, and the 15 goes right. Standard B-S-T rules.", action: 5 },
+            { text: "Second, node color. Every single node is assigned a color: it’s either Red or Black.", action: 6 },
+            { text: "Let's apply this to our tree.", action: 7 },
+            { text: "Notice in the visualization how each node is now strictly defined by one of these two colors. Third, we have the Black Anchors. The root of the tree must be Black.", action: 8 },
+            { text: "Look at our root node, 10. It is colored black, satisfying the first part of this rule.", action: 9 },
+            { text: "Additionally, all external nodes—basically the null pointers at the ends of branches—are considered Black. Let's draw those in so we don't forget them.", action: 10 },
+            { text: "Fourth, no Red Duos. This one is very, very important. You cannot have two Red nodes in a row.", action: 11 },
+            { text: "If a node is Red, its children must be Black. You can kind of think of this as a no consecutive red rule on any path from the root.", action: 12 },
+            { text: "Take a look at the red 5. If we wanted to insert a new node below it... say, a 3...", action: 13 },
+            { text: "As you can see on the diagram, that new node 3 must be black. If we colored it red, we'd have a red 5 pointing to a red 3, which breaks the physics of our tree. And finally, the fifth rule... the Black Equilibrium. This is really the most critical rule.", action: 14 },
+            { text: "Every path from the root to an external node must contain the exact same number of Black nodes. Let me say it again, every path must have the same number of Black nodes. Let's actually count them on our board to see if our tree holds up.", action: 15 },
+            { text: "Notice in the diagram, if we follow this far-left path: we hit the black 10... skip the red 5... hit the black 3... and hit the black NULL. That's 3 black nodes.", action: 16 },
+            { text: "Now look at the right side. From the black 10... skip the red 15... hit the black NULL. That's only 2 black nodes! Because these counts don't match, this visual tells us right away that our current tree violates the Black Equilibrium rule and would need restructuring.", action: 17 }
+        ];
+
+        let currentStep = -1;
+        let synth = window.speechSynthesis;
+        let gbVoice = null;
+
+        function initVoices() {
+            let voices = synth.getVoices();
+            gbVoice = voices.find(v => v.name === 'Google UK English Female') ||
+                      voices.find(v => v.lang.includes('en-GB') && v.name.toLowerCase().includes('female')) ||
+                      voices.find(v => v.lang.includes('en-GB')) ||
+                      voices[0];
+        }
+
+        if (speechSynthesis.onvoiceschanged !== undefined) {
+            speechSynthesis.onvoiceschanged = initVoices;
+        }
+        initVoices();
+
+        function setNodeColor(id, color) {
+            document.querySelector(`#${id} circle`).style.fill = color;
+        }
+
+        function setNodeStroke(id, color, width) {
+            let circle = document.querySelector(`#${id} circle`);
+            circle.style.stroke = color;
+            circle.style.strokeWidth = width + 'px';
+        }
+
+        function toggleVisibility(id, condition) {
+            document.getElementById(id).style.opacity = condition ? '1' : '0';
+        }
+
+        function updateUI(idx) {
+            // Titles & Text elements
+            let titleEl = document.getElementById('title');
+            if (idx >= 0) {
+                titleEl.textContent = (idx >= 2) ? "Colored Nodes Definition" : "Red-Black Tree Rules";
+                titleEl.style.opacity = '1';
+            } else {
+                titleEl.style.opacity = '0';
+            }
+
+            toggleVisibility('bullet1', idx === 1);
+            toggleVisibility('bullet2', idx === 1);
+
+            toggleVisibility('rule1', idx >= 3);
+            toggleVisibility('rule2', idx >= 6);
+            toggleVisibility('rule3', idx >= 8);
+            toggleVisibility('rule4', idx >= 11);
+            toggleVisibility('rule5', idx >= 14);
+
+            // Base Tree (10, 5, 15)
+            const treeVisible = idx >= 4;
+            toggleVisibility('e1', treeVisible);
+            toggleVisibility('e2', treeVisible);
+            toggleVisibility('n10', treeVisible);
+            toggleVisibility('n5', treeVisible);
+            toggleVisibility('n15', treeVisible);
+
+            // Coloring Logic
+            const colored = idx >= 7;
+            setNodeColor('n10', colored ? '#222222' : '#777777');
+            setNodeColor('n5', colored ? '#d62728' : '#777777');
+            setNodeColor('n15', colored ? '#d62728' : '#777777');
+
+            // Highlight 10
+            if (idx === 8) {
+                setNodeStroke('n10', '#1F77B4', 8);
+            } else {
+                setNodeStroke('n10', '#ffffff', 3);
+            }
+
+            // Highlight 5
+            if (idx === 12) {
+                setNodeStroke('n5', '#1F77B4', 8);
+            } else {
+                setNodeStroke('n5', '#ffffff', 3);
+            }
+
+            // Null nodes for 5 and 15
+            const showNulls5L = (idx >= 10 && idx < 13);
+            toggleVisibility('e_null_5l', showNulls5L);
+            toggleVisibility('null_5l', showNulls5L);
+
+            const showOtherNulls = idx >= 10;
+            toggleVisibility('e_null_5r', showOtherNulls);
+            toggleVisibility('null_5r', showOtherNulls);
+            toggleVisibility('e_null_15l', showOtherNulls);
+            toggleVisibility('null_15l', showOtherNulls);
+            toggleVisibility('e_null_15r', showOtherNulls);
+            toggleVisibility('null_15r', showOtherNulls);
+
+            // Node 3 and its nulls
+            const showNode3 = idx >= 13;
+            toggleVisibility('e3', showNode3);
+            toggleVisibility('n3', showNode3);
+            if (showNode3) { setNodeColor('n3', '#222222'); }
+            
+            toggleVisibility('e_null_3l', showNode3);
+            toggleVisibility('null_3l', showNode3);
+            toggleVisibility('e_null_3r', showNode3);
+            toggleVisibility('null_3r', showNode3);
+
+            // Paths
+            document.getElementById('path_left').style.opacity = (idx >= 15 && idx <= 16) ? '0.4' : '0';
+            document.getElementById('path_right').style.opacity = (idx === 17) ? '0.4' : '0';
+        }
+
+        function playStep(idx) {
+            document.getElementById('overlay').style.display = 'none';
+            updateUI(idx);
+            synth.cancel();
+            
+            let utterance = new SpeechSynthesisUtterance(steps[idx].text);
+            if (gbVoice) {
+                utterance.voice = gbVoice;
+            }
+            utterance.rate = 1.0;
+            synth.speak(utterance);
+        }
+
+        document.addEventListener('keydown', (e) => {
+            if (e.key === 'ArrowRight') {
+                if (currentStep < steps.length - 1) {
+                    currentStep++;
+                    playStep(currentStep);
+                }
+            } else if (e.key === 'ArrowLeft') {
+                if (currentStep > 0) {
+                    currentStep--;
+                    playStep(currentStep);
+                }
+            }
+        });
+
+        // Initialize empty state
+        updateUI(-1);
+    </script>
+</body>
+</html>
