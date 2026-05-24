@@ -209,15 +209,31 @@ function viewerHtml(openPath, initialWidth = 1080, initialHeight = 1920) {
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Render HTML Viewer</title>
 <style>
+:root {
+  --bg: #050505;
+  --panel: #111111;
+  --panel-raised: #181818;
+  --control: #202020;
+  --control-hover: #2a2a2a;
+  --control-active: #333333;
+  --line: #2d2d2d;
+  --line-strong: #3a3a3a;
+  --text: #f2f2f2;
+  --muted: #a3a3a3;
+  --muted-strong: #c7c7c7;
+  --accent: #f5f5f5;
+  --focus: rgba(255,255,255,0.34);
+}
 * { box-sizing: border-box; }
 html, body {
   margin: 0;
   width: 100%;
   height: 100%;
   overflow: hidden;
-  background: #101317;
-  color: #e5e7eb;
-  font-family: Arial, Helvetica, sans-serif;
+  background: var(--bg);
+  color: var(--text);
+  font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  font-size: 14px;
 }
 body {
   display: grid;
@@ -230,23 +246,21 @@ body.fullscreen-active {
   min-height: 0;
   display: grid;
   place-items: center;
-  padding: 16px;
-  background:
-    linear-gradient(90deg, rgba(255,255,255,0.04) 1px, transparent 1px),
-    linear-gradient(0deg, rgba(255,255,255,0.04) 1px, transparent 1px),
-    #101317;
-  background-size: 32px 32px;
+  padding: 18px;
+  background: #3a3a3a;
 }
 body.fullscreen-active #frame-wrap {
   padding: 0;
 }
 #preview-shell {
-  border: 1px solid rgba(255,255,255,0.16);
+  border: 1px solid var(--line-strong);
   background: #000;
   overflow: hidden;
+  box-shadow: 0 22px 70px rgba(0,0,0,0.62), 0 0 0 1px rgba(255,255,255,0.025);
 }
 body.fullscreen-active #preview-shell {
   border: 0;
+  box-shadow: none;
 }
 #preview {
   border: 0;
@@ -256,11 +270,12 @@ body.fullscreen-active #preview-shell {
 #controls {
   display: grid;
   grid-template-columns: auto auto auto 1fr auto auto auto auto auto auto auto auto;
-  gap: 12px;
+  gap: 10px;
   align-items: center;
-  padding: 12px 16px;
-  border-top: 1px solid rgba(255,255,255,0.12);
-  background: #181d24;
+  padding: 12px 14px 14px;
+  border-top: 1px solid var(--line);
+  background: color-mix(in srgb, var(--panel) 94%, #fff 6%);
+  box-shadow: 0 -16px 50px rgba(0,0,0,0.34);
 }
 body.fullscreen-active #controls {
   position: fixed;
@@ -281,34 +296,78 @@ body.fullscreen-active #controls:hover {
   grid-column: 1 / -1;
   display: grid;
   grid-template-columns: 1fr auto auto;
-  gap: 10px;
+  gap: 8px;
 }
 #current-file {
   min-width: 0;
-  padding: 9px 11px;
-  border: 1px solid rgba(255,255,255,0.12);
+  height: 38px;
+  padding: 9px 12px;
+  border: 1px solid var(--line);
   border-radius: 6px;
-  background: #111820;
-  color: #cbd5e1;
+  background: #0b0b0b;
+  color: var(--muted-strong);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+  line-height: 18px;
+  box-shadow: inset 0 1px 0 rgba(255,255,255,0.03);
 }
 input, button, select {
   font: inherit;
-  color: #e5e7eb;
-  background: #242b35;
-  border: 1px solid rgba(255,255,255,0.16);
+  color: var(--text);
+  background: var(--control);
+  border: 1px solid var(--line-strong);
   border-radius: 6px;
+  outline: none;
 }
 button {
+  min-height: 38px;
   padding: 9px 13px;
   cursor: pointer;
+  font-weight: 520;
+  letter-spacing: 0;
+  transition: background 120ms ease, border-color 120ms ease, transform 120ms ease;
 }
-button:hover { background: #2d3541; }
+button:hover {
+  background: var(--control-hover);
+  border-color: #4a4a4a;
+}
+button:active {
+  background: var(--control-active);
+  transform: translateY(1px);
+}
+button:focus-visible,
+input:focus-visible,
+select:focus-visible {
+  border-color: #6a6a6a;
+  box-shadow: 0 0 0 3px var(--focus);
+}
+#play {
+  min-width: 74px;
+  background: #ededed;
+  border-color: #ededed;
+  color: #050505;
+}
+#play:hover {
+  background: #ffffff;
+  border-color: #ffffff;
+}
+#load,
+#reload,
+#fullscreen {
+  background: var(--panel-raised);
+}
 input[type="text"] {
   width: 100%;
+  height: 38px;
   padding: 9px 11px;
+  background: #0c0c0c;
+}
+select {
+  height: 38px;
+  padding: 0 34px 0 10px;
+  color: var(--muted-strong);
+  cursor: pointer;
 }
 #seek-time {
   width: 108px;
@@ -326,28 +385,57 @@ input[type="range"] {
   flex: 1 1 auto;
   min-width: 0;
   width: 100%;
+  height: 22px;
+  accent-color: var(--accent);
   cursor: pointer;
+}
+input[type="range"]::-webkit-slider-runnable-track {
+  height: 4px;
+  border-radius: 999px;
+  background: #3a3a3a;
+}
+input[type="range"]::-webkit-slider-thumb {
+  width: 14px;
+  height: 14px;
+  margin-top: -5px;
+  border-radius: 50%;
+  background: #f4f4f4;
+  border: 1px solid #ffffff;
+  box-shadow: 0 1px 8px rgba(0,0,0,0.55);
+}
+input[type="range"]::-moz-range-track {
+  height: 4px;
+  border-radius: 999px;
+  background: #3a3a3a;
+}
+input[type="range"]::-moz-range-thumb {
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  background: #f4f4f4;
+  border: 1px solid #ffffff;
+  box-shadow: 0 1px 8px rgba(0,0,0,0.55);
 }
 #interactive-marker,
 #game-marker {
   flex: 0 0 auto;
   position: relative;
-  width: 18px;
-  height: 18px;
-  border: 2px solid #04110d;
+  width: 14px;
+  height: 14px;
+  border: 1px solid rgba(255,255,255,0.75);
   display: none;
   pointer-events: auto;
   cursor: pointer;
 }
 #interactive-marker {
   border-radius: 50%;
-  background: #facc15;
-  box-shadow: 0 0 16px rgba(250,204,21,0.9);
+  background: #d6d6d6;
+  box-shadow: 0 0 0 4px rgba(255,255,255,0.12);
 }
 #game-marker {
   border-radius: 5px;
-  background: #22c55e;
-  box-shadow: 0 0 16px rgba(34,197,94,0.9);
+  background: #8d8d8d;
+  box-shadow: 0 0 0 4px rgba(255,255,255,0.1);
   transform: rotate(45deg);
 }
 #interactive-marker.visible {
@@ -360,15 +448,15 @@ input[type="range"] {
   min-width: 128px;
   text-align: right;
   font-variant-numeric: tabular-nums;
-  color: #cbd5e1;
+  color: var(--muted-strong);
 }
 #status {
-  color: #94a3b8;
+  color: var(--muted);
   white-space: nowrap;
   display: none;
 }
 #viewport {
-  color: #94a3b8;
+  color: var(--muted);
   font-variant-numeric: tabular-nums;
   white-space: nowrap;
   display: none;
@@ -999,9 +1087,42 @@ function seekFromPointer(event) {
   seekTo(ratio * playback.duration);
 }
 
+function handleViewerShortcut(event) {
+  const isSpace = event.code === 'Space' || event.key === ' ' || event.key === 'Spacebar';
+  const target = event.target;
+  const isTextInput = target instanceof HTMLInputElement ||
+    target instanceof HTMLTextAreaElement ||
+    target instanceof HTMLSelectElement ||
+    target?.isContentEditable;
+
+  if (event.ctrlKey && isSpace) {
+    event.preventDefault();
+    event.stopPropagation();
+    togglePlay();
+  } else if (isTextInput) {
+    return;
+  } else if (isSpace) {
+    event.preventDefault();
+    event.stopPropagation();
+  } else if (event.ctrlKey && event.key === 'ArrowRight') {
+    event.preventDefault();
+    event.stopPropagation();
+    seekBy(5);
+  } else if (event.ctrlKey && event.key === 'ArrowLeft') {
+    event.preventDefault();
+    event.stopPropagation();
+    seekBy(-5);
+  } else if (event.ctrlKey && event.key.toLowerCase() === 'f') {
+    event.preventDefault();
+    event.stopPropagation();
+    toggleFullscreen();
+  }
+}
+
 frame.addEventListener('load', () => {
   try {
     const win = frame.contentWindow;
+    win.addEventListener('keydown', handleViewerShortcut, true);
     const detectedViewport = detectDocumentViewport(win);
     if (detectedViewport) {
       setPreviewViewport(detectedViewport.width, detectedViewport.height);
@@ -1078,15 +1199,7 @@ document.addEventListener('mousemove', event => {
     hideFullscreenControls();
   }
 });
-document.addEventListener('keydown', event => {
-  if (event.code === 'Space') {
-    event.preventDefault();
-    togglePlay();
-  } else if (event.key.toLowerCase() === 'f') {
-    event.preventDefault();
-    toggleFullscreen();
-  }
-});
+document.addEventListener('keydown', handleViewerShortcut, true);
 window.addEventListener('resize', resizePreview);
 
 setCurrentFile(currentFilePath);
