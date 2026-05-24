@@ -65,6 +65,24 @@ Viewer features:
 - `Live TTS` is enabled by default and uses Chrome Web Speech only when a narration segment has no usable audio file.
 - Click the time bar or use the 5-second buttons to seek.
 
+The reusable playback engine lives in `packages/lecture-viewer/src/player/index.mjs`.
+Host UIs can import `createLecturePlayer()` and provide their own controls around an iframe:
+
+```js
+import { createLecturePlayer } from './packages/lecture-viewer/src/player/index.mjs';
+
+const player = createLecturePlayer({
+  iframe: document.querySelector('iframe'),
+  resolveSrc: src => src
+});
+
+await player.load('/lesson.html?export=1&viewer=1');
+player.play();
+player.seek(12.5);
+```
+
+The local viewer is now one host UI around that player core; server-only behavior such as `/pick`, `/files`, and `/viewer-state` stays in `scripts/viewer-server.mjs`.
+
 ## Rendering
 
 Render the visual-only Three.js fixture:
