@@ -100,7 +100,7 @@ End
 - Titles are blue (#61AFEF), bold, centered.
 
 ### Constraint
-- You should write the webpage following the constraints at: docs\html-input-contract.md
+- You should write the webpage following the constraints at: docs\html-input-contract-v0_1.md
 - Don't put any start button or overlay.
 ### Subtitle
 - DON'T Embed subtitle.

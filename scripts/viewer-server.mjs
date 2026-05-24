@@ -5,6 +5,7 @@ import path from 'node:path';
 
 const rootDir = process.cwd();
 const defaultPort = 4307;
+const viewerVersion = '0.1';
 
 function parseArgs(argv) {
   const args = {
@@ -253,9 +254,11 @@ body.fullscreen-active #frame-wrap {
   padding: 0;
 }
 #preview-shell {
+  position: relative;
   border: 1px solid var(--line-strong);
   background: #000;
   overflow: hidden;
+  container-type: size;
   box-shadow: 0 22px 70px rgba(0,0,0,0.62), 0 0 0 1px rgba(255,255,255,0.025);
 }
 body.fullscreen-active #preview-shell {
@@ -267,9 +270,31 @@ body.fullscreen-active #preview-shell {
   background: #000;
   transform-origin: 0 0;
 }
+#subtitle-overlay {
+  position: absolute;
+  left: 16%;
+  right: 16%;
+  bottom: clamp(12px, 3.5cqh, 38px);
+  z-index: 2;
+  display: none;
+  color: #bde7ff;
+  font-family: "Segoe UI", Inter, ui-sans-serif, system-ui, sans-serif;
+  font-size: clamp(10px, 1.25cqw, 16px);
+  font-weight: 520;
+  line-height: 1.32;
+  text-align: center;
+  text-wrap: balance;
+  text-shadow:
+    0 1px 2px rgba(0,0,0,0.95),
+    0 0 4px rgba(0,0,0,0.9);
+  pointer-events: none;
+}
+#subtitle-overlay.visible {
+  display: block;
+}
 #controls {
   display: grid;
-  grid-template-columns: auto auto auto 1fr auto auto auto auto auto auto auto auto;
+  grid-template-columns: auto auto auto 1fr auto auto auto auto auto auto;
   gap: 10px;
   align-items: center;
   padding: 12px 14px 14px;
@@ -295,7 +320,7 @@ body.fullscreen-active #controls:hover {
 #file-row {
   grid-column: 1 / -1;
   display: grid;
-  grid-template-columns: 1fr auto auto;
+  grid-template-columns: 1fr auto auto auto;
   gap: 8px;
 }
 #current-file {
@@ -354,8 +379,17 @@ select:focus-visible {
 }
 #load,
 #reload,
+#info,
+#subtitles-toggle,
+#live-tts-toggle,
 #fullscreen {
   background: var(--panel-raised);
+}
+#subtitles-toggle.active,
+#live-tts-toggle.active {
+  background: #ededed;
+  border-color: #ededed;
+  color: #050505;
 }
 input[type="text"] {
   width: 100%;
@@ -368,11 +402,6 @@ select {
   padding: 0 34px 0 10px;
   color: var(--muted-strong);
   cursor: pointer;
-}
-#seek-time {
-  width: 108px;
-  padding: 9px 11px;
-  font-variant-numeric: tabular-nums;
 }
 #scrub-wrap {
   position: relative;
@@ -461,17 +490,82 @@ input[type="range"]::-moz-range-thumb {
   white-space: nowrap;
   display: none;
 }
+#info-dialog {
+  position: fixed;
+  inset: 0;
+  z-index: 2000;
+  display: none;
+  place-items: center;
+  padding: 18px;
+  background: rgba(0,0,0,0.58);
+}
+#info-dialog.visible {
+  display: grid;
+}
+#info-panel {
+  width: min(560px, 100%);
+  max-height: min(720px, calc(100vh - 36px));
+  overflow: auto;
+  border: 1px solid var(--line-strong);
+  border-radius: 8px;
+  background: #101010;
+  box-shadow: 0 22px 70px rgba(0,0,0,0.62);
+}
+#info-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 14px 16px;
+  border-bottom: 1px solid var(--line);
+}
+#info-title {
+  font-weight: 650;
+  color: var(--text);
+}
+#info-close {
+  min-height: 32px;
+  padding: 5px 10px;
+}
+#info-content {
+  display: grid;
+  grid-template-columns: max-content 1fr;
+  gap: 8px 16px;
+  padding: 16px;
+}
+#info-content dt {
+  color: var(--muted);
+}
+#info-content dd {
+  min-width: 0;
+  margin: 0;
+  color: var(--muted-strong);
+  overflow-wrap: anywhere;
+}
+#info-branding {
+  padding: 12px 16px 14px;
+  border-top: 1px solid var(--line);
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.4;
+}
+#info-branding strong {
+  color: var(--muted-strong);
+  font-weight: 620;
+}
 </style>
 </head>
 <body>
 <main id="frame-wrap">
   <div id="preview-shell">
     <iframe id="preview" title="Render preview"></iframe>
+    <div id="subtitle-overlay" aria-live="polite"></div>
   </div>
 </main>
 <section id="controls">
   <div id="file-row">
     <div id="current-file">${escapeHtml(normalizedOpenPath || 'No file selected')}</div>
+    <button id="info" type="button">Info</button>
     <button id="load">Load</button>
     <button id="reload">Reload</button>
   </div>
@@ -484,8 +578,8 @@ input[type="range"]::-moz-range-thumb {
     <div id="game-marker" title="Game segment"></div>
   </div>
   <div id="time">0.00 / 0.00</div>
-  <input id="seek-time" type="text" placeholder="1:23.5">
-  <button id="seek-go">Go</button>
+  <button id="subtitles-toggle" type="button" aria-pressed="true">Subtitles</button>
+  <button id="live-tts-toggle" type="button" aria-pressed="true">Live TTS</button>
   <select id="speed">
     <option value="0.5">0.5x</option>
     <option value="1" selected>1x</option>
@@ -501,12 +595,28 @@ input[type="range"]::-moz-range-thumb {
   <div id="viewport">${safeInitialWidth}x${safeInitialHeight}</div>
   <div id="status">No file loaded</div>
 </section>
+<div id="info-dialog" role="dialog" aria-modal="true" aria-labelledby="info-title">
+  <div id="info-panel">
+    <div id="info-header">
+      <div id="info-title">Video Info</div>
+      <button id="info-close" type="button">Close</button>
+    </div>
+    <dl id="info-content"></dl>
+    <div id="info-branding">
+      Copyright 2026, <strong>mylecture.ai</strong>, Touhidul Islam.
+    </div>
+  </div>
+</div>
 <script>
 const frameWrap = document.getElementById('frame-wrap');
 const previewShell = document.getElementById('preview-shell');
 const frame = document.getElementById('preview');
 const controls = document.getElementById('controls');
 const currentFileLabel = document.getElementById('current-file');
+const infoButton = document.getElementById('info');
+const infoDialog = document.getElementById('info-dialog');
+const infoCloseButton = document.getElementById('info-close');
+const infoContent = document.getElementById('info-content');
 const loadButton = document.getElementById('load');
 const reloadButton = document.getElementById('reload');
 const playButton = document.getElementById('play');
@@ -516,19 +626,23 @@ const scrubber = document.getElementById('scrub');
 const interactiveMarker = document.getElementById('interactive-marker');
 const gameMarker = document.getElementById('game-marker');
 const timeReadout = document.getElementById('time');
-const seekTimeInput = document.getElementById('seek-time');
-const seekGoButton = document.getElementById('seek-go');
+const subtitlesToggle = document.getElementById('subtitles-toggle');
+const liveTtsToggle = document.getElementById('live-tts-toggle');
+const subtitleOverlay = document.getElementById('subtitle-overlay');
 const speedSelect = document.getElementById('speed');
 const viewportPreset = document.getElementById('viewport-preset');
 const fullscreenButton = document.getElementById('fullscreen');
 const viewportText = document.getElementById('viewport');
 const statusText = document.getElementById('status');
+const VIEWER_VERSION = '${escapeJsString(viewerVersion)}';
 let currentFilePath = '${escapeJsString(normalizedOpenPath)}';
 let viewerCommandVersion = 0;
+let videoMetadata = {};
 let renderViewport = {
   width: ${safeInitialWidth},
   height: ${safeInitialHeight}
 };
+let userViewportOverride = false;
 
 let playback = {
   loaded: false,
@@ -540,13 +654,18 @@ let playback = {
   raf: 0,
   timeline: [],
   audioTimeline: [],
+  subtitleTimeline: [],
   interactiveTimeline: [],
   gameTimeline: [],
   audio: null,
   audioCue: null,
+  audioFailures: new Set(),
+  speechSegmentKey: '',
   completed: false,
   interactiveActive: false,
-  gameActive: false
+  gameActive: false,
+  subtitlesEnabled: true,
+  liveTtsEnabled: true
 };
 let controlsHideTimer = 0;
 
@@ -622,8 +741,107 @@ function detectDocumentViewport(win) {
   return null;
 }
 
+function viewportFromAspectRatio(aspectRatio) {
+  const normalized = String(aspectRatio || '').trim();
+  const presets = {
+    '9:16': { width: 1080, height: 1920 },
+    '16:9': { width: 1920, height: 1080 },
+    '1:1': { width: 1080, height: 1080 },
+    '4:5': { width: 1080, height: 1350 }
+  };
+  if (presets[normalized]) return presets[normalized];
+
+  const match = normalized.match(/^(\\d+(?:\\.\\d+)?):(\\d+(?:\\.\\d+)?)$/);
+  if (!match) return null;
+
+  const widthRatio = Number(match[1]);
+  const heightRatio = Number(match[2]);
+  if (!Number.isFinite(widthRatio) || !Number.isFinite(heightRatio) || widthRatio <= 0 || heightRatio <= 0) {
+    return null;
+  }
+
+  const longEdge = 1920;
+  if (widthRatio >= heightRatio) {
+    return {
+      width: longEdge,
+      height: Math.round(longEdge * heightRatio / widthRatio)
+    };
+  }
+
+  return {
+    width: Math.round(longEdge * widthRatio / heightRatio),
+    height: longEdge
+  };
+}
+
+function detectMetadataViewport(win) {
+  return viewportFromAspectRatio(win.__VIDEO_METADATA__?.aspectRatio);
+}
+
 function setStatus(message) {
   statusText.textContent = message;
+}
+
+function formatMetadataKey(key) {
+  if (key === 'viewerVersion') return 'Viewer version';
+  if (key === 'lastResolved') return 'Last rendered';
+  return String(key)
+    .replace(/([a-z0-9])([A-Z])/g, '$1 $2')
+    .replace(/[_-]+/g, ' ')
+    .replace(/^./, char => char.toUpperCase());
+}
+
+function formatMetadataValue(key, value) {
+  if (key === 'lastResolved' && value) {
+    const date = new Date(value);
+    if (!Number.isNaN(date.getTime())) {
+      return date.toLocaleString(undefined, {
+        year: 'numeric',
+        month: 'short',
+        day: 'numeric',
+        hour: 'numeric',
+        minute: '2-digit',
+        second: '2-digit',
+        timeZoneName: 'short'
+      });
+    }
+  }
+
+  if (Array.isArray(value)) return value.join(', ');
+  if (value && typeof value === 'object') return JSON.stringify(value);
+  if (value === undefined || value === null || value === '') return 'Not set';
+  return String(value);
+}
+
+function renderInfoDialog() {
+  infoContent.textContent = '';
+  const rows = [
+    ['viewerVersion', VIEWER_VERSION],
+    ...Object.entries(videoMetadata || {})
+  ];
+
+  if (rows.length === 1) {
+    rows.push(['metadata', 'No video metadata found']);
+  }
+
+  for (const [key, value] of rows) {
+    const term = document.createElement('dt');
+    term.textContent = formatMetadataKey(key);
+    const detail = document.createElement('dd');
+    detail.textContent = formatMetadataValue(key, value);
+    infoContent.append(term, detail);
+  }
+}
+
+function openInfoDialog() {
+  renderInfoDialog();
+  infoDialog.classList.add('visible');
+  infoCloseButton.focus();
+}
+
+function closeInfoDialog() {
+  infoDialog.classList.remove('visible');
+  infoButton.focus();
 }
 
 function isFullscreenActive() {
@@ -679,23 +897,13 @@ function updateControls() {
   scrubber.max = String(playback.duration || 1);
   scrubber.value = String(playback.time || 0);
   timeReadout.textContent = formatTime(playback.time) + ' / ' + formatTime(playback.duration);
-  if (document.activeElement !== seekTimeInput) {
-    seekTimeInput.value = playback.loaded ? formatTime(playback.time) : '';
-  }
   playButton.textContent = playback.playing ? 'Pause' : 'Play';
+  subtitlesToggle.classList.toggle('active', playback.subtitlesEnabled);
+  subtitlesToggle.setAttribute('aria-pressed', playback.subtitlesEnabled ? 'true' : 'false');
+  liveTtsToggle.classList.toggle('active', playback.liveTtsEnabled);
+  liveTtsToggle.setAttribute('aria-pressed', playback.liveTtsEnabled ? 'true' : 'false');
   interactiveMarker.classList.toggle('visible', playback.interactiveTimeline.length > 0);
   gameMarker.classList.toggle('visible', playback.gameTimeline.length > 0);
-}
-
-function parseTime(value) {
-  const text = String(value || '').trim();
-  if (!text) return NaN;
-  const parts = text.split(':').map(Number);
-  if (parts.some(part => !Number.isFinite(part))) return NaN;
-  if (parts.length === 1) return parts[0];
-  if (parts.length === 2) return parts[0] * 60 + parts[1];
-  if (parts.length === 3) return parts[0] * 3600 + parts[1] * 60 + parts[2];
-  return NaN;
 }
 
 function fileUrl(filePath) {
@@ -704,7 +912,11 @@ function fileUrl(filePath) {
 }
 
 function setCurrentFile(filePath) {
-  currentFilePath = String(filePath || '').replaceAll('\\\\', '/');
+  const nextFilePath = String(filePath || '').replaceAll('\\\\', '/');
+  if (nextFilePath !== currentFilePath) {
+    userViewportOverride = false;
+  }
+  currentFilePath = nextFilePath;
   currentFileLabel.textContent = currentFilePath || 'No file selected';
   currentFileLabel.title = currentFilePath;
 }
@@ -790,11 +1002,23 @@ function buildGameTimeline(win) {
 
 function buildAudioTimeline(win, videoTimeline) {
   if (Array.isArray(win.__AUDIO_TIMELINE__) && win.__AUDIO_TIMELINE__.length) {
-    return win.__AUDIO_TIMELINE__;
+    return win.__AUDIO_TIMELINE__.map(cue => {
+      const videoCue = videoTimeline.find(candidate => candidate.item?.id === cue.sectionId);
+      return {
+        ...cue,
+        text: cue.text || videoCue?.item?.text || ''
+      };
+    });
   }
 
   if (Array.isArray(win.__RESOLVED_TIMELINE__?.audioTimeline) && win.__RESOLVED_TIMELINE__.audioTimeline.length) {
-    return win.__RESOLVED_TIMELINE__.audioTimeline;
+    return win.__RESOLVED_TIMELINE__.audioTimeline.map(cue => {
+      const videoCue = videoTimeline.find(candidate => candidate.item?.id === cue.sectionId);
+      return {
+        ...cue,
+        text: cue.text || videoCue?.item?.text || ''
+      };
+    });
   }
 
   return videoTimeline
@@ -803,8 +1027,50 @@ function buildAudioTimeline(win, videoTimeline) {
       start: cue.start,
       duration: cue.duration,
       src: cue.item.audio,
+      text: cue.item.text || '',
       sectionId: cue.item.id
     }));
+}
+
+function buildSubtitleTimeline(audioTimeline, videoTimeline) {
+  const audioSubtitleCues = audioTimeline
+    .filter(cue => String(cue.text || '').trim())
+    .map(cue => ({
+      start: Number(cue.start) || 0,
+      end: (Number(cue.start) || 0) + (Number(cue.duration) || 0),
+      text: String(cue.text || '').trim(),
+      sectionId: cue.sectionId || ''
+    }))
+    .filter(cue => cue.end > cue.start);
+
+  const audioSectionIds = new Set(audioSubtitleCues.map(cue => cue.sectionId).filter(Boolean));
+  const videoSubtitleCues = videoTimeline
+    .filter(cue => String(cue.item?.text || '').trim())
+    .filter(cue => !audioSectionIds.has(cue.item?.id))
+    .map(cue => ({
+      start: Number(cue.start) || 0,
+      end: Number(cue.end) || ((Number(cue.start) || 0) + (Number(cue.duration) || 0)),
+      text: String(cue.item.text || '').trim(),
+      sectionId: cue.item.id || ''
+    }))
+    .filter(cue => cue.end > cue.start);
+
+  return [...audioSubtitleCues, ...videoSubtitleCues].sort((a, b) => a.start - b.start);
+}
+
+function updateSubtitleOverlay() {
+  if (!playback.subtitlesEnabled || playback.interactiveActive || playback.gameActive) {
+    subtitleOverlay.textContent = '';
+    subtitleOverlay.classList.remove('visible');
+    return;
+  }
+
+  const activeSubtitle = playback.subtitleTimeline.find(cue =>
+    playback.time >= cue.start && playback.time < cue.end
+  );
+  const text = activeSubtitle?.text || '';
+  subtitleOverlay.textContent = text;
+  subtitleOverlay.classList.toggle('visible', Boolean(text));
 }
 
 function audioUrl(src) {
@@ -818,23 +1084,96 @@ function stopAudio() {
   playback.audioCue = null;
 }
 
-function syncAudio() {
-  if (!playback.playing) return;
+function stopLiveTts() {
+  playback.speechSegmentKey = '';
+  if ('speechSynthesis' in window) {
+    window.speechSynthesis.cancel();
+  }
+}
 
-  const cue = playback.audioTimeline.find(candidate =>
-    playback.time >= candidate.start && playback.time < candidate.start + candidate.duration
+function activeVideoCue() {
+  let cue = null;
+  for (const candidate of playback.timeline) {
+    if (candidate.start <= playback.time && playback.time < candidate.end) cue = candidate;
+    if (candidate.start > playback.time) break;
+  }
+  return cue;
+}
+
+function activeAudioCue() {
+  return playback.audioTimeline.find(candidate =>
+    playback.time >= candidate.start &&
+    playback.time < candidate.start + candidate.duration &&
+    !playback.audioFailures.has(audioCueKey(candidate))
   );
+}
 
-  if (!cue) {
-    stopAudio();
+function audioCueKey(cue) {
+  return cue?.sectionId || cue?.src || String(cue?.start || '');
+}
+
+function syncLiveTts() {
+  if (!playback.playing || !playback.liveTtsEnabled || !('speechSynthesis' in window)) {
+    stopLiveTts();
     return;
   }
 
+  const cue = activeVideoCue();
+  const text = String(cue?.item?.text || '').trim();
+  if (!cue || !text || playback.interactiveActive || playback.gameActive) {
+    stopLiveTts();
+    return;
+  }
+
+  const key = cue.item?.id || String(cue.start);
+  if (playback.speechSegmentKey === key) return;
+
+  stopLiveTts();
+  playback.speechSegmentKey = key;
+  const utterance = new SpeechSynthesisUtterance(text);
+  const voice = selectLiveTtsVoice();
+  utterance.lang = 'en-GB';
+  if (voice) utterance.voice = voice;
+  utterance.rate = Math.max(0.5, Math.min(2, Number(speedSelect.value) || 1));
+  utterance.onerror = () => {
+    if (playback.speechSegmentKey === key) playback.speechSegmentKey = '';
+    setStatus('Live TTS unavailable in this browser');
+  };
+  window.speechSynthesis.speak(utterance);
+}
+
+function selectLiveTtsVoice() {
+  if (!('speechSynthesis' in window)) return null;
+  const voices = window.speechSynthesis.getVoices();
+  const enGbVoices = voices.filter(voice => String(voice.lang || '').toLowerCase().startsWith('en-gb'));
+  return enGbVoices.find(voice => /female|woman|zira|susan|serena|sonia|hazel|libby/i.test(voice.name)) ||
+    enGbVoices[0] ||
+    voices.find(voice => /female|woman|zira|susan|serena|sonia|hazel|libby/i.test(voice.name)) ||
+    null;
+}
+
+function syncAudio() {
+  if (!playback.playing) return;
+
+  const cue = activeAudioCue();
+
+  if (!cue) {
+    stopAudio();
+    syncLiveTts();
+    return;
+  }
+
+  stopLiveTts();
   const offset = playback.time - cue.start;
   if (playback.audioCue !== cue) {
     stopAudio();
     playback.audioCue = cue;
     playback.audio = new Audio(audioUrl(cue.src));
+    playback.audio.addEventListener('error', () => {
+      playback.audioFailures.add(audioCueKey(cue));
+      stopAudio();
+      syncLiveTts();
+    }, { once: true });
     playback.audio.playbackRate = Number(speedSelect.value) || 1;
     playback.audio.currentTime = Math.max(0, offset);
     playback.audio.play().catch(() => setStatus('Audio blocked until play is clicked again'));
@@ -875,6 +1214,7 @@ function renderAt(time) {
   }
 
   updateControls();
+  updateSubtitleOverlay();
   syncAudio();
 }
 
@@ -933,6 +1273,7 @@ function pause() {
   playback.playing = false;
   cancelAnimationFrame(playback.raf);
   stopAudio();
+  stopLiveTts();
   updateControls();
 }
 
@@ -942,12 +1283,16 @@ function startInteractiveSection() {
   if (playback.gameActive) stopGameSection();
   if (interactive && typeof win.__START_INTERACTIVE__ === 'function') {
     playback.interactiveActive = true;
+    stopLiveTts();
+    updateSubtitleOverlay();
     win.__START_INTERACTIVE__(interactive);
     setStatus('Interactive: ' + (interactive.title || interactive.id || 'ready'));
     return;
   }
   if (typeof win.__ON_VIEWER_COMPLETE__ === 'function') {
     playback.interactiveActive = true;
+    stopLiveTts();
+    updateSubtitleOverlay();
     win.__ON_VIEWER_COMPLETE__(interactive);
     setStatus('Interactive ready');
   }
@@ -959,6 +1304,8 @@ function startGameSection() {
   if (playback.interactiveActive) stopInteractiveSection();
   if (game && typeof win.__START_GAME__ === 'function') {
     playback.gameActive = true;
+    stopLiveTts();
+    updateSubtitleOverlay();
     win.__START_GAME__(game);
     setStatus('Game: ' + (game.title || game.id || 'ready'));
   }
@@ -973,7 +1320,8 @@ function seekTo(time, resume = playback.playing) {
   const shouldResume = Boolean(resume && playback.loaded);
   playback.playing = false;
   cancelAnimationFrame(playback.raf);
-  if (!shouldResume) stopAudio();
+  stopAudio();
+  stopLiveTts();
 
   renderAt(time);
   playback.completed = playback.time >= playback.duration;
@@ -1024,11 +1372,16 @@ async function loadFile(filePath = currentFilePath) {
   playback.gameActive = false;
   playback.duration = 0;
   playback.time = 0;
+  videoMetadata = {};
   playback.timeline = [];
   playback.audioTimeline = [];
+  playback.audioFailures = new Set();
+  playback.subtitleTimeline = [];
   playback.interactiveTimeline = [];
   playback.gameTimeline = [];
   stopAudio();
+  stopLiveTts();
+  updateSubtitleOverlay();
   updateControls();
   setStatus('Loading...');
 
@@ -1069,15 +1422,6 @@ async function pollViewerCommands() {
   } catch {
     // The viewer can keep running even if a transient poll fails.
   }
-}
-
-function seekToInput() {
-  const target = parseTime(seekTimeInput.value);
-  if (!Number.isFinite(target)) {
-    setStatus('Enter time as seconds, mm:ss, or hh:mm:ss');
-    return;
-  }
-  seekTo(target);
 }
 
 function seekFromPointer(event) {
@@ -1123,13 +1467,19 @@ frame.addEventListener('load', () => {
   try {
     const win = frame.contentWindow;
     win.addEventListener('keydown', handleViewerShortcut, true);
-    const detectedViewport = detectDocumentViewport(win);
+    videoMetadata = win.__VIDEO_METADATA__ && typeof win.__VIDEO_METADATA__ === 'object'
+      ? { ...win.__VIDEO_METADATA__ }
+      : {};
+    const detectedViewport = userViewportOverride
+      ? null
+      : (detectMetadataViewport(win) || detectDocumentViewport(win));
     if (detectedViewport) {
       setPreviewViewport(detectedViewport.width, detectedViewport.height);
     }
 
     playback.timeline = buildPreviewTimeline(win);
     playback.audioTimeline = buildAudioTimeline(win, playback.timeline);
+    playback.subtitleTimeline = buildSubtitleTimeline(playback.audioTimeline, playback.timeline);
     playback.interactiveTimeline = buildInteractiveTimeline(win);
     playback.gameTimeline = buildGameTimeline(win);
     playback.duration = Number(win.__VIDEO_DURATION__) ||
@@ -1150,10 +1500,32 @@ frame.addEventListener('load', () => {
 });
 
 loadButton.addEventListener('click', pickAndLoadFile);
+infoButton.addEventListener('click', openInfoDialog);
+infoCloseButton.addEventListener('click', closeInfoDialog);
+infoDialog.addEventListener('click', event => {
+  if (event.target === infoDialog) closeInfoDialog();
+});
 reloadButton.addEventListener('click', () => loadFile());
 playButton.addEventListener('click', togglePlay);
 seekBackButton.addEventListener('click', () => seekBy(-5));
 seekForwardButton.addEventListener('click', () => seekBy(5));
+subtitlesToggle.addEventListener('click', () => {
+  playback.subtitlesEnabled = !playback.subtitlesEnabled;
+  updateControls();
+  updateSubtitleOverlay();
+});
+liveTtsToggle.addEventListener('click', () => {
+  playback.liveTtsEnabled = !playback.liveTtsEnabled;
+  if (!playback.liveTtsEnabled) {
+    stopLiveTts();
+  } else if (!('speechSynthesis' in window)) {
+    playback.liveTtsEnabled = false;
+    setStatus('Live TTS unavailable in this browser');
+  } else {
+    syncAudio();
+  }
+  updateControls();
+});
 scrubber.addEventListener('input', event => {
   seekTo(Number(event.target.value));
 });
@@ -1179,14 +1551,20 @@ gameMarker.addEventListener('click', event => {
   event.stopPropagation();
   seekToGame();
 });
-seekGoButton.addEventListener('click', seekToInput);
-seekTimeInput.addEventListener('keydown', event => {
-  if (event.key === 'Enter') seekToInput();
+speedSelect.addEventListener('change', () => {
+  if (playback.speechSegmentKey) {
+    const currentTime = playback.time;
+    stopLiveTts();
+    if (playback.playing) {
+      renderAt(currentTime);
+    }
+  }
 });
 viewportPreset.addEventListener('change', event => {
   const value = event.target.value;
   if (value === 'custom') return;
   const [width, height] = value.split('x').map(Number);
+  userViewportOverride = true;
   setPreviewViewport(width, height, true);
 });
 fullscreenButton.addEventListener('click', toggleFullscreen);
@@ -1200,6 +1578,15 @@ document.addEventListener('mousemove', event => {
   }
 });
 document.addEventListener('keydown', handleViewerShortcut, true);
+document.addEventListener('keydown', event => {
+  if (event.key === 'Escape' && infoDialog.classList.contains('visible')) {
+    event.preventDefault();
+    closeInfoDialog();
+  }
+});
+if ('speechSynthesis' in window) {
+  window.speechSynthesis.onvoiceschanged = () => {};
+}
 window.addEventListener('resize', resizePreview);
 
 setCurrentFile(currentFilePath);

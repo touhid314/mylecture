@@ -1,6 +1,6 @@
 # Video Rendering
 
-For the HTML generation contract, see [`html-input-contract.md`](./html-input-contract.md).
+For the HTML generation contract, see [`html-input-contract-v0_1.md`](./html-input-contract-v0_1.md).
 
 Render the current standalone HTML file to MP4:
 

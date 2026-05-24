@@ -1,12 +1,48 @@
-# HTML Input Contract
-Rules for source HTML files accepted by the renderer pipeline.
+# HTML Input Contract - v0.1
+Rules for source HTML files accepted by the renderer pipeline. 
 
 ## Required Globals
 The HTML must define:
 
 ```js
+window.__VIDEO_METADATA__
 window.__VIDEO_PLAN__
 window.__RENDER_SECTION__
+```
+
+## Video Metadata
+
+Source HTML must define exactly these fields:
+
+```js
+window.__VIDEO_METADATA__ = {
+  contractVersion: "0.1",
+  title: "Dijkstra's Algorithm Explained",
+  aspectRatio: "9:16"
+};
+```
+
+Rules:
+
+```text
+contractVersion must be "0.1"
+title must be a non-empty string
+aspectRatio must be a string such as "9:16", "16:9", "1:1", or "4:5"
+source HTML must not include renderer execution settings such as width, height, or fps
+source HTML should not define lastResolved manually
+```
+
+Resolved HTML adds one resolver-owned field:
+
+```js
+lastResolved: "2026-05-24T12:34:56.789Z"
+```
+
+Rules:
+
+```text
+lastResolved is written by the resolver
+lastResolved must be an ISO 8601 UTC timestamp
 ```
 
 ## Segment Kinds

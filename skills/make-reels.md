@@ -49,7 +49,7 @@ End
 - Don't put content in: top 15%, bottom 20%. Center 65% = safe for key content. Because it will be uploaded to fb/insta/yt reels/shorts.
 - Example theme: inputs\bloomfilter-modifier\index.html
 ### Constraint
-- You should write the webpage following the constraints at: docs\html-input-contract.md
+- You should write the webpage following the constraints at: docs\html-input-contract-v0_1.md
 - Don't put any start button or overlay.
 ### Subtitle
 - Embed subtitle.

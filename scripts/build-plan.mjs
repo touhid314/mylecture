@@ -317,7 +317,7 @@ async function resolveTimeline(plan, inputPath, outputPath, args) {
   };
 }
 
-function writeResolvedHtml(inputPath, outputPath, timeline) {
+function writeResolvedHtml(inputPath, outputPath, timeline, resolvedAt = new Date().toISOString()) {
   const source = readFileSync(inputPath, 'utf8');
   const sourceDir = path.dirname(inputPath);
   const outputDir = path.dirname(outputPath);
@@ -333,6 +333,9 @@ function writeResolvedHtml(inputPath, outputPath, timeline) {
     '  transition: none !important;',
     '}',
     '</style>',
+    '<script id="resolved-metadata">',
+    `window.__VIDEO_METADATA__ = { ...(window.__VIDEO_METADATA__ || {}), lastResolved: ${jsString(resolvedAt)} };`,
+    '</script>',
     '<script id="resolved-timeline">',
     `window.__RESOLVED_TIMELINE__ = ${jsString(timeline)};`,
     '</script>',
