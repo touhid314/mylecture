@@ -94,13 +94,26 @@ function sendText(response, status, body, contentType = 'text/plain; charset=utf
   response.end(body);
 }
 
+function sendJson(response, status, payload) {
+  sendText(response, status, JSON.stringify(payload), 'application/json; charset=utf-8');
+}
+
+function resolveInputPath(inputPath) {
+  return path.isAbsolute(inputPath) ? path.resolve(inputPath) : path.resolve(rootDir, inputPath);
+}
+
+function normalizeOpenPath(inputPath) {
+  const resolvedPath = resolveInputPath(inputPath);
+  if (!existsSync(resolvedPath) || !statSync(resolvedPath).isFile()) {
+    throw new Error(`File does not exist: ${inputPath}`);
+  }
+  return resolvedPath.replaceAll(path.sep, '/');
+}
+
 function resolveWorkspacePath(urlPath) {
   const rawPath = decodeURIComponent(urlPath.replace(/^\/files\/?/, ''));
-  const resolvedPath = path.resolve(rootDir, rawPath || '.');
-  if (resolvedPath !== rootDir && !resolvedPath.startsWith(rootDir + path.sep)) {
-    return null;
-  }
-  return resolvedPath;
+  if (!rawPath) return rootDir;
+  return resolveInputPath(rawPath);
 }
 
 function serveFile(request, response) {
@@ -178,14 +191,11 @@ async function pickHtmlFile() {
   if (!selectedPath) return null;
 
   const resolvedPath = path.resolve(selectedPath);
-  if (resolvedPath !== rootDir && !resolvedPath.startsWith(rootDir + path.sep)) {
-    throw new Error('Selected file must be inside this repo workspace.');
-  }
   if (!existsSync(resolvedPath) || !statSync(resolvedPath).isFile()) {
     throw new Error('Selected file does not exist.');
   }
 
-  return path.relative(rootDir, resolvedPath).replaceAll(path.sep, '/');
+  return normalizeOpenPath(resolvedPath);
 }
 
 function viewerHtml(openPath, initialWidth = 1080, initialHeight = 1920) {
@@ -426,6 +436,7 @@ const fullscreenButton = document.getElementById('fullscreen');
 const viewportText = document.getElementById('viewport');
 const statusText = document.getElementById('status');
 let currentFilePath = '${escapeJsString(normalizedOpenPath)}';
+let viewerCommandVersion = 0;
 let renderViewport = {
   width: ${safeInitialWidth},
   height: ${safeInitialHeight}
@@ -953,6 +964,25 @@ async function pickAndLoadFile() {
   }
 }
 
+async function pollViewerCommands() {
+  try {
+    const response = await fetch('/viewer-state?since=' + viewerCommandVersion, { cache: 'no-store' });
+    if (!response.ok) return;
+    const payload = await response.json();
+    if (!payload.changed) return;
+
+    viewerCommandVersion = Number(payload.version) || viewerCommandVersion;
+    if (Number.isInteger(payload.width) && Number.isInteger(payload.height)) {
+      setPreviewViewport(payload.width, payload.height);
+    }
+    if (payload.path && payload.path !== currentFilePath) {
+      await loadFile(payload.path);
+    }
+  } catch {
+    // The viewer can keep running even if a transient poll fails.
+  }
+}
+
 function seekToInput() {
   const target = parseTime(seekTimeInput.value);
   if (!Number.isFinite(target)) {
@@ -1062,6 +1092,7 @@ window.addEventListener('resize', resizePreview);
 setCurrentFile(currentFilePath);
 resizePreview();
 if (currentFilePath) loadFile();
+setInterval(pollViewerCommands, 750);
 </script>
 </body>
 </html>`;
@@ -1084,18 +1115,87 @@ function escapeJsString(value) {
 }
 
 const args = parseArgs(process.argv.slice(2));
+const viewerState = {
+  version: 0,
+  path: args.openPath,
+  width: args.width,
+  height: args.height
+};
+
+async function pushFileToExistingViewer(args) {
+  const url = new URL(`http://127.0.0.1:${args.port}/open-file`);
+  url.searchParams.set('file', args.openPath);
+  url.searchParams.set('width', String(args.width));
+  url.searchParams.set('height', String(args.height));
+
+  const response = await fetch(url, { method: 'POST' });
+  const body = await response.text();
+  let payload = {};
+  try {
+    payload = body ? JSON.parse(body) : {};
+  } catch {
+    payload = { error: body };
+  }
+
+  if (!response.ok) {
+    throw new Error(payload.error || `Existing viewer returned HTTP ${response.status}`);
+  }
+
+  console.log(`Sent file to existing viewer on port ${args.port}: ${payload.path || args.openPath}`);
+}
+
 const server = createServer(async (request, response) => {
   const requestUrl = new URL(request.url, 'http://localhost');
 
   if (requestUrl.pathname === '/' || requestUrl.pathname === '/viewer') {
     const width = Number(requestUrl.searchParams.get('width')) || args.width;
     const height = Number(requestUrl.searchParams.get('height')) || args.height;
+    const openPath = requestUrl.searchParams.get('file') || viewerState.path || args.openPath;
     sendText(
       response,
       200,
-      viewerHtml(requestUrl.searchParams.get('file') || args.openPath, width, height),
+      viewerHtml(openPath, width, height),
       'text/html; charset=utf-8'
     );
+    return;
+  }
+
+  if (requestUrl.pathname === '/viewer-state') {
+    const since = Number(requestUrl.searchParams.get('since')) || 0;
+    sendJson(response, 200, {
+      changed: viewerState.version > since,
+      version: viewerState.version,
+      path: viewerState.path,
+      width: viewerState.width,
+      height: viewerState.height
+    });
+    return;
+  }
+
+  if (requestUrl.pathname === '/open-file') {
+    try {
+      const requestedPath = requestUrl.searchParams.get('file') || '';
+      if (!requestedPath) throw new Error('Missing file path.');
+
+      const width = Number(requestUrl.searchParams.get('width')) || viewerState.width;
+      const height = Number(requestUrl.searchParams.get('height')) || viewerState.height;
+      const normalizedPath = normalizeOpenPath(requestedPath);
+
+      viewerState.version++;
+      viewerState.path = normalizedPath;
+      viewerState.width = Number.isInteger(width) && width > 0 ? width : viewerState.width;
+      viewerState.height = Number.isInteger(height) && height > 0 ? height : viewerState.height;
+
+      sendJson(response, 200, {
+        ok: true,
+        version: viewerState.version,
+        path: viewerState.path,
+        width: viewerState.width,
+        height: viewerState.height
+      });
+    } catch (error) {
+      sendJson(response, 400, { error: error.message });
+    }
     return;
   }
 
@@ -1115,6 +1215,28 @@ const server = createServer(async (request, response) => {
   }
 
   sendText(response, 404, 'Not found');
+});
+
+server.on('error', error => {
+  if (error.code === 'EADDRINUSE' && args.openPath) {
+    pushFileToExistingViewer(args)
+      .then(() => process.exit(0))
+      .catch(pushError => {
+        console.error(`Port ${args.port} is already in use, but the existing viewer did not accept the file.`);
+        console.error(pushError.message);
+        process.exit(1);
+      });
+    return;
+  }
+
+  if (error.code === 'EADDRINUSE') {
+    console.error(`Port ${args.port} is already in use. Pass --file <path> to send a file to the existing viewer, or choose another --port.`);
+    process.exit(1);
+    return;
+  }
+
+  console.error(error.message);
+  process.exit(1);
 });
 
 server.listen(args.port, '127.0.0.1', () => {

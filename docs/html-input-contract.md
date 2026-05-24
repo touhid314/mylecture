@@ -1,9 +1,7 @@
 # HTML Input Contract
-
 Rules for source HTML files accepted by the renderer pipeline.
 
 ## Required Globals
-
 The HTML must define:
 
 ```js
@@ -12,7 +10,6 @@ window.__RENDER_SECTION__
 ```
 
 ## Segment Kinds
-
 Only these segment kinds are allowed:
 
 ```js
@@ -22,8 +19,7 @@ Only these segment kinds are allowed:
 "game"
 ```
 
-## `visual-only`
-
+1. `visual-only`
 Use for a segment with visuals and no voiceover.
 
 Allowed fields:
@@ -42,7 +38,7 @@ Rules:
 duration must be a positive number in seconds
 ```
 
-## `narration+visual`
+2. `narration+visual`
 
 Use for a segment with visuals and voiceover.
 
@@ -64,7 +60,7 @@ text is the narration script
 audio must be a relative .wav path
 ```
 
-## `interactive`
+3. `interactive`
 
 Use for an interactive section that should be available in the viewer after the renderable video timeline finishes.
 
@@ -88,7 +84,7 @@ the page should define window.__START_INTERACTIVE__(segment) to show the interac
 the viewer calls window.__START_INTERACTIVE__(segment) after playback reaches the end
 ```
 
-## `game`
+4. `game`
 
 Use for a playable practice section that should be available in the viewer after the renderable video timeline finishes.
 

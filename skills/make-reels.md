@@ -1,11 +1,14 @@
 # Task
-Make a video on the topic: {CDN, content delivery network}
+Make a video on the topic: {graph data structure}
 
 - Length: 130-140 words of narration.
 - Aspect ratio: 9:16 (vertical)
 
 # Workflow
 You will work in multi step method. First you write a best-effort draft, then you read it back and check against the requirement and improvise by editing the original.
+
+Don't read other files in the repo unless instructed here!
+
 ## Script writing
 - First make a script of the visual and the exact audio transcript. Then act upon it to make the html file. Make the visual plan very detailed, so that the visuals can be regenerated exactly by any agent.
 - Script is the most important part of the whole thing. Make sure the content is coherent, interesting and properly teaches a thing. 
