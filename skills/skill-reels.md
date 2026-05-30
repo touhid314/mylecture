@@ -74,3 +74,7 @@ outputs:
 ## What not to deliver  
 - You don't have to resolve. If later asked to resolve, use the command `npm run build:plan -- --input path/to/index.html --out path/to/resolved.html` to generate the resolved html from the index.html. 
 - You don't need to render the resolved html. If later asked to render, use command: `npm run render:video -- --html path/to/index.html --resolved-html path/to/resolved.html --out path/to/output.mp4`
+
+# when you are done
+open the viewer with the generated html file.
+read: `skills\skill-resolve-render.md`

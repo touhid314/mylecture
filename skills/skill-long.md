@@ -45,3 +45,8 @@ Put all deliverables inside `outputs/long/<topic-slug>/` folder
 0. script-text.md
 1. script.md
 2. index.html
+
+
+# when you are done
+open the viewer with the generated html file.
+read: `skills\skill-resolve-render.md`

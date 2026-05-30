@@ -349,11 +349,14 @@ class LecturePlayer {
       const subtitleTimeline = buildSubtitleTimeline(audioTimeline, timeline);
       const interactiveTimeline = buildInteractiveTimeline(win);
       const gameTimeline = buildGameTimeline(win);
-      const duration = Number(win.__VIDEO_DURATION__) ||
+      const rawDuration = Number(win.__VIDEO_DURATION__) ||
         Number(win.__RESOLVED_TIMELINE__?.duration) ||
         (timeline.at(-1)?.end || 0);
+      const hasRenderableTimeline = timeline.length > 0 && Number.isFinite(rawDuration) && rawDuration > 0;
+      const isGameOnly = !timeline.length && gameTimeline.length > 0;
+      const duration = hasRenderableTimeline ? rawDuration : 0;
 
-      if (!timeline.length || !Number.isFinite(duration) || duration <= 0) {
+      if (!hasRenderableTimeline && !isGameOnly) {
         throw new Error('No render timeline found');
       }
 
@@ -372,6 +375,10 @@ class LecturePlayer {
       const snapshot = { ...this.snapshot(), detectedViewport };
       this.emit('ready', snapshot);
       this.emit('statechange', snapshot);
+      if (isGameOnly) {
+        this.startGameSection();
+        this.emit('statechange', this.snapshot());
+      }
     } catch (error) {
       this.emit('error', error);
     }
@@ -581,7 +588,11 @@ class LecturePlayer {
     if (this.state.time >= this.state.duration) {
       this.state.playing = false;
       this.state.completed = true;
-      this.startInteractiveSection();
+      if (this.state.interactiveTimeline.length > 0) {
+        this.startInteractiveSection();
+      } else if (this.state.gameTimeline.length > 0) {
+        this.startGameSection();
+      }
       this.emit('ended', this.snapshot());
       this.emit('statechange', this.snapshot());
       return;
