@@ -16,34 +16,15 @@ Source HTML must define exactly these fields:
 
 ```js
 window.__VIDEO_METADATA__ = {
-  contractVersion: "0.1",
-  title: "Dijkstra's Algorithm Explained",
-  aspectRatio: "9:16"
+  contractVersion: "x.y",
+  title: "<a suitable title for the video>",
+  aspectRatio: "a:b"
 };
 ```
 
 Rules:
-
-```text
-contractVersion must be "0.1"
-title must be a non-empty string
-aspectRatio must be a string such as "9:16", "16:9", "1:1", or "4:5"
-source HTML must not include renderer execution settings such as width, height, or fps
-source HTML should not define lastResolved manually
-```
-
-Resolved HTML adds one resolver-owned field:
-
-```js
-lastResolved: "2026-05-24T12:34:56.789Z"
-```
-
-Rules:
-
-```text
-lastResolved is written by the resolver
-lastResolved must be an ISO 8601 UTC timestamp
-```
+Get contractVersion from the top of this file.
+aspectRatio must be a string such as "9:16", "16:9", etc.
 
 ## Segment Kinds
 Only these segment kinds are allowed:

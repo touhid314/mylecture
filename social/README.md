@@ -78,8 +78,8 @@ python social/upload_video.py "C:\path\to\video.mp4" --title "Video title" --cap
 Use a caption from a text file:
 
 ```powershell
-$caption = Get-Content -Raw -Encoding UTF8 "inputs\git-github-gitlab\description.txt"
-python social/upload_video.py "inputs\git-github-gitlab\output.mp4" --caption $caption
+$caption = Get-Content -Raw -Encoding UTF8 "outputs\git-github-gitlab\description.txt"
+python social/upload_video.py "outputs\git-github-gitlab\output.mp4" --caption $caption
 ```
 
 ## Upload A Regular Page Video
@@ -134,19 +134,19 @@ video
 Upload as a Reel:
 
 ```powershell
-python social/upload_video.py "inputs\git-github-gitlab\output.mp4" --caption "Git, GitHub, and GitLab explained."
+python social/upload_video.py "outputs\git-github-gitlab\output.mp4" --caption "Git, GitHub, and GitLab explained."
 ```
 
 Upload as a regular Page video:
 
 ```powershell
-python social/upload_video.py "inputs\git-github-gitlab\output.mp4" --caption "Git, GitHub, and GitLab explained." --type video
+python social/upload_video.py "outputs\git-github-gitlab\output.mp4" --caption "Git, GitHub, and GitLab explained." --type video
 ```
 
 Schedule a Reel:
 
 ```powershell
-python social/upload_video.py "inputs\git-github-gitlab\output.mp4" --caption "Git, GitHub, and GitLab explained." --schedule "2026-05-24 09:00"
+python social/upload_video.py "outputs\git-github-gitlab\output.mp4" --caption "Git, GitHub, and GitLab explained." --schedule "2026-05-24 09:00"
 ```
 
 ## Token Expiration
