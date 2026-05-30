@@ -1,4 +1,4 @@
-const viewerVersion = '0.1';
+const viewerVersion = '0.2';
 
 export function createViewerHtml(openPath, initialWidth = 1080, initialHeight = 1920) {
   const normalizedOpenPath = openPath ? openPath.replaceAll('\\', '/') : '';
@@ -39,12 +39,224 @@ html, body {
 }
 body {
   display: grid;
+  grid-template-columns: 280px 1fr;
   grid-template-rows: 1fr auto;
 }
 body.fullscreen-active {
+  grid-template-columns: 1fr;
   grid-template-rows: 1fr;
 }
+#folder-sidebar {
+  grid-row: 1 / 3;
+  min-width: 0;
+  min-height: 0;
+  display: grid;
+  grid-template-rows: auto auto 1fr;
+  border-right: 1px solid var(--line);
+  background: #0d0d0d;
+}
+body.fullscreen-active #folder-sidebar {
+  display: none;
+}
+#sidebar-header {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 8px;
+  align-items: start;
+  padding: 13px 14px 10px;
+  border-bottom: 1px solid var(--line);
+}
+#sidebar-title {
+  font-size: 12px;
+  font-weight: 650;
+  color: var(--muted-strong);
+  text-transform: uppercase;
+}
+#folder-path {
+  margin-top: 6px;
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.35;
+  overflow-wrap: anywhere;
+}
+#copy-folder-path {
+  background: transparent;
+  border: 0;
+  padding: 0;
+  min-height: 0;
+  display: inline-flex;
+  align-items: center;
+  cursor: pointer;
+  color: var(--muted);
+  transition: color 120ms ease, transform 100ms ease;
+  margin-top: 6px;
+}
+#copy-folder-path:hover:not([disabled]) {
+  color: var(--text) !important;
+}
+#copy-folder-path:active:not([disabled]) {
+  transform: scale(0.9);
+}
+#copy-folder-path[disabled] {
+  opacity: 0.35;
+  cursor: default;
+}
+#open-folder {
+  width: 28px;
+  min-width: 28px;
+  min-height: 28px;
+  padding: 0;
+  display: grid;
+  place-items: center;
+}
+#open-folder[disabled] {
+  opacity: 0.45;
+  cursor: default;
+}
+#action-row {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 6px;
+  padding: 8px;
+  border-bottom: 1px solid var(--line);
+}
+#action-row button {
+  width: 100%;
+  min-width: 0;
+}
+#resolve-control,
+#render-control {
+  position: relative;
+  display: grid;
+  grid-template-columns: 1fr 28px;
+  min-width: 0;
+}
+#resolve-control[hidden],
+#render-control[hidden] {
+  display: none;
+}
+#resolve-control #sidebar-resolve,
+#render-control #sidebar-render {
+  border-top-right-radius: 0;
+  border-bottom-right-radius: 0;
+}
+#resolve-menu-toggle,
+#render-menu-toggle {
+  border-left: 0;
+  border-top-left-radius: 0;
+  border-bottom-left-radius: 0;
+  padding: 0;
+}
+#resolve-menu-toggle::before,
+#render-menu-toggle::before {
+  content: "";
+  display: inline-block;
+  width: 0;
+  height: 0;
+  border-left: 4px solid transparent;
+  border-right: 4px solid transparent;
+  border-top: 5px solid currentColor;
+  vertical-align: middle;
+}
+#resolve-options,
+#render-options {
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: calc(100% + 6px);
+  z-index: 30;
+  display: none;
+  gap: 7px;
+  padding: 9px;
+  border: 1px solid var(--line-strong);
+  border-radius: 6px;
+  background: #101010;
+  box-shadow: 0 12px 34px rgba(0,0,0,0.46);
+}
+#resolve-options.visible,
+#render-options.visible {
+  display: grid;
+}
+.resolve-option,
+.render-option {
+  display: grid;
+  gap: 4px;
+}
+.resolve-option label,
+.render-option label {
+  color: var(--muted);
+  font-size: 11px;
+}
+.resolve-option select,
+.render-option select {
+  width: 100%;
+}
+#job-status {
+  display: none;
+  padding: 7px 8px;
+  border-bottom: 1px solid var(--line);
+  background: #090909;
+  color: var(--muted-strong);
+  font-size: 12px;
+  line-height: 1.35;
+  overflow-wrap: anywhere;
+}
+#job-status.visible {
+  display: block;
+}
+#job-status.error {
+  color: #ffb4b4;
+}
+#job-status.success {
+  color: #b8f7c8;
+}
+#file-list {
+  min-height: 0;
+  overflow: auto;
+  padding: 6px;
+}
+.file-item {
+  width: 100%;
+  min-height: 30px;
+  display: grid;
+  grid-template-columns: 1fr auto;
+  align-items: center;
+  gap: 8px;
+  padding: 5px 7px;
+  border: 1px solid transparent;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--muted-strong);
+  text-align: left;
+}
+.file-item:hover {
+  background: var(--control);
+  border-color: var(--line);
+}
+.file-item.active {
+  background: #ededed;
+  border-color: #ededed;
+  color: #050505;
+}
+.file-name {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.file-kind {
+  color: inherit;
+  opacity: 0.62;
+  font-size: 11px;
+  text-transform: uppercase;
+}
+#sidebar-empty {
+  padding: 12px 8px;
+  color: var(--muted);
+  font-size: 12px;
+}
 #frame-wrap {
+  grid-column: 2;
   min-height: 0;
   display: grid;
   place-items: center;
@@ -52,7 +264,11 @@ body.fullscreen-active {
   background: #3a3a3a;
 }
 body.fullscreen-active #frame-wrap {
+  grid-column: 1;
   padding: 0;
+}
+body.fullscreen-active.file-kind-mp4 #frame-wrap {
+  background: #000;
 }
 #preview-shell {
   position: relative;
@@ -70,6 +286,44 @@ body.fullscreen-active #preview-shell {
   border: 0;
   background: #000;
   transform-origin: 0 0;
+}
+#document-preview {
+  width: min(920px, calc(100% - 36px));
+  height: calc(100% - 36px);
+  display: none;
+  overflow: auto;
+  padding: 28px;
+  border: 1px solid var(--line-strong);
+  border-radius: 8px;
+  background: #101010;
+  color: var(--text);
+  line-height: 1.58;
+}
+#document-preview.visible {
+  display: block;
+}
+#document-preview h1,
+#document-preview h2,
+#document-preview h3 {
+  margin: 0 0 14px;
+  line-height: 1.2;
+}
+#document-preview p,
+#document-preview ul,
+#document-preview ol,
+#document-preview pre {
+  margin: 0 0 14px;
+}
+#document-preview pre {
+  overflow: auto;
+  padding: 12px;
+  background: #050505;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+}
+#document-preview code {
+  font-family: "Cascadia Code", Consolas, monospace;
+  font-size: 13px;
 }
 #subtitle-overlay {
   position: absolute;
@@ -94,16 +348,18 @@ body.fullscreen-active #preview-shell {
   display: block;
 }
 #controls {
+  grid-column: 2;
   display: grid;
   grid-template-columns: auto auto auto 1fr auto auto auto auto auto auto;
-  gap: 10px;
+  gap: 8px;
   align-items: center;
-  padding: 12px 14px 14px;
+  padding: 8px 10px 10px;
   border-top: 1px solid var(--line);
   background: color-mix(in srgb, var(--panel) 94%, #fff 6%);
   box-shadow: 0 -16px 50px rgba(0,0,0,0.34);
 }
 body.fullscreen-active #controls {
+  grid-column: 1;
   position: fixed;
   left: 0;
   right: 0;
@@ -122,12 +378,12 @@ body.fullscreen-active #controls:hover {
   grid-column: 1 / -1;
   display: grid;
   grid-template-columns: 1fr auto auto auto;
-  gap: 8px;
+  gap: 6px;
 }
 #current-file {
   min-width: 0;
-  height: 38px;
-  padding: 9px 12px;
+  height: 30px;
+  padding: 6px 9px;
   border: 1px solid var(--line);
   border-radius: 6px;
   background: #0b0b0b;
@@ -135,7 +391,7 @@ body.fullscreen-active #controls:hover {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-  line-height: 18px;
+  line-height: 16px;
   box-shadow: inset 0 1px 0 rgba(255,255,255,0.03);
 }
 input, button, select {
@@ -147,12 +403,16 @@ input, button, select {
   outline: none;
 }
 button {
-  min-height: 38px;
-  padding: 9px 13px;
+  min-height: 30px;
+  padding: 5px 9px;
   cursor: pointer;
   font-weight: 520;
+  font-size: 12px;
   letter-spacing: 0;
   transition: background 120ms ease, border-color 120ms ease, transform 120ms ease;
+}
+button * {
+  pointer-events: none;
 }
 button:hover {
   background: var(--control-hover);
@@ -169,10 +429,27 @@ select:focus-visible {
   box-shadow: 0 0 0 3px var(--focus);
 }
 #play {
-  min-width: 74px;
+  min-width: 34px;
+  width: 34px;
+  padding: 0;
+  display: grid;
+  place-items: center;
   background: #ededed;
   border-color: #ededed;
   color: #050505;
+}
+#fullscreen {
+  min-width: 34px;
+  width: 34px;
+  padding: 0;
+  display: grid;
+  place-items: center;
+}
+.control-icon {
+  width: 15px;
+  height: 15px;
+  display: block;
+  pointer-events: none;
 }
 #play:hover {
   background: #ffffff;
@@ -194,15 +471,24 @@ select:focus-visible {
 }
 input[type="text"] {
   width: 100%;
-  height: 38px;
-  padding: 9px 11px;
+  height: 30px;
+  padding: 6px 9px;
   background: #0c0c0c;
 }
 select {
-  height: 38px;
-  padding: 0 34px 0 10px;
+  height: 30px;
+  width: auto;
+  min-width: 0;
+  padding: 0 22px 0 7px;
+  font-size: 12px;
   color: var(--muted-strong);
   cursor: pointer;
+}
+#speed {
+  width: 54px;
+}
+#viewport-preset {
+  width: 66px;
 }
 #scrub-wrap {
   position: relative;
@@ -357,11 +643,123 @@ input[type="range"]::-moz-range-thumb {
 </style>
 </head>
 <body>
+<aside id="folder-sidebar">
+  <div id="sidebar-header">
+    <div>
+      <div id="sidebar-title">Folder</div>
+      <div style="display: flex; align-items: center; gap: 6px;">
+        <div id="folder-path">No file selected</div>
+        <button id="copy-folder-path" type="button" aria-label="Copy folder path" title="Copy folder path" disabled>
+          <svg class="control-icon" style="width: 14px; height: 14px;" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect>
+            <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path>
+          </svg>
+        </button>
+      </div>
+    </div>
+    <button id="open-folder" type="button" aria-label="Open folder" title="Open folder" disabled>
+      <svg class="control-icon" viewBox="0 0 24 24" aria-hidden="true">
+        <path d="M3 7.5A2.5 2.5 0 0 1 5.5 5H10l2 2h6.5A2.5 2.5 0 0 1 21 9.5v7A2.5 2.5 0 0 1 18.5 19h-13A2.5 2.5 0 0 1 3 16.5z" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round"/>
+      </svg>
+    </button>
+  </div>
+  <div id="action-row">
+    <div id="resolve-control">
+      <button id="sidebar-resolve" type="button">Resolve</button>
+      <button id="resolve-menu-toggle" type="button" aria-label="Resolve options" title="Resolve options" aria-expanded="false"></button>
+      <div id="resolve-options">
+        <div class="resolve-option">
+          <label for="resolve-tts-voice">TTS voice</label>
+          <select id="resolve-tts-voice">
+            <optgroup label="Kokoro TTS (Local)">
+              <option value="am_puck" selected>am_puck</option>
+              <option value="af_heart">af_heart</option>
+              <option value="am_adam">am_adam</option>
+              <option value="bf_emma">bf_emma</option>
+            </optgroup>
+            <optgroup label="Google TTS (Gemini)">
+              <option value="Puck">Puck</option>
+              <option value="Charon">Charon</option>
+              <option value="Kore">Kore</option>
+              <option value="Fenrir">Fenrir</option>
+              <option value="Aoede">Aoede</option>
+              <option value="Zephyr">Zephyr</option>
+            </optgroup>
+          </select>
+        </div>
+        <div class="resolve-option">
+          <label for="resolve-tts-speed">Voice speed</label>
+          <select id="resolve-tts-speed">
+            <option value="1">1.0x</option>
+            <option value="1.2">1.2x</option>
+            <option value="1.3" selected>1.3x</option>
+            <option value="1.5">1.5x</option>
+          </select>
+        </div>
+      </div>
+    </div>
+    <div id="render-control">
+      <button id="sidebar-render" type="button">Render</button>
+      <button id="render-menu-toggle" type="button" aria-label="Render options" title="Render options" aria-expanded="false"></button>
+      <div id="render-options">
+        <div class="render-option">
+          <label for="render-tts-voice">TTS voice</label>
+          <select id="render-tts-voice">
+            <optgroup label="Kokoro TTS (Local)">
+              <option value="am_puck" selected>am_puck</option>
+              <option value="af_heart">af_heart</option>
+              <option value="am_adam">am_adam</option>
+              <option value="bf_emma">bf_emma</option>
+            </optgroup>
+            <optgroup label="Google TTS (Gemini)">
+              <option value="Puck">Puck</option>
+              <option value="Charon">Charon</option>
+              <option value="Kore">Kore</option>
+              <option value="Fenrir">Fenrir</option>
+              <option value="Aoede">Aoede</option>
+              <option value="Zephyr">Zephyr</option>
+            </optgroup>
+          </select>
+        </div>
+        <div class="render-option">
+          <label for="render-tts-speed">Voice speed</label>
+          <select id="render-tts-speed">
+            <option value="1">1.0x</option>
+            <option value="1.2">1.2x</option>
+            <option value="1.3" selected>1.3x</option>
+            <option value="1.5">1.5x</option>
+          </select>
+        </div>
+        <div class="render-option">
+          <label for="render-fps">FPS</label>
+          <select id="render-fps">
+            <option value="24">24</option>
+            <option value="30" selected>30</option>
+            <option value="60">60</option>
+          </select>
+        </div>
+        <div class="render-option">
+          <label for="render-resolution">Resolution</label>
+          <select id="render-resolution">
+            <option value="1080x1920" selected>1080x1920</option>
+            <option value="1920x1080">1920x1080</option>
+            <option value="720x1280">720x1280</option>
+          </select>
+        </div>
+      </div>
+    </div>
+  </div>
+  <div id="job-status" role="status" aria-live="polite"></div>
+  <div id="file-list">
+    <div id="sidebar-empty">Open an HTML file to scan its folder.</div>
+  </div>
+</aside>
 <main id="frame-wrap">
   <div id="preview-shell">
     <iframe id="preview" title="Render preview"></iframe>
     <div id="subtitle-overlay" aria-live="polite"></div>
   </div>
+  <article id="document-preview"></article>
 </main>
 <section id="controls">
   <div id="file-row">
@@ -370,7 +768,7 @@ input[type="range"]::-moz-range-thumb {
     <button id="load">Load</button>
     <button id="reload">Reload</button>
   </div>
-  <button id="play">Play</button>
+  <button id="play" type="button" aria-label="Play" title="Play"></button>
   <button id="seek-back" title="Back 5 seconds">&#8592; 5s</button>
   <button id="seek-forward" title="Forward 5 seconds">5s &#8594;</button>
   <div id="scrub-wrap">
@@ -379,7 +777,7 @@ input[type="range"]::-moz-range-thumb {
     <div id="game-marker" title="Game segment"></div>
   </div>
   <div id="time">0.00 / 0.00</div>
-  <button id="subtitles-toggle" type="button" aria-pressed="true">Subtitles</button>
+  <button id="subtitles-toggle" type="button" aria-pressed="true" title="Closed captions">CC</button>
   <button id="live-tts-toggle" type="button" aria-pressed="true">Live TTS</button>
   <select id="speed">
     <option value="0.5">0.5x</option>
@@ -388,13 +786,13 @@ input[type="range"]::-moz-range-thumb {
     <option value="2">2x</option>
   </select>
   <select id="viewport-preset" title="Preview viewport">
-    <option value="1080x1920">9:16 1080x1920</option>
-    <option value="1920x1080">16:9 1920x1080</option>
+    <option value="1080x1920">9:16</option>
+    <option value="1920x1080">16:9</option>
     <option value="custom">Custom</option>
   </select>
-  <button id="fullscreen" type="button">Fullscreen</button>
   <div id="viewport">${safeInitialWidth}x${safeInitialHeight}</div>
   <div id="status">No file loaded</div>
+  <button id="fullscreen" type="button" aria-label="Fullscreen" title="Fullscreen"></button>
 </section>
 <div id="info-dialog" role="dialog" aria-modal="true" aria-labelledby="info-title">
   <div id="info-panel">
@@ -411,9 +809,29 @@ input[type="range"]::-moz-range-thumb {
 <script type="module">
 import { createLecturePlayer, lectureViewerVersion } from '/lecture-viewer/player/index.mjs';
 
+const folderPathLabel = document.getElementById('folder-path');
+const copyFolderPathButton = document.getElementById('copy-folder-path');
+const openFolderButton = document.getElementById('open-folder');
+const fileList = document.getElementById('file-list');
+const jobStatus = document.getElementById('job-status');
+const resolveControl = document.getElementById('resolve-control');
+const sidebarResolveButton = document.getElementById('sidebar-resolve');
+const resolveMenuToggle = document.getElementById('resolve-menu-toggle');
+const resolveOptions = document.getElementById('resolve-options');
+const resolveTtsVoice = document.getElementById('resolve-tts-voice');
+const resolveTtsSpeed = document.getElementById('resolve-tts-speed');
+const renderControl = document.getElementById('render-control');
+const sidebarRenderButton = document.getElementById('sidebar-render');
+const renderMenuToggle = document.getElementById('render-menu-toggle');
+const renderOptions = document.getElementById('render-options');
+const renderTtsVoice = document.getElementById('render-tts-voice');
+const renderTtsSpeed = document.getElementById('render-tts-speed');
+const renderFps = document.getElementById('render-fps');
+const renderResolution = document.getElementById('render-resolution');
 const frameWrap = document.getElementById('frame-wrap');
 const previewShell = document.getElementById('preview-shell');
 const frame = document.getElementById('preview');
+const documentPreview = document.getElementById('document-preview');
 const currentFileLabel = document.getElementById('current-file');
 const infoButton = document.getElementById('info');
 const infoDialog = document.getElementById('info-dialog');
@@ -447,6 +865,10 @@ let renderViewport = {
 let userViewportOverride = false;
 let controlsHideTimer = 0;
 let lastPlayerState = null;
+let activeJobTimer = 0;
+let activeJobStartedAt = 0;
+let activeJobLabel = '';
+let currentBrowserFolder = '';
 
 const player = createLecturePlayer({
   iframe: frame,
@@ -507,8 +929,402 @@ function setStatus(message) {
   statusText.textContent = message;
 }
 
+function formatElapsed(seconds) {
+  seconds = Math.max(0, Math.floor(Number(seconds) || 0));
+  const minutes = Math.floor(seconds / 60);
+  const remainder = seconds % 60;
+  return minutes + ':' + String(remainder).padStart(2, '0');
+}
+
+function setJobStatus(message, state = '') {
+  jobStatus.textContent = message || '';
+  jobStatus.classList.toggle('visible', Boolean(message));
+  jobStatus.classList.toggle('error', state === 'error');
+  jobStatus.classList.toggle('success', state === 'success');
+}
+
+function setResolveOptionsVisible(visible) {
+  resolveOptions.classList.toggle('visible', visible);
+  resolveMenuToggle.setAttribute('aria-expanded', visible ? 'true' : 'false');
+}
+
+function setRenderOptionsVisible(visible) {
+  renderOptions.classList.toggle('visible', visible);
+  renderMenuToggle.setAttribute('aria-expanded', visible ? 'true' : 'false');
+}
+
+function resolveQuery() {
+  const params = new URLSearchParams();
+  params.set('file', currentFilePath);
+  params.set('ttsVoice', resolveTtsVoice.value || 'am_puck');
+  params.set('ttsSpeed', resolveTtsSpeed.value || '1.3');
+  return params.toString();
+}
+
+function renderQuery() {
+  const params = new URLSearchParams();
+  const [width, height] = String(renderResolution.value || '1080x1920').split('x');
+  params.set('file', currentFilePath);
+  params.set('ttsVoice', renderTtsVoice.value || 'am_puck');
+  params.set('ttsSpeed', renderTtsSpeed.value || '1.3');
+  params.set('fps', renderFps.value || '30');
+  params.set('width', width || '1080');
+  params.set('height', height || '1920');
+  return params.toString();
+}
+
+function startJobStatus(label) {
+  activeJobLabel = label;
+  activeJobStartedAt = Date.now();
+  clearInterval(activeJobTimer);
+
+  const update = () => {
+    const elapsed = (Date.now() - activeJobStartedAt) / 1000;
+    setJobStatus(activeJobLabel + '... ' + formatElapsed(elapsed));
+  };
+
+  update();
+  activeJobTimer = setInterval(update, 1000);
+}
+
+function finishJobStatus(message, state = 'success') {
+  clearInterval(activeJobTimer);
+  activeJobTimer = 0;
+  activeJobLabel = '';
+  setJobStatus(message, state);
+}
+
+const controlIcons = {
+  play: '<svg class="control-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M8 5v14l11-7z" fill="currentColor"/></svg>',
+  pause: '<svg class="control-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M7 5h4v14H7zM13 5h4v14h-4z" fill="currentColor"/></svg>',
+  fullscreen: '<svg class="control-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M5 9V5h4M15 5h4v4M19 15v4h-4M9 19H5v-4" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>',
+  fullscreenExit: '<svg class="control-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M9 5v4H5M19 9h-4V5M15 19v-4h4M5 15h4v4" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>'
+};
+
+function setIconButton(button, icon, label) {
+  button.innerHTML = controlIcons[icon] || '';
+  button.setAttribute('aria-label', label);
+  button.title = label;
+}
+
+function fileBaseName(filePath) {
+  return String(filePath || '').replaceAll('\\\\', '/').split('/').filter(Boolean).at(-1) || '';
+}
+
+function fileExtension(filePath) {
+  const name = fileBaseName(filePath);
+  const index = name.lastIndexOf('.');
+  return index > -1 ? name.slice(index + 1).toLowerCase() : '';
+}
+
+function folderPathFromFile(filePath) {
+  const normalized = String(filePath || '').replaceAll('\\\\', '/');
+  const index = normalized.lastIndexOf('/');
+  return index > -1 ? normalized.slice(0, index) : '';
+}
+
+function isDocumentPreviewFile(filePath) {
+  return ['txt', 'md'].includes(fileExtension(filePath));
+}
+
+function currentFileKind() {
+  return fileBaseName(currentFilePath).toLowerCase();
+}
+
+function setPreviewMode(mode) {
+  const documentMode = mode === 'document';
+  previewShell.style.display = documentMode ? 'none' : '';
+  documentPreview.classList.toggle('visible', documentMode);
+}
+
+function escapeText(value) {
+  return String(value)
+    .replaceAll('&', '&amp;')
+    .replaceAll('<', '&lt;')
+    .replaceAll('>', '&gt;')
+    .replaceAll('"', '&quot;');
+}
+
+function renderMarkdown(markdown) {
+  const lines = String(markdown || '').split(/\\r?\\n/);
+  const html = [];
+  let paragraph = [];
+  let listOpen = false;
+  let codeOpen = false;
+
+  const flushParagraph = () => {
+    if (!paragraph.length) return;
+    html.push('<p>' + paragraph.map(escapeText).join(' ') + '</p>');
+    paragraph = [];
+  };
+  const closeList = () => {
+    if (!listOpen) return;
+    html.push('</ul>');
+    listOpen = false;
+  };
+
+  for (const line of lines) {
+    if (line.trim().startsWith(String.fromCharCode(96, 96, 96))) {
+      flushParagraph();
+      closeList();
+      html.push(codeOpen ? '</code></pre>' : '<pre><code>');
+      codeOpen = !codeOpen;
+      continue;
+    }
+    if (codeOpen) {
+      html.push(escapeText(line) + '\\n');
+      continue;
+    }
+
+    const heading = line.match(/^(#{1,3})\\s+(.+)$/);
+    if (heading) {
+      flushParagraph();
+      closeList();
+      const level = heading[1].length;
+      html.push('<h' + level + '>' + escapeText(heading[2]) + '</h' + level + '>');
+      continue;
+    }
+
+    const listItem = line.match(/^\\s*[-*]\\s+(.+)$/);
+    if (listItem) {
+      flushParagraph();
+      if (!listOpen) {
+        html.push('<ul>');
+        listOpen = true;
+      }
+      html.push('<li>' + escapeText(listItem[1]) + '</li>');
+      continue;
+    }
+
+    if (!line.trim()) {
+      flushParagraph();
+      closeList();
+      continue;
+    }
+    paragraph.push(line.trim());
+  }
+
+  flushParagraph();
+  closeList();
+  if (codeOpen) html.push('</code></pre>');
+  return html.join('');
+}
+
+async function loadDocumentFile(filePath) {
+  player.pause();
+  setPreviewMode('document');
+  setCurrentFile(filePath);
+  videoMetadata = {};
+  lastPlayerState = null;
+  updateControls(player.snapshot());
+  documentPreview.textContent = 'Loading...';
+  setStatus('Loading document...');
+
+  try {
+    const response = await fetch(fileUrl(currentFilePath), { cache: 'no-store' });
+    const text = await response.text();
+    if (!response.ok) throw new Error(text || 'Document load failed');
+
+    if (fileExtension(currentFilePath) === 'md') {
+      documentPreview.innerHTML = renderMarkdown(text);
+    } else {
+      const pre = document.createElement('pre');
+      const code = document.createElement('code');
+      code.textContent = text;
+      pre.append(code);
+      documentPreview.textContent = '';
+      documentPreview.append(pre);
+    }
+
+    setStatus('Document loaded');
+    refreshFolderFiles();
+  } catch (error) {
+    documentPreview.textContent = error.message;
+    setStatus(error.message);
+    refreshFolderFiles();
+  }
+}
+
+function syncIdeActions() {
+  const kind = currentFileKind();
+  const canResolve = kind === 'index.html';
+  const canRender = kind === 'index.html' || kind === 'resolved.html';
+  resolveControl.hidden = !canResolve;
+  if (!canResolve) {
+    setResolveOptionsVisible(false);
+  }
+  sidebarResolveButton.disabled = !canResolve;
+  resolveMenuToggle.disabled = !canResolve;
+  renderControl.hidden = !canRender;
+  if (!canRender) {
+    setRenderOptionsVisible(false);
+  }
+  sidebarRenderButton.disabled = !canRender;
+  renderMenuToggle.disabled = !canRender;
+}
+
+function setActionBusy(isBusy, message, action = '') {
+  for (const button of [sidebarResolveButton, resolveMenuToggle, sidebarRenderButton, renderMenuToggle]) {
+    button.disabled = isBusy;
+  }
+  sidebarResolveButton.textContent = isBusy && action === 'resolve' ? 'Resolving...' : 'Resolve';
+  sidebarRenderButton.textContent = isBusy && action === 'render' ? 'Rendering...' : 'Render';
+  if (message) setStatus(message);
+}
+
+function renderFolderFiles(payload) {
+  folderPathLabel.textContent = payload?.folder || 'No file selected';
+  folderPathLabel.title = payload?.folder || '';
+  currentBrowserFolder = payload?.folder || '';
+  openFolderButton.disabled = !currentBrowserFolder;
+  copyFolderPathButton.disabled = !currentBrowserFolder;
+  fileList.textContent = '';
+
+  const entries = Array.isArray(payload?.entries)
+    ? payload.entries
+    : (Array.isArray(payload?.files) ? payload.files.map(file => ({ ...file, type: 'file' })) : []);
+
+  if (payload?.parent) {
+    const parentButton = document.createElement('button');
+    parentButton.type = 'button';
+    parentButton.className = 'file-item';
+    parentButton.title = payload.parent;
+
+    const name = document.createElement('span');
+    name.className = 'file-name';
+    name.textContent = '..';
+
+    const kind = document.createElement('span');
+    kind.className = 'file-kind';
+    kind.textContent = 'UP';
+
+    parentButton.append(name, kind);
+    parentButton.addEventListener('click', () => browseFolder(payload.parent));
+    fileList.append(parentButton);
+  }
+
+  if (!entries.length && !payload?.parent) {
+    const empty = document.createElement('div');
+    empty.id = 'sidebar-empty';
+    empty.textContent = 'No files found in this folder.';
+    fileList.append(empty);
+    return;
+  }
+
+  for (const file of entries) {
+    const button = document.createElement('button');
+    button.type = 'button';
+    button.className = 'file-item';
+    button.classList.toggle('active', file.path === currentFilePath);
+    button.title = file.path;
+
+    const name = document.createElement('span');
+    name.className = 'file-name';
+    name.textContent = file.name;
+
+    const kind = document.createElement('span');
+    kind.className = 'file-kind';
+    kind.textContent = file.type === 'directory' ? 'DIR' : (fileExtension(file.name) || 'file');
+
+    button.append(name, kind);
+    button.addEventListener('click', () => {
+      if (file.type === 'directory') browseFolder(file.path);
+      else loadFile(file.path);
+    });
+    fileList.append(button);
+  }
+}
+
+async function browseFolder(folderPath = '') {
+  try {
+    const query = folderPath ? '?dir=' + encodeURIComponent(folderPath) : '';
+    const response = await fetch('/browse-folder' + query, { cache: 'no-store' });
+    const payload = await response.json();
+    if (!response.ok) throw new Error(payload.error || 'Folder browse failed');
+    renderFolderFiles(payload);
+  } catch (error) {
+    folderPathLabel.textContent = error.message;
+    folderPathLabel.title = '';
+    currentBrowserFolder = '';
+    openFolderButton.disabled = true;
+    copyFolderPathButton.disabled = true;
+    fileList.textContent = '';
+  } finally {
+    syncIdeActions();
+  }
+}
+
+async function refreshFolderFiles() {
+  if (!currentFilePath) {
+    await browseFolder(currentBrowserFolder);
+    return;
+  }
+
+  try {
+    const response = await fetch('/browse-folder?dir=' + encodeURIComponent(folderPathFromFile(currentFilePath)), { cache: 'no-store' });
+    const payload = await response.json();
+    if (!response.ok) throw new Error(payload.error || 'Folder scan failed');
+    renderFolderFiles(payload);
+  } catch (error) {
+    folderPathLabel.textContent = error.message;
+    fileList.textContent = '';
+  } finally {
+    syncIdeActions();
+  }
+}
+
+async function runResolve() {
+  if (currentFileKind() !== 'index.html') return;
+  const sourceName = fileBaseName(currentFilePath);
+  setActionBusy(true, 'Resolving...', 'resolve');
+  setResolveOptionsVisible(false);
+  startJobStatus('Resolving ' + sourceName + ' with ' + resolveTtsVoice.value + ' @ ' + resolveTtsSpeed.value + 'x');
+  try {
+    const response = await fetch('/resolve-file?' + resolveQuery(), { method: 'POST' });
+    const payload = await response.json();
+    if (!response.ok) throw new Error(payload.error || 'Resolve failed');
+    renderFolderFiles(payload.folder);
+    await loadFile(payload.path);
+    setStatus('Resolved: ' + payload.path);
+    finishJobStatus('Done: ' + fileBaseName(payload.path));
+  } catch (error) {
+    setStatus(error.message);
+    finishJobStatus(error.message, 'error');
+  } finally {
+    setActionBusy(false);
+    syncIdeActions();
+  }
+}
+
+async function runRender() {
+  if (!['index.html', 'resolved.html'].includes(currentFileKind())) return;
+  const sourceName = fileBaseName(currentFilePath);
+  setActionBusy(true, 'Rendering...', 'render');
+  setRenderOptionsVisible(false);
+  startJobStatus(
+    'Rendering ' + sourceName +
+    ' at ' + renderFps.value + ' FPS, ' +
+    renderResolution.value +
+    ', ' + renderTtsVoice.value + ' @ ' + renderTtsSpeed.value + 'x'
+  );
+  try {
+    const response = await fetch('/render-file?' + renderQuery(), { method: 'POST' });
+    const payload = await response.json();
+    if (!response.ok) throw new Error(payload.error || 'Render failed');
+    renderFolderFiles(payload.folder);
+    setStatus('Rendered: ' + payload.output);
+    finishJobStatus('Done: ' + fileBaseName(payload.output));
+  } catch (error) {
+    setStatus(error.message);
+    finishJobStatus(error.message, 'error');
+  } finally {
+    setActionBusy(false);
+    syncIdeActions();
+  }
+}
+
 function formatMetadataKey(key) {
-  if (key === 'viewerVersion') return 'Viewer version';
+  if (key === 'viewerVersion') return 'IDE version';
   if (key === 'lastResolved') return 'Last rendered';
   return String(key)
     .replace(/([a-z0-9])([A-Z])/g, '$1 $2')
@@ -593,7 +1409,7 @@ function updateFullscreenState() {
   if (active && document.activeElement instanceof HTMLElement) {
     document.activeElement.blur();
   }
-  fullscreenButton.textContent = active ? 'Exit Fullscreen' : 'Fullscreen';
+  setIconButton(fullscreenButton, active ? 'fullscreenExit' : 'fullscreen', active ? 'Exit fullscreen' : 'Fullscreen');
   resizePreview();
 }
 
@@ -618,7 +1434,7 @@ function updateControls(state = playerState()) {
   scrubber.max = String(state.duration || 1);
   scrubber.value = String(state.time || 0);
   timeReadout.textContent = formatTime(state.time) + ' / ' + formatTime(state.duration);
-  playButton.textContent = state.playing ? 'Pause' : 'Play';
+  setIconButton(playButton, state.playing ? 'pause' : 'play', state.playing ? 'Pause' : 'Play');
   subtitlesToggle.classList.toggle('active', state.subtitlesEnabled);
   subtitlesToggle.setAttribute('aria-pressed', state.subtitlesEnabled ? 'true' : 'false');
   liveTtsToggle.classList.toggle('active', state.liveTtsEnabled);
@@ -638,14 +1454,35 @@ function setCurrentFile(filePath) {
   currentFilePath = nextFilePath;
   currentFileLabel.textContent = currentFilePath || 'No file selected';
   currentFileLabel.title = currentFilePath;
+  const isMp4 = fileExtension(currentFilePath) === 'mp4';
+  document.body.classList.toggle('file-kind-mp4', isMp4);
+  syncIdeActions();
+}
+
+async function openCurrentFolder() {
+  if (!currentBrowserFolder) return;
+  try {
+    const response = await fetch('/open-folder?dir=' + encodeURIComponent(currentBrowserFolder), { method: 'POST' });
+    const payload = await response.json();
+    if (!response.ok) throw new Error(payload.error || 'Open folder failed');
+    setStatus('Opened folder: ' + payload.folder);
+  } catch (error) {
+    setStatus(error.message);
+  }
 }
 
 async function loadFile(filePath = currentFilePath) {
   if (!filePath) {
-    setStatus('Select an HTML file first');
+    setStatus('Select a file first');
     return;
   }
 
+  if (isDocumentPreviewFile(filePath)) {
+    await loadDocumentFile(filePath);
+    return;
+  }
+
+  setPreviewMode('html');
   setCurrentFile(filePath);
   videoMetadata = {};
   lastPlayerState = null;
@@ -654,8 +1491,10 @@ async function loadFile(filePath = currentFilePath) {
 
   try {
     await player.load(currentFilePath);
+    refreshFolderFiles();
   } catch (error) {
     setStatus(error.message);
+    refreshFolderFiles();
   }
 }
 
@@ -749,12 +1588,53 @@ player.on('timeupdate', updateControls);
 player.on('error', error => setStatus(error.message));
 
 loadButton.addEventListener('click', pickAndLoadFile);
+openFolderButton.addEventListener('click', openCurrentFolder);
+copyFolderPathButton.addEventListener('click', async () => {
+  if (!currentBrowserFolder) return;
+  try {
+    await navigator.clipboard.writeText(currentBrowserFolder);
+    const originalTitle = copyFolderPathButton.title;
+    copyFolderPathButton.title = 'Copied!';
+    setStatus('Folder path copied to clipboard');
+    
+    copyFolderPathButton.innerHTML = '<svg class="control-icon" style="width: 14px; height: 14px; color: #b8f7c8;" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"></polyline></svg>';
+    
+    setTimeout(() => {
+      copyFolderPathButton.title = originalTitle;
+      copyFolderPathButton.innerHTML = '<svg class="control-icon" style="width: 14px; height: 14px;" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path></svg>';
+    }, 1500);
+  } catch (err) {
+    setStatus('Failed to copy: ' + err.message);
+  }
+});
 infoButton.addEventListener('click', openInfoDialog);
 infoCloseButton.addEventListener('click', closeInfoDialog);
 infoDialog.addEventListener('click', event => {
   if (event.target === infoDialog) closeInfoDialog();
 });
 reloadButton.addEventListener('click', () => loadFile());
+resolveMenuToggle.addEventListener('click', event => {
+  event.stopPropagation();
+  setResolveOptionsVisible(!resolveOptions.classList.contains('visible'));
+  setRenderOptionsVisible(false);
+});
+resolveOptions.addEventListener('click', event => {
+  event.stopPropagation();
+});
+renderMenuToggle.addEventListener('click', event => {
+  event.stopPropagation();
+  setRenderOptionsVisible(!renderOptions.classList.contains('visible'));
+  setResolveOptionsVisible(false);
+});
+renderOptions.addEventListener('click', event => {
+  event.stopPropagation();
+});
+document.addEventListener('click', () => {
+  setResolveOptionsVisible(false);
+  setRenderOptionsVisible(false);
+});
+sidebarResolveButton.addEventListener('click', runResolve);
+sidebarRenderButton.addEventListener('click', runRender);
 playButton.addEventListener('click', () => player.togglePlay());
 seekBackButton.addEventListener('click', () => player.seekBy(-5));
 seekForwardButton.addEventListener('click', () => player.seekBy(5));
@@ -823,6 +1703,8 @@ window.addEventListener('resize', resizePreview);
 setCurrentFile(currentFilePath);
 resizePreview();
 updateControls(player.snapshot());
+setIconButton(fullscreenButton, 'fullscreen', 'Fullscreen');
+refreshFolderFiles();
 if (currentFilePath) loadFile();
 setInterval(pollViewerCommands, 750);
 </script>

@@ -60,7 +60,7 @@ Viewer features:
 - `Load` opens a Windows file picker for HTML files inside this repo.
 - The preview aspect ratio is detected from `window.__VIDEO_METADATA__.aspectRatio` when available.
 - The aspect-ratio dropdown can still override the detected preview size.
-- `Info` shows video metadata, formatted `lastResolved` time when present, and viewer version. The viewer version is currently `0.1`.
+- `Info` shows video metadata, formatted `lastResolved` time when present, and IDE version. The IDE version is currently `0.2`.
 - `Subtitles` toggles viewer-owned subtitles derived from narration `text`.
 - `Live TTS` is enabled by default and uses Chrome Web Speech only when a narration segment has no usable audio file.
 - Click the time bar or use the 5-second buttons to seek.

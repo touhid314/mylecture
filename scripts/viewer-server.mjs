@@ -1,4 +1,4 @@
-import { createReadStream, existsSync, statSync } from 'node:fs';
+import { createReadStream, existsSync, readdirSync, statSync } from 'node:fs';
 import { createServer } from 'node:http';
 import { spawn } from 'node:child_process';
 import path from 'node:path';
@@ -75,6 +75,8 @@ function openBrowser(url) {
 
 const mimeTypes = new Map([
   ['.html', 'text/html; charset=utf-8'],
+  ['.txt', 'text/plain; charset=utf-8'],
+  ['.md', 'text/markdown; charset=utf-8'],
   ['.js', 'text/javascript; charset=utf-8'],
   ['.mjs', 'text/javascript; charset=utf-8'],
   ['.css', 'text/css; charset=utf-8'],
@@ -100,7 +102,14 @@ function sendJson(response, status, payload) {
 }
 
 function resolveInputPath(inputPath) {
-  return path.isAbsolute(inputPath) ? path.resolve(inputPath) : path.resolve(rootDir, inputPath);
+  let cleaned = String(inputPath || '').trim();
+
+  if (process.platform === 'win32') {
+    cleaned = cleaned.replace(/^[\/\\]+([a-zA-Z]:)/, '$1');
+  }
+
+  const isAbs = path.isAbsolute(cleaned) || (process.platform === 'win32' && /^[a-zA-Z]:/.test(cleaned));
+  return isAbs ? path.resolve(cleaned) : path.resolve(rootDir, cleaned);
 }
 
 function normalizeOpenPath(inputPath) {
@@ -109,6 +118,209 @@ function normalizeOpenPath(inputPath) {
     throw new Error(`File does not exist: ${inputPath}`);
   }
   return resolvedPath.replaceAll(path.sep, '/');
+}
+
+function toViewerPath(filePath) {
+  return path.resolve(filePath).replaceAll(path.sep, '/');
+}
+
+function listFolderFiles(filePath) {
+  const resolvedPath = resolveInputPath(filePath);
+  if (!existsSync(resolvedPath) || !statSync(resolvedPath).isFile()) {
+    throw new Error(`File does not exist: ${filePath}`);
+  }
+
+  const folderPath = path.dirname(resolvedPath);
+  const files = readdirSync(folderPath, { withFileTypes: true })
+    .filter(entry => entry.isFile())
+    .map(entry => {
+      const fullPath = path.join(folderPath, entry.name);
+      const stat = statSync(fullPath);
+      return {
+        name: entry.name,
+        path: toViewerPath(fullPath),
+        size: stat.size,
+        modified: stat.mtime.toISOString()
+      };
+    })
+    .sort((a, b) => {
+      const timeDiff = new Date(b.modified) - new Date(a.modified);
+      if (timeDiff !== 0) return timeDiff;
+      return a.name.localeCompare(b.name, undefined, { sensitivity: 'base' });
+    });
+
+  return {
+    folder: toViewerPath(folderPath),
+    files
+  };
+}
+
+function defaultBrowserFolder() {
+  const outputsPath = path.resolve(rootDir, 'outputs');
+  if (existsSync(outputsPath) && statSync(outputsPath).isDirectory()) return outputsPath;
+  return rootDir;
+}
+
+function resolveDirectoryPath(inputPath = '') {
+  const resolvedPath = inputPath ? resolveInputPath(inputPath) : defaultBrowserFolder();
+  if (!existsSync(resolvedPath) || !statSync(resolvedPath).isDirectory()) {
+    throw new Error(`Folder does not exist: ${inputPath || 'outputs'}`);
+  }
+  return resolvedPath;
+}
+
+function listDirectory(inputPath = '') {
+  const folderPath = resolveDirectoryPath(inputPath);
+  const entries = readdirSync(folderPath, { withFileTypes: true })
+    .filter(entry => entry.isDirectory() || entry.isFile())
+    .map(entry => {
+      const fullPath = path.join(folderPath, entry.name);
+      const stat = statSync(fullPath);
+      return {
+        name: entry.name,
+        path: toViewerPath(fullPath),
+        type: entry.isDirectory() ? 'directory' : 'file',
+        size: entry.isFile() ? stat.size : null,
+        modified: stat.mtime.toISOString()
+      };
+    })
+    .sort((a, b) => {
+      if (a.type !== b.type) return a.type === 'directory' ? -1 : 1;
+      const timeDiff = new Date(b.modified) - new Date(a.modified);
+      if (timeDiff !== 0) return timeDiff;
+      return a.name.localeCompare(b.name, undefined, { sensitivity: 'base' });
+    });
+
+  const parentPath = path.dirname(folderPath);
+  const canGoUp = path.resolve(parentPath) !== path.resolve(folderPath);
+
+  return {
+    folder: toViewerPath(folderPath),
+    parent: canGoUp ? toViewerPath(parentPath) : '',
+    entries
+  };
+}
+
+function folderForFile(filePath) {
+  const resolvedPath = resolveInputPath(filePath);
+  if (!existsSync(resolvedPath) || !statSync(resolvedPath).isFile()) {
+    throw new Error(`File does not exist: ${filePath}`);
+  }
+  return path.dirname(resolvedPath);
+}
+
+function openFolderPath(folderPath) {
+  const resolvedPath = resolveDirectoryPath(folderPath);
+  const command = process.platform === 'win32' ? 'explorer.exe' : process.platform === 'darwin' ? 'open' : 'xdg-open';
+  const openArgs = [resolvedPath];
+  const child = spawn(command, openArgs, {
+    detached: true,
+    stdio: 'ignore',
+    windowsHide: false
+  });
+  child.on('error', error => {
+    console.error(`Failed to open folder: ${error.message}`);
+  });
+  child.unref();
+  return toViewerPath(resolvedPath);
+}
+
+function openFolder(filePath) {
+  const folderPath = folderForFile(filePath);
+  return openFolderPath(folderPath);
+}
+
+function siblingPath(filePath, name) {
+  return path.join(path.dirname(resolveInputPath(filePath)), name);
+}
+
+function defaultOutputPath(filePath) {
+  return siblingPath(filePath, 'output.mp4');
+}
+
+function normalizeTtsVoice(value) {
+  const voice = String(value || '').trim();
+  return voice || 'am_puck';
+}
+
+function detectProvider(voice) {
+  const v = String(voice || '').trim().toLowerCase();
+  if (!v) return 'kokoro';
+  if (v.startsWith('am_') || v.startsWith('af_') || v.startsWith('bf_') || v.startsWith('bm_')) {
+    return 'kokoro';
+  }
+  const openAiVoices = new Set(['alloy', 'ash', 'ballad', 'coral', 'cedar', 'echo', 'fable', 'marin', 'nova', 'onyx', 'sage', 'shimmer', 'verse']);
+  if (openAiVoices.has(v)) {
+    return 'openai';
+  }
+  return 'google';
+}
+
+function normalizeTtsSpeed(value) {
+  const speed = Number(value);
+  if (!Number.isFinite(speed) || speed <= 0) return '1.3';
+  return String(Math.max(0.5, Math.min(2, speed)));
+}
+
+function normalizePositiveInteger(value, fallback, min = 1, max = Number.MAX_SAFE_INTEGER) {
+  const number = Number(value);
+  if (!Number.isInteger(number) || number < min || number > max) return String(fallback);
+  return String(number);
+}
+
+async function resolveLectureFile(filePath, options = {}) {
+  const inputPath = resolveInputPath(filePath);
+  const outPath = siblingPath(inputPath, 'resolved.html');
+  if (path.basename(inputPath).toLowerCase() !== 'index.html') {
+    throw new Error('Resolve is only available for index.html files.');
+  }
+
+  const voice = normalizeTtsVoice(options.ttsVoice);
+  const provider = detectProvider(voice);
+
+  await runCapture('node', [
+    'scripts/build-plan.mjs',
+    '--input', inputPath,
+    '--out', outPath,
+    '--provider', provider,
+    '--voice', voice,
+    '--speed', normalizeTtsSpeed(options.ttsSpeed)
+  ], { cwd: rootDir, windowsHide: true });
+
+  return toViewerPath(outPath);
+}
+
+async function renderLectureFile(filePath, options = {}) {
+  const inputPath = resolveInputPath(filePath);
+  const basename = path.basename(inputPath).toLowerCase();
+  if (!['index.html', 'resolved.html'].includes(basename)) {
+    throw new Error('Render is only available for index.html or resolved.html files.');
+  }
+
+  const voice = normalizeTtsVoice(options.ttsVoice);
+  const provider = detectProvider(voice);
+  const outPath = defaultOutputPath(inputPath);
+  const renderArgs = [
+    'scripts/render-video.mjs',
+    '--html', inputPath,
+    '--out', outPath,
+    '--fps', normalizePositiveInteger(options.fps, 30, 1, 240),
+    '--width', normalizePositiveInteger(options.width, 1080, 1),
+    '--height', normalizePositiveInteger(options.height, 1920, 1),
+    '--tts-provider', provider,
+    '--tts-voice', voice,
+    '--tts-speed', normalizeTtsSpeed(options.ttsSpeed),
+    '--force-audio'
+  ];
+
+  if (basename === 'index.html') {
+    renderArgs.push('--resolved-html', siblingPath(inputPath, 'resolved.html'));
+  } else {
+    renderArgs.push('--no-auto-build');
+  }
+
+  await runCapture('node', renderArgs, { cwd: rootDir, windowsHide: true });
+  return toViewerPath(outPath);
 }
 
 function resolveWorkspacePath(urlPath) {
@@ -201,8 +413,8 @@ async function pickHtmlFile() {
     '$form.Activate()',
     '$dialog = New-Object System.Windows.Forms.OpenFileDialog',
     `$dialog.InitialDirectory = '${escapedRoot}'`,
-    "$dialog.Filter = 'HTML files (*.html)|*.html|All files (*.*)|*.*'",
-    "$dialog.Title = 'Open render-friendly HTML'",
+    "$dialog.Filter = 'Supported files (*.html;*.md;*.txt)|*.html;*.md;*.txt|HTML files (*.html)|*.html|Markdown files (*.md)|*.md|Text files (*.txt)|*.txt|All files (*.*)|*.*'",
+    "$dialog.Title = 'Open lecture IDE file'",
     'if ($dialog.ShowDialog($form) -eq [System.Windows.Forms.DialogResult]::OK) {',
     '  [Console]::OutputEncoding = [System.Text.Encoding]::UTF8',
     '  Write-Output $dialog.FileName',
@@ -308,6 +520,88 @@ const server = createServer(async (request, response) => {
       });
     } catch (error) {
       sendJson(response, 400, { error: error.message });
+    }
+    return;
+  }
+
+  if (requestUrl.pathname === '/folder-files') {
+    try {
+      const requestedPath = requestUrl.searchParams.get('file') || viewerState.path || args.openPath;
+      if (!requestedPath) throw new Error('Missing file path.');
+      sendJson(response, 200, listFolderFiles(requestedPath));
+    } catch (error) {
+      sendJson(response, 400, { error: error.message });
+    }
+    return;
+  }
+
+  if (requestUrl.pathname === '/browse-folder') {
+    try {
+      const requestedPath = requestUrl.searchParams.get('dir') || '';
+      sendJson(response, 200, listDirectory(requestedPath));
+    } catch (error) {
+      sendJson(response, 400, { error: error.message });
+    }
+    return;
+  }
+
+  if (requestUrl.pathname === '/open-folder') {
+    try {
+      const requestedFolder = requestUrl.searchParams.get('dir') || '';
+      const requestedPath = requestUrl.searchParams.get('file') || viewerState.path || args.openPath;
+      if (!requestedFolder && !requestedPath) throw new Error('Missing folder path.');
+      sendJson(response, 200, {
+        ok: true,
+        folder: requestedFolder ? openFolderPath(requestedFolder) : openFolder(requestedPath)
+      });
+    } catch (error) {
+      sendJson(response, 400, { error: error.message });
+    }
+    return;
+  }
+
+  if (requestUrl.pathname === '/resolve-file') {
+    try {
+      const requestedPath = requestUrl.searchParams.get('file') || '';
+      if (!requestedPath) throw new Error('Missing file path.');
+      const resolvedPath = await resolveLectureFile(requestedPath, {
+        ttsVoice: requestUrl.searchParams.get('ttsVoice'),
+        ttsSpeed: requestUrl.searchParams.get('ttsSpeed')
+      });
+
+      viewerState.version++;
+      viewerState.path = resolvedPath;
+
+      sendJson(response, 200, {
+        ok: true,
+        path: resolvedPath,
+        folder: listFolderFiles(resolvedPath)
+      });
+    } catch (error) {
+      sendJson(response, 500, { error: error.message });
+    }
+    return;
+  }
+
+  if (requestUrl.pathname === '/render-file') {
+    try {
+      const requestedPath = requestUrl.searchParams.get('file') || '';
+      if (!requestedPath) throw new Error('Missing file path.');
+      const outputPath = await renderLectureFile(requestedPath, {
+        ttsVoice: requestUrl.searchParams.get('ttsVoice'),
+        ttsSpeed: requestUrl.searchParams.get('ttsSpeed'),
+        fps: requestUrl.searchParams.get('fps'),
+        width: requestUrl.searchParams.get('width'),
+        height: requestUrl.searchParams.get('height')
+      });
+
+      sendJson(response, 200, {
+        ok: true,
+        output: outputPath,
+        folder: listFolderFiles(requestedPath)
+      });
+    } catch (error) {
+      sendJson(response, 500, { error: error.message });
     }
     return;
   }

@@ -1,4 +1,4 @@
-export const lectureViewerVersion = '0.1';
+export const lectureViewerVersion = '0.2';
 
 export function createLecturePlayer(options = {}) {
   return new LecturePlayer(options);
