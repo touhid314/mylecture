@@ -1,0 +1,536 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>StatQuest PCA</title>
+    <style>
+        body {
+            margin: 0;
+            overflow: hidden;
+            font-family: 'Helvetica Neue', Helvetica, Arial, sans-serif;
+            background-color: #f0f0f0;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            height: 100vh;
+        }
+        #container {
+            width: 100%;
+            height: 100%;
+            background-color: white;
+            position: relative;
+            box-sizing: border-box;
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+            align-items: center;
+        }
+        svg {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            pointer-events: none;
+        }
+        .title {
+            font-size: 5vw;
+            font-weight: bold;
+            text-align: center;
+            position: absolute;
+            white-space: pre-wrap;
+        }
+        .subtitle {
+            font-size: 3vw;
+            text-align: center;
+            position: absolute;
+            white-space: pre-wrap;
+        }
+        .note {
+            font-size: 2vw;
+            text-align: center;
+            position: absolute;
+            bottom: 5%;
+            width: 80%;
+            color: #555;
+            background: rgba(255,255,255,0.9);
+            padding: 10px;
+            border-radius: 10px;
+            z-index: 10;
+        }
+        .bam {
+            font-size: 15vw;
+            font-weight: bold;
+            color: black;
+            position: absolute;
+            text-shadow: 5px 5px 0px rgba(0,0,0,0.2);
+            transform: rotate(-10deg);
+        }
+        .data-table-text {
+            font-family: monospace;
+            font-size: 2vw;
+        }
+    </style>
+</head>
+<body>
+    <div id="container">
+        <!-- SVG for all drawings -->
+        <svg id="canvas"></svg>
+        <div id="html-layer"></div>
+    </div>
+
+    <script>
+        window.__VIDEO_METADATA__ = {
+            contractVersion: "0.1",
+            title: "StatQuest: Principal Component Analysis (PCA) concepts in 5 minutes!",
+            aspectRatio: "16:9"
+        };
+
+        const plan = [
+            { id: "s1", kind: "narration+visual", audio: "audio/s1.wav", text: "StatQuest..." },
+            { id: "s2", kind: "narration+visual", audio: "audio/s2.wav", text: "...is the best!!" },
+            { id: "s3", kind: "narration+visual", audio: "audio/s3.wav", text: "If you don't think so..." },
+            { id: "s4", kind: "narration+visual", audio: "audio/s4.wav", text: "...then we have different opinions!!!" },
+            { id: "s5", kind: "narration+visual", audio: "audio/s5.wav", text: "Hello, I'm Josh Starmer and welcome to StatQuest. Today we're going to be talking about the main ideas behind principal component analysis, and we're going to cover those concepts in 5 minutes." },
+            { id: "s6", kind: "narration+visual", audio: "audio/s6.wav", text: "If you want more details than you get here, be sure to check out my other PCA video." },
+            { id: "s7", kind: "narration+visual", audio: "audio/s7.wav", text: "Let's say we had some normal cells..." },
+            { id: "s8", kind: "narration+visual", audio: "audio/s8.wav", text: "(psst - if you're not a biologist, imagine that these could be people, or cars, or cities, etc... they could be anything.)" },
+            { id: "s9", kind: "narration+visual", audio: "audio/s9.wav", text: "Even though they look the same, we suspect that there are differences..." },
+            { id: "s10", kind: "narration+visual", audio: "audio/s10.wav", text: "These might be one type of cell..." },
+            { id: "s11", kind: "narration+visual", audio: "audio/s11.wav", text: "(or one type of person, or car, or city, etc...)" },
+            { id: "s12", kind: "narration+visual", audio: "audio/s12.wav", text: "These might be another type of cell..." },
+            { id: "s13", kind: "narration+visual", audio: "audio/s13.wav", text: "And lastly, these might be a third type of cell..." },
+            { id: "s14", kind: "narration+visual", audio: "audio/s14.wav", text: "Unfortunately, we can't observe the differences from the outside..." },
+            { id: "s15", kind: "narration+visual", audio: "audio/s15.wav", text: "So we sequence the mRNA in each cell to identify which genes are active. This tells us what the cell is doing." },
+            { id: "s16", kind: "narration+visual", audio: "audio/s16.wav", text: "(If they were people, we could measure their height, blood pressure, reading level etc...)" },
+            { id: "s17", kind: "narration+visual", audio: "audio/s17.wav", text: "Okay, here's the data..." },
+            { id: "s18", kind: "narration+visual", audio: "audio/s18.wav", text: "Each column shows how much each gene is transcribed in each cell." },
+            { id: "s19", kind: "narration+visual", audio: "audio/s19.wav", text: "For now, let's imagine there were only 2 cells." },
+            { id: "s20", kind: "narration+visual", audio: "audio/s20.wav", text: "we can plot the measurements for each gene." },
+            { id: "s21", kind: "narration+visual", audio: "audio/s21.wav", text: "This gene (Gene1) is highly transcribed in Cell1 and lowly transcribed in Cell2..." },
+            { id: "s22", kind: "narration+visual", audio: "audio/s22.wav", text: "...and this gene (Gene9) is lowly transcribed in Cell1 and highly transcribed in Cell2." },
+            { id: "s23", kind: "narration+visual", audio: "audio/s23.wav", text: "In general, Cell1 and Cell2 have an inverse correlation. This means that they are probably two different types of cells since they are using different genes." },
+            { id: "s24", kind: "narration+visual", audio: "audio/s24.wav", text: "Now let's imagine there are 3 cells." },
+            { id: "s25", kind: "narration+visual", audio: "audio/s25.wav", text: "We've already seen how we can plot the first 2 cells to see how closely they are related." },
+            { id: "s26", kind: "narration+visual", audio: "audio/s26.wav", text: "Now we can also compare Cell1 to Cell3..." },
+            { id: "s27", kind: "narration+visual", audio: "audio/s27.wav", text: "Cell1 and Cell3 are positively correlated, suggesting they are doing similar things." },
+            { id: "s28", kind: "narration+visual", audio: "audio/s28.wav", text: "Lastly, we can also compare Cell2 to Cell3..." },
+            { id: "s29", kind: "narration+visual", audio: "audio/s29.wav", text: "The negative correlation suggests that Cell2 is doing something different from Cell3..." },
+            { id: "s30", kind: "narration+visual", audio: "audio/s30.wav", text: "Alternatively, we could try to plot all three cells at once on a 3-dimensional graph." },
+            { id: "s31", kind: "narration+visual", audio: "audio/s31.wav", text: "Cell1 could be the vertical axis..." },
+            { id: "s32", kind: "narration+visual", audio: "audio/s32.wav", text: "...Cell2 could be the horizontal axis..." },
+            { id: "s33", kind: "narration+visual", audio: "audio/s33.wav", text: "...and Cell3 could be \"depth\"." },
+            { id: "s34", kind: "narration+visual", audio: "audio/s34.wav", text: "We could then rotate this graph around to see how the cells are related to each other." },
+            { id: "s35", kind: "narration+visual", audio: "audio/s35.wav", text: "But what do we do when we have 4 or more cells?" },
+            { id: "s36", kind: "narration+visual", audio: "audio/s36.wav", text: "Draw tons and tons of 2 cell plots and try to make sense of them all?" },
+            { id: "s37", kind: "narration+visual", audio: "audio/s37.wav", text: "Or draw some crazy graph that has an axis for each cell and makes our brain explode?" },
+            { id: "s38", kind: "narration+visual", audio: "audio/s38.wav", text: "No, both of those options are just plain silly." },
+            { id: "s39", kind: "narration+visual", audio: "audio/s39.wav", text: "Instead, we draw a Principal Component Analysis (PCA) plot..." },
+            { id: "s40", kind: "narration+visual", audio: "audio/s40.wav", text: "A PCA plot converts the correlations (or lack there of) among all of the cells into a 2-D graph." },
+            { id: "s41", kind: "narration+visual", audio: "audio/s41.wav", text: "Cells that are highly correlated cluster together..." },
+            { id: "s42", kind: "narration+visual", audio: "audio/s42.wav", text: "This cluster of cells are highly correlated with each other..." },
+            { id: "s43", kind: "narration+visual", audio: "audio/s43.wav", text: "...so are these..." },
+            { id: "s44", kind: "narration+visual", audio: "audio/s44.wav", text: "...and so are these." },
+            { id: "s45", kind: "narration+visual", audio: "audio/s45.wav", text: "To make the clusters easier to see, we can color code them..." },
+            { id: "s46", kind: "narration+visual", audio: "audio/s46.wav", text: "Once we've identified the clusters in the PCA plot, we can go back to the original cells..." },
+            { id: "s47", kind: "narration+visual", audio: "audio/s47.wav", text: "...and see that they represent 3 different types of cells doing 3 different things with their genes!!!" },
+            { id: "s48", kind: "narration+visual", audio: "audio/s48.wav", text: "BAM!!!" },
+            { id: "s49", kind: "narration+visual", audio: "audio/s49.wav", text: "Here's one last main idea about how to interpret PCA plots: The axes are ranked in order of importance." },
+            { id: "s50", kind: "narration+visual", audio: "audio/s50.wav", text: "Differences along the first principal component axis (PC1)..." },
+            { id: "s51", kind: "narration+visual", audio: "audio/s51.wav", text: "...are more important than differences along the second principal component axis (PC2)." },
+            { id: "s52", kind: "narration+visual", audio: "audio/s52.wav", text: "If the plot looked like this..." },
+            { id: "s53", kind: "narration+visual", audio: "audio/s53.wav", text: "...where the distance between these two clusters..." },
+            { id: "s54", kind: "narration+visual", audio: "audio/s54.wav", text: "...is about the same as the distance between these two clusters..." },
+            { id: "s55", kind: "narration+visual", audio: "audio/s55.wav", text: "...then these two clusters are more different from each other..." },
+            { id: "s56", kind: "narration+visual", audio: "audio/s56.wav", text: "...than these two clusters." },
+            { id: "s57", kind: "narration+visual", audio: "audio/s57.wav", text: "Before we go, you should know that PCA is just one way to to make sense of this type of data. There are lots of other methods that are variations on this theme of \"dimension reduction\"." },
+            { id: "s58", kind: "narration+visual", audio: "audio/s58.wav", text: "These methods include Heatmaps," },
+            { id: "s59", kind: "narration+visual", audio: "audio/s59.wav", text: "t-SNE Plots" },
+            { id: "s60", kind: "narration+visual", audio: "audio/s60.wav", text: "and Multi-Dimensional Scaling (MDS)" },
+            { id: "s61", kind: "narration+visual", audio: "audio/s61.wav", text: "The good news is that I've got StatQuests for all of these..." },
+            { id: "s62", kind: "narration+visual", audio: "audio/s62.wav", text: "NOTE: If the concept of \"dimension reduction\" is freaking you out, check out the original StatQuest on PCA. I take it nice and slow so it's clearly explained." },
+            { id: "s63", kind: "narration+visual", audio: "audio/s63.wav", text: "The End!!!" },
+            { id: "s64", kind: "narration+visual", audio: "audio/s64.wav", text: "Hooray, we've made it to the end of another exciting StatQuest. If you like this StatQuest and want to see more of them, please subscribe. And if you have any ideas for additional StatQuests, well, put them in the comments below. Until next time, Quest on!" }
+        ];
+
+        window.__VIDEO_PLAN__ = plan;
+
+        const canvas = document.getElementById('canvas');
+        const htmlLayer = document.getElementById('html-layer');
+        let width = 1920;
+        let height = 1080;
+
+        function clearCanvas() {
+            canvas.innerHTML = '';
+            htmlLayer.innerHTML = '';
+        }
+
+        function getSegmentIndex(segmentId) {
+            return plan.findIndex(s => s.id === segmentId);
+        }
+
+        function drawText(text, x, y, className) {
+            const div = document.createElement('div');
+            div.className = className;
+            div.textContent = text;
+            div.style.left = typeof x === 'number' ? x + 'px' : x;
+            div.style.top = typeof y === 'number' ? y + 'px' : y;
+            if (x === 'center') {
+                div.style.left = '50%';
+                div.style.transform = 'translate(-50%, 0)';
+            }
+            if (y === 'center') {
+                div.style.top = '50%';
+                div.style.transform = 'translate(0, -50%)';
+                if (x === 'center') div.style.transform = 'translate(-50%, -50%)';
+            }
+            htmlLayer.appendChild(div);
+            return div;
+        }
+
+        function drawCircle(x, y, r, fill, stroke, strokeWidth) {
+            const circle = document.createElementNS('http://www.w3.org/2000/svg', 'circle');
+            circle.setAttribute('cx', x);
+            circle.setAttribute('cy', y);
+            circle.setAttribute('r', r);
+            circle.setAttribute('fill', fill);
+            if (stroke) circle.setAttribute('stroke', stroke);
+            if (strokeWidth) circle.setAttribute('stroke-width', strokeWidth);
+            canvas.appendChild(circle);
+            return circle;
+        }
+
+        function drawRect(x, y, w, h, fill) {
+            const rect = document.createElementNS('http://www.w3.org/2000/svg', 'rect');
+            rect.setAttribute('x', x);
+            rect.setAttribute('y', y);
+            rect.setAttribute('width', w);
+            rect.setAttribute('height', h);
+            rect.setAttribute('fill', fill);
+            canvas.appendChild(rect);
+            return rect;
+        }
+
+        function drawLine(x1, y1, x2, y2, color, strokeWidth, dashed) {
+            const line = document.createElementNS('http://www.w3.org/2000/svg', 'line');
+            line.setAttribute('x1', x1);
+            line.setAttribute('y1', y1);
+            line.setAttribute('x2', x2);
+            line.setAttribute('y2', y2);
+            line.setAttribute('stroke', color);
+            line.setAttribute('stroke-width', strokeWidth);
+            if (dashed) {
+                line.setAttribute('stroke-dasharray', '10, 10');
+            }
+            canvas.appendChild(line);
+            return line;
+        }
+
+        function drawAxis(x1, y1, x2, y2, labelText) {
+            drawLine(x1, y1, x2, y2, 'black', 4);
+            const text = document.createElementNS('http://www.w3.org/2000/svg', 'text');
+            text.setAttribute('x', x2 + 10);
+            text.setAttribute('y', y2 + 10);
+            text.textContent = labelText;
+            text.setAttribute('font-size', '30');
+            text.setAttribute('font-family', 'sans-serif');
+            canvas.appendChild(text);
+        }
+
+        function renderCells(stateColor, offsetX = 800, offsetY = 300) {
+            const positions = [
+                [30, 20], [20, 50], [40, 60], [25, 80], [45, 90], // left cluster (light blue)
+                [60, 20], [70, 40], [85, 30], // top right cluster (red)
+                [60, 70], [75, 60], [90, 70], [65, 90], [80, 85], [95, 90], [85, 105] // bottom right cluster (yellow)
+            ];
+            
+            positions.forEach((pos, i) => {
+                let color = 'lightgreen';
+                if (stateColor === 'types' || stateColor === 'pca_colored') {
+                    if (i < 5) color = 'lightblue';
+                    else if (i < 8) {
+                        if (stateColor === 'types_2' || stateColor === 'types_3' || stateColor === 'pca_colored') color = 'lightcoral';
+                        else color = 'lightgreen';
+                    }
+                    else {
+                        if (stateColor === 'types_3' || stateColor === 'pca_colored') color = 'gold';
+                        else color = 'lightgreen';
+                    }
+                }
+                
+                let stroke = 'black';
+                let strokeWidth = 2;
+                if (stateColor === 'target_left' && i < 5) strokeWidth = 6;
+                if (stateColor === 'target_top_right' && i >= 5 && i < 8) strokeWidth = 6;
+                if (stateColor === 'target_bottom_right' && i >= 8) strokeWidth = 6;
+
+                drawCircle(pos[0]*6 + offsetX, pos[1]*6 + offsetY, 25, color, stroke, strokeWidth);
+            });
+        }
+
+        function drawDataTable(cols, highlightIdx = -1) {
+            drawText("Cell1   Cell2   Cell3   Cell4 ...", "50%", "30%", "data-table-text title");
+            drawText("Gene1   2.5     0.1     2.8   ...", "50%", "40%", "data-table-text title");
+            drawText("Gene2   1.8     0.5     1.2   ...", "50%", "50%", "data-table-text title");
+            drawText("Gene9   0.2     3.1     0.4   ...", "50%", "60%", "data-table-text title");
+            
+            if (highlightIdx === 0) {
+                // Highlight all cols
+                drawRect(width/2 - 250, height*0.25, 600, height*0.4, 'rgba(255,255,0,0.3)');
+            } else if (highlightIdx === 2) {
+                // Highlight Cell1 and Cell2
+                drawRect(width/2 - 250, height*0.25, 250, height*0.4, 'rgba(255,0,0,0.3)');
+            }
+        }
+
+        window.__RENDER_SECTION__ = function(segment, localTime, globalTime) {
+            const rect = document.getElementById('container').getBoundingClientRect();
+            if (rect.width > 0) {
+                width = rect.width;
+                height = rect.height;
+            }
+            
+            clearCanvas();
+            const idx = getSegmentIndex(segment.id);
+
+            // 0-5: Intro titles
+            if (idx <= 1) {
+                let txt = "StatQuest...";
+                if (idx === 1) txt += "\n...is the best!!";
+                drawText(txt, "center", "center", "title");
+            } else if (idx <= 3) {
+                let txt = "If you don't think so...";
+                if (idx === 3) txt += "\n...then we have different opinions!!!";
+                drawText(txt, "center", "center", "title");
+            } else if (idx <= 5) {
+                drawText("StatQuest:\nPrincipal Component Analysis (PCA) concepts in 5 minutes!", "center", "center", "title");
+            }
+            
+            // 6-15: Cells diagram
+            if (idx >= 6 && idx <= 15) {
+                let state = 'green';
+                if (idx === 9 || idx === 10) state = 'types';
+                if (idx === 11) state = 'types_2';
+                if (idx === 12) state = 'types_3';
+                if (idx === 9) state = 'target_left';
+                if (idx === 11) state = 'target_top_right'; 
+                if (idx === 12) state = 'target_bottom_right';
+
+                renderCells(state, width/2 - 300, height/2 - 300);
+
+                if (idx === 7) drawText("(psst - if you're not a biologist, these could be people, or cars, or cities, etc...)", "center", "80%", "note");
+                if (idx === 10) drawText("(or one type of person, or car, or city, etc...)", "center", "80%", "note");
+                if (idx === 15) drawText("(If they were people, we could measure their height, blood pressure, reading level etc...)", "center", "80%", "note");
+            }
+
+            // 16-18: Data table
+            if (idx >= 16 && idx <= 18) {
+                drawDataTable(4, idx === 17 ? 0 : (idx === 18 ? 2 : -1));
+            }
+
+            // 19-22: 2D Plot
+            if (idx >= 19 && idx <= 22) {
+                const ox = width/2 - 300;
+                const oy = height/2 + 300;
+                drawAxis(ox, oy, ox + 600, oy, "Cell2");
+                drawAxis(ox, oy, ox, oy - 600, "Cell1");
+
+                const points = [[50, -500], [100, -450], [150, -350], [200, -300], [300, -200], [350, -150], [400, -100], [450, -50], [500, -20]];
+                points.forEach((p, i) => {
+                    let fill = 'blue';
+                    let r = 15;
+                    if (idx === 20 && i === 0) { fill = 'red'; r = 30; }
+                    if (idx === 21 && i === 8) { fill = 'red'; r = 30; }
+                    drawCircle(ox + p[0], oy + p[1], r, fill);
+                });
+                if (idx === 22) {
+                    drawLine(ox + 30, oy - 520, ox + 520, oy - 10, 'black', 6);
+                }
+            }
+
+            // 23-28: 3 cells
+            if (idx >= 23 && idx <= 28) {
+                if (idx === 23) {
+                    drawText("Cell1   Cell2   Cell3", "50%", "30%", "data-table-text title");
+                    drawText("Gene1   2.5     0.1     2.4", "50%", "40%", "data-table-text title");
+                }
+                const ox = width/2 - 200;
+                const oy = height/2 + 200;
+                if (idx === 24) {
+                    drawAxis(ox, oy, ox+400, oy, "Cell2"); drawAxis(ox, oy, ox, oy-400, "Cell1");
+                    drawLine(ox+50, oy-350, ox+350, oy-50, 'black', 4);
+                }
+                if (idx >= 25 && idx <= 26) {
+                    drawAxis(ox, oy, ox+400, oy, "Cell3"); drawAxis(ox, oy, ox, oy-400, "Cell1");
+                    drawLine(ox+50, oy-50, ox+350, oy-350, 'black', 4);
+                }
+                if (idx >= 27) {
+                    drawAxis(ox, oy, ox+400, oy, "Cell3"); drawAxis(ox, oy, ox, oy-400, "Cell2");
+                    drawLine(ox+50, oy-350, ox+350, oy-50, 'black', 4);
+                }
+            }
+
+            // 29-33: 3D plot
+            if (idx >= 29 && idx <= 33) {
+                const ox = width/2;
+                const oy = height/2 + 100;
+                drawAxis(ox, oy, ox, oy - 400, "Cell1"); // vertical
+                drawAxis(ox, oy, ox + 400, oy, "Cell2"); // horizontal
+                drawAxis(ox, oy, ox - 300, oy + 200, "Cell3"); // depth
+
+                if (idx === 30) drawLine(ox, oy, ox, oy - 400, 'red', 8);
+                if (idx === 31) drawLine(ox, oy, ox + 400, oy, 'red', 8);
+                if (idx === 32) drawLine(ox, oy, ox - 300, oy + 200, 'red', 8);
+                
+                // points
+                drawCircle(ox + 100, oy - 150, 15, 'blue');
+                drawCircle(ox + 150, oy - 250, 15, 'blue');
+                drawCircle(ox - 50, oy - 50, 15, 'blue');
+                drawCircle(ox - 100, oy - 100, 15, 'blue');
+            }
+
+            // 34-37: Many cells
+            if (idx === 34) {
+                drawDataTable(4, -1);
+            }
+            if (idx === 35) {
+                for(let i=0; i<4; i++) {
+                    for(let j=0; j<4; j++) {
+                        const x = width/2 - 400 + j*200;
+                        const y = height/2 - 400 + i*200;
+                        drawAxis(x, y + 150, x + 150, y + 150, "");
+                        drawAxis(x, y + 150, x, y, "");
+                        drawLine(x + 20, y + 20, x + 130, y + 130, 'black', 2);
+                    }
+                }
+            }
+            if (idx === 36) {
+                const ox = width/2;
+                const oy = height/2;
+                for(let i=0; i<8; i++) {
+                    const ang = i * Math.PI / 4;
+                    drawAxis(ox, oy, ox + Math.cos(ang)*300, oy + Math.sin(ang)*300, "");
+                }
+            }
+
+            // 38-47: PCA Plot
+            if (idx >= 38 && idx <= 47) {
+                const ox = 200;
+                const oy = height - 200;
+                drawAxis(ox, oy, width - 200, oy, "PC1");
+                drawAxis(ox, oy, ox, 200, "PC2");
+                
+                const c1 = [[350, 400], [380, 420], [400, 380], [360, 360], [420, 410]]; // top left
+                const c2 = [[360, 700], [390, 720], [410, 680]]; // bottom left
+                const c3 = [[1200, 500], [1250, 520], [1220, 480], [1280, 550], [1180, 490], [1300, 510], [1260, 470]]; // right
+                
+                c1.forEach(p => drawCircle(p[0], p[1], 15, idx >= 44 ? 'lightblue' : 'blue'));
+                c2.forEach(p => drawCircle(p[0], p[1], 15, idx >= 44 ? 'lightcoral' : 'blue'));
+                c3.forEach(p => drawCircle(p[0], p[1], 15, idx >= 44 ? 'gold' : 'blue'));
+
+                if (idx === 41) drawCircle(385, 395, 80, 'none', 'red', 6);
+                if (idx === 42) drawCircle(385, 700, 60, 'none', 'red', 6);
+                if (idx === 43) drawCircle(1240, 505, 100, 'none', 'red', 6);
+
+                if (idx >= 45) {
+                    renderCells(idx >= 46 ? 'pca_colored' : 'green', width/2 + 200, height/2 - 400);
+                }
+                if (idx === 47) {
+                    drawText("BAM!!!", "center", "center", "bam");
+                }
+            }
+
+            // 48-50: PCA axes importance
+            if (idx >= 48 && idx <= 50) {
+                const ox = width/2 - 400;
+                const oy = height/2 + 300;
+                drawAxis(ox, oy, ox + 800, oy, "PC1");
+                drawAxis(ox, oy, ox, oy - 600, "PC2");
+                drawCircle(ox + 400, oy - 300, 30, 'blue');
+                if (idx === 49) drawLine(ox, oy, ox + 800, oy, 'red', 10);
+                if (idx === 50) drawLine(ox, oy, ox, oy - 600, 'red', 10);
+            }
+
+            // 51-55: PCA Plot distances
+            if (idx >= 51 && idx <= 55) {
+                const ox = width/2 - 600;
+                const oy = height/2 + 300;
+                drawAxis(ox, oy, ox + 1200, oy, "PC1");
+                drawAxis(ox, oy, ox, oy - 600, "PC2");
+                
+                const c1 = [[ox+150, oy-400], [ox+180, oy-420], [ox+200, oy-380]];
+                const c2 = [[ox+160, oy-100], [ox+190, oy-120], [ox+210, oy-80]];
+                const c3 = [[ox+900, oy-100], [ox+950, oy-120], [ox+920, oy-80]];
+
+                c1.forEach(p => drawCircle(p[0], p[1], 15, 'lightblue'));
+                c2.forEach(p => drawCircle(p[0], p[1], 15, 'lightcoral'));
+                c3.forEach(p => drawCircle(p[0], p[1], 15, 'gold'));
+
+                if (idx === 52 || idx === 55) { // vertical distance
+                    drawLine(ox+180, oy-370, ox+180, oy-130, 'black', 6);
+                }
+                if (idx === 53 || idx === 54) { // horizontal distance
+                    drawLine(ox+220, oy-100, ox+890, oy-100, 'black', 6);
+                }
+                if (idx === 54) drawLine(ox+220, oy-100, ox+890, oy-100, 'orange', 12);
+                if (idx === 55) drawLine(ox+180, oy-370, ox+180, oy-130, 'orange', 12);
+            }
+
+            // 56-61: End Methods
+            if (idx >= 56 && idx <= 61) {
+                if (idx === 56) drawText("Before we go, you should know that PCA is just one way to make sense of this type of data...", "center", "80%", "note");
+                
+                if (idx >= 57) {
+                    drawRect(width/2 - 600, height/2 - 200, 300, 300, 'purple');
+                    for(let i=0; i<10; i++) {
+                        for(let j=0; j<10; j++) {
+                            drawRect(width/2 - 600 + j*30, height/2 - 200 + i*30, 28, 28, `rgba(255, ${i*25}, ${j*25}, 1)`);
+                        }
+                    }
+                    drawText("Heatmap", width/2 - 450, height/2 + 150, "subtitle");
+                }
+                if (idx >= 58) {
+                    drawCircle(width/2, height/2 - 50, 150, 'orange', 'black', 4);
+                    drawCircle(width/2 - 50, height/2 - 100, 20, 'white');
+                    drawCircle(width/2 + 50, height/2, 20, 'white');
+                    drawText("t-SNE Plots", "center", height/2 + 150, "subtitle");
+                }
+                if (idx >= 59) {
+                    drawAxis(width/2 + 300, height/2 + 100, width/2 + 700, height/2 + 100, "");
+                    drawAxis(width/2 + 300, height/2 + 100, width/2 + 300, height/2 - 300, "");
+                    drawCircle(width/2 + 400, height/2 - 100, 20, 'cyan');
+                    drawCircle(width/2 + 600, height/2 - 200, 20, 'cyan');
+                    drawText("MDS", width/2 + 500, height/2 + 150, "subtitle");
+                }
+                if (idx === 61) drawText("NOTE: If the concept of 'dimension reduction' is freaking you out, check out the original StatQuest on PCA. I take it nice and slow so it's clearly explained.", "center", "80%", "note");
+            }
+
+            // 62-63: The End
+            if (idx >= 62) {
+                drawText("The End!!!", "center", "center", "title");
+            }
+        };
+
+        // Initialize SVG marker for arrows if needed later
+        const defs = document.createElementNS('http://www.w3.org/2000/svg', 'defs');
+        defs.innerHTML = `
+            <marker id="arrow" viewBox="0 0 10 10" refX="5" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+                <path d="M 0 0 L 10 5 L 0 10 z" fill="black"/>
+            </marker>
+        `;
+        canvas.appendChild(defs);
+
+        // For testing outside of the viewer
+        if (!window.frameElement && !window.location.search.includes('export=1')) {
+            let currentIndex = 0;
+            window.__RENDER_SECTION__(plan[currentIndex], 0, 0);
+            document.body.addEventListener('click', () => {
+                currentIndex = (currentIndex + 1) % plan.length;
+                window.__RENDER_SECTION__(plan[currentIndex], 0, 0);
+            });
+            drawText("Click to advance to next segment", "10px", "10px", "note").style.bottom = 'auto';
+        }
+
+    </script>
+</body>
+</html>

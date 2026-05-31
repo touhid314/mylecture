@@ -1,10 +1,19 @@
 import { chromium } from 'playwright';
 import { spawn } from 'node:child_process';
+import os from 'node:os';
 import { existsSync, mkdirSync, readFileSync, statSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import { pathToFileURL } from 'node:url';
 
 const rootDir = process.cwd();
+
+function defaultWorkerCount() {
+  return Math.max(1, os.cpus()?.length || 1);
+}
+
+function defaultAudioWorkerCount(provider) {
+  return provider === 'kokoro' ? 6 : defaultWorkerCount();
+}
 
 function parseArgs(argv) {
   const args = {
@@ -13,6 +22,7 @@ function parseArgs(argv) {
     provider: 'kokoro',
     voice: 'am_puck',
     speed: 1.2,
+    audioWorkers: null,
     forceAudio: false
   };
 
@@ -25,6 +35,7 @@ function parseArgs(argv) {
     else if (arg === '--provider') args.provider = next, i++;
     else if (arg === '--voice') args.voice = next, i++;
     else if (arg === '--speed') args.speed = Number(next), i++;
+    else if (arg === '--audio-workers') args.audioWorkers = Number(next), i++;
     else if (arg === '--force-audio') args.forceAudio = true;
     else if (arg === '--help') {
       printHelp();
@@ -36,6 +47,17 @@ function parseArgs(argv) {
 
   if (!Number.isFinite(args.speed) || args.speed <= 0) {
     throw new Error('--speed must be a positive number');
+  }
+
+  if (args.audioWorkers === null) {
+    args.audioWorkers = Number(
+      process.env.TTS_AUDIO_WORKERS ||
+      process.env.KOKORO_TTS_WORKERS ||
+      defaultAudioWorkerCount(args.provider)
+    );
+  }
+  if (!Number.isInteger(args.audioWorkers) || args.audioWorkers <= 0) {
+    throw new Error('--audio-workers must be a positive integer');
   }
 
   return args;
@@ -51,6 +73,7 @@ Options:
   --provider <name>    TTS provider passed to tools/tts.py. Default: kokoro
   --voice <name>       TTS voice passed to tools/tts.py. Default: am_puck
   --speed <number>     TTS speed passed to tools/tts.py. Default: 1.2
+  --audio-workers <n>  Concurrent audio files to generate. Default: 6 for Kokoro, CPU count otherwise
   --force-audio        Regenerate narration audio even if files already exist
 `);
 }
@@ -190,6 +213,24 @@ async function generateAudio({ text, outputPath, provider, voice, speed }) {
   });
 }
 
+async function runAudioJobs(audioJobs, maxWorkers) {
+  if (audioJobs.length === 0) return;
+
+  const workerCount = Math.min(maxWorkers, audioJobs.length);
+  let nextJob = 0;
+  console.log(`Generating ${audioJobs.length} audio file(s) with ${workerCount} worker(s)...`);
+
+  async function worker() {
+    while (nextJob < audioJobs.length) {
+      const job = audioJobs[nextJob++];
+      console.log(`Generating audio for ${job.sectionId} -> ${job.displayPath}`);
+      await generateAudio(job);
+    }
+  }
+
+  await Promise.all(Array.from({ length: workerCount }, () => worker()));
+}
+
 async function measureAudioDuration(audioPath) {
   const output = await runCapture('ffprobe', [
     '-v', 'error',
@@ -212,6 +253,51 @@ async function resolveTimeline(plan, inputPath, outputPath, args) {
   const audioTimeline = [];
   const interactiveTimeline = [];
   const gameTimeline = [];
+  const audioInfoBySection = new Map();
+  const audioJobs = [];
+
+  for (const [index, section] of plan.entries()) {
+    if (!section || typeof section !== 'object') {
+      throw new Error(`Plan item ${index} must be an object.`);
+    }
+    if (!section.id) {
+      throw new Error(`Plan item ${index} is missing id.`);
+    }
+
+    const sectionKind = normalizeSectionKind(section.kind);
+
+    if (sectionKind === 'narration+visual') {
+      if (!section.text || !String(section.text).trim()) {
+        throw new Error(`Narration+visual section "${section.id}" must include text.`);
+      }
+
+      const requestedAudio = normalizeAudioRequest(section.audio, section.id);
+      const audioPath = path.resolve(outputDir, requestedAudio);
+      const displayPath = toPosixRelative(outputPath, audioPath);
+      mkdirSync(path.dirname(audioPath), { recursive: true });
+      audioInfoBySection.set(section.id, { audioPath, displayPath });
+
+      if (section.audio && section.audio !== requestedAudio) {
+        console.log(`Normalized audio path for ${section.id}: ${section.audio} -> ${requestedAudio}`);
+      }
+
+      if (args.forceAudio || !isFile(audioPath)) {
+        audioJobs.push({
+          sectionId: section.id,
+          text: section.text,
+          outputPath: audioPath,
+          displayPath,
+          provider: args.provider,
+          voice: args.voice,
+          speed: args.speed
+        });
+      } else {
+        console.log(`Using existing audio for ${section.id} -> ${displayPath}`);
+      }
+    }
+  }
+
+  await runAudioJobs(audioJobs, args.audioWorkers);
 
   for (const [index, section] of plan.entries()) {
     if (!section || typeof section !== 'object') {
@@ -262,29 +348,13 @@ async function resolveTimeline(plan, inputPath, outputPath, args) {
         throw new Error(`Narration+visual section "${section.id}" must include text.`);
       }
 
-      const requestedAudio = normalizeAudioRequest(section.audio, section.id);
-      const audioPath = path.resolve(outputDir, requestedAudio);
-      mkdirSync(path.dirname(audioPath), { recursive: true });
-
-      if (section.audio && section.audio !== requestedAudio) {
-        console.log(`Normalized audio path for ${section.id}: ${section.audio} -> ${requestedAudio}`);
+      const audioInfo = audioInfoBySection.get(section.id);
+      if (!audioInfo) {
+        throw new Error(`Internal error: missing audio info for "${section.id}".`);
       }
 
-      if (args.forceAudio || !isFile(audioPath)) {
-        console.log(`Generating audio for ${section.id} -> ${toPosixRelative(outputPath, audioPath)}`);
-        await generateAudio({
-          text: section.text,
-          outputPath: audioPath,
-          provider: args.provider,
-          voice: args.voice,
-          speed: args.speed
-        });
-      } else {
-        console.log(`Using existing audio for ${section.id} -> ${toPosixRelative(outputPath, audioPath)}`);
-      }
-
-      const duration = await measureAudioDuration(audioPath);
-      const audioSrc = toPosixRelative(outputPath, audioPath);
+      const duration = await measureAudioDuration(audioInfo.audioPath);
+      const audioSrc = audioInfo.displayPath;
       const item = { ...section, kind: sectionKind, audio: audioSrc, resolvedDuration: duration };
 
       videoTimeline.push({

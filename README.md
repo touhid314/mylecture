@@ -16,6 +16,21 @@ tools/      Python support utilities, including TTS
 .render/    Temporary render artifacts
 ```
 
+## Requirements
+
+- Node.js dependencies from `npm install`.
+- Python dependencies for local Kokoro CUDA TTS:
+
+```bash
+python -m pip install misaki[en] onnxruntime-gpu scipy numpy huggingface_hub
+```
+
+- Kokoro ONNX model files are not committed. Download the required full-quality model, tokenizer, and voices:
+
+```bash
+python -c "from huggingface_hub import snapshot_download; snapshot_download('onnx-community/Kokoro-82M-v1.0-ONNX', local_dir='models/kokoro-onnx', allow_patterns=['onnx/model.onnx','voices/*','tokenizer.json'])"
+```
+
 ## Main Commands
 
 ```bash

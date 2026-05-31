@@ -29,12 +29,11 @@ Providers available via this module:
    - Important: Google may add/remove voices over time; this wrapper forwards
      voice names directly and does not hard-validate them.
 
-3) kokoro (local via kokoro-js + Node.js)
+3) kokoro (local via ONNX Runtime CUDA, with kokoro-js fallback)
    - Provider key: "kokoro"
    - Default model: onnx-community/Kokoro-82M-ONNX
-   - Device selection:
-     set KOKORO_DEVICE to "dml", "cuda", or "cpu" (empty = runtime default).
-     If a non-CPU device fails, this wrapper automatically falls back to CPU.
+   - Default engine: Python ONNX Runtime with CUDAExecutionProvider.
+   - Set KOKORO_ENGINE=kokoro-js to force the old Node.js path.
    - Available voices (from installed kokoro-js package):
      af_heart, af_alloy, af_aoede, af_bella, af_jessica, af_kore,
      af_nicole, af_nova, af_river, af_sarah, af_sky,
@@ -51,6 +50,7 @@ Note:
 from __future__ import annotations
 
 import os
+import json
 import re
 import subprocess
 import sys
@@ -113,15 +113,41 @@ _ALLOWED_GEMINI_MODELS = {
 }
 
 DEFAULT_KOKORO_MODEL = os.getenv("KOKORO_MODEL") or "onnx-community/Kokoro-82M-ONNX"
-DEFAULT_KOKORO_DTYPE = os.getenv("KOKORO_DTYPE") or "q8"
 DEFAULT_KOKORO_VOICE = os.getenv("KOKORO_VOICE") or "am_puck"
-DEFAULT_KOKORO_DEVICE = "cuda"
+DEFAULT_KOKORO_ENGINE = (os.getenv("KOKORO_ENGINE") or "onnxruntime").strip().lower()
+DEFAULT_KOKORO_ONNX_MODEL = os.getenv("KOKORO_ONNX_MODEL") or "model.onnx"
+DEFAULT_KOKORO_ONNX_MODEL_DIR = Path(
+    os.getenv("KOKORO_ONNX_MODEL_DIR") or PROJECT_ROOT / "models" / "kokoro-onnx"
+)
+
+
+def _default_kokoro_device() -> str:
+    explicit = os.getenv("KOKORO_DEVICE")
+    if explicit is not None:
+        return explicit.strip()
+    if sys.platform in {"win32"} or sys.platform.startswith("linux"):
+        return "cuda"
+    return "cpu"
+
+
+DEFAULT_KOKORO_DEVICE = _default_kokoro_device()
+
+
+def _default_kokoro_dtype() -> str:
+    explicit = os.getenv("KOKORO_DTYPE")
+    if explicit:
+        return explicit
+    return "fp32" if DEFAULT_KOKORO_DEVICE in {"dml", "cuda", "webgpu"} else "q8"
+
+
+DEFAULT_KOKORO_DTYPE = _default_kokoro_dtype()
 
 KOKORO_JS = r"""
 import { KokoroTTS } from "kokoro-js";
 
 const model = process.env.KOKORO_MODEL ?? "onnx-community/Kokoro-82M-ONNX";
 const dtype = process.env.KOKORO_DTYPE ?? "q8";
+const cpuFallbackDtype = process.env.KOKORO_CPU_FALLBACK_DTYPE ?? "q8";
 const voice = process.env.KOKORO_VOICE ?? "am_puck";
 const speedRaw = process.env.KOKORO_SPEED ?? "1";
 const speed = Number(speedRaw);
@@ -142,11 +168,14 @@ if (device) initOpts.device = device;
 
 let tts;
 try {
+  console.error(`Kokoro loading model=${model} dtype=${dtype} device=${device ?? "default"}`);
   tts = await KokoroTTS.from_pretrained(model, initOpts);
+  console.error(`Kokoro ready device=${device ?? "default"}`);
 } catch (err) {
   if (device && device !== "cpu") {
-    console.warn(`Kokoro device '${device}' failed; falling back to cpu.`);
-    tts = await KokoroTTS.from_pretrained(model, { dtype, device: "cpu" });
+    console.warn(`Kokoro device '${device}' failed; falling back to cpu. ${err?.message ?? err}`);
+    tts = await KokoroTTS.from_pretrained(model, { dtype: cpuFallbackDtype, device: "cpu" });
+    console.error(`Kokoro ready device=cpu dtype=${cpuFallbackDtype}`);
   } else {
     throw err;
   }
@@ -162,7 +191,7 @@ try {
 } catch (err) {
   if (device && device !== "cpu") {
     console.warn(`Kokoro synthesis failed on '${device}'; retrying on cpu.`);
-    const cpuTts = await KokoroTTS.from_pretrained(model, { dtype, device: "cpu" });
+    const cpuTts = await KokoroTTS.from_pretrained(model, { dtype: cpuFallbackDtype, device: "cpu" });
     await synthesize(cpuTts);
   } else {
     throw err;
@@ -361,7 +390,81 @@ def _google_client() -> genai.Client:
     return genai.Client(api_key=api_key)
 
 
-def _run_kokoro(text: str, output_path: Path, voice: str, speed: float) -> None:
+def _run_kokoro_onnxruntime(text: str, output_path: Path, voice: str, speed: float) -> None:
+    try:
+        import numpy as np
+        import scipy.io.wavfile as wavfile
+        import onnxruntime as ort
+        from huggingface_hub import snapshot_download
+        from misaki import en
+    except Exception as exc:
+        raise RuntimeError(
+            "Python Kokoro CUDA backend requires numpy, scipy, onnxruntime-gpu, "
+            "huggingface_hub, and misaki[en]."
+        ) from exc
+
+    model_dir = DEFAULT_KOKORO_ONNX_MODEL_DIR
+    if not (model_dir / "tokenizer.json").is_file() or not (model_dir / "onnx" / DEFAULT_KOKORO_ONNX_MODEL).is_file():
+        snapshot_download(
+            "onnx-community/Kokoro-82M-v1.0-ONNX",
+            local_dir=str(model_dir),
+            allow_patterns=["onnx/model.onnx", "voices/*", "tokenizer.json"],
+        )
+
+    tokenizer_path = model_dir / "tokenizer.json"
+    voice_path = model_dir / "voices" / f"{voice}.bin"
+    model_path = model_dir / "onnx" / DEFAULT_KOKORO_ONNX_MODEL
+    if not voice_path.is_file():
+        raise RuntimeError(f"Kokoro voice file not found: {voice_path}")
+    if not model_path.is_file():
+        raise RuntimeError(f"Kokoro ONNX model not found: {model_path}")
+
+    with tokenizer_path.open("r", encoding="utf-8") as f:
+        tokenizer = json.load(f)
+    vocab = tokenizer["model"]["vocab"]
+
+    g2p = en.G2P(trf=False, british=voice.startswith("b"), fallback=None)
+    phonemes, _ = g2p(text)
+    missing_phonemes = sorted({p for p in phonemes if p not in vocab})
+    if missing_phonemes:
+        log.warning(f"Kokoro skipped tokenizer-missing phoneme(s): {''.join(missing_phonemes)}")
+    tokens = [vocab[p] for p in phonemes if p in vocab]
+    if not tokens:
+        raise RuntimeError("Kokoro phonemizer produced no tokenizer-compatible phonemes.")
+    if len(tokens) > 510:
+        raise RuntimeError(f"Kokoro input is too long for one ONNX call: {len(tokens)} tokens")
+
+    voices = np.fromfile(voice_path, dtype=np.float32).reshape(-1, 1, 256)
+    ref_s = voices[len(tokens)]
+    input_ids = np.array([[0, *tokens, 0]], dtype=np.int64)
+    speed_input = np.array([speed], dtype=np.float32)
+
+    requested_device = (DEFAULT_KOKORO_DEVICE or "cuda").lower()
+    if requested_device == "cpu":
+        providers = ["CPUExecutionProvider"]
+    elif requested_device == "cuda":
+        providers = ["CUDAExecutionProvider", "CPUExecutionProvider"]
+    else:
+        raise RuntimeError(
+            f"Python Kokoro ONNX backend supports KOKORO_DEVICE=cuda or cpu, got {requested_device!r}."
+        )
+
+    available = ort.get_available_providers()
+    if providers[0] not in available:
+        raise RuntimeError(f"ONNX Runtime provider {providers[0]} is not available. Available: {available}")
+
+    sess = ort.InferenceSession(str(model_path), providers=providers)
+    active = sess.get_providers()
+    print(f"Kokoro ONNX Runtime providers={active} model={DEFAULT_KOKORO_ONNX_MODEL} voice={voice}")
+    if requested_device == "cuda" and (not active or active[0] != "CUDAExecutionProvider"):
+        raise RuntimeError(f"CUDAExecutionProvider was requested but session providers are {active}")
+
+    audio = sess.run(None, {"input_ids": input_ids, "style": ref_s, "speed": speed_input})[0]
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    wavfile.write(output_path, 24000, audio[0])
+
+
+def _run_kokoro_js(text: str, output_path: Path, voice: str, speed: float) -> None:
     env = os.environ.copy()
     env.update(
         {
@@ -407,9 +510,42 @@ def _run_kokoro(text: str, output_path: Path, voice: str, speed: float) -> None:
                 # Windows can briefly lock temp files after process exit.
                 pass
 
+    def _summarize_process_output(output: str) -> str:
+        lines = []
+        for line in output.splitlines():
+            clean = re.sub(r"\x1b\[[0-9;]*m", "", line).strip()
+            if not clean:
+                continue
+            if clean.startswith(("Kokoro ", "RuntimeError:", "Error:", "An error occurred")):
+                lines.append(clean)
+            elif "Status Message:" in clean:
+                lines.append(clean[:500])
+            elif "failed" in clean.lower() or "unsupported device" in clean.lower():
+                lines.append(clean[:500])
+        return "\n".join(lines[-20:]) or output.strip()[:1000] or "Unknown error"
+
     if result.returncode != 0:
-        detail = (result.stderr or result.stdout or "Unknown error").strip()
+        detail = _summarize_process_output(result.stderr or result.stdout or "")
         raise RuntimeError(f"kokoro-js failed: {detail}")
+    if result.stderr.strip():
+        detail = _summarize_process_output(result.stderr)
+        if detail:
+            print(detail)
+
+
+def _run_kokoro(text: str, output_path: Path, voice: str, speed: float) -> None:
+    if DEFAULT_KOKORO_ENGINE in {"onnxruntime", "onnx", "ort", "cuda"}:
+        try:
+            _run_kokoro_onnxruntime(text, output_path, voice, speed)
+            return
+        except Exception as exc:
+            if os.getenv("KOKORO_STRICT_GPU", "").strip() in {"1", "true", "yes"}:
+                raise
+            log.warning(f"Kokoro ONNX Runtime backend failed; falling back to kokoro-js. {exc}")
+    elif DEFAULT_KOKORO_ENGINE not in {"kokoro-js", "node", "js"}:
+        raise RuntimeError("KOKORO_ENGINE must be one of: onnxruntime, kokoro-js")
+
+    _run_kokoro_js(text, output_path, voice, speed)
 
 
 def _run_kokoro_chunked(text: str, output_path: Path, voice: str, speed: float) -> None:
@@ -425,7 +561,14 @@ def _run_kokoro_chunked(text: str, output_path: Path, voice: str, speed: float) 
     with tempfile.TemporaryDirectory(dir=str(tmp_root), prefix="kokoro_chunks_") as td:
         chunk_dir = Path(td)
         chunk_paths = [chunk_dir / f"chunk_{idx:04d}.wav" for idx in range(len(chunks))]
-        max_workers = min(len(chunks), max(1, os.cpu_count() or 4), 8)
+        configured_workers = os.getenv("KOKORO_CHUNK_WORKERS")
+        if configured_workers:
+            max_workers = int(configured_workers)
+        elif DEFAULT_KOKORO_ENGINE in {"onnxruntime", "onnx", "ort", "cuda"} and DEFAULT_KOKORO_DEVICE == "cuda":
+            max_workers = 1
+        else:
+            max_workers = min(len(chunks), max(1, os.cpu_count() or 4), 8)
+        max_workers = max(1, min(len(chunks), max_workers))
 
         with ThreadPoolExecutor(max_workers=max_workers) as executor:
             future_map = {

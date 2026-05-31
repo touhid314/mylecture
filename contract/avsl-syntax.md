@@ -87,7 +87,4 @@ One, {visual: add text “find the node you want to delete” duration:”persis
 Two, {visual: add text “Find a replacement:”} Find a replacement: {visual: add text “Follow any path of non-null pointers downwards until you reach a leaf node”}Follow any path of non-null pointers downwards until you reach a leaf node (a node with no children).
 Three, {visual: add text “Swap and Remove”} Swap and Remove: {visual: add text “Take the key from that leaf, move it up to the node you intended to delete, and then simply remove the now-empty leaf.”} Take the key from that leaf, move it up to the node you intended to delete, and then simply remove the now-empty leaf.
 
-Additional instructions for large input:
-If the input transcript is too large, it may be separated into multiple segments. In that case, you will only generate output for the segment you are asked for. Make sure you maintain continuity between the visuals and speech of the segments. Segment (n+1)’s beginning must be from the end of segment n.
-
 ====================END OF INSTRUCTION ==============

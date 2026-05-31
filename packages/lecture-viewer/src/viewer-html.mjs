@@ -364,6 +364,28 @@ body.fullscreen-active #preview-shell {
   font-family: "Cascadia Code", Consolas, monospace;
   font-size: 13px;
 }
+#document-preview.avsl-preview {
+  font-family: "Cascadia Code", Consolas, monospace;
+  font-size: 13px;
+  line-height: 1.62;
+}
+#document-preview .avsl-line {
+  min-height: 1.62em;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+#document-preview .avsl-visual {
+  display: inline;
+  padding: 1px 5px;
+  border: 1px solid rgba(111, 194, 255, 0.42);
+  border-radius: 4px;
+  background: rgba(28, 93, 140, 0.32);
+  color: #bde7ff;
+  font-weight: 600;
+}
+#document-preview .avsl-narration {
+  color: #eeeeee;
+}
 #subtitle-overlay {
   position: absolute;
   left: 16%;
@@ -1073,7 +1095,7 @@ function folderPathFromFile(filePath) {
 }
 
 function isDocumentPreviewFile(filePath) {
-  return ['txt', 'md'].includes(fileExtension(filePath));
+  return ['txt', 'md', 'avsl'].includes(fileExtension(filePath));
 }
 
 function currentFileKind() {
@@ -1159,6 +1181,73 @@ function renderMarkdown(markdown) {
   return html.join('');
 }
 
+function findAvslVisualEnd(text, startIndex) {
+  let quote = '';
+  let escaped = false;
+
+  for (let index = startIndex; index < text.length; index++) {
+    const char = text[index];
+
+    if (escaped) {
+      escaped = false;
+      continue;
+    }
+
+    if (quote) {
+      if (char === '\\\\') {
+        escaped = true;
+      } else if (char === quote) {
+        quote = '';
+      }
+      continue;
+    }
+
+    if (char === '"' || char === "'") {
+      quote = char;
+    } else if (char === '}') {
+      return index + 1;
+    }
+  }
+
+  return text.length;
+}
+
+function appendAvslSpan(parent, className, text) {
+  if (!text) return;
+  const span = document.createElement('span');
+  span.className = className;
+  span.textContent = text;
+  parent.append(span);
+}
+
+function renderAvsl(avsl) {
+  const fragment = document.createDocumentFragment();
+  const lines = String(avsl || '').split(/\\r?\\n/);
+
+  for (const line of lines) {
+    const row = document.createElement('div');
+    row.className = 'avsl-line';
+    let cursor = 0;
+
+    while (cursor < line.length) {
+      const start = line.indexOf('{visual:', cursor);
+      if (start === -1) {
+        appendAvslSpan(row, 'avsl-narration', line.slice(cursor));
+        break;
+      }
+
+      appendAvslSpan(row, 'avsl-narration', line.slice(cursor, start));
+      const end = findAvslVisualEnd(line, start + 8);
+      appendAvslSpan(row, 'avsl-visual', line.slice(start, end));
+      cursor = end;
+    }
+
+    fragment.append(row);
+  }
+
+  return fragment;
+}
+
 async function loadDocumentFile(filePath) {
   player.pause();
   setPreviewMode('document');
@@ -1166,6 +1255,8 @@ async function loadDocumentFile(filePath) {
   videoMetadata = {};
   lastPlayerState = null;
   updateControls(player.snapshot());
+  const extension = fileExtension(currentFilePath);
+  documentPreview.classList.toggle('avsl-preview', extension === 'avsl');
   documentPreview.textContent = 'Loading...';
   setStatus('Loading document...');
 
@@ -1174,8 +1265,11 @@ async function loadDocumentFile(filePath) {
     const text = await response.text();
     if (!response.ok) throw new Error(text || 'Document load failed');
 
-    if (fileExtension(currentFilePath) === 'md') {
+    if (extension === 'md') {
       documentPreview.innerHTML = renderMarkdown(text);
+    } else if (extension === 'avsl') {
+      documentPreview.textContent = '';
+      documentPreview.append(renderAvsl(text));
     } else {
       const pre = document.createElement('pre');
       const code = document.createElement('code');

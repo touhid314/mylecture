@@ -75,6 +75,7 @@ function openBrowser(url) {
 
 const mimeTypes = new Map([
   ['.html', 'text/html; charset=utf-8'],
+  ['.avsl', 'text/plain; charset=utf-8'],
   ['.txt', 'text/plain; charset=utf-8'],
   ['.md', 'text/markdown; charset=utf-8'],
   ['.js', 'text/javascript; charset=utf-8'],
@@ -494,7 +495,7 @@ async function pickHtmlFile() {
     '$form.Activate()',
     '$dialog = New-Object System.Windows.Forms.OpenFileDialog',
     `$dialog.InitialDirectory = '${escapedRoot}'`,
-    "$dialog.Filter = 'Supported files (*.html;*.md;*.txt)|*.html;*.md;*.txt|HTML files (*.html)|*.html|Markdown files (*.md)|*.md|Text files (*.txt)|*.txt|All files (*.*)|*.*'",
+    "$dialog.Filter = 'Supported files (*.html;*.avsl;*.md;*.txt)|*.html;*.avsl;*.md;*.txt|HTML files (*.html)|*.html|AVSL scripts (*.avsl)|*.avsl|Markdown files (*.md)|*.md|Text files (*.txt)|*.txt|All files (*.*)|*.*'",
     "$dialog.Title = 'Open lecture IDE file'",
     'if ($dialog.ShowDialog($form) -eq [System.Windows.Forms.DialogResult]::OK) {',
     '  [Console]::OutputEncoding = [System.Text.Encoding]::UTF8',

@@ -11,3 +11,4 @@ tests/fixtures/*/audio/
 outputs/
 *.mp4
 assets/
+models/kokoro-onnx/
