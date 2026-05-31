@@ -51,7 +51,7 @@ body.fullscreen-active {
   min-width: 0;
   min-height: 0;
   display: grid;
-  grid-template-rows: auto auto 1fr;
+  grid-template-rows: auto auto auto 1fr;
   border-right: 1px solid var(--line);
   background: #0d0d0d;
 }
@@ -200,15 +200,52 @@ body.fullscreen-active #folder-sidebar {
   font-size: 12px;
   line-height: 1.35;
   overflow-wrap: anywhere;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
 }
 #job-status.visible {
-  display: block;
+  display: flex;
 }
 #job-status.error {
   color: #ffb4b4;
 }
 #job-status.success {
   color: #b8f7c8;
+}
+#job-status-text {
+  flex: 1;
+  min-width: 0;
+}
+.stop-btn {
+  min-height: 20px;
+  height: 20px;
+  padding: 0 8px;
+  background: #2a1111;
+  border: 1px solid #5a2222;
+  border-radius: 4px;
+  color: #ffb4b4;
+  font-size: 11px;
+  font-weight: bold;
+  cursor: pointer;
+  line-height: 18px;
+  display: none;
+  flex-shrink: 0;
+  transition: background 120ms ease, border-color 120ms ease;
+}
+.stop-btn:hover:not([disabled]) {
+  background: #4a1515;
+  border-color: #8a3333;
+}
+.stop-btn:active:not([disabled]) {
+  transform: translateY(1px);
+}
+.stop-btn[disabled] {
+  opacity: 0.5;
+  cursor: default;
+}
+.stop-btn.visible {
+  display: inline-block;
 }
 #file-list {
   min-height: 0;
@@ -320,6 +357,8 @@ body.fullscreen-active #preview-shell {
   background: #050505;
   border: 1px solid var(--line);
   border-radius: 6px;
+  white-space: pre-wrap;
+  word-break: break-word;
 }
 #document-preview code {
   font-family: "Cascadia Code", Consolas, monospace;
@@ -749,7 +788,10 @@ input[type="range"]::-moz-range-thumb {
       </div>
     </div>
   </div>
-  <div id="job-status" role="status" aria-live="polite"></div>
+  <div id="job-status" role="status" aria-live="polite">
+    <span id="job-status-text"></span>
+    <button id="stop-job-btn" type="button" class="stop-btn">Stop</button>
+  </div>
   <div id="file-list">
     <div id="sidebar-empty">Open an HTML file to scan its folder.</div>
   </div>
@@ -937,10 +979,17 @@ function formatElapsed(seconds) {
 }
 
 function setJobStatus(message, state = '') {
-  jobStatus.textContent = message || '';
+  const textSpan = document.getElementById('job-status-text');
+  const stopBtn = document.getElementById('stop-job-btn');
+  if (textSpan) textSpan.textContent = message || '';
   jobStatus.classList.toggle('visible', Boolean(message));
   jobStatus.classList.toggle('error', state === 'error');
   jobStatus.classList.toggle('success', state === 'success');
+
+  if (stopBtn) {
+    const isRunning = Boolean(message) && state !== 'error' && state !== 'success';
+    stopBtn.classList.toggle('visible', isRunning);
+  }
 }
 
 function setResolveOptionsVisible(visible) {
@@ -1273,6 +1322,44 @@ async function refreshFolderFiles() {
   }
 }
 
+function playNotificationSound(success = true) {
+  try {
+    const ctx = new (window.AudioContext || window.webkitAudioContext)();
+    const osc = ctx.createOscillator();
+    const gain = ctx.createGain();
+    osc.connect(gain);
+    gain.connect(ctx.destination);
+
+    if (success) {
+      // Pleasant dual tone chime: low to high
+      osc.type = 'sine';
+      osc.frequency.setValueAtTime(587.33, ctx.currentTime); // D5
+      osc.frequency.setValueAtTime(880, ctx.currentTime + 0.12); // A5
+      
+      gain.gain.setValueAtTime(0, ctx.currentTime);
+      gain.gain.linearRampToValueAtTime(0.15, ctx.currentTime + 0.02);
+      gain.gain.linearRampToValueAtTime(0.15, ctx.currentTime + 0.12);
+      gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.40);
+      
+      osc.start(ctx.currentTime);
+      osc.stop(ctx.currentTime + 0.40);
+    } else {
+      // Duller warning tone for errors/aborts
+      osc.type = 'triangle';
+      osc.frequency.setValueAtTime(220, ctx.currentTime); // A3
+      
+      gain.gain.setValueAtTime(0, ctx.currentTime);
+      gain.gain.linearRampToValueAtTime(0.10, ctx.currentTime + 0.05);
+      gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.35);
+      
+      osc.start(ctx.currentTime);
+      osc.stop(ctx.currentTime + 0.35);
+    }
+  } catch (err) {
+    console.error('Failed to play notification sound:', err);
+  }
+}
+
 async function runResolve() {
   if (currentFileKind() !== 'index.html') return;
   const sourceName = fileBaseName(currentFilePath);
@@ -1287,9 +1374,11 @@ async function runResolve() {
     await loadFile(payload.path);
     setStatus('Resolved: ' + payload.path);
     finishJobStatus('Done: ' + fileBaseName(payload.path));
+    playNotificationSound(true);
   } catch (error) {
     setStatus(error.message);
     finishJobStatus(error.message, 'error');
+    playNotificationSound(false);
   } finally {
     setActionBusy(false);
     syncIdeActions();
@@ -1314,12 +1403,30 @@ async function runRender() {
     renderFolderFiles(payload.folder);
     setStatus('Rendered: ' + payload.output);
     finishJobStatus('Done: ' + fileBaseName(payload.output));
+    playNotificationSound(true);
   } catch (error) {
     setStatus(error.message);
     finishJobStatus(error.message, 'error');
+    playNotificationSound(false);
   } finally {
     setActionBusy(false);
     syncIdeActions();
+  }
+}
+
+async function runStopJob() {
+  const stopBtn = document.getElementById('stop-job-btn');
+  if (stopBtn) stopBtn.disabled = true;
+  setStatus('Stopping process...');
+  try {
+    const response = await fetch('/stop-job', { method: 'POST' });
+    const payload = await response.json();
+    if (!response.ok) throw new Error(payload.error || 'Failed to stop');
+    setStatus('Process stopped successfully');
+  } catch (error) {
+    setStatus(error.message);
+  } finally {
+    if (stopBtn) stopBtn.disabled = false;
   }
 }
 
@@ -1580,6 +1687,24 @@ player.on('ready', state => {
   if (!userViewportOverride && state.detectedViewport) {
     setPreviewViewport(state.detectedViewport.width, state.detectedViewport.height);
   }
+
+  if (state.detectedViewport) {
+    const val = state.detectedViewport.width + 'x' + state.detectedViewport.height;
+    let exists = Array.from(renderResolution.options).some(opt => opt.value === val);
+    if (!exists) {
+      const opt = document.createElement('option');
+      opt.value = val;
+      opt.textContent = val + ' (Auto)';
+      opt.id = 'render-resolution-auto';
+      
+      const prev = document.getElementById('render-resolution-auto');
+      if (prev) prev.remove();
+      
+      renderResolution.prepend(opt);
+    }
+    renderResolution.value = val;
+  }
+
   updateControls(state);
   setStatus(state.resolved ? 'Resolved timeline loaded' : 'Preview timeline estimated');
 });
@@ -1635,6 +1760,10 @@ document.addEventListener('click', () => {
 });
 sidebarResolveButton.addEventListener('click', runResolve);
 sidebarRenderButton.addEventListener('click', runRender);
+const stopJobBtn = document.getElementById('stop-job-btn');
+if (stopJobBtn) {
+  stopJobBtn.addEventListener('click', runStopJob);
+}
 playButton.addEventListener('click', () => player.togglePlay());
 seekBackButton.addEventListener('click', () => player.seekBy(-5));
 seekForwardButton.addEventListener('click', () => player.seekBy(5));

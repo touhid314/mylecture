@@ -487,6 +487,72 @@ async function renderFrames(browser, url, framesDir, frameCount, fps, args) {
   await Promise.all(pages.map(page => page.close()));
 }
 
+async function detectPageViewport(page) {
+  return await page.evaluate(() => {
+    const presets = {
+      '9:16': { width: 1080, height: 1920 },
+      '16:9': { width: 1920, height: 1080 },
+      '1:1': { width: 1080, height: 1080 },
+      '4:5': { width: 1080, height: 1350 }
+    };
+    
+    const aspectRatio = window.__VIDEO_METADATA__?.aspectRatio;
+    if (aspectRatio) {
+      const normalized = String(aspectRatio).trim();
+      if (presets[normalized]) return presets[normalized];
+      
+      const match = normalized.match(/^(\d+(?:\.\d+)?):(\d+(?:\.\d+)?)$/);
+      if (match) {
+        const widthRatio = Number(match[1]);
+        const heightRatio = Number(match[2]);
+        if (Number.isFinite(widthRatio) && Number.isFinite(heightRatio) && widthRatio > 0 && heightRatio > 0) {
+          const longEdge = 1920;
+          if (widthRatio >= heightRatio) {
+            return {
+              width: longEdge,
+              height: Math.round(longEdge * heightRatio / widthRatio)
+            };
+          } else {
+            return {
+              width: Math.round(longEdge * widthRatio / heightRatio),
+              height: longEdge
+            };
+          }
+        }
+      }
+    }
+
+    const candidates = [
+      document.getElementById('frame'),
+      document.querySelector('.video-frame'),
+      document.getElementById('video-frame'),
+      document.getElementById('player-container')
+    ].filter(Boolean);
+
+    for (const el of candidates) {
+      const style = window.getComputedStyle(el);
+      const cssWidth = parseFloat(style.width);
+      const cssHeight = parseFloat(style.height);
+      if (Number.isFinite(cssWidth) && Number.isFinite(cssHeight) && cssWidth >= 320 && cssHeight >= 240) {
+        const rounded = { width: Math.round(cssWidth), height: Math.round(cssHeight) };
+        const ratio = rounded.width / rounded.height;
+        if (ratio > 1.2 || ratio < 0.85) return rounded;
+      }
+    }
+
+    const canvas = document.querySelector('canvas[width][height]');
+    if (canvas) {
+      const width = Number(canvas.getAttribute('width'));
+      const height = Number(canvas.getAttribute('height'));
+      if (Number.isFinite(width) && Number.isFinite(height) && width >= 320 && height >= 240) {
+        return { width, height };
+      }
+    }
+
+    return null;
+  });
+}
+
 async function main() {
   const totalStart = performance.now();
   const args = parseArgs(process.argv.slice(2));
@@ -508,6 +574,13 @@ async function main() {
   });
   const url = `${pathToFileURL(htmlPath).href}?export=1`;
   const timelinePage = await preparePage(browser, url, args.width, args.height);
+
+  const detectedViewport = await detectPageViewport(timelinePage);
+  if (detectedViewport) {
+    console.log(`Auto-detected viewport from metadata: ${detectedViewport.width}x${detectedViewport.height} (originally: ${args.width}x${args.height})`);
+    args.width = detectedViewport.width;
+    args.height = detectedViewport.height;
+  }
 
   const timeline = await getTimelineFromPage(timelinePage);
   await timelinePage.close();

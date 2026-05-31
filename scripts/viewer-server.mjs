@@ -1,4 +1,4 @@
-import { createReadStream, existsSync, readdirSync, statSync } from 'node:fs';
+import { createReadStream, existsSync, readdirSync, statSync, unlinkSync } from 'node:fs';
 import { createServer } from 'node:http';
 import { spawn } from 'node:child_process';
 import path from 'node:path';
@@ -278,16 +278,54 @@ async function resolveLectureFile(filePath, options = {}) {
   const voice = normalizeTtsVoice(options.ttsVoice);
   const provider = detectProvider(voice);
 
-  await runCapture('node', [
-    'scripts/build-plan.mjs',
-    '--input', inputPath,
-    '--out', outPath,
-    '--provider', provider,
-    '--voice', voice,
-    '--speed', normalizeTtsSpeed(options.ttsSpeed)
-  ], { cwd: rootDir, windowsHide: true });
+  let childProc = null;
+  activeJob = {
+    type: 'resolve',
+    outPath,
+    inputPath,
+    kill: () => {
+      activeJob.aborted = true;
+      if (childProc) {
+        if (process.platform === 'win32') {
+          spawn('taskkill', ['/pid', childProc.pid, '/f', '/t'], { windowsHide: true });
+        } else {
+          childProc.kill('SIGTERM');
+        }
+      }
+    }
+  };
 
-  return toViewerPath(outPath);
+  try {
+    await runCapture('node', [
+      'scripts/build-plan.mjs',
+      '--input', inputPath,
+      '--out', outPath,
+      '--provider', provider,
+      '--voice', voice,
+      '--speed', normalizeTtsSpeed(options.ttsSpeed)
+    ], {
+      cwd: rootDir,
+      windowsHide: true,
+      onSpawn: (child) => {
+        childProc = child;
+      }
+    });
+    return toViewerPath(outPath);
+  } catch (error) {
+    if (existsSync(outPath)) {
+      try {
+        unlinkSync(outPath);
+      } catch (err) {
+        console.error(`Failed to delete partial resolve file: ${err.message}`);
+      }
+    }
+    if (activeJob && activeJob.aborted) {
+      throw new Error('Process stopped by user');
+    }
+    throw error;
+  } finally {
+    activeJob = null;
+  }
 }
 
 async function renderLectureFile(filePath, options = {}) {
@@ -319,8 +357,47 @@ async function renderLectureFile(filePath, options = {}) {
     renderArgs.push('--no-auto-build');
   }
 
-  await runCapture('node', renderArgs, { cwd: rootDir, windowsHide: true });
-  return toViewerPath(outPath);
+  let childProc = null;
+  activeJob = {
+    type: 'render',
+    outPath,
+    inputPath,
+    kill: () => {
+      activeJob.aborted = true;
+      if (childProc) {
+        if (process.platform === 'win32') {
+          spawn('taskkill', ['/pid', childProc.pid, '/f', '/t'], { windowsHide: true });
+        } else {
+          childProc.kill('SIGTERM');
+        }
+      }
+    }
+  };
+
+  try {
+    await runCapture('node', renderArgs, {
+      cwd: rootDir,
+      windowsHide: true,
+      onSpawn: (child) => {
+        childProc = child;
+      }
+    });
+    return toViewerPath(outPath);
+  } catch (error) {
+    if (existsSync(outPath)) {
+      try {
+        unlinkSync(outPath);
+      } catch (err) {
+        console.error(`Failed to delete partial render file: ${err.message}`);
+      }
+    }
+    if (activeJob && activeJob.aborted) {
+      throw new Error('Process stopped by user');
+    }
+    throw error;
+  } finally {
+    activeJob = null;
+  }
 }
 
 function resolveWorkspacePath(urlPath) {
@@ -382,6 +459,10 @@ function runCapture(command, args, options = {}) {
       ...options
     });
 
+    if (typeof options.onSpawn === 'function') {
+      options.onSpawn(child);
+    }
+
     let stdout = '';
     let stderr = '';
     child.stdout.on('data', chunk => stdout += chunk);
@@ -440,6 +521,7 @@ async function pickHtmlFile() {
 }
 
 const args = parseArgs(process.argv.slice(2));
+let activeJob = null;
 const viewerState = {
   version: 0,
   path: args.openPath,
@@ -600,6 +682,22 @@ const server = createServer(async (request, response) => {
         output: outputPath,
         folder: listFolderFiles(requestedPath)
       });
+    } catch (error) {
+      sendJson(response, 500, { error: error.message });
+    }
+    return;
+  }
+
+  if (requestUrl.pathname === '/stop-job') {
+    try {
+      if (!activeJob) {
+        sendJson(response, 200, { ok: true, stopped: false, message: 'No active job' });
+        return;
+      }
+
+      const type = activeJob.type;
+      activeJob.kill();
+      sendJson(response, 200, { ok: true, stopped: true, type, message: `Stopped ${type} job successfully` });
     } catch (error) {
       sendJson(response, 500, { error: error.message });
     }

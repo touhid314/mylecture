@@ -70,7 +70,7 @@ output folder: `outputs/short/<topic-slug>/`
 outputs: 
 - script.md: Detailed script of the visual and the exact audio transcript.
 - index.html: The html file that will be rendered.
-- description.txt: One liner description and hashtags for facebook/instagram upload.
+- description.txt: One liner description and hashtags(no more than 5 hashtags) for facebook/instagram upload.
 ## What not to deliver  
 - You don't have to resolve. If later asked to resolve, use the command `npm run build:plan -- --input path/to/index.html --out path/to/resolved.html` to generate the resolved html from the index.html. 
 - You don't need to render the resolved html. If later asked to render, use command: `npm run render:video -- --html path/to/index.html --resolved-html path/to/resolved.html --out path/to/output.mp4`
