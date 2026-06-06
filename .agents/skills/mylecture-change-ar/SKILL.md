@@ -18,7 +18,7 @@ First read the HTML contract so that you comply with it in the processs: `.agent
 # Workflow
 - DO NOT change the original narration, animation, visual etc.
 - First,  update the aspect ratio of the `.html` file in it's `window.__VIDEO_METADATA__.aspectRatio field`
-- Your task is to reposition all the existing elements to fit in the target aspect ratio.
+- Your task is to reposition and resize all the existing elements to fit in the target aspect ratio.
 - You will also tinker with the font sizes. Because in the new aspect ratio the real font size viewable will change, font size may get too small or too large. Fix the font size to look big enough to be viewable in the current aspect ratio.
 
 For portrait video assume video will be watched on mobile device and adjust font sizes accordingly. Don't tinker with font weight though.
@@ -57,4 +57,4 @@ Absolute minimum font size: 20px (no text or label may go below this value under
 
 # Deliverables
 Default deliverables folder: the folder where the `index.html` or `resolved.html` is already in.
-1. Updated file named as `<old-file-name>-AR-<x>-<y>.html`, where x:y is  the new aspect ratio. Example: `index-AR-1-1.html`  
+1. Updated file named as `<old-file-name>-ar-<x>-<y>.html`, where x:y is  the new aspect ratio. Example: `index-ar-1-1.html`  

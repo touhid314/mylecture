@@ -245,6 +245,7 @@ class LecturePlayer {
       audio: null,
       audioCue: null,
       audioFailures: new Set(),
+      waitingForAudioStart: false,
       speechSegmentKey: '',
       completed: false,
       interactiveActive: false,
@@ -439,7 +440,23 @@ class LecturePlayer {
     return new URL(src, this.iframe.contentWindow.location.href).href;
   }
 
+  tryPlayAudio(audio, cue) {
+    if (this.state.audio !== audio || this.state.audioCue !== cue || !this.state.playing) return;
+    audio.play()
+      .then(() => this.markAudioStarted(audio, cue))
+      .catch(() => this.setStatus('Audio blocked until play is clicked again'));
+  }
+
+  markAudioStarted(audio, cue) {
+    if (this.state.audio !== audio || this.state.audioCue !== cue || !this.state.playing) return;
+    if (!this.state.waitingForAudioStart) return;
+    this.state.waitingForAudioStart = false;
+    this.state.startedAt = performance.now();
+    this.state.startTime = this.state.time;
+  }
+
   stopAudio() {
+    this.state.waitingForAudioStart = false;
     if (!this.state.audio) return;
     this.state.audio.pause();
     this.state.audio = null;
@@ -511,59 +528,22 @@ class LecturePlayer {
       this.state.audioCue = cue;
       this.state.audio = new Audio(this.audioUrl(cue.src));
       const audio = this.state.audio;
-      const playAudio = () => {
-        if (this.state.audio !== audio || this.state.audioCue !== cue || !this.state.playing) return;
-        if (audio.__viewerPlayPending) return;
-        audio.__viewerPlayPending = true;
-        audio.play()
-          .then(() => {
-            audio.__viewerStarted = true;
-            audio.__viewerPlayPending = false;
-            if (this.state.audio === audio && this.state.audioCue === cue && this.state.playing) {
-              this.state.startedAt = performance.now();
-              this.state.startTime = cue.start + audio.currentTime;
-            }
-          })
-          .catch(() => {
-            audio.__viewerPlayPending = false;
-            this.setStatus('Audio blocked until play is clicked again');
-          });
-      };
+      this.state.waitingForAudioStart = cue.start <= 0.05 && offset <= 0.05;
       this.state.audio.addEventListener('error', () => {
         this.state.audioFailures.add(this.audioCueKey(cue));
         this.stopAudio();
         this.syncLiveTts();
       }, { once: true });
-      this.state.audio.addEventListener('canplay', playAudio, { once: true });
+      this.state.audio.addEventListener('playing', () => this.markAudioStarted(audio, cue), { once: true });
+      this.state.audio.addEventListener('canplay', () => this.tryPlayAudio(audio, cue), { once: true });
       this.state.audio.preload = 'auto';
       this.state.audio.playbackRate = this.speed;
       this.state.audio.currentTime = Math.max(0, offset);
-      this.state.audio.load();
-      playAudio();
+      this.tryPlayAudio(audio, cue);
       return;
     }
 
     this.state.audio.playbackRate = this.speed;
-    if (this.state.audio.paused && !this.state.audio.__viewerStarted) {
-      const audio = this.state.audio;
-      if (!audio.__viewerPlayPending) {
-        audio.__viewerPlayPending = true;
-        audio.play()
-          .then(() => {
-            audio.__viewerStarted = true;
-            audio.__viewerPlayPending = false;
-            if (this.state.audio === audio && this.state.audioCue === cue && this.state.playing) {
-              this.state.startedAt = performance.now();
-              this.state.startTime = cue.start + audio.currentTime;
-            }
-          })
-          .catch(() => {
-            audio.__viewerPlayPending = false;
-            this.setStatus('Audio blocked until play is clicked again');
-          });
-      }
-      return;
-    }
     if (Math.abs(this.state.audio.currentTime - offset) > 0.22) {
       this.state.audio.currentTime = Math.max(0, offset);
     }
@@ -624,6 +604,11 @@ class LecturePlayer {
 
   tick(now) {
     if (!this.state.playing) return;
+    if (this.state.waitingForAudioStart) {
+      this.state.startedAt = now;
+      this.state.raf = requestAnimationFrame(now => this.tick(now));
+      return;
+    }
     const nextTime = this.state.startTime + ((now - this.state.startedAt) / 1000) * this.speed;
     this.renderAt(nextTime);
 
