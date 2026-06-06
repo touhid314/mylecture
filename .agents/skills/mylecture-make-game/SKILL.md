@@ -1,10 +1,15 @@
+---
+name: mylecture-make-game
+description: use this skill to make a education game segment for some topic
+---
+
 Make a game to teach a topic : {binary search tree insertion}
 
 Don't read other files in the repo unless instructed here!
 
 
 # Contract
-Strictly follow this contract: `contract\html-input-contract.md`
+Strictly follow this contract: `.agents\mylecture-contracts\html-input-contract.md`
 
 game.html will only contain game segment, no other types of segment.
 
@@ -74,4 +79,4 @@ Put deliverables inside `outputs/long/game-<topic-slug>/` folder
 
 # when you are done
 open the viewer with the generated html file.
-read: `skills\skill-resolve-render.md`
+read: `.agents\skills\mylecture-render-pipeline\SKILL.md`

@@ -2,17 +2,12 @@
 complete black.
 
 # font
-- family: Computer Modern
-    @import url('https://cdn.jsdelivr.net/npm/computer-modern@0.1.2/cmu-serif.css');
-
-    body {
-    font-family: "Computer Modern Serif", "Latin Modern Roman", "Times New Roman", serif;
-    }
-
-- font-weight: 400; /* normal */ 
-* Don't use bold, just use bigger font.
+- family: Arial
+- font-weight: 400; /* normal */
+* NOTE: Don't use bold fonts.
 
 ## font size
+
 title/headers: 72px
 subtitle: 52px
 main teaching text: 44px

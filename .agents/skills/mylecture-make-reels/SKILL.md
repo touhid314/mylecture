@@ -1,5 +1,10 @@
+---
+name: mylecture-make-reels
+description: use this skill to make short form reels on a topic provided by the user.
+---
+
 # Task
-Make a video on the topic: {canary deployment in software dev. start like blue-green deployment has this problem, so... start directly saying about the canary deployment so that it's a good hook.}
+Make a video on the topic: [from the user]
 
 - Length: 130-140 words of narration.
 - Aspect ratio: 9:16 (vertical)
@@ -49,7 +54,7 @@ End
 - Don't put content in: top 15%, bottom 20%. Center 65% = safe for key content. Because it will be uploaded to fb/insta/yt reels/shorts.
 - Example theme: outputs\short\bloomfilter-modifier\index.html
 ### Constraint
-- You should write the webpage following the constraints at: `contract\html-input-contract.md`
+- You should write the webpage following the constraints at: `.agents\mylecture-contracts\html-input-contract.md`
 - Don't put any start button or overlay.
 ### Subtitle
 - Embed subtitle.
@@ -77,4 +82,4 @@ outputs:
 
 # when you are done
 open the viewer with the generated html file.
-read: `skills\skill-resolve-render.md`
+read: `.agents\skills\mylecture-render-pipeline\SKILL.md`
