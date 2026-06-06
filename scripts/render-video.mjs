@@ -19,7 +19,7 @@ function defaultTtsAudioWorkerCount(provider) {
 function parseArgs(argv) {
   const args = {
     html: path.join('tests', 'fixtures', 'input-contract-test', 'index.html'),
-    out: 'output.mp4',
+    out: null,
     fps: 60,
     width: 1080,
     height: 1920,
@@ -107,6 +107,7 @@ function parseArgs(argv) {
   if (args.maxFrames !== null && (!Number.isInteger(args.maxFrames) || args.maxFrames <= 0)) {
     throw new Error('--max-frames must be a positive integer');
   }
+  if (!args.out) args.out = defaultOutputPath(args.html);
 
   return args;
 }
@@ -117,7 +118,7 @@ function printHelp() {
 
 Options:
   --html <file>          HTML file to render. Default: tests/fixtures/input-contract-test/index.html
-  --out <file>           Output MP4 path. Default: output.mp4
+  --out <file>           Output MP4 path. Default: rendered.mp4, or rendered<suffix>.mp4 for index/resolved variants
   --fps <number>         Frames per second. Default: 60
   --width <pixels>       Viewport width. Default: 1080
   --height <pixels>      Viewport height. Default: 1920
@@ -246,6 +247,12 @@ function isPlanSourceHtml(htmlPath) {
     html.includes('__HTML_VIDEO_PLAN__') ||
     html.includes('__AI_VIDEO_PLAN__')
   ) && !html.includes('id="resolved-timeline"');
+}
+
+function defaultOutputPath(htmlPath) {
+  const basename = path.basename(htmlPath);
+  const match = basename.match(/^(?:index|resolved)(.*)\.html$/i);
+  return path.join(path.dirname(htmlPath), `rendered${match?.[1] || ''}.mp4`);
 }
 
 function defaultResolvedPath(htmlPath) {

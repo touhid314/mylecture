@@ -510,18 +510,60 @@ class LecturePlayer {
       this.stopAudio();
       this.state.audioCue = cue;
       this.state.audio = new Audio(this.audioUrl(cue.src));
+      const audio = this.state.audio;
+      const playAudio = () => {
+        if (this.state.audio !== audio || this.state.audioCue !== cue || !this.state.playing) return;
+        if (audio.__viewerPlayPending) return;
+        audio.__viewerPlayPending = true;
+        audio.play()
+          .then(() => {
+            audio.__viewerStarted = true;
+            audio.__viewerPlayPending = false;
+            if (this.state.audio === audio && this.state.audioCue === cue && this.state.playing) {
+              this.state.startedAt = performance.now();
+              this.state.startTime = cue.start + audio.currentTime;
+            }
+          })
+          .catch(() => {
+            audio.__viewerPlayPending = false;
+            this.setStatus('Audio blocked until play is clicked again');
+          });
+      };
       this.state.audio.addEventListener('error', () => {
         this.state.audioFailures.add(this.audioCueKey(cue));
         this.stopAudio();
         this.syncLiveTts();
       }, { once: true });
+      this.state.audio.addEventListener('canplay', playAudio, { once: true });
+      this.state.audio.preload = 'auto';
       this.state.audio.playbackRate = this.speed;
       this.state.audio.currentTime = Math.max(0, offset);
-      this.state.audio.play().catch(() => this.setStatus('Audio blocked until play is clicked again'));
+      this.state.audio.load();
+      playAudio();
       return;
     }
 
     this.state.audio.playbackRate = this.speed;
+    if (this.state.audio.paused && !this.state.audio.__viewerStarted) {
+      const audio = this.state.audio;
+      if (!audio.__viewerPlayPending) {
+        audio.__viewerPlayPending = true;
+        audio.play()
+          .then(() => {
+            audio.__viewerStarted = true;
+            audio.__viewerPlayPending = false;
+            if (this.state.audio === audio && this.state.audioCue === cue && this.state.playing) {
+              this.state.startedAt = performance.now();
+              this.state.startTime = cue.start + audio.currentTime;
+            }
+          })
+          .catch(() => {
+            audio.__viewerPlayPending = false;
+            this.setStatus('Audio blocked until play is clicked again');
+          });
+      }
+      return;
+    }
     if (Math.abs(this.state.audio.currentTime - offset) > 0.22) {
       this.state.audio.currentTime = Math.max(0, offset);
     }

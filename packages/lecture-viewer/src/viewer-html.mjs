@@ -1102,6 +1102,14 @@ function currentFileKind() {
   return fileBaseName(currentFilePath).toLowerCase();
 }
 
+function isIndexHtmlKind(kind) {
+  return /^index.*\\.html$/i.test(kind);
+}
+
+function isResolvedHtmlKind(kind) {
+  return /^resolved.*\\.html$/i.test(kind);
+}
+
 function setPreviewMode(mode) {
   const documentMode = mode === 'document';
   previewShell.style.display = documentMode ? 'none' : '';
@@ -1290,8 +1298,8 @@ async function loadDocumentFile(filePath) {
 
 function syncIdeActions() {
   const kind = currentFileKind();
-  const canResolve = kind === 'index.html';
-  const canRender = kind === 'index.html' || kind === 'resolved.html';
+  const canResolve = isIndexHtmlKind(kind);
+  const canRender = isIndexHtmlKind(kind) || isResolvedHtmlKind(kind);
   resolveControl.hidden = !canResolve;
   if (!canResolve) {
     setResolveOptionsVisible(false);
@@ -1455,7 +1463,7 @@ function playNotificationSound(success = true) {
 }
 
 async function runResolve() {
-  if (currentFileKind() !== 'index.html') return;
+  if (!isIndexHtmlKind(currentFileKind())) return;
   const sourceName = fileBaseName(currentFilePath);
   setActionBusy(true, 'Resolving...', 'resolve');
   setResolveOptionsVisible(false);
@@ -1480,7 +1488,8 @@ async function runResolve() {
 }
 
 async function runRender() {
-  if (!['index.html', 'resolved.html'].includes(currentFileKind())) return;
+  const kind = currentFileKind();
+  if (!isIndexHtmlKind(kind) && !isResolvedHtmlKind(kind)) return;
   const sourceName = fileBaseName(currentFilePath);
   setActionBusy(true, 'Rendering...', 'render');
   setRenderOptionsVisible(false);

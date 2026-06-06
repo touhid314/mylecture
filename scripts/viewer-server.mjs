@@ -236,7 +236,23 @@ function siblingPath(filePath, name) {
 }
 
 function defaultOutputPath(filePath) {
-  return siblingPath(filePath, 'output.mp4');
+  const basename = path.basename(filePath);
+  const match = basename.match(/^(?:index|resolved)(.*)\.html$/i);
+  return siblingPath(filePath, `rendered${match?.[1] || ''}.mp4`);
+}
+
+function isIndexHtmlName(name) {
+  return /^index.*\.html$/i.test(name);
+}
+
+function isResolvedHtmlName(name) {
+  return /^resolved.*\.html$/i.test(name);
+}
+
+function resolvedSiblingPathForIndex(filePath) {
+  const basename = path.basename(filePath);
+  const suffix = basename.slice('index'.length, -'.html'.length);
+  return siblingPath(filePath, `resolved${suffix}.html`);
 }
 
 function normalizeTtsVoice(value) {
@@ -271,9 +287,10 @@ function normalizePositiveInteger(value, fallback, min = 1, max = Number.MAX_SAF
 
 async function resolveLectureFile(filePath, options = {}) {
   const inputPath = resolveInputPath(filePath);
-  const outPath = siblingPath(inputPath, 'resolved.html');
-  if (path.basename(inputPath).toLowerCase() !== 'index.html') {
-    throw new Error('Resolve is only available for index.html files.');
+  const basename = path.basename(inputPath);
+  const outPath = resolvedSiblingPathForIndex(inputPath);
+  if (!isIndexHtmlName(basename)) {
+    throw new Error('Resolve is only available for index*.html files.');
   }
 
   const voice = normalizeTtsVoice(options.ttsVoice);
@@ -331,9 +348,9 @@ async function resolveLectureFile(filePath, options = {}) {
 
 async function renderLectureFile(filePath, options = {}) {
   const inputPath = resolveInputPath(filePath);
-  const basename = path.basename(inputPath).toLowerCase();
-  if (!['index.html', 'resolved.html'].includes(basename)) {
-    throw new Error('Render is only available for index.html or resolved.html files.');
+  const basename = path.basename(inputPath);
+  if (!isIndexHtmlName(basename) && !isResolvedHtmlName(basename)) {
+    throw new Error('Render is only available for index*.html or resolved*.html files.');
   }
 
   const voice = normalizeTtsVoice(options.ttsVoice);
@@ -352,8 +369,8 @@ async function renderLectureFile(filePath, options = {}) {
     '--force-audio'
   ];
 
-  if (basename === 'index.html') {
-    renderArgs.push('--resolved-html', siblingPath(inputPath, 'resolved.html'));
+  if (isIndexHtmlName(basename)) {
+    renderArgs.push('--resolved-html', resolvedSiblingPathForIndex(inputPath));
   } else {
     renderArgs.push('--no-auto-build');
   }
