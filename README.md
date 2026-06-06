@@ -109,7 +109,7 @@ npm run render:video
 Useful options:
 
 ```bash
-npm run render:video -- --html tests/fixtures/input-contract-test/index.html --out output.mp4 --fps 30 --width 1080 --height 1920
+npm run render:video -- --html tests/fixtures/input-contract-test/index.html --out output.mp4 --fps 60 --width 1080 --height 1920
 npm run render:video -- --max-frames 60 --out .render/test.mp4 --keep-frames
 npm test
 ```
@@ -126,8 +126,8 @@ Speed defaults:
 
 - Frames are written as JPEG at quality `90`.
 - Frame rendering uses parallel Playwright pages equal to the logical CPU core count by default.
-- Source HTML auto-build uses Kokoro voice `am_puck` at speed `1.2`.
-- Video renders default to vertical 1080p: `1080x1920` at `30` fps.
+- Source HTML auto-build uses Kokoro voice `af_heart` at speed `1`.
+- Video renders default to vertical 1080p: `1080x1920` at `60` fps.
 
 Override them when needed:
 
@@ -142,7 +142,7 @@ Use PNG only when you need lossless intermediate frames; it is much slower.
 Choose a TTS voice when rendering plan-source HTML:
 
 ```bash
-npm run render:video -- --html outputs/power-analysis-attack/index.html --out .render/inference/power-analysis-attack-ampuck.mp4 --tts-voice am_puck --force-audio
+npm run render:video -- --html outputs/power-analysis-attack/index.html --out .render/inference/power-analysis-attack-afheart.mp4 --tts-voice af_heart --force-audio
 ```
 
 Use `--force-audio` when changing voices; otherwise existing narration files are reused.

@@ -12,3 +12,4 @@ outputs/
 *.mp4
 assets/
 models/kokoro-onnx/
+trash/

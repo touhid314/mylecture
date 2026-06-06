@@ -154,7 +154,6 @@ window.__VIDEO_METADATA__ = {
 
 const VIDEO_PLAN = [
   { id: "main-title", kind: "narration+visual", audio: "audio/main-title.wav", text: "Hello, today we're going to be talking about the main ideas behind principal component analysis, and we're going to cover those concepts in less than 5 minutes." },
-  { id: "more-details", kind: "narration+visual", audio: "audio/more-details.wav", text: "If you want more details than you get here, be sure to check out my other PCA video." },
   { id: "cells-normal", kind: "narration+visual", audio: "audio/cells-normal.wav", text: "Let's say we had some normal cells..." },
   { id: "cells-psst", kind: "narration+visual", audio: "audio/cells-psst.wav", text: "If you're not a biologist, imagine that these could be people, or cars, or cities, or etc. They could be anything." },
   { id: "cells-suspect", kind: "narration+visual", audio: "audio/cells-suspect.wav", text: "Even though they look the same, we suspect that there are differences..." },
@@ -192,7 +191,6 @@ const VIDEO_PLAN = [
   { id: "color-code", kind: "narration+visual", audio: "audio/color-code.wav", text: "To make the clusters easier to see, we can color code them..." },
   { id: "back-cells", kind: "narration+visual", audio: "audio/back-cells.wav", text: "Once we've identified the clusters in the PCA plot, we can go back to the original cells..." },
   { id: "final-types", kind: "narration+visual", audio: "audio/final-types.wav", text: "And see that they represent 3 different types of cells doing 3 different types of things with their genes!!!" },
-  { id: "bam", kind: "narration+visual", audio: "audio/bam.wav", text: "BAM!!!" },
   { id: "axes-intro", kind: "narration+visual", audio: "audio/axes-intro.wav", text: "Here's one last main idea about how to interpret PCA plots: The axes are ranked in order of importance." },
   { id: "pc1-important", kind: "narration+visual", audio: "audio/pc1-important.wav", text: "Differences along the first principal component axis, PC1, are more important than differences along the second principal component axis, PC2." },
   { id: "distance-start", kind: "narration+visual", audio: "audio/distance-start.wav", text: "If the plot looked like this..." },
@@ -203,8 +201,8 @@ const VIDEO_PLAN = [
   { id: "methods-heatmap", kind: "narration+visual", audio: "audio/methods-heatmap.wav", text: "These methods include heatmaps..." },
   { id: "methods-tsne", kind: "narration+visual", audio: "audio/methods-tsne.wav", text: "t-SNE plots..." },
   { id: "methods-mds", kind: "narration+visual", audio: "audio/methods-mds.wav", text: "And Multi-Dimensional Scaling, MDS, plots." },
-  { id: "note", kind: "narration+visual", audio: "audio/note.wav", text: "You can check out separate lessons on each of these if you want to learn more. Note: If the concept of dimension reduction feels confusing, review a slower introduction to PCA before going deeper." },
-  { id: "end", kind: "narration+visual", audio: "audio/end.wav", text: "We've made it to the end. If you want to see more lessons like this, please subscribe. And if you have ideas for additional topics, put them in the comments below. Until next time!" }
+  { id: "note", kind: "narration+visual", audio: "audio/note.wav", text: "Together, these methods are used to reduce complex data into visual summaries that are easier to interpret. Key idea: PCA is a dimension reduction method that summarizes many measured variables with a smaller number of ranked principal components." },
+  { id: "end", kind: "narration+visual", audio: "audio/end.wav", text: "This concludes the overview of the main ideas behind PCA." }
 ];
 window.__VIDEO_PLAN__ = VIDEO_PLAN;
 
@@ -429,7 +427,7 @@ function renderSection(segment, localTime, globalTime) {
   clearStage();
   const t = Math.max(0, localTime || 0);
 
-  if (segment.id === "main-title" || segment.id === "more-details") {
+  if (segment.id === "main-title") {
     titleScreen("Principal Component Analysis (PCA)", "concepts in less than 5 minutes!");
     return;
   }
@@ -547,11 +545,10 @@ function renderSection(segment, localTime, globalTime) {
     return;
   }
 
-  if (segment.id === "back-cells" || segment.id === "final-types" || segment.id === "bam") {
+  if (segment.id === "back-cells" || segment.id === "final-types") {
     textBlock("top-text", segment.id === "final-types" ? "...and see 3 different types of cells doing 3 different things with their genes!!!" : "Once we've identified clusters in the PCA plot,\nwe can go back to the original cells...");
     box("svgbox", "7vw", "22vh", "42vw", "56vh", pcaSvg({ color: true }));
     box("svgbox", "58vw", "22vh", "34vw", "54vh", cellsSvg(segment.id === "back-cells" ? "green" : "typed-final", ""));
-    if (segment.id === "bam") textBlock("big-word", "BAM!!!");
     return;
   }
 
@@ -586,11 +583,11 @@ function renderSection(segment, localTime, globalTime) {
       textBlock("label", "Multi-Dimensional Scaling (MDS)", "left:67vw;top:23vh;max-width:25vw;");
       box("svgbox", "67vw", "35vh", "27vw", "35vh", methodsSvg("mds"));
     }
-    if (segment.id === "note") textBlock("note", 'NOTE: If "dimension reduction" feels confusing, review a slower introduction to PCA before going deeper.');
+    if (segment.id === "note") textBlock("note", "Key idea: PCA summarizes many measured variables with a smaller number of ranked principal components.");
     return;
   }
   if (segment.id === "end") {
-    titleScreen("The End!!!", "Until next time!");
+    titleScreen("The End", "This concludes the overview of the main ideas behind PCA.");
   }
 }
 

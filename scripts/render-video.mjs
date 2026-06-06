@@ -20,7 +20,7 @@ function parseArgs(argv) {
   const args = {
     html: path.join('tests', 'fixtures', 'input-contract-test', 'index.html'),
     out: 'output.mp4',
-    fps: 30,
+    fps: 60,
     width: 1080,
     height: 1920,
     framesDir: path.join('.render', 'frames'),
@@ -30,8 +30,8 @@ function parseArgs(argv) {
     autoBuildPlan: true,
     forceAudio: false,
     ttsProvider: 'kokoro',
-    ttsVoice: 'am_puck',
-    ttsSpeed: 1.2,
+    ttsVoice: 'af_heart',
+    ttsSpeed: 1,
     ttsAudioWorkers: null,
     videoCodec: 'auto',
     x264Preset: 'veryfast',
@@ -118,7 +118,7 @@ function printHelp() {
 Options:
   --html <file>          HTML file to render. Default: tests/fixtures/input-contract-test/index.html
   --out <file>           Output MP4 path. Default: output.mp4
-  --fps <number>         Frames per second. Default: 30
+  --fps <number>         Frames per second. Default: 60
   --width <pixels>       Viewport width. Default: 1080
   --height <pixels>      Viewport height. Default: 1920
   --frames-dir <dir>     Temporary frame directory. Default: .render/frames
@@ -132,8 +132,8 @@ Options:
   --no-auto-build         Do not auto-build source HTML before rendering
   --force-audio           Regenerate narration audio when auto-building source HTML
   --tts-provider <name>   TTS provider for auto-build. Default: kokoro
-  --tts-voice <name>      TTS voice for auto-build. Default: am_puck
-  --tts-speed <number>    TTS speed for auto-build. Default: 1.2
+  --tts-voice <name>      TTS voice for auto-build. Default: af_heart
+  --tts-speed <number>    TTS speed for auto-build. Default: 1
   --tts-audio-workers <n> Concurrent audio files for auto-build. Default: 6 for Kokoro
   --max-frames <number>  Render only the first N frames for a smoke test
   --keep-frames          Do not delete rendered PNG frames

@@ -3,15 +3,27 @@
 - Make sure that the details of the visuals is captured in complete detail, including the content/data of the visual, color, position etc. 
     - Full data should be added in the script for things like table, matrix or anything that has data inside.
 
-- Make sure you choose the position thinking what else are in the screen right now and the text or content don't overlap. While making the index.html also your highest priority is no overlap. 
+- The visuals you plan will be executed by an AI agent with HTML+CSS+JS+SVG and other web technology. So plan accordingly. 
 
-- In the script use position with visuals when they are added. Position need not be a speicifc one word top, bottom like this. Position can be descrptive; like: "under the y axis", "center of the screen" etc. 
+- Make sure you choose the position thinking what else are in the screen right now and the text or content don't overlap. While making the index.html also your highest priority is no overlap. 
 
 - Use colors for highlighting in all cases. Don't use arrows, the animator AI agent has trouble putting arrow in proper position.
 
+- There should be granual synchronization between narration and visual.
+Example: 
+    So we add {visual: highight 7} 7, {visual: highlight 90} 90 and get the result {visual: add 97} 97.
+Similarly for all cases, add granual synchronization between narration and visual.
 
+    - You MUST have some visual change within every about 15 words. So that, viewer's attention is kept.
 
+- Add example based visual. 
 
+Example:
+    Let's say we have a database table {visual: add table id:users_table content:"Table: users. Columns: [id, name]. Rows: [1, 'Alice'], [2, 'Bob']" duration:persist} And we add a column to it 
+    {visual: update table id:users_table content:"Table: users. Columns: [id, name, email]. Rows: [1, 'Alice', 'alice@example.com'], [2, 'Bob', 'bob@example.com']" description:"Append a new column labeled 'email' to the right of the 'name' column. Highlight the new column in green to emphasize the addition."}
+
+Notice how we visualized the narration with an examplary table.
+ 
 
 # workflow
 You should work in multi-pass system.

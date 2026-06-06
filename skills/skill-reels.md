@@ -1,5 +1,5 @@
 # Task
-Make a video on the topic: {Blue-Green Deployment Explained. also explain what companies use this toward the beginning of the video}
+Make a video on the topic: {canary deployment in software dev. start like blue-green deployment has this problem, so... start directly saying about the canary deployment so that it's a good hook.}
 
 - Length: 130-140 words of narration.
 - Aspect ratio: 9:16 (vertical)

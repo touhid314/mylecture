@@ -241,7 +241,7 @@ function defaultOutputPath(filePath) {
 
 function normalizeTtsVoice(value) {
   const voice = String(value || '').trim();
-  return voice || 'am_puck';
+  return voice || 'af_heart';
 }
 
 function detectProvider(voice) {
@@ -259,7 +259,7 @@ function detectProvider(voice) {
 
 function normalizeTtsSpeed(value) {
   const speed = Number(value);
-  if (!Number.isFinite(speed) || speed <= 0) return '1.3';
+  if (!Number.isFinite(speed) || speed <= 0) return '1';
   return String(Math.max(0.5, Math.min(2, speed)));
 }
 
@@ -343,7 +343,7 @@ async function renderLectureFile(filePath, options = {}) {
     'scripts/render-video.mjs',
     '--html', inputPath,
     '--out', outPath,
-    '--fps', normalizePositiveInteger(options.fps, 30, 1, 240),
+    '--fps', normalizePositiveInteger(options.fps, 60, 1, 240),
     '--width', normalizePositiveInteger(options.width, 1080, 1),
     '--height', normalizePositiveInteger(options.height, 1920, 1),
     '--tts-provider', provider,

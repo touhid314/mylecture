@@ -20,8 +20,8 @@ function parseArgs(argv) {
     input: path.join('tests', 'fixtures', 'plan-pipeline', 'source.html'),
     out: path.join('tests', 'fixtures', 'plan-pipeline', 'index.html'),
     provider: 'kokoro',
-    voice: 'am_puck',
-    speed: 1.2,
+    voice: 'af_heart',
+    speed: 1,
     audioWorkers: null,
     forceAudio: false
   };
@@ -71,8 +71,8 @@ Options:
   --input <file>       Source HTML. Default: tests/fixtures/plan-pipeline/source.html
   --out <file>         Final renderable HTML. Default: tests/fixtures/plan-pipeline/index.html
   --provider <name>    TTS provider passed to tools/tts.py. Default: kokoro
-  --voice <name>       TTS voice passed to tools/tts.py. Default: am_puck
-  --speed <number>     TTS speed passed to tools/tts.py. Default: 1.2
+  --voice <name>       TTS voice passed to tools/tts.py. Default: af_heart
+  --speed <number>     TTS speed passed to tools/tts.py. Default: 1
   --audio-workers <n>  Concurrent audio files to generate. Default: 6 for Kokoro, CPU count otherwise
   --force-audio        Regenerate narration audio even if files already exist
 `);

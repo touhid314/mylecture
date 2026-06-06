@@ -733,8 +733,8 @@ input[type="range"]::-moz-range-thumb {
           <label for="resolve-tts-voice">TTS voice</label>
           <select id="resolve-tts-voice">
             <optgroup label="Kokoro TTS (Local)">
-              <option value="am_puck" selected>am_puck</option>
-              <option value="af_heart">af_heart</option>
+              <option value="am_puck">am_puck</option>
+              <option value="af_heart" selected>af_heart</option>
               <option value="am_adam">am_adam</option>
               <option value="bf_emma">bf_emma</option>
             </optgroup>
@@ -751,9 +751,9 @@ input[type="range"]::-moz-range-thumb {
         <div class="resolve-option">
           <label for="resolve-tts-speed">Voice speed</label>
           <select id="resolve-tts-speed">
-            <option value="1">1.0x</option>
+            <option value="1" selected>1.0x</option>
             <option value="1.2">1.2x</option>
-            <option value="1.3" selected>1.3x</option>
+            <option value="1.3">1.3x</option>
             <option value="1.5">1.5x</option>
           </select>
         </div>
@@ -767,8 +767,8 @@ input[type="range"]::-moz-range-thumb {
           <label for="render-tts-voice">TTS voice</label>
           <select id="render-tts-voice">
             <optgroup label="Kokoro TTS (Local)">
-              <option value="am_puck" selected>am_puck</option>
-              <option value="af_heart">af_heart</option>
+              <option value="am_puck">am_puck</option>
+              <option value="af_heart" selected>af_heart</option>
               <option value="am_adam">am_adam</option>
               <option value="bf_emma">bf_emma</option>
             </optgroup>
@@ -785,9 +785,9 @@ input[type="range"]::-moz-range-thumb {
         <div class="render-option">
           <label for="render-tts-speed">Voice speed</label>
           <select id="render-tts-speed">
-            <option value="1">1.0x</option>
+            <option value="1" selected>1.0x</option>
             <option value="1.2">1.2x</option>
-            <option value="1.3" selected>1.3x</option>
+            <option value="1.3">1.3x</option>
             <option value="1.5">1.5x</option>
           </select>
         </div>
@@ -795,8 +795,8 @@ input[type="range"]::-moz-range-thumb {
           <label for="render-fps">FPS</label>
           <select id="render-fps">
             <option value="24">24</option>
-            <option value="30" selected>30</option>
-            <option value="60">60</option>
+            <option value="30">30</option>
+            <option value="60" selected>60</option>
           </select>
         </div>
         <div class="render-option">
@@ -1027,8 +1027,8 @@ function setRenderOptionsVisible(visible) {
 function resolveQuery() {
   const params = new URLSearchParams();
   params.set('file', currentFilePath);
-  params.set('ttsVoice', resolveTtsVoice.value || 'am_puck');
-  params.set('ttsSpeed', resolveTtsSpeed.value || '1.3');
+  params.set('ttsVoice', resolveTtsVoice.value || 'af_heart');
+  params.set('ttsSpeed', resolveTtsSpeed.value || '1');
   return params.toString();
 }
 
@@ -1036,9 +1036,9 @@ function renderQuery() {
   const params = new URLSearchParams();
   const [width, height] = String(renderResolution.value || '1080x1920').split('x');
   params.set('file', currentFilePath);
-  params.set('ttsVoice', renderTtsVoice.value || 'am_puck');
-  params.set('ttsSpeed', renderTtsSpeed.value || '1.3');
-  params.set('fps', renderFps.value || '30');
+  params.set('ttsVoice', renderTtsVoice.value || 'af_heart');
+  params.set('ttsSpeed', renderTtsSpeed.value || '1');
+  params.set('fps', renderFps.value || '60');
   params.set('width', width || '1080');
   params.set('height', height || '1920');
   return params.toString();

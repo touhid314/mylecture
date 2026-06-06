@@ -152,11 +152,6 @@ Once we've identified the clusters in the PCA plot, we can go back to the origin
 and see that they represent 3 different types of cells doing 3 different types of things with their genes!!!
 {visual: clear}
 
-{visual: add diagram id:bam_cells content:"The color-coded cells from before" position:"right center" duration:persist}
-{visual: add text id:txt_bam content:"BAM!!!" position:"top center" style:"large, bold" duration:persist}
-BAM!!!
-
-{visual: clear}
 {visual: add text id:txt_interpret content:"Here's one last main idea about how to interpret PCA plots:" position:"top center" duration:persist}
 {visual: add text id:txt_ranked content:"The axes are ranked in order of importance." position:"below txt_interpret" duration:persist}
 {visual: add diagram id:plot_pca2 content:"A PCA plot with three distinct color-coded clusters: cyan top-left, yellow middle-right, red bottom-left" position:"left center" duration:persist}
@@ -204,10 +199,10 @@ t-SNE plots
 {visual: add diagram id:mds content:"An MDS scatter plot" position:"bottom right" duration:persist}
 {visual: add text id:txt_mds content:"Multi-Dimensional Scaling (MDS)" position:"above mds" duration:persist}
 and multi-dimensional scaling (MDS) plots.
-You can check out separate lessons on each of these if you want to learn more.
-{visual: add text id:txt_note content:"NOTE: If the concept of 'dimension reduction' feels confusing, review a slower introduction to PCA before going deeper." position:"bottom full width" duration:persist}
-NOTE: If the concept of "dimension reduction" feels confusing, review a slower introduction to PCA before going deeper.
+Together, these methods are used to reduce complex data into visual summaries that are easier to interpret.
+{visual: add text id:txt_note content:"Key idea: PCA is a dimension reduction method that summarizes many measured variables with a smaller number of ranked principal components." position:"bottom full width" duration:persist}
+Key idea: PCA is a dimension reduction method that summarizes many measured variables with a smaller number of ranked principal components.
 
 {visual: clear}
 {visual: add text id:txt_the_end content:"The End!!!" position:"center" style:"huge, bold" duration:persist}
-We've made it to the end. If you want to see more lessons like this, please subscribe. And if you have ideas for additional topics, put them in the comments below. Until next time!
+This concludes the overview of the main ideas behind PCA.
