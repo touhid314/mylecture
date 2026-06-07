@@ -7,6 +7,7 @@
   "scripts": {
     "build:plan": "node scripts/build-plan.mjs",
     "render:video": "node scripts/render-video.mjs",
+    "subtitle:burn": "node scripts/subtitle-burner.mjs",
     "view": "node scripts/viewer-server.mjs",
     "test": "npm run test:build && npm run test:render && npm run test:visual && npm run test:narration",
     "test:build": "node scripts/build-plan.mjs --input tests/fixtures/input-contract-test/index.html --out .render/tests/input-contract-resolved.html",
