@@ -384,11 +384,23 @@ class LecturePlayer {
             videoEl.addEventListener('loadedmetadata', onMetadata, { once: true });
           }
           
-          videoEl.ontimeupdate = () => {
-            if (this.state.playing) {
-              this.state.time = videoEl.currentTime;
-              this.emit('timeupdate', this.snapshot());
+          videoEl.onplay = () => {
+            if (!this.state.playing) {
+              this.state.playing = true;
+              this.emit('statechange', this.snapshot());
             }
+          };
+
+          videoEl.onpause = () => {
+            if (this.state.playing) {
+              this.state.playing = false;
+              this.emit('statechange', this.snapshot());
+            }
+          };
+
+          videoEl.ontimeupdate = () => {
+            this.state.time = videoEl.currentTime;
+            this.emit('timeupdate', this.snapshot());
           };
           
           videoEl.onended = () => {

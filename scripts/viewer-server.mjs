@@ -62,8 +62,8 @@ function parseArgs(argv) {
     port: defaultPort,
     openPath: '',
     openBrowser: false,
-    width: 1080,
-    height: 1920
+    width: 1920,
+    height: 1080
   };
 
   for (let i = 0; i < argv.length; i++) {
@@ -103,8 +103,8 @@ function printHelp() {
 Options:
   --port <number>   Local server port. Default: ${defaultPort}
   --file <path>     HTML file to preselect in the viewer
-  --width <pixels>  Preview viewport width. Default: 1080
-  --height <pixels> Preview viewport height. Default: 1920
+  --width <pixels>  Preview viewport width. Default: 1920
+  --height <pixels> Preview viewport height. Default: 1080
   --open            Open the viewer in the default browser
 `);
 }
@@ -209,8 +209,10 @@ function listFolderFiles(filePath) {
 }
 
 function defaultBrowserFolder() {
-  const outputsPath = path.resolve(rootDir, 'outputs');
-  if (existsSync(outputsPath) && statSync(outputsPath).isDirectory()) return outputsPath;
+  const targetPath = 'C:\\Users\\touhi\\OneDrive\\Desktop\\mylecture\\lecture-agent\\workspace\\outputs';
+  if (existsSync(targetPath) && statSync(targetPath).isDirectory()) {
+    return targetPath;
+  }
   return rootDir;
 }
 
@@ -355,7 +357,7 @@ function killProcessTree(childProc) {
 async function resolveLectureFile(filePath, options = {}) {
   const inputPath = resolveInputPath(filePath);
   const folderPath = path.dirname(inputPath);
-  
+
   if (!isIndexHtmlName(path.basename(inputPath))) {
     throw new Error('Resolve is only available for index*.html files.');
   }
@@ -372,7 +374,9 @@ async function resolveLectureFile(filePath, options = {}) {
   const provider = detectProvider(voice);
   let finalResolvedPath = '';
 
-  for (const file of files) {
+  const filesToResolve = options.currentOnly ? [path.basename(inputPath)] : files;
+
+  for (const file of filesToResolve) {
     const fileInputPath = path.join(folderPath, file);
     const fileOutPath = resolvedSiblingPathForIndex(fileInputPath);
 
@@ -409,7 +413,7 @@ async function resolveLectureFile(filePath, options = {}) {
           childProc = child;
         }
       });
-      
+
       if (fileInputPath === inputPath) {
         finalResolvedPath = toViewerPath(fileOutPath);
       }
@@ -738,12 +742,51 @@ function serveFile(request, response) {
     return;
   }
 
+  const stat = statSync(resolvedPath);
+  const fileSize = stat.size;
+  const range = request.headers.range;
   const extension = path.extname(resolvedPath).toLowerCase();
-  response.writeHead(200, {
-    'content-type': mimeTypes.get(extension) || 'application/octet-stream',
-    'cache-control': 'no-cache'
-  });
-  createReadStream(resolvedPath).pipe(response);
+  const contentType = mimeTypes.get(extension) || 'application/octet-stream';
+
+  if (range) {
+    const parts = range.replace(/bytes=/, "").split("-");
+    let start = parts[0] ? parseInt(parts[0], 10) : null;
+    let end = parts[1] ? parseInt(parts[1], 10) : null;
+
+    if (start === null && end !== null) {
+      start = fileSize - end;
+      end = fileSize - 1;
+    } else if (end === null) {
+      end = fileSize - 1;
+    }
+
+    if (start === null || start < 0 || start >= fileSize || end >= fileSize || start > end) {
+      response.writeHead(416, {
+        "Content-Range": `bytes */${fileSize}`,
+        "Accept-Ranges": "bytes"
+      });
+      return response.end();
+    }
+
+    const chunksize = (end - start) + 1;
+    const file = createReadStream(resolvedPath, { start, end });
+    response.writeHead(206, {
+      'Content-Range': `bytes ${start}-${end}/${fileSize}`,
+      'Accept-Ranges': 'bytes',
+      'Content-Length': chunksize,
+      'Content-Type': contentType,
+      'Cache-Control': 'no-cache'
+    });
+    file.pipe(response);
+  } else {
+    response.writeHead(200, {
+      'Content-Length': fileSize,
+      'Content-Type': contentType,
+      'Accept-Ranges': 'bytes',
+      'Cache-Control': 'no-cache'
+    });
+    createReadStream(resolvedPath).pipe(response);
+  }
 }
 
 function serveViewerPackageFile(request, response) {
@@ -842,6 +885,7 @@ async function pickHtmlFile() {
 
 const args = parseArgs(process.argv.slice(2));
 let activeJob = null;
+let activeAgentLog = '';
 const viewerState = {
   version: 0,
   path: args.openPath,
@@ -968,7 +1012,8 @@ const server = createServer(async (request, response) => {
       if (!requestedPath) throw new Error('Missing file path.');
       const resolvedPath = await resolveLectureFile(requestedPath, {
         ttsVoice: requestUrl.searchParams.get('ttsVoice'),
-        ttsSpeed: requestUrl.searchParams.get('ttsSpeed')
+        ttsSpeed: requestUrl.searchParams.get('ttsSpeed'),
+        currentOnly: requestUrl.searchParams.get('currentOnly') === '1'
       });
 
       viewerState.version++;
@@ -1021,6 +1066,121 @@ const server = createServer(async (request, response) => {
     } catch (error) {
       sendJson(response, 500, { error: error.message });
     }
+    return;
+  }
+
+  if (requestUrl.pathname === '/agent-chat') {
+    try {
+      let bodyData = '';
+      request.on('data', chunk => { bodyData += chunk; });
+      request.on('end', () => {
+        try {
+          const payload = JSON.parse(bodyData || '{}');
+          const message = payload.message || '';
+          const currentFile = payload.currentFile || '';
+
+          if (!message) {
+            sendJson(response, 400, { error: 'Missing message parameter.' });
+            return;
+          }
+
+          let pythonCmd = 'python';
+          const agentScript = path.resolve(rootDir, '../lecture-agent/coding_agent.py');
+          const venvPython = path.resolve(rootDir, '../lecture-agent/.venv/Scripts/python.exe');
+          if (existsSync(venvPython)) {
+            pythonCmd = venvPython;
+          }
+
+          if (!existsSync(agentScript)) {
+            sendJson(response, 500, { error: `Agent script not found at ${agentScript}` });
+            return;
+          }
+
+          let task = '';
+          if (currentFile) {
+            const relPath = path.relative(rootDir, resolveInputPath(currentFile)).replaceAll(path.sep, '/');
+            task = `[Context: The user is currently viewing the file "${relPath}" in the editor. Use this as the target file if they refer to "this file", "the script", "the code", or "the HTML".]\n\n`;
+          }
+          task += message;
+
+          const args = [
+            agentScript,
+            task
+          ];
+
+          const env = {
+            ...process.env,
+            AGENT_WORKSPACE: path.resolve(rootDir, '../lecture-agent/workspace'),
+            NO_COLOR: '1'
+          };
+
+          console.log(`Starting agent process: ${pythonCmd} ${args.map(a => `"${a}"`).join(' ')}`);
+
+          let stdout = '';
+          let stderr = '';
+          activeAgentLog = ''; // Reset log buffer
+
+          let childProc = null;
+          activeJob = {
+            type: 'agent',
+            kill: () => {
+              activeJob.aborted = true;
+              if (childProc) killProcessTree(childProc);
+            }
+          };
+
+          const child = spawn(pythonCmd, args, {
+            stdio: ['ignore', 'pipe', 'pipe'],
+            windowsHide: true,
+            env
+          });
+          childProc = child;
+
+          child.stdout.on('data', chunk => {
+            const str = chunk.toString();
+            stdout += str;
+            activeAgentLog += str;
+            process.stdout.write(chunk);
+          });
+
+          child.stderr.on('data', chunk => {
+            const str = chunk.toString();
+            stderr += str;
+            activeAgentLog += str;
+            process.stderr.write(chunk);
+          });
+
+          child.on('error', err => {
+            activeJob = null;
+            sendJson(response, 500, { error: err.message });
+          });
+
+          child.on('close', code => {
+            activeJob = null;
+            if (code === 0) {
+              sendJson(response, 200, { ok: true, output: stdout.trim() });
+            } else {
+              const output = `${stdout}\n${stderr}`
+                .split(/\r?\n/)
+                .map(line => line.trim())
+                .filter(Boolean)
+                .slice(-80)
+                .join('\n');
+              sendJson(response, 500, { error: output || `Agent exited with code ${code}` });
+            }
+          });
+        } catch (error) {
+          sendJson(response, 500, { error: error.message });
+        }
+      });
+    } catch (error) {
+      sendJson(response, 500, { error: error.message });
+    }
+    return;
+  }
+
+  if (requestUrl.pathname === '/agent-log') {
+    sendJson(response, 200, { log: activeAgentLog });
     return;
   }
 

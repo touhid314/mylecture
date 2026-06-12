@@ -1,9 +1,9 @@
 const viewerVersion = '0.2';
 
-export function createViewerHtml(openPath, initialWidth = 1080, initialHeight = 1920) {
+export function createViewerHtml(openPath, initialWidth = 1920, initialHeight = 1080) {
   const normalizedOpenPath = openPath ? openPath.replaceAll('\\', '/') : '';
-  const safeInitialWidth = Number.isInteger(initialWidth) && initialWidth > 0 ? initialWidth : 1080;
-  const safeInitialHeight = Number.isInteger(initialHeight) && initialHeight > 0 ? initialHeight : 1920;
+  const safeInitialWidth = Number.isInteger(initialWidth) && initialWidth > 0 ? initialWidth : 1920;
+  const safeInitialHeight = Number.isInteger(initialHeight) && initialHeight > 0 ? initialHeight : 1080;
   return `<!DOCTYPE html>
 <html lang="en">
 <head>
@@ -45,7 +45,7 @@ body {
   transition: grid-template-columns 200ms cubic-bezier(0.4, 0, 0.2, 1);
 }
 body.agent-collapsed {
-  --agent-bar-width: 48px;
+  --agent-bar-width: 0px;
 }
 body.fullscreen-active {
   grid-template-columns: 1fr;
@@ -107,7 +107,8 @@ body.fullscreen-active #folder-sidebar {
   opacity: 0.35;
   cursor: default;
 }
-#open-folder {
+#open-folder,
+#refresh-folder {
   width: 28px;
   min-width: 28px;
   min-height: 28px;
@@ -115,7 +116,8 @@ body.fullscreen-active #folder-sidebar {
   display: grid;
   place-items: center;
 }
-#open-folder[disabled] {
+#open-folder[disabled],
+#refresh-folder[disabled] {
   opacity: 0.45;
   cursor: default;
 }
@@ -988,57 +990,46 @@ body.fullscreen-active #scene-panel {
   background: #0d0d0d;
   display: flex;
   flex-direction: row;
-  overflow: hidden;
+  overflow: visible; /* Changed from hidden to let toggle button float outside */
   width: var(--agent-bar-width, 320px);
   position: relative;
-  transition: width 200ms cubic-bezier(0.4, 0, 0.2, 1);
+  transition: width 200ms cubic-bezier(0.4, 0, 0.2, 1), border-left-color 200ms cubic-bezier(0.4, 0, 0.2, 1);
+}
+body.agent-collapsed #agent-bar {
+  border-left-color: transparent;
 }
 body.fullscreen-active #agent-bar {
   display: none;
 }
-.agent-toggle-col {
-  width: 48px;
-  flex: 0 0 48px;
-  background: #111;
-  border-right: 1px solid var(--line);
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  padding: 12px 0;
-  gap: 16px;
-}
 .agent-toggle-btn {
-  background: transparent;
-  border: 0;
-  width: 32px;
+  position: absolute;
+  top: 12px;
+  left: -24px; /* Float on left edge */
+  width: 24px;
   height: 32px;
-  padding: 0;
-  display: grid;
-  place-items: center;
+  background: #111111;
+  border: 1px solid var(--line);
+  border-right: none;
+  border-radius: 6px 0 0 6px;
   color: var(--muted);
   cursor: pointer;
-  border-radius: 6px;
+  display: grid;
+  place-items: center;
+  z-index: 100;
   transition: color 120ms ease, background 120ms ease;
+  box-shadow: -2px 0 8px rgba(0,0,0,0.15);
 }
 .agent-toggle-btn:hover {
   color: var(--text);
-  background: var(--control);
-}
-.agent-icon-badge {
-  background: rgba(255, 255, 255, 0.05);
-  border-radius: 50%;
-  width: 32px;
-  height: 32px;
-  display: grid;
-  place-items: center;
-  color: var(--accent);
+  background: var(--control-hover);
 }
 .agent-content-col {
-  flex: 1;
+  width: 320px; /* Fixed width to prevent content squeezing during collapse transition */
+  flex: 0 0 320px;
   display: flex;
   flex-direction: column;
-  min-width: 272px;
   background: #0d0d0d;
+  overflow: hidden;
 }
 .agent-header {
   padding: 13px 14px 10px;
@@ -1062,6 +1053,26 @@ body.fullscreen-active #agent-bar {
   text-transform: uppercase;
   font-weight: bold;
   letter-spacing: 0.5px;
+}
+.agent-new-chat-btn {
+  background: transparent;
+  border: 1px solid var(--line);
+  color: var(--muted);
+  font-size: 10px;
+  padding: 3px 8px;
+  border-radius: 4px;
+  cursor: pointer;
+  font-weight: 500;
+  transition: all 120ms ease;
+  line-height: 1;
+}
+.agent-new-chat-btn:hover {
+  color: var(--text);
+  border-color: var(--line-strong);
+  background: rgba(255, 255, 255, 0.03);
+}
+.agent-new-chat-btn:active {
+  transform: scale(0.95);
 }
 .agent-body {
   flex: 1;
@@ -1100,12 +1111,18 @@ body.fullscreen-active #agent-bar {
 .agent-input {
   flex: 1;
   height: 32px;
+  min-height: 32px;
+  max-height: 180px;
   padding: 6px 10px;
   font-size: 12px;
   background: #080808;
   border: 1px solid var(--line);
   border-radius: 6px;
   color: var(--text);
+  resize: none;
+  font-family: inherit;
+  overflow-y: auto;
+  box-sizing: border-box;
 }
 .agent-send-btn {
   height: 32px;
@@ -1116,6 +1133,177 @@ body.fullscreen-active #agent-bar {
   border: 0;
   border-radius: 6px;
   font-weight: bold;
+  cursor: pointer;
+}
+.agent-stop-btn {
+  height: 32px;
+  min-height: 32px;
+  padding: 0 12px;
+  background: #ff453a;
+  color: #ffffff;
+  border: 0;
+  border-radius: 6px;
+  font-weight: bold;
+  cursor: pointer;
+}
+.agent-stop-btn:hover {
+  background: #ff5b52;
+}
+.agent-stop-btn:active {
+  transform: scale(0.95);
+}
+.chat-message {
+  display: flex;
+  flex-direction: column;
+  max-width: 85%;
+  padding: 10px 12px;
+  border-radius: 8px;
+  line-height: 1.45;
+  font-size: 13px;
+  word-break: break-word;
+}
+.chat-message.user {
+  align-self: flex-end;
+  background: #202020;
+  color: #f5f5f5;
+  border: 1px solid var(--line-strong);
+  border-bottom-right-radius: 2px;
+}
+.chat-message.agent {
+  align-self: flex-start;
+  background: #151515;
+  color: #eeeeee;
+  border: 1px solid var(--line);
+  border-bottom-left-radius: 2px;
+}
+.chat-message.error {
+  align-self: flex-start;
+  background: #2b1515;
+  color: #ffb4b4;
+  border: 1px solid #5a2222;
+  border-bottom-left-radius: 2px;
+}
+.chat-message p {
+  margin: 0 0 8px 0;
+}
+.chat-message p:last-child {
+  margin-bottom: 0;
+}
+.chat-message pre {
+  margin: 6px 0;
+  padding: 8px;
+  background: #050505;
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  overflow-x: auto;
+}
+.chat-message code {
+  font-family: monospace;
+  background: #050505;
+  padding: 2px 4px;
+  border-radius: 3px;
+}
+.chat-message ul, .chat-message ol {
+  margin: 6px 0;
+  padding-left: 20px;
+}
+.chat-message li {
+  margin-bottom: 4px;
+}
+.thinking-bubble {
+  align-self: flex-start;
+  background: #111111;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  border-bottom-left-radius: 2px;
+  padding: 10px 12px;
+  color: var(--muted);
+  font-style: italic;
+  font-size: 12px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.dot-flashing {
+  position: relative;
+  width: 6px;
+  height: 6px;
+  border-radius: 3px;
+  background-color: var(--muted);
+  color: var(--muted);
+  animation: dot-flashing 1s infinite linear;
+}
+@keyframes dot-flashing {
+  0% { background-color: var(--muted); }
+  50%, 100% { background-color: rgba(255,255,255,0.15); }
+}
+.agent-log-panel {
+  border-top: 1px solid var(--line);
+  background: #090909;
+  display: flex;
+  flex-direction: column;
+}
+.agent-log-toggle {
+  width: 100%;
+  height: 28px;
+  padding: 0 10px;
+  background: #111111;
+  border: none;
+  border-bottom: 1px solid var(--line);
+  color: var(--muted-strong);
+  font-size: 10px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  cursor: pointer;
+}
+.agent-log-toggle:hover {
+  background: var(--control-hover);
+  color: var(--text);
+}
+.agent-log-toggle .chevron {
+  width: 10px;
+  height: 10px;
+  transition: transform 150ms ease;
+  color: var(--muted);
+}
+.agent-log-panel.expanded .chevron {
+  transform: rotate(180deg);
+}
+.agent-log-content {
+  height: 0;
+  overflow: hidden;
+  transition: height 180ms ease;
+  background: #050505;
+}
+.agent-log-panel.expanded .agent-log-content {
+  height: 160px; /* fixed height for expanded log drawer */
+  overflow-y: auto;
+}
+#agent-log-text {
+  margin: 0;
+  padding: 8px 10px;
+  font-family: "Cascadia Code", Consolas, monospace;
+  font-size: 10.5px;
+  line-height: 1.45;
+  color: #8c8c8c;
+  white-space: pre-wrap;
+  word-break: break-all;
+}
+button[disabled] {
+  opacity: 0.45;
+  cursor: not-allowed;
+  pointer-events: none;
+}
+body.file-kind-mp4 .timeline-ruler {
+  cursor: not-allowed;
+  opacity: 0.5;
+}
+body.file-kind-mp4 .timeline-playhead-handle {
+  cursor: not-allowed;
 }
 </style>
 </head>
@@ -1134,11 +1322,19 @@ body.fullscreen-active #agent-bar {
         </button>
       </div>
     </div>
-    <button id="open-folder" type="button" aria-label="Open folder" title="Open folder" disabled>
-      <svg class="control-icon" viewBox="0 0 24 24" aria-hidden="true">
-        <path d="M3 7.5A2.5 2.5 0 0 1 5.5 5H10l2 2h6.5A2.5 2.5 0 0 1 21 9.5v7A2.5 2.5 0 0 1 18.5 19h-13A2.5 2.5 0 0 1 3 16.5z" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round"/>
-      </svg>
-    </button>
+    <div style="display: flex; align-items: center; gap: 4px; flex-shrink: 0;">
+      <button id="refresh-folder" type="button" aria-label="Refresh folder" title="Refresh folder" disabled>
+        <svg class="control-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M23 4v6h-6"></path>
+          <path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"></path>
+        </svg>
+      </button>
+      <button id="open-folder" type="button" aria-label="Open folder" title="Open folder" disabled>
+        <svg class="control-icon" viewBox="0 0 24 24" aria-hidden="true">
+          <path d="M3 7.5A2.5 2.5 0 0 1 5.5 5H10l2 2h6.5A2.5 2.5 0 0 1 21 9.5v7A2.5 2.5 0 0 1 18.5 19h-13A2.5 2.5 0 0 1 3 16.5z" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round"/>
+        </svg>
+      </button>
+    </div>
   </div>
   <div id="action-row">
     <div id="resolve-control">
@@ -1172,6 +1368,10 @@ body.fullscreen-active #agent-bar {
             <option value="1.3">1.3x</option>
             <option value="1.5">1.5x</option>
           </select>
+        </div>
+        <div class="resolve-option" style="display: flex; align-items: center; gap: 6px; padding-top: 4px; border-top: 1px solid var(--line);">
+          <input type="checkbox" id="resolve-current-only" style="width: auto; height: auto; margin: 0; cursor: pointer;">
+          <label for="resolve-current-only" style="cursor: pointer; user-select: none; font-size: 11px;">Resolve current scene only</label>
         </div>
       </div>
     </div>
@@ -1218,8 +1418,8 @@ body.fullscreen-active #agent-bar {
         <div class="render-option">
           <label for="render-resolution">Resolution</label>
           <select id="render-resolution">
-            <option value="1080x1920" selected>1080x1920</option>
-            <option value="1920x1080">1920x1080</option>
+            <option value="1920x1080" selected>1920x1080</option>
+            <option value="1080x1920">1080x1920</option>
             <option value="720x1280">720x1280</option>
           </select>
         </div>
@@ -1267,8 +1467,8 @@ body.fullscreen-active #agent-bar {
     <option value="2">2x</option>
   </select>
   <select id="viewport-preset" title="Preview viewport">
-    <option value="1080x1920">9:16</option>
     <option value="1920x1080">16:9</option>
+    <option value="1080x1920">9:16</option>
     <option value="custom">Custom</option>
   </select>
   <div id="viewport">${safeInitialWidth}x${safeInitialHeight}</div>
@@ -1297,24 +1497,18 @@ body.fullscreen-active #agent-bar {
   </div>
 </section>
 <aside id="agent-bar">
-  <div class="agent-toggle-col">
-    <button id="agent-toggle-btn" class="agent-toggle-btn" type="button" aria-label="Toggle Agent Panel" title="Toggle Agent Panel">
-      <svg class="control-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-        <polyline points="15 18 9 12 15 6"></polyline>
-      </svg>
-    </button>
-    <div class="agent-icon-badge" title="Lecture Agent">
-      <svg class="control-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-        <path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z"></path>
-        <polyline points="3.27 6.96 12 12.01 20.73 6.96"></polyline>
-        <line x1="12" y1="22.08" x2="12" y2="12"></line>
-      </svg>
-    </div>
-  </div>
+  <button id="agent-toggle-btn" class="agent-toggle-btn" type="button" aria-label="Toggle Agent Panel" title="Toggle Agent Panel">
+    <svg class="control-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+      <polyline points="15 18 9 12 15 6"></polyline>
+    </svg>
+  </button>
   <div class="agent-content-col">
     <div class="agent-header">
       <div class="agent-title">Lecture Agent</div>
-      <span class="agent-status-tag">Standby</span>
+      <div style="display: flex; align-items: center; gap: 8px;">
+        <button id="agent-new-chat" class="agent-new-chat-btn" type="button" title="New Chat">New Chat</button>
+        <span class="agent-status-tag">Standby</span>
+      </div>
     </div>
     <div class="agent-body">
       <div class="agent-placeholder-card">
@@ -1324,9 +1518,11 @@ body.fullscreen-active #agent-bar {
         </div>
       </div>
     </div>
+
     <div class="agent-input-area">
-      <input class="agent-input" type="text" placeholder="Type a message..." disabled>
-      <button class="agent-send-btn" type="button" disabled>Send</button>
+      <textarea id="agent-chat-input" class="agent-input" placeholder="Ask agent to build/edit..."></textarea>
+      <button id="agent-chat-send" class="agent-send-btn" type="button">Send</button>
+      <button id="agent-chat-stop" class="agent-stop-btn" type="button" style="display: none;">Stop</button>
     </div>
   </div>
 </aside>
@@ -1348,11 +1544,19 @@ import { createLecturePlayer, lectureViewerVersion } from '/lecture-viewer/playe
 const folderPathLabel = document.getElementById('folder-path');
 const copyFolderPathButton = document.getElementById('copy-folder-path');
 const openFolderButton = document.getElementById('open-folder');
+const refreshFolderButton = document.getElementById('refresh-folder');
 const fileList = document.getElementById('file-list');
 const jobStatus = document.getElementById('job-status');
 const resolveControl = document.getElementById('resolve-control');
 const sidebarResolveButton = document.getElementById('sidebar-resolve');
 const resolveMenuToggle = document.getElementById('resolve-menu-toggle');
+const agentChatInput = document.getElementById('agent-chat-input');
+const agentChatSend = document.getElementById('agent-chat-send');
+const agentChatStop = document.getElementById('agent-chat-stop');
+const agentNewChat = document.getElementById('agent-new-chat');
+const agentBody = document.querySelector('.agent-body');
+const agentStatusTag = document.querySelector('.agent-status-tag');
+
 const resolveOptions = document.getElementById('resolve-options');
 const resolveTtsVoice = document.getElementById('resolve-tts-voice');
 const resolveTtsSpeed = document.getElementById('resolve-tts-speed');
@@ -1590,6 +1794,10 @@ function resolveQuery() {
   params.set('file', currentFilePath);
   params.set('ttsVoice', resolveTtsVoice.value || 'af_heart');
   params.set('ttsSpeed', resolveTtsSpeed.value || '1');
+  const currentOnlyCheckbox = document.getElementById('resolve-current-only');
+  if (currentOnlyCheckbox && currentOnlyCheckbox.checked) {
+    params.set('currentOnly', '1');
+  }
   return params.toString();
 }
 
@@ -1692,9 +1900,20 @@ function renderMarkdown(markdown) {
   let listOpen = false;
   let codeOpen = false;
 
+  const parseInline = (text) => {
+    let res = String(text);
+    res = res.replace(/\\*\\*(.*?)\\*\\*/g, '<strong>$1</strong>');
+    res = res.replace(/__(.*?)__/g, '<strong>$1</strong>');
+    res = res.replace(/\\*(.*?)\\*/g, '<em>$1</em>');
+    res = res.replace(/_(.*?)_/g, '<em>$1</em>');
+    res = res.replace(new RegExp(String.fromCharCode(96) + '(.*?)' + String.fromCharCode(96), 'g'), '<code>$1</code>');
+    res = res.replace(/\\\[(.*?)\\\]\\\((.*?)\\\)/g, '<a href="$2" target="_blank" style="color: #6fc2ff; text-decoration: underline;">$1</a>');
+    return res;
+  };
+
   const flushParagraph = () => {
     if (!paragraph.length) return;
-    html.push('<p>' + paragraph.map(escapeText).join(' ') + '</p>');
+    html.push('<p>' + parseInline(paragraph.map(escapeText).join(' ')) + '</p>');
     paragraph = [];
   };
   const closeList = () => {
@@ -1721,7 +1940,7 @@ function renderMarkdown(markdown) {
       flushParagraph();
       closeList();
       const level = heading[1].length;
-      html.push('<h' + level + '>' + escapeText(heading[2]) + '</h' + level + '>');
+      html.push('<h' + level + '>' + parseInline(escapeText(heading[2])) + '</h' + level + '>');
       continue;
     }
 
@@ -1732,7 +1951,7 @@ function renderMarkdown(markdown) {
         html.push('<ul>');
         listOpen = true;
       }
-      html.push('<li>' + escapeText(listItem[1]) + '</li>');
+      html.push('<li>' + parseInline(escapeText(listItem[1])) + '</li>');
       continue;
     }
 
@@ -1889,6 +2108,7 @@ function renderFolderFiles(payload) {
   folderPathLabel.title = payload?.folder || '';
   currentBrowserFolder = payload?.folder || '';
   openFolderButton.disabled = !currentBrowserFolder;
+  refreshFolderButton.disabled = !currentBrowserFolder;
   copyFolderPathButton.disabled = !currentBrowserFolder;
   fileList.textContent = '';
 
@@ -2103,6 +2323,8 @@ let isLoadFilePending = false;
 
 function handleTimelinePointerDown(event) {
   if (event.button !== 0) return;
+  const isMp4 = fileExtension(currentFilePath) === 'mp4';
+  if (isMp4) return;
   isDraggingTimeline = true;
   if (timelineRuler) {
     timelineRuler.setPointerCapture(event.pointerId);
@@ -2136,6 +2358,9 @@ async function seekFromTimelineEvent(event) {
 
 
 async function seekToGlobalTime(globalTime) {
+  const isMp4 = fileExtension(currentFilePath) === 'mp4';
+  if (isMp4) return;
+  
   if (currentScenesList.length === 0) {
     player.seek(globalTime);
     return;
@@ -2148,10 +2373,11 @@ async function seekToGlobalTime(globalTime) {
   if (!targetScene) return;
   
   const localTime = Math.max(0, Math.min(targetScene.duration, globalTime - targetScene.timelineStart));
+  const wasPlaying = playerState().playing;
   
   if (targetScene.path !== currentFilePath) {
     if (preloadedFilePath === targetScene.path && !isPreloading) {
-      await swapToPreloadedScene(targetScene.path);
+      await swapToPreloadedScene(targetScene.path, wasPlaying);
       player.seek(localTime);
     } else {
       if (isLoadFilePending) return;
@@ -2160,6 +2386,8 @@ async function seekToGlobalTime(globalTime) {
       isLoadFilePending = false;
       if (success) {
         player.seek(localTime);
+        if (wasPlaying) player.play();
+        else player.pause();
       }
     }
   } else {
@@ -2168,6 +2396,9 @@ async function seekToGlobalTime(globalTime) {
 }
 
 async function seekGlobalBy(seconds) {
+  const isMp4 = fileExtension(currentFilePath) === 'mp4';
+  if (isMp4) return;
+
   const state = playerState();
   if (!state.loaded) return;
   const activeScene = currentScenesList.find(file => file.path === currentFilePath);
@@ -2296,10 +2527,11 @@ function preloadNextScene() {
   }
 }
 
-async function swapToPreloadedScene(nextPath) {
+async function swapToPreloadedScene(nextPath, shouldPlay = true) {
   if (preloadedFilePath !== nextPath || isPreloading) {
     await loadFile(nextPath);
-    player.play();
+    if (shouldPlay) player.play();
+    else player.pause();
     return;
   }
   
@@ -2318,7 +2550,8 @@ async function swapToPreloadedScene(nextPath) {
   
   setCurrentFile(nextPath);
   player.handleFrameLoad();
-  player.play();
+  if (shouldPlay) player.play();
+  else player.pause();
   
   preloadedFilePath = '';
   preloadNextScene();
@@ -2336,6 +2569,7 @@ async function browseFolder(folderPath = '') {
     folderPathLabel.title = '';
     currentBrowserFolder = '';
     openFolderButton.disabled = true;
+    refreshFolderButton.disabled = true;
     copyFolderPathButton.disabled = true;
     fileList.textContent = '';
   } finally {
@@ -2405,7 +2639,12 @@ async function runResolve() {
   const sourceName = fileBaseName(currentFilePath);
   setActionBusy(true, 'Resolving...', 'resolve');
   setResolveOptionsVisible(false);
-  startJobStatus('Resolving ' + sourceName + ' with ' + resolveTtsVoice.value + ' @ ' + resolveTtsSpeed.value + 'x');
+  const currentOnlyCheckbox = document.getElementById('resolve-current-only');
+  const isCurrentOnly = currentOnlyCheckbox && currentOnlyCheckbox.checked;
+  const resolveMsg = isCurrentOnly
+    ? 'Resolving ' + sourceName + ' only with ' + resolveTtsVoice.value + ' @ ' + resolveTtsSpeed.value + 'x'
+    : 'Resolving ' + sourceName + ' with ' + resolveTtsVoice.value + ' @ ' + resolveTtsSpeed.value + 'x';
+  startJobStatus(resolveMsg);
   try {
     const response = await fetch('/resolve-file?' + resolveQuery(), { method: 'POST' });
     const payload = await response.json();
@@ -2596,6 +2835,11 @@ function updateControls(state = playerState()) {
   liveTtsToggle.setAttribute('aria-pressed', state.liveTtsEnabled ? 'true' : 'false');
   interactiveMarker.classList.toggle('visible', state.interactiveTimeline.length > 0);
   gameMarker.classList.toggle('visible', state.gameTimeline.length > 0);
+  
+  const isMp4 = fileExtension(currentFilePath) === 'mp4';
+  scrubber.disabled = isMp4;
+  seekBackButton.disabled = isMp4;
+  seekForwardButton.disabled = isMp4;
   
   updatePlayheadPosition(state);
 }
@@ -2799,6 +3043,7 @@ player.on('ended', async () => {
 
 loadButton.addEventListener('click', pickAndLoadFile);
 openFolderButton.addEventListener('click', openCurrentFolder);
+refreshFolderButton.addEventListener('click', refreshFolderFiles);
 copyFolderPathButton.addEventListener('click', async () => {
   if (!currentBrowserFolder) return;
   try {
@@ -2941,16 +3186,206 @@ if (agentToggleBtn) {
     
     const isCollapsed = document.body.classList.contains('agent-collapsed');
     agentToggleBtn.innerHTML = isCollapsed
-      ? '<svg class="control-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="11 18 17 12 11 6"></polyline></svg>'
-      : '<svg class="control-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="15 18 9 12 15 6"></polyline></svg>';
+      ? '<svg class="control-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="15 18 9 12 15 6"></polyline></svg>'
+      : '<svg class="control-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="11 18 17 12 11 6"></polyline></svg>';
     
     setTimeout(resizePreview, 210);
   });
 }
 
-document.body.classList.add('agent-collapsed');
+// Right panel expanded by default
 if (agentToggleBtn) {
   agentToggleBtn.innerHTML = '<svg class="control-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="11 18 17 12 11 6"></polyline></svg>';
+}
+
+function appendChatMessage(text, sender = 'agent') {
+  if (!agentBody) return;
+  const bubble = document.createElement('div');
+  bubble.className = 'chat-message ' + sender;
+  
+  if (sender === 'user' || sender === 'error') {
+    bubble.textContent = text;
+  } else {
+    bubble.innerHTML = renderMarkdown(text);
+  }
+  
+  agentBody.appendChild(bubble);
+  agentBody.scrollTop = agentBody.scrollHeight;
+}
+
+function getLatestStepFromLog(logText) {
+  if (!logText) return '';
+  const cleanLog = logText.replace(/\\x1B\\[[0-9;]*[a-zA-Z]/g, '');
+  const lines = cleanLog.split(/\\r?\\n/);
+  const stepLines = [];
+  for (const line of lines) {
+    const trimmed = line.trim();
+    if (trimmed.toLowerCase().includes('[step ')) {
+      stepLines.push(trimmed);
+    }
+  }
+  if (stepLines.length > 0) {
+    const lastLine = stepLines[stepLines.length - 1];
+    const match = lastLine.match(/\\[step\\s+(\\d+)\\]\\s*(.*)/i);
+    if (match) {
+      const stepNum = match[1];
+      const action = match[2];
+      return "Step " + stepNum + ": " + action;
+    }
+    return lastLine;
+  }
+  return '';
+}
+
+function showThinking() {
+  if (!agentBody) return;
+  const bubble = document.createElement('div');
+  bubble.className = 'thinking-bubble';
+  bubble.id = 'agent-thinking';
+  bubble.innerHTML = '<span>Agent is starting...</span><div class="dot-flashing"></div>';
+  agentBody.appendChild(bubble);
+  agentBody.scrollTop = agentBody.scrollHeight;
+}
+
+function updateThinkingStatus(statusText) {
+  const el = document.getElementById('agent-thinking');
+  if (el) {
+    const span = el.querySelector('span');
+    if (span) {
+      span.textContent = statusText;
+    }
+  }
+}
+
+function removeThinking() {
+  const el = document.getElementById('agent-thinking');
+  if (el) el.remove();
+}
+
+async function sendChat() {
+  if (!agentChatInput || !agentChatSend) return;
+  const msg = agentChatInput.value.trim();
+  if (!msg) return;
+
+  agentChatInput.value = '';
+  agentChatInput.style.height = '32px';
+  appendChatMessage(msg, 'user');
+  
+  agentChatInput.disabled = true;
+  agentChatSend.style.display = 'none';
+  if (agentChatStop) agentChatStop.style.display = 'block';
+  if (agentStatusTag) {
+    agentStatusTag.textContent = 'Thinking';
+    agentStatusTag.style.background = 'rgba(255, 214, 10, 0.15)';
+    agentStatusTag.style.color = '#ffd60a';
+  }
+  
+  showThinking();
+
+  let logPollInterval = setInterval(async () => {
+    try {
+      const logRes = await fetch('/agent-log');
+      const logData = await logRes.json();
+      const latestStep = getLatestStepFromLog(logData.log);
+      if (latestStep) {
+        updateThinkingStatus(latestStep);
+      }
+    } catch (e) {}
+  }, 800);
+
+  try {
+    const response = await fetch('/agent-chat', {
+      method: 'POST',
+      headers: {
+        'content-type': 'application/json'
+      },
+      body: JSON.stringify({
+        message: msg,
+        currentFile: currentFilePath
+      })
+    });
+    
+    const payload = await response.json();
+    removeThinking();
+    
+    if (!response.ok) {
+      throw new Error(payload.error || 'Agent execution failed');
+    }
+    
+    appendChatMessage(payload.output || 'Done.', 'agent');
+  } catch (error) {
+    removeThinking();
+    appendChatMessage(error.message, 'error');
+  } finally {
+    clearInterval(logPollInterval);
+    agentChatInput.disabled = false;
+    agentChatSend.style.display = 'block';
+    if (agentChatStop) agentChatStop.style.display = 'none';
+    agentChatInput.style.height = '32px';
+    agentChatInput.focus();
+    if (agentStatusTag) {
+      agentStatusTag.textContent = 'Standby';
+      agentStatusTag.style.background = '';
+      agentStatusTag.style.color = '';
+    }
+    
+    refreshFolderFiles();
+  }
+}
+
+if (agentChatInput) {
+  agentChatInput.addEventListener('keydown', event => {
+    if (event.key === 'Enter') {
+      if (event.shiftKey || event.ctrlKey) {
+        // Allow default behavior (line break)
+      } else {
+        event.preventDefault();
+        sendChat();
+      }
+    }
+  });
+  agentChatInput.addEventListener('input', () => {
+    agentChatInput.style.height = 'auto';
+    agentChatInput.style.height = Math.min(180, agentChatInput.scrollHeight) + 'px';
+  });
+}
+if (agentChatSend) {
+  agentChatSend.addEventListener('click', sendChat);
+}
+if (agentChatStop) {
+  agentChatStop.addEventListener('click', async () => {
+    agentChatStop.disabled = true;
+    agentChatStop.textContent = 'Stopping...';
+    try {
+      const response = await fetch('/stop-job', { method: 'POST' });
+      const payload = await response.json();
+      if (!response.ok) throw new Error(payload.error || 'Failed to stop agent');
+      appendChatMessage('Stopping agent...', 'error');
+    } catch (error) {
+      appendChatMessage('Error stopping agent: ' + error.message, 'error');
+    } finally {
+      agentChatStop.disabled = false;
+      agentChatStop.textContent = 'Stop';
+    }
+  });
+}
+if (agentNewChat) {
+  agentNewChat.addEventListener('click', () => {
+    if (confirm('Are you sure you want to clear this conversation and start a new chat?')) {
+      if (agentBody) {
+        agentBody.innerHTML = '';
+        appendChatMessage("Hello! I am your Lecture Agent. I can make great lecture videos, interactive demonstrations, and games. What would you like to build today?", "agent");
+      }
+    }
+  });
+}
+
+
+
+// Add a welcome message and clear placeholder card
+if (agentBody) {
+  agentBody.innerHTML = '';
+  appendChatMessage("Hello! I am your Lecture Agent. I can make great lecture videos, interactive demonstrations, and games. What would you like to build today?", "agent");
 }
 
 setCurrentFile(currentFilePath);
