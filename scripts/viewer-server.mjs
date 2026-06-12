@@ -1,4 +1,4 @@
-import { createReadStream, existsSync, readdirSync, readFileSync, statSync, unlinkSync } from 'node:fs';
+import { createReadStream, existsSync, mkdirSync, readdirSync, readFileSync, rmSync, statSync, unlinkSync, writeFileSync } from 'node:fs';
 import { createServer } from 'node:http';
 import { spawn } from 'node:child_process';
 import path from 'node:path';
@@ -295,6 +295,10 @@ function defaultOutputPath(filePath) {
   return siblingPath(filePath, `rendered${match?.[1] || ''}.mp4`);
 }
 
+function finalBatchOutputPath(filePath) {
+  return siblingPath(filePath, 'rendered.mp4');
+}
+
 function isIndexHtmlName(name) {
   return /^index.*\.html$/i.test(name);
 }
@@ -337,6 +341,15 @@ function normalizePositiveInteger(value, fallback, min = 1, max = Number.MAX_SAF
   const number = Number(value);
   if (!Number.isInteger(number) || number < min || number > max) return String(fallback);
   return String(number);
+}
+
+function killProcessTree(childProc) {
+  if (!childProc) return;
+  if (process.platform === 'win32') {
+    spawn('taskkill', ['/pid', childProc.pid, '/f', '/t'], { windowsHide: true });
+  } else {
+    childProc.kill('SIGTERM');
+  }
 }
 
 async function resolveLectureFile(filePath, options = {}) {
@@ -420,16 +433,10 @@ async function resolveLectureFile(filePath, options = {}) {
   return finalResolvedPath || toViewerPath(resolvedSiblingPathForIndex(path.join(folderPath, files[0])));
 }
 
-async function renderLectureFile(filePath, options = {}) {
-  const inputPath = resolveInputPath(filePath);
+function renderArgsForFile(inputPath, outPath, options = {}, extraArgs = []) {
   const basename = path.basename(inputPath);
-  if (!isIndexHtmlName(basename) && !isResolvedHtmlName(basename)) {
-    throw new Error('Render is only available for index*.html or resolved*.html files.');
-  }
-
   const voice = normalizeTtsVoice(options.ttsVoice);
   const provider = detectProvider(voice);
-  const outPath = defaultOutputPath(inputPath);
   const renderArgs = [
     'scripts/render-video.mjs',
     '--html', inputPath,
@@ -449,6 +456,102 @@ async function renderLectureFile(filePath, options = {}) {
     renderArgs.push('--no-auto-build');
   }
 
+  renderArgs.push(...extraArgs);
+  return renderArgs;
+}
+
+function buildPlanArgsForIndex(inputPath, outPath, options = {}) {
+  const voice = normalizeTtsVoice(options.ttsVoice);
+  const provider = detectProvider(voice);
+  return [
+    'scripts/build-plan.mjs',
+    '--input', inputPath,
+    '--out', outPath,
+    '--provider', provider,
+    '--voice', voice,
+    '--speed', normalizeTtsSpeed(options.ttsSpeed),
+    '--force-audio'
+  ];
+}
+
+function renderSceneSet(inputPath) {
+  const folderPath = path.dirname(inputPath);
+  const basename = path.basename(inputPath);
+  const predicate = isIndexHtmlName(basename) ? isIndexHtmlName : isResolvedHtmlName;
+  return readdirSync(folderPath)
+    .filter(name => predicate(name))
+    .sort((a, b) => a.localeCompare(b, undefined, { numeric: true, sensitivity: 'base' }))
+    .map(name => path.join(folderPath, name));
+}
+
+async function runLimited(items, limit, worker) {
+  let nextIndex = 0;
+  let firstError = null;
+  const workerCount = Math.min(limit, items.length);
+  await Promise.allSettled(Array.from({ length: workerCount }, async () => {
+    while (!firstError && nextIndex < items.length) {
+      const index = nextIndex++;
+      try {
+        await worker(items[index], index);
+      } catch (error) {
+        firstError = error;
+        throw error;
+      }
+    }
+  }));
+  if (firstError) throw firstError;
+}
+
+function ffmpegConcatPath(filePath) {
+  return path.resolve(filePath).replaceAll('\\', '/').replaceAll("'", "'\\''");
+}
+
+async function concatRenderedScenes(tempFiles, outputPath, listPath) {
+  const listBody = tempFiles
+    .map(file => `file '${ffmpegConcatPath(file)}'`)
+    .join('\n');
+  writeFileSync(listPath, `${listBody}\n`, 'utf8');
+  await runCapture('ffmpeg', [
+    '-y',
+    '-hide_banner',
+    '-loglevel', 'warning',
+    '-f', 'concat',
+    '-safe', '0',
+    '-i', listPath,
+    '-c', 'copy',
+    outputPath
+  ], {
+    cwd: rootDir,
+    windowsHide: true
+  });
+}
+
+function deleteIntermediateSceneRenders(sceneOutputs, finalOutputPath) {
+  const finalResolvedPath = path.resolve(finalOutputPath);
+  for (const sceneOutput of sceneOutputs) {
+    if (path.resolve(sceneOutput) === finalResolvedPath || !existsSync(sceneOutput)) continue;
+    try {
+      unlinkSync(sceneOutput);
+    } catch (error) {
+      console.error(`Failed to delete intermediate scene render ${sceneOutput}: ${error.message}`);
+    }
+  }
+}
+
+async function renderLectureFile(filePath, options = {}) {
+  const inputPath = resolveInputPath(filePath);
+  const basename = path.basename(inputPath);
+  if (!isIndexHtmlName(basename) && !isResolvedHtmlName(basename)) {
+    throw new Error('Render is only available for index*.html or resolved*.html files.');
+  }
+
+  const sceneFiles = renderSceneSet(inputPath);
+  if (sceneFiles.length > 1) {
+    return await renderLectureBatch(inputPath, sceneFiles, options);
+  }
+
+  const outPath = defaultOutputPath(inputPath);
+  const renderArgs = renderArgsForFile(inputPath, outPath, options);
   let childProc = null;
   activeJob = {
     type: 'render',
@@ -456,13 +559,7 @@ async function renderLectureFile(filePath, options = {}) {
     inputPath,
     kill: () => {
       activeJob.aborted = true;
-      if (childProc) {
-        if (process.platform === 'win32') {
-          spawn('taskkill', ['/pid', childProc.pid, '/f', '/t'], { windowsHide: true });
-        } else {
-          childProc.kill('SIGTERM');
-        }
-      }
+      killProcessTree(childProc);
     }
   };
 
@@ -488,6 +585,129 @@ async function renderLectureFile(filePath, options = {}) {
     }
     throw error;
   } finally {
+    activeJob = null;
+  }
+}
+
+async function renderLectureBatch(inputPath, sceneFiles, options = {}) {
+  const batchId = `${Date.now()}-${Math.random().toString(16).slice(2)}`;
+  const tempDir = path.resolve(rootDir, '.render', 'batch-render', batchId);
+  const outputPath = finalBatchOutputPath(inputPath);
+  const concatListPath = path.join(tempDir, 'concat.txt');
+  const childProcs = new Set();
+  let firstSceneError = null;
+  let renderSceneFiles = sceneFiles;
+
+  mkdirSync(tempDir, { recursive: true });
+  activeJob = {
+    type: 'render',
+    outPath: outputPath,
+    inputPath,
+    aborted: false,
+    kill: () => {
+      activeJob.aborted = true;
+      for (const childProc of childProcs) {
+        killProcessTree(childProc);
+      }
+    }
+  };
+
+  try {
+    if (isIndexHtmlName(path.basename(inputPath))) {
+      console.log(`Resolving ${sceneFiles.length} index scene(s) before batch render...`);
+      const resolvedSceneFiles = [];
+      for (let index = 0; index < sceneFiles.length; index++) {
+        const scenePath = sceneFiles[index];
+        const resolvedPath = resolvedSiblingPathForIndex(scenePath);
+        const buildArgs = buildPlanArgsForIndex(scenePath, resolvedPath, options);
+        let childProc = null;
+        console.log(`Resolving scene ${index + 1}/${sceneFiles.length}: ${path.basename(scenePath)} -> ${path.basename(resolvedPath)}`);
+        try {
+          await runCapture('node', buildArgs, {
+            cwd: rootDir,
+            windowsHide: true,
+            onSpawn: (child) => {
+              childProc = child;
+              childProcs.add(child);
+            }
+          });
+        } catch (error) {
+          throw new Error(`Scene resolve failed for ${path.basename(scenePath)}:\n${error.message}`);
+        } finally {
+          if (childProc) childProcs.delete(childProc);
+        }
+        resolvedSceneFiles.push(resolvedPath);
+      }
+      renderSceneFiles = resolvedSceneFiles;
+    }
+
+    if (activeJob && activeJob.aborted) {
+      throw new Error('Process stopped by user');
+    }
+
+    const sceneOutputs = renderSceneFiles.map(scenePath => defaultOutputPath(scenePath));
+    console.log(`Batch rendering ${renderSceneFiles.length} scenes with up to 4 parallel processes...`);
+    await runLimited(renderSceneFiles, 4, async (scenePath, index) => {
+      const sceneOutput = sceneOutputs[index];
+      const sceneTempDir = path.join(tempDir, `scene-${String(index + 1).padStart(3, '0')}`);
+      const framesDir = path.join(sceneTempDir, 'frames');
+      const renderArgs = renderArgsForFile(scenePath, sceneOutput, options, [
+        '--frames-dir', framesDir,
+        '--workers', '1',
+        '--video-codec', 'libx264'
+      ]);
+      let childProc = null;
+      console.log(`Rendering scene ${index + 1}/${sceneFiles.length}: ${path.basename(scenePath)} -> ${path.basename(sceneOutput)}`);
+      await runCapture('node', renderArgs, {
+        cwd: rootDir,
+        windowsHide: true,
+        onSpawn: (child) => {
+          childProc = child;
+          childProcs.add(child);
+        }
+      }).catch((error) => {
+        const sceneError = new Error(`Scene render failed for ${path.basename(scenePath)}:\n${error.message}`);
+        if (!firstSceneError) {
+          firstSceneError = sceneError;
+          for (const runningChild of childProcs) {
+            if (runningChild !== childProc) killProcessTree(runningChild);
+          }
+        }
+        if (existsSync(sceneOutput)) {
+          try {
+            unlinkSync(sceneOutput);
+          } catch (err) {
+            console.error(`Failed to delete partial scene render file: ${err.message}`);
+          }
+        }
+        throw firstSceneError;
+      }).finally(() => {
+        if (childProc) childProcs.delete(childProc);
+      });
+    });
+
+    if (activeJob && activeJob.aborted) {
+      throw new Error('Process stopped by user');
+    }
+
+    console.log(`Joining ${sceneOutputs.length} rendered scene files -> ${path.basename(outputPath)}`);
+    await concatRenderedScenes(sceneOutputs, outputPath, concatListPath);
+    deleteIntermediateSceneRenders(sceneOutputs, outputPath);
+    return toViewerPath(outputPath);
+  } catch (error) {
+    if (existsSync(outputPath)) {
+      try {
+        unlinkSync(outputPath);
+      } catch (err) {
+        console.error(`Failed to delete partial render file: ${err.message}`);
+      }
+    }
+    if (activeJob && activeJob.aborted) {
+      throw new Error('Process stopped by user');
+    }
+    throw error;
+  } finally {
+    rmSync(tempDir, { recursive: true, force: true });
     activeJob = null;
   }
 }
@@ -562,7 +782,15 @@ function runCapture(command, args, options = {}) {
     child.on('error', reject);
     child.on('close', code => {
       if (code === 0) resolve(stdout.trim());
-      else reject(new Error(stderr.trim() || `${command} exited with code ${code}`));
+      else {
+        const output = `${stdout}\n${stderr}`
+          .split(/\r?\n/)
+          .map(line => line.trim())
+          .filter(Boolean)
+          .slice(-80)
+          .join('\n');
+        reject(new Error(output || `${command} exited with code ${code}`));
+      }
     });
   });
 }

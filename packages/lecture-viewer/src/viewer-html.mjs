@@ -886,6 +886,13 @@ body.fullscreen-active #scene-panel {
   min-height: 82px;
   box-sizing: border-box;
 }
+.scene-empty-state {
+  color: var(--muted);
+  font-size: 12px;
+  padding: 8px 16px;
+  white-space: nowrap;
+  min-width: max-content;
+}
 .scene-card {
   position: relative;
   box-sizing: border-box;
@@ -2042,9 +2049,7 @@ function updateScenePanel(entries) {
   
   if (activeFiles.length === 0) {
     const empty = document.createElement('div');
-    empty.style.color = 'var(--muted)';
-    empty.style.fontSize = '12px';
-    empty.style.padding = '8px 16px';
+    empty.className = 'scene-empty-state';
     empty.textContent = 'No ' + currentSceneTab + ' files found.';
     sceneListContainer.appendChild(empty);
     return;
