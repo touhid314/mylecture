@@ -1,7 +1,7 @@
 import { chromium } from 'playwright';
 import { spawn } from 'node:child_process';
 import os from 'node:os';
-import { existsSync, mkdirSync, readFileSync, statSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, statSync, writeFileSync, unlinkSync } from 'node:fs';
 import path from 'node:path';
 import { pathToFileURL } from 'node:url';
 
@@ -216,19 +216,66 @@ async function generateAudio({ text, outputPath, provider, voice, speed }) {
 async function runAudioJobs(audioJobs, maxWorkers) {
   if (audioJobs.length === 0) return;
 
-  const workerCount = Math.min(maxWorkers, audioJobs.length);
-  let nextJob = 0;
-  console.log(`Generating ${audioJobs.length} audio file(s) with ${workerCount} worker(s)...`);
+  console.log(`Generating ${audioJobs.length} audio file(s) in a single batch with ${maxWorkers} workers...`);
+  const tempJobsFile = path.resolve(rootDir, '.tmp', `jobs_${Date.now()}.json`);
+  mkdirSync(path.dirname(tempJobsFile), { recursive: true });
+  writeFileSync(tempJobsFile, JSON.stringify(audioJobs, null, 2), 'utf8');
 
-  async function worker() {
-    while (nextJob < audioJobs.length) {
-      const job = audioJobs[nextJob++];
-      console.log(`Generating audio for ${job.sectionId} -> ${job.displayPath}`);
-      await generateAudio(job);
+  const code = [
+    'import os',
+    'import sys',
+    'import json',
+    'from concurrent.futures import ThreadPoolExecutor',
+    'from pathlib import Path',
+    'sys.path.insert(0, str(Path(os.environ["PROJECT_ROOT"]) / "tools"))',
+    'from tts import tts',
+    '',
+    'jobs_file = os.environ["TTS_JOBS_FILE"]',
+    'max_workers = int(os.environ.get("TTS_MAX_WORKERS", "6"))',
+    'with open(jobs_file, "r", encoding="utf-8") as f:',
+    '    jobs = json.load(f)',
+    '',
+    'def run_job(job):',
+    '    print(f"Generating audio for {job[\'sectionId\']} -> {job[\'displayPath\']}", flush=True)',
+    '    tts(',
+    '        job["text"],',
+    '        provider=job["provider"],',
+    '        voice=job["voice"],',
+    '        output_path=job["outputPath"],',
+    '        speed=job["speed"]',
+    '    )',
+    '',
+    'if len(jobs) > 0:',
+    '    # Warm up sequentially first to cache the session and avoid concurrent CUDA initialization',
+    '    run_job(jobs[0])',
+    'if len(jobs) > 1:',
+    '    with ThreadPoolExecutor(max_workers=max_workers) as executor:',
+    '        list(executor.map(run_job, jobs[1:]))',
+    '',
+    'try:',
+    '    os.unlink(jobs_file)',
+    'except:',
+    '    pass'
+  ].join('\n');
+
+  try {
+    await run('python', ['-c', code], {
+      cwd: rootDir,
+      env: {
+        ...process.env,
+        PROJECT_ROOT: rootDir,
+        TTS_JOBS_FILE: tempJobsFile,
+        TTS_MAX_WORKERS: String(maxWorkers)
+      }
+    });
+  } catch (error) {
+    if (existsSync(tempJobsFile)) {
+      try {
+        unlinkSync(tempJobsFile);
+      } catch (_) {}
     }
+    throw error;
   }
-
-  await Promise.all(Array.from({ length: workerCount }, () => worker()));
 }
 
 async function measureAudioDuration(audioPath) {

@@ -122,38 +122,286 @@ class LLM_Model:
 
     import re
 
+    def _extract_json_objects(self, s: str) -> List[str]:
+        """
+        Finds and extracts all JSON objects ({...}) or arrays ([...]) from the string
+        by counting matching braces/brackets, properly ignoring braces/brackets inside strings.
+        """
+        results = []
+        i = 0
+        while i < len(s):
+            # Find the next opening brace/bracket
+            start_idx = -1
+            for j in range(i, len(s)):
+                if s[j] == '{' or s[j] == '[':
+                    start_idx = j
+                    break
+            if start_idx == -1:
+                break
+                
+            open_char = s[start_idx]
+            close_char = '}' if open_char == '{' else ']'
+            
+            count = 0
+            in_string = False
+            escape = False
+            found = False
+            
+            for k in range(start_idx, len(s)):
+                char = s[k]
+                if escape:
+                    escape = False
+                    continue
+                if char == '\\':
+                    escape = True
+                    continue
+                if char == '"':
+                    in_string = not in_string
+                    continue
+                if not in_string:
+                    if char == open_char:
+                        count += 1
+                    elif char == close_char:
+                        count -= 1
+                        if count == 0:
+                            results.append(s[start_idx:k+1])
+                            i = k + 1
+                            found = True
+                            break
+            if not found:
+                break
+        return results
+
     def _clean_json(self, response_string: str) -> str:
         """
-        Extracts the first valid JSON object or array from a string,
-        handling optional markdown code fences (e.g., ```json ... ```).
+        Extracts valid JSON objects or arrays from a string,
+        wrapping multiple sequential JSON objects into a single JSON array.
         """
         if not response_string:
             return ""
 
         # 1. Try to find JSON within ```json ... ``` or ``` ... ``` fences.
-        #    re.DOTALL makes '.' match newline characters.
-        #    This regex looks for {..} or [..] *inside* the fences.
-        fence_match = re.search(
-            r'```(?:json)?\s*(\{.*\}|\[.*\])\s*```', 
+        #    We search for all matches to support multiple fences.
+        fence_matches = re.findall(
+            r'```(?:json)?\s*(\{.*?\}|\[.*?\])\s*```', 
             response_string, 
             re.DOTALL
         )
         
-        if fence_match:
-            # If found, return the captured group (the JSON part)
-            return fence_match.group(1)
+        extracted_parts = []
+        if fence_matches:
+            for match in fence_matches:
+                extracted_parts.extend(self._extract_json_objects(match))
+        else:
+            extracted_parts = self._extract_json_objects(response_string)
+            
+        if not extracted_parts:
+            return response_string
+            
+        if len(extracted_parts) == 1:
+            return extracted_parts[0]
+            
+        # Wrap multiple JSON objects into a single JSON array
+        return "[" + ",\n".join(extracted_parts) + "]"
 
-        # 2. If no fences found, fall back to the original logic:
-        #    Find the first '{...}' or '[...]' block in the *entire* string.
-        json_match = re.search(r'\{.*\}|\[.*\]', response_string, re.DOTALL)
+    def _parse_json_response(self, response_content: str) -> Any:
+        if not response_content:
+            return None
+            
+        cleaned_content = self._clean_json(response_content)
+        try:
+            return json.loads(cleaned_content)
+        except json.JSONDecodeError:
+            # Try parsing/repairing individual objects
+            extracted_objs = self._extract_json_objects(cleaned_content)
+            repaired_objs = []
+            for obj in extracted_objs:
+                try:
+                    repaired_objs.append(json.loads(obj))
+                except json.JSONDecodeError:
+                    try:
+                        repaired = self._repair_json_string(obj)
+                        repaired_objs.append(json.loads(repaired))
+                    except Exception:
+                        pass
+            if repaired_objs:
+                if len(repaired_objs) == 1:
+                    return repaired_objs[0]
+                return repaired_objs
+                
+            # Fallback to general repair
+            try:
+                repaired = self._repair_json_string(cleaned_content)
+                return json.loads(repaired)
+            except Exception as repair_err:
+                self.logger.warning(f"JSON response was not valid and repair failed: {response_content}. Error: {repair_err}")
+                return response_content
+
+    def _repair_json_string(self, s: str) -> str:
+        """
+        Robustly repairs common JSON syntax errors, specifically unescaped double quotes 
+        inside string fields of agent's ReAct response JSON schema.
+        """
+        def find_key_pos(pattern, text, start_idx=0):
+            match = re.search(pattern, text[start_idx:])
+            if match:
+                return start_idx + match.start(), start_idx + match.end()
+            return -1, -1
+
+        def decode_val(val: str) -> str:
+            if not isinstance(val, str):
+                return val
+            import codecs
+            try:
+                # Decodes unicode and standard JSON backslash escape sequences (e.g. \", \n, \\)
+                return codecs.escape_decode(bytes(val, "utf-8"))[0].decode("utf-8")
+            except Exception:
+                # Fallback to manual replacement if codecs decoding fails
+                val = val.replace('\\\\', '\\')
+                val = val.replace('\\"', '"')
+                val = val.replace('\\n', '\n')
+                val = val.replace('\\t', '\t')
+                val = val.replace('\\r', '\r')
+                return val
+
+        thought_start_pattern = r'"thought"\s*:\s*"'
+        tool_start_pattern = r'"tool"\s*:\s*"'
+        done_start_pattern = r'"done"\s*:\s*'
+        output_start_pattern = r'"output"\s*:\s*"'
         
-        if json_match:
-            # If found, return the matched block
-            return json_match.group(0)
+        idx_thought_key_start, idx_thought_val_start = find_key_pos(thought_start_pattern, s)
+        if idx_thought_key_start == -1:
+            return s
+            
+        idx_tool_key_start, idx_tool_val_start = find_key_pos(tool_start_pattern, s, idx_thought_val_start)
+        idx_done_key_start, idx_done_val_start = find_key_pos(done_start_pattern, s, idx_thought_val_start)
         
-        # 3. If no JSON-like structure is found at all, return the original string
-        return response_string
-    
+        thought_val = ""
+        tool_val = None
+        done_val = None
+        arguments_val = None
+        output_val = None
+        
+        next_key_idx = -1
+        if idx_tool_key_start != -1:
+            next_key_idx = idx_tool_key_start
+        elif idx_done_key_start != -1:
+            next_key_idx = idx_done_key_start
+            
+        if next_key_idx == -1:
+            last_quote = s.rfind('"')
+            if last_quote > idx_thought_val_start:
+                thought_val = decode_val(s[idx_thought_val_start:last_quote])
+            else:
+                thought_val = decode_val(s[idx_thought_val_start:])
+        else:
+            search_area = s[idx_thought_val_start:next_key_idx]
+            last_quote_in_search = search_area.rfind('"')
+            if last_quote_in_search != -1:
+                thought_val = decode_val(search_area[:last_quote_in_search])
+            else:
+                thought_val = decode_val(search_area)
+                
+        if idx_done_key_start != -1 and (idx_tool_key_start == -1 or idx_done_key_start < idx_tool_key_start):
+            idx_output_key_start, idx_output_val_start = find_key_pos(output_start_pattern, s, idx_done_val_start)
+            if idx_output_key_start != -1:
+                done_str = s[idx_done_val_start:idx_output_key_start].strip().rstrip(',').strip().strip('"').strip()
+                done_val = (done_str.lower() == "true")
+                
+                last_brace = s.rfind('}')
+                search_area = s[idx_output_val_start:last_brace]
+                last_quote = search_area.rfind('"')
+                if last_quote != -1:
+                    output_val = decode_val(search_area[:last_quote])
+                else:
+                    output_val = decode_val(search_area)
+            else:
+                done_str = s[idx_done_val_start:].strip().rstrip('}').strip().strip('"').strip()
+                done_val = (done_str.lower() == "true")
+                
+        elif idx_tool_key_start != -1:
+            idx_args_key_start, idx_args_val_start = find_key_pos(r'"arguments"\s*:\s*\{', s, idx_tool_val_start)
+            if idx_args_key_start != -1:
+                search_area = s[idx_tool_val_start:idx_args_key_start]
+                last_quote = search_area.rfind('"')
+                if last_quote != -1:
+                    tool_val = decode_val(search_area[:last_quote])
+                else:
+                    tool_val = decode_val(search_area)
+                    
+                last_brace = s.rfind('}')
+                second_last_brace = s[:last_brace].rfind('}')
+                args_end_idx = second_last_brace if second_last_brace != -1 else last_brace
+                
+                args_block = s[idx_args_val_start:args_end_idx]
+                
+                arg_keys = []
+                for m in re.finditer(r'"([a-zA-Z0-9_-]+)"\s*:', args_block):
+                    arg_keys.append({
+                        "name": m.group(1),
+                        "key_start": m.start(),
+                        "val_start": m.end()
+                    })
+                    
+                arguments_val = {}
+                for i, key_info in enumerate(arg_keys):
+                    name = key_info["name"]
+                    start_search = key_info["val_start"]
+                    first_quote = args_block.find('"', start_search)
+                    if first_quote == -1:
+                        end_val_idx = arg_keys[i+1]["key_start"] if i + 1 < len(arg_keys) else len(args_block)
+                        val_str = args_block[start_search:end_val_idx].strip().rstrip(',').strip().strip('"').strip()
+                        if val_str.lower() == "true":
+                            arguments_val[name] = True
+                        elif val_str.lower() == "false":
+                            arguments_val[name] = False
+                        else:
+                            try:
+                                arguments_val[name] = int(val_str)
+                            except ValueError:
+                                try:
+                                    arguments_val[name] = float(val_str)
+                                except ValueError:
+                                    arguments_val[name] = val_str
+                    else:
+                        val_start_idx = first_quote + 1
+                        if i + 1 < len(arg_keys):
+                            next_key_pos = arg_keys[i+1]["key_start"]
+                            sub_search = args_block[val_start_idx:next_key_pos]
+                            last_q = sub_search.rfind('"')
+                            if last_q != -1:
+                                arguments_val[name] = decode_val(sub_search[:last_q])
+                            else:
+                                arguments_val[name] = decode_val(sub_search)
+                        else:
+                            sub_search = args_block[val_start_idx:]
+                            last_q = sub_search.rfind('"')
+                            if last_q != -1:
+                                arguments_val[name] = decode_val(sub_search[:last_q])
+                            else:
+                                arguments_val[name] = decode_val(sub_search)
+            else:
+                search_area = s[idx_tool_val_start:]
+                last_quote = search_area.rfind('"')
+                if last_quote != -1:
+                    tool_val = decode_val(search_area[:last_quote])
+                else:
+                    tool_val = decode_val(search_area)
+
+        rebuilt = {}
+        if thought_val is not None:
+            rebuilt["thought"] = thought_val
+        if tool_val is not None:
+            rebuilt["tool"] = tool_val
+        if done_val is not None:
+            rebuilt["done"] = done_val
+        if output_val is not None:
+            rebuilt["output"] = output_val
+        if arguments_val is not None:
+            rebuilt["arguments"] = arguments_val
+            
+        return json.dumps(rebuilt, indent=2)
+
     def _preprocess_video_for_gemini(self, video_path: str) -> Optional[str]:
         """
         Optionally resample FPS and resize height for a video before uploading to Gemini,
@@ -639,13 +887,7 @@ class LLM_Model:
                 self._enforce_history_limit()
 
             if return_json and response_content:
-                try:
-                    self.logger.debug("Cleaning JSON response...")
-                    cleaned_content = self._clean_json(response_content)
-                    return json.loads(cleaned_content)
-                except json.JSONDecodeError:
-                    self.logger.warning(f"OpenAI response was not valid JSON after cleaning: {response_content}")
-                    return response_content
+                return self._parse_json_response(response_content)
             return response_content
 
         except Exception as e:
@@ -753,12 +995,7 @@ class LLM_Model:
                 self._enforce_history_limit()
 
             if return_json and response_content:
-                try:
-                    cleaned_content = self._clean_json(response_content)
-                    return json.loads(cleaned_content)
-                except json.JSONDecodeError:
-                    self.logger.warning(f"Gemini response was not valid JSON after cleaning: {response_content}")
-                    return response_content
+                return self._parse_json_response(response_content)
             return response_content
 
         except Exception as e:

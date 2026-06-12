@@ -6,11 +6,17 @@ description: use this skill to make short form reels on a topic provided by the 
 # Task
 Make a video on the topic: [from the user]
 
-- Length: 130-140 words of narration.
+- Length: about 130-140 words of narration.
 - Aspect ratio: 9:16 (vertical)
 
-# Workflow
-You will work in multi step method. First you write a best-effort draft, then you read it back and check against the requirement and improvise by editing the original.
+# Plan Guideline
+You will work in multi step method. 
+
+1. First you write a best-effort draft
+2. Then you write a best effort lecture.html. 
+3. Then you edit the lecture.html to improvise it by adding better visuals, making better audio-visual sync and fixing any placement/overflow issue in the lecture.html.
+
+You must ensure proper narration-visual synchronization, so that a visual updates in sync with narration. And when a narration talks about a part of the visual, that part highlights.
 
 Don't read other files in the repo unless instructed here!
 
@@ -45,41 +51,33 @@ End
 - Write a best effort initial index.html, revise it and check against the theme requirement, and evaluate the overall quality yourself. Edit the index.html and make it better.
 - Your main problem is often times, you place elements in wrong positions. For example a slider should go over the middle of a block, it's going over the top of the block for misplacement. In your revision make sure you fix such misplacement issues.
 - Keep engaging animation with movement to keep viewer attracted. Especially in the first scene use great engaging animations and try to download and use some relevant image if possible for greater hook.
+- Length of Text chunk for narration = 1 line. With every line of narration some sort of visual change must happen.
 
 ### Theme:
 - background: #1e1e1e 
 - font-family: 'Roboto', sans-serif;
 - Font size: Content 42px, Subtitle 48px
 - Titles are blue (#61AFEF), bold, centered, and boxed with a blue border. 
+
 - Don't put content in: top 15%, bottom 20%. Center 65% = safe for key content. Because it will be uploaded to fb/insta/yt reels/shorts.
-- Example theme: outputs\short\bloomfilter-modifier\index.html
+
+
 ### Constraint
-- You should write the webpage following the constraints at: `.agents\mylecture-contracts\html-input-contract.md`
+- You should write the webpage following this constraints: `.agents\mylecture-contracts\html-input-contract.md`
 - Don't put any start button or overlay.
-### Subtitle
-- Embed subtitle.
-- Subtitle should be exactly same as the audio transcript (don't use emoji), no concise version of what is being spoken.
-- Caption style: white, centered near the lower third, with a strong black text shadow for readability.
-- Subtitle should not overlap with other elements.
-- Subtitle should be around 7-8 words and not long so that it overlaps with visuals.
+- Don't embed any subtitle.
 
 # Example output html: 
-- `outputs\short\bloomfilter-modifier\index.html`
-- `outputs\short\bsp-tree\index.html`
-- `outputs\short\cnn-shorts\index.html`
+`.agents\mylecture-examples\example-reels.html`
 
 
 # Deliverables:
 output folder: `outputs/short/<topic-slug>/`
 
 outputs: 
-- script.md: Detailed script of the visual and the exact audio transcript.
-- index.html: The html file that will be rendered.
-- description.txt: One liner description and hashtags(no more than 5 hashtags) for facebook/instagram upload.
-## What not to deliver  
-- You don't have to resolve. If later asked to resolve, use the command `npm run build:plan -- --input path/to/index.html --out path/to/resolved.html` to generate the resolved html from the index.html. 
-- You don't need to render the resolved html. If later asked to render, use command: `npm run render:video -- --html path/to/index.html --resolved-html path/to/resolved.html --out path/to/output.mp4`
+- `script.md`: Detailed script of the visual and the exact audio transcript.
+- `lecture.html`: The html file that will be rendered.
+- `description.txt`: One liner description and hashtags(no more than 5 hashtags) for facebook/instagram upload.
 
-# when you are done
-open the viewer with the generated html file.
-read: `.agents\skills\mylecture-render-pipeline\SKILL.md`
+
+

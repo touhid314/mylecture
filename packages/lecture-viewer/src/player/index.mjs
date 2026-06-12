@@ -1,4 +1,4 @@
-export const lectureViewerVersion = '0.2';
+export const lectureViewerVersion = '0.1';
 
 export function createLecturePlayer(options = {}) {
   return new LecturePlayer(options);
@@ -245,7 +245,6 @@ class LecturePlayer {
       audio: null,
       audioCue: null,
       audioFailures: new Set(),
-      waitingForAudioStart: false,
       speechSegmentKey: '',
       completed: false,
       interactiveActive: false,
@@ -331,6 +330,11 @@ class LecturePlayer {
   }
 
   resetForLoad() {
+    if (this.nativeVideo) {
+      this.nativeVideo.ontimeupdate = null;
+      this.nativeVideo.onended = null;
+      this.nativeVideo = null;
+    }
     this.stopAudio();
     this.stopLiveTts();
     cancelAnimationFrame(this.state.raf);
@@ -342,6 +346,61 @@ class LecturePlayer {
   handleFrameLoad() {
     try {
       const win = this.iframe.contentWindow;
+      
+      // Check if loading an MP4 file
+      const isMp4 = String(this.state.src || '').toLowerCase().endsWith('.mp4');
+      if (isMp4) {
+        const doc = win.document;
+        const videoEl = doc.querySelector('video');
+        if (videoEl) {
+          this.nativeVideo = videoEl;
+          this.nativeVideo.playbackRate = this.speed;
+          this.nativeVideo.defaultPlaybackRate = this.speed;
+          
+          const onMetadata = () => {
+            const duration = videoEl.duration || 0;
+            this.state.duration = duration;
+            this.state.loaded = true;
+            this.state.resolved = true;
+            this.state.timeline = [{
+              start: 0,
+              end: duration,
+              duration: duration,
+              item: { id: 'rendered-video', text: '' }
+            }];
+            this.state.audioTimeline = [];
+            this.state.subtitleTimeline = [];
+            this.state.interactiveTimeline = [];
+            this.state.gameTimeline = [];
+            
+            const snapshot = this.snapshot();
+            this.emit('ready', snapshot);
+            this.emit('statechange', snapshot);
+          };
+          
+          if (videoEl.readyState >= 1) { // HAVE_METADATA or higher
+            onMetadata();
+          } else {
+            videoEl.addEventListener('loadedmetadata', onMetadata, { once: true });
+          }
+          
+          videoEl.ontimeupdate = () => {
+            if (this.state.playing) {
+              this.state.time = videoEl.currentTime;
+              this.emit('timeupdate', this.snapshot());
+            }
+          };
+          
+          videoEl.onended = () => {
+            this.state.playing = false;
+            this.state.completed = true;
+            this.emit('ended', this.snapshot());
+            this.emit('statechange', this.snapshot());
+          };
+          return;
+        }
+      }
+
       const metadata = win.__VIDEO_METADATA__ && typeof win.__VIDEO_METADATA__ === 'object'
         ? { ...win.__VIDEO_METADATA__ }
         : {};
@@ -350,15 +409,17 @@ class LecturePlayer {
       const subtitleTimeline = buildSubtitleTimeline(audioTimeline, timeline);
       const interactiveTimeline = buildInteractiveTimeline(win);
       const gameTimeline = buildGameTimeline(win);
-      const rawDuration = Number(win.__VIDEO_DURATION__) ||
+      const duration = Number(win.__VIDEO_DURATION__) ||
         Number(win.__RESOLVED_TIMELINE__?.duration) ||
         (timeline.at(-1)?.end || 0);
-      const hasRenderableTimeline = timeline.length > 0 && Number.isFinite(rawDuration) && rawDuration > 0;
-      const isGameOnly = !timeline.length && gameTimeline.length > 0;
-      const duration = hasRenderableTimeline ? rawDuration : 0;
 
-      if (!hasRenderableTimeline && !isGameOnly) {
-        throw new Error('No render timeline found');
+      const isGameOnly = typeof win.__START_GAME__ === 'function';
+      const isInteractiveOnly = typeof win.__START_INTERACTIVE__ === 'function';
+
+      if (!timeline.length || !Number.isFinite(duration) || duration <= 0) {
+        if (!isGameOnly && !isInteractiveOnly) {
+          throw new Error('No render timeline found');
+        }
       }
 
       this.state.metadata = metadata;
@@ -367,19 +428,25 @@ class LecturePlayer {
       this.state.subtitleTimeline = subtitleTimeline;
       this.state.interactiveTimeline = interactiveTimeline;
       this.state.gameTimeline = gameTimeline;
-      this.state.duration = duration;
+      this.state.duration = isGameOnly || isInteractiveOnly ? 0 : duration;
       this.state.loaded = true;
-      this.state.resolved = typeof win.renderAt === 'function';
-      this.renderAt(0);
+      this.state.resolved = typeof win.renderAt === 'function' || isGameOnly || isInteractiveOnly;
+      
+      if (!isGameOnly && !isInteractiveOnly) {
+        this.renderAt(0);
+      }
 
       const detectedViewport = detectMetadataViewport(win) || detectDocumentViewport(win);
       const snapshot = { ...this.snapshot(), detectedViewport };
       this.emit('ready', snapshot);
       this.emit('statechange', snapshot);
+
       if (isGameOnly) {
-        this.startGameSection();
-        this.emit('statechange', this.snapshot());
+        requestAnimationFrame(() => this.startGameSection());
+      } else if (isInteractiveOnly) {
+        requestAnimationFrame(() => this.startInteractiveSection());
       }
+
     } catch (error) {
       this.emit('error', error);
     }
@@ -387,6 +454,10 @@ class LecturePlayer {
 
   setSpeed(speed) {
     this.speed = Math.max(0.1, Number(speed) || 1);
+    if (this.nativeVideo) {
+      this.nativeVideo.playbackRate = this.speed;
+      this.nativeVideo.defaultPlaybackRate = this.speed;
+    }
     if (this.state.audio) this.state.audio.playbackRate = this.speed;
     if (this.state.speechSegmentKey) {
       const currentTime = this.state.time;
@@ -440,23 +511,7 @@ class LecturePlayer {
     return new URL(src, this.iframe.contentWindow.location.href).href;
   }
 
-  tryPlayAudio(audio, cue) {
-    if (this.state.audio !== audio || this.state.audioCue !== cue || !this.state.playing) return;
-    audio.play()
-      .then(() => this.markAudioStarted(audio, cue))
-      .catch(() => this.setStatus('Audio blocked until play is clicked again'));
-  }
-
-  markAudioStarted(audio, cue) {
-    if (this.state.audio !== audio || this.state.audioCue !== cue || !this.state.playing) return;
-    if (!this.state.waitingForAudioStart) return;
-    this.state.waitingForAudioStart = false;
-    this.state.startedAt = performance.now();
-    this.state.startTime = this.state.time;
-  }
-
   stopAudio() {
-    this.state.waitingForAudioStart = false;
     if (!this.state.audio) return;
     this.state.audio.pause();
     this.state.audio = null;
@@ -527,19 +582,14 @@ class LecturePlayer {
       this.stopAudio();
       this.state.audioCue = cue;
       this.state.audio = new Audio(this.audioUrl(cue.src));
-      const audio = this.state.audio;
-      this.state.waitingForAudioStart = cue.start <= 0.05 && offset <= 0.05;
       this.state.audio.addEventListener('error', () => {
         this.state.audioFailures.add(this.audioCueKey(cue));
         this.stopAudio();
         this.syncLiveTts();
       }, { once: true });
-      this.state.audio.addEventListener('playing', () => this.markAudioStarted(audio, cue), { once: true });
-      this.state.audio.addEventListener('canplay', () => this.tryPlayAudio(audio, cue), { once: true });
-      this.state.audio.preload = 'auto';
       this.state.audio.playbackRate = this.speed;
       this.state.audio.currentTime = Math.max(0, offset);
-      this.tryPlayAudio(audio, cue);
+      this.state.audio.play().catch(() => this.setStatus('Audio blocked until play is clicked again'));
       return;
     }
 
@@ -604,22 +654,13 @@ class LecturePlayer {
 
   tick(now) {
     if (!this.state.playing) return;
-    if (this.state.waitingForAudioStart) {
-      this.state.startedAt = now;
-      this.state.raf = requestAnimationFrame(now => this.tick(now));
-      return;
-    }
     const nextTime = this.state.startTime + ((now - this.state.startedAt) / 1000) * this.speed;
     this.renderAt(nextTime);
 
     if (this.state.time >= this.state.duration) {
       this.state.playing = false;
       this.state.completed = true;
-      if (this.state.interactiveTimeline.length > 0) {
-        this.startInteractiveSection();
-      } else if (this.state.gameTimeline.length > 0) {
-        this.startGameSection();
-      }
+      this.startInteractiveSection();
       this.emit('ended', this.snapshot());
       this.emit('statechange', this.snapshot());
       return;
@@ -630,6 +671,17 @@ class LecturePlayer {
 
   play() {
     if (!this.state.loaded) return;
+    if (this.nativeVideo) {
+      if (this.state.time >= this.state.duration) {
+        this.nativeVideo.currentTime = 0;
+      }
+      this.state.playing = true;
+      this.nativeVideo.play().catch(e => {
+        this.setStatus('Playback blocked: ' + e.message);
+      });
+      this.emit('statechange', this.snapshot());
+      return;
+    }
     if (this.state.time >= this.state.duration) {
       this.state.completed = false;
       this.renderAt(0);
@@ -643,6 +695,12 @@ class LecturePlayer {
   }
 
   pause() {
+    if (this.nativeVideo) {
+      this.state.playing = false;
+      this.nativeVideo.pause();
+      this.emit('statechange', this.snapshot());
+      return;
+    }
     this.state.playing = false;
     cancelAnimationFrame(this.state.raf);
     this.stopAudio();
@@ -657,6 +715,22 @@ class LecturePlayer {
 
   seek(time, options = {}) {
     const shouldResume = Boolean((options.resume ?? this.state.playing) && this.state.loaded);
+    if (this.nativeVideo) {
+      this.state.playing = false;
+      const targetTime = Math.max(0, Math.min(time, this.state.duration));
+      this.state.time = targetTime;
+      this.nativeVideo.currentTime = targetTime;
+      this.state.completed = targetTime >= this.state.duration;
+      
+      if (shouldResume) {
+        this.state.playing = true;
+        this.nativeVideo.play().catch(e => {
+          this.setStatus('Playback blocked: ' + e.message);
+        });
+      }
+      this.emit('statechange', this.snapshot());
+      return;
+    }
     this.state.playing = false;
     cancelAnimationFrame(this.state.raf);
     this.stopAudio();
@@ -682,9 +756,9 @@ class LecturePlayer {
 
   startInteractiveSection() {
     const win = this.iframe.contentWindow;
-    const interactive = this.state.interactiveTimeline[0]?.item || null;
+    const interactive = this.state.interactiveTimeline[0]?.item || { id: 'interactive' };
     if (this.state.gameActive) this.stopGameSection();
-    if (interactive && typeof win.__START_INTERACTIVE__ === 'function') {
+    if (typeof win.__START_INTERACTIVE__ === 'function') {
       this.state.interactiveActive = true;
       this.stopLiveTts();
       this.updateSubtitleOverlay();
@@ -705,9 +779,9 @@ class LecturePlayer {
 
   startGameSection() {
     const win = this.iframe.contentWindow;
-    const game = this.state.gameTimeline[0]?.item || null;
+    const game = this.state.gameTimeline[0]?.item || { id: 'game' };
     if (this.state.interactiveActive) this.stopInteractiveSection();
-    if (game && typeof win.__START_GAME__ === 'function') {
+    if (typeof win.__START_GAME__ === 'function') {
       this.state.gameActive = true;
       this.stopLiveTts();
       this.updateSubtitleOverlay();

@@ -390,6 +390,12 @@ def _google_client() -> genai.Client:
     return genai.Client(api_key=api_key)
 
 
+_ONNX_SESSIONS = {}
+_TOKENIZERS = {}
+_VOICES = {}
+_G2P_OBJECTS = {}
+
+
 def _run_kokoro_onnxruntime(text: str, output_path: Path, voice: str, speed: float) -> None:
     try:
         import numpy as np
@@ -402,6 +408,8 @@ def _run_kokoro_onnxruntime(text: str, output_path: Path, voice: str, speed: flo
             "Python Kokoro CUDA backend requires numpy, scipy, onnxruntime-gpu, "
             "huggingface_hub, and misaki[en]."
         ) from exc
+
+    global _ONNX_SESSIONS, _TOKENIZERS, _VOICES, _G2P_OBJECTS
 
     model_dir = DEFAULT_KOKORO_ONNX_MODEL_DIR
     if not (model_dir / "tokenizer.json").is_file() or not (model_dir / "onnx" / DEFAULT_KOKORO_ONNX_MODEL).is_file():
@@ -419,11 +427,19 @@ def _run_kokoro_onnxruntime(text: str, output_path: Path, voice: str, speed: flo
     if not model_path.is_file():
         raise RuntimeError(f"Kokoro ONNX model not found: {model_path}")
 
-    with tokenizer_path.open("r", encoding="utf-8") as f:
-        tokenizer = json.load(f)
-    vocab = tokenizer["model"]["vocab"]
+    # Cache tokenizer/vocab
+    tok_key = str(tokenizer_path)
+    if tok_key not in _TOKENIZERS:
+        with tokenizer_path.open("r", encoding="utf-8") as f:
+            _TOKENIZERS[tok_key] = json.load(f)["model"]["vocab"]
+    vocab = _TOKENIZERS[tok_key]
 
-    g2p = en.G2P(trf=False, british=voice.startswith("b"), fallback=None)
+    # Cache G2P converter
+    british = voice.startswith("b")
+    if british not in _G2P_OBJECTS:
+        _G2P_OBJECTS[british] = en.G2P(trf=False, british=british, fallback=None)
+    g2p = _G2P_OBJECTS[british]
+
     phonemes, _ = g2p(text)
     missing_phonemes = sorted({p for p in phonemes if p not in vocab})
     if missing_phonemes:
@@ -434,7 +450,12 @@ def _run_kokoro_onnxruntime(text: str, output_path: Path, voice: str, speed: flo
     if len(tokens) > 510:
         raise RuntimeError(f"Kokoro input is too long for one ONNX call: {len(tokens)} tokens")
 
-    voices = np.fromfile(voice_path, dtype=np.float32).reshape(-1, 1, 256)
+    # Cache voice binaries
+    v_key = str(voice_path)
+    if v_key not in _VOICES:
+        _VOICES[v_key] = np.fromfile(voice_path, dtype=np.float32).reshape(-1, 1, 256)
+    voices = _VOICES[v_key]
+
     ref_s = voices[len(tokens)]
     input_ids = np.array([[0, *tokens, 0]], dtype=np.int64)
     speed_input = np.array([speed], dtype=np.float32)
@@ -453,9 +474,13 @@ def _run_kokoro_onnxruntime(text: str, output_path: Path, voice: str, speed: flo
     if providers[0] not in available:
         raise RuntimeError(f"ONNX Runtime provider {providers[0]} is not available. Available: {available}")
 
-    sess = ort.InferenceSession(str(model_path), providers=providers)
+    # Cache Inference Session
+    sess_key = (str(model_path), tuple(providers))
+    if sess_key not in _ONNX_SESSIONS:
+        _ONNX_SESSIONS[sess_key] = ort.InferenceSession(str(model_path), providers=providers)
+    sess = _ONNX_SESSIONS[sess_key]
+
     active = sess.get_providers()
-    print(f"Kokoro ONNX Runtime providers={active} model={DEFAULT_KOKORO_ONNX_MODEL} voice={voice}")
     if requested_device == "cuda" and (not active or active[0] != "CUDAExecutionProvider"):
         raise RuntimeError(f"CUDAExecutionProvider was requested but session providers are {active}")
 

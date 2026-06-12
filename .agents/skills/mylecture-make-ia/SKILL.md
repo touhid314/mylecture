@@ -17,6 +17,8 @@ example: `templates\minimal-interactive\interactive.html`
 
 - In case user has to click or interact in a certain way, keep  clear guideline on how to interact.
 
+- At the end, keep a free to play interactive demo, so that user can just tinker with it.
+
 # Theme
 Full screen.
 background color: complete black.

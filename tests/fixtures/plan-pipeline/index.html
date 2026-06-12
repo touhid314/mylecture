@@ -3,510 +3,572 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Plan Pipeline Example</title>
+<title>The Pythagoras Theorem</title>
 <style>
-    :root {
-        --bg: #0e1116;
-        --panel: #171d25;
-        --text: #edf2f7;
-        --muted: #9aa7b6;
-        --blue: #4b9fff;
-        --green: #38d39f;
-        --yellow: #f6c44f;
-        --line: rgba(237, 242, 247, 0.15);
-    }
-
-    * {
-        box-sizing: border-box;
-    }
-
-    html,
-    body {
-        width: 100%;
-        height: 100%;
-        margin: 0;
-        overflow: hidden;
-        background: var(--bg);
-        color: var(--text);
-        font-family: "Segoe UI", Arial, sans-serif;
-    }
-
-    #stage {
-        position: relative;
-        width: 100vw;
-        height: 100vh;
-        overflow: hidden;
-        background:
-            linear-gradient(90deg, rgba(255,255,255,0.035) 1px, transparent 1px),
-            linear-gradient(0deg, rgba(255,255,255,0.035) 1px, transparent 1px),
-            radial-gradient(circle at 50% 18%, rgba(75, 159, 255, 0.12), transparent 34%),
-            var(--bg);
-        background-size: 96px 96px, 96px 96px, 100% 100%, 100% 100%;
-    }
-
-    .topbar {
-        position: absolute;
-        top: 54px;
-        left: 58px;
-        right: 58px;
-        display: flex;
-        align-items: flex-start;
-        justify-content: space-between;
-    }
-
-    .eyebrow {
-        color: var(--muted);
-        font-size: 24px;
-        margin-bottom: 10px;
-    }
-
-    #title {
-        max-width: 720px;
-        font-size: 52px;
-        line-height: 1.08;
-        font-weight: 750;
-        letter-spacing: 0;
-    }
-
-    #clock {
-        color: var(--green);
-        font-size: 34px;
-        font-weight: 700;
-        font-variant-numeric: tabular-nums;
-    }
-
-    #diagram {
-        position: absolute;
-        left: 90px;
-        right: 90px;
-        top: 350px;
-        height: 720px;
-    }
-
-    #diagram svg {
-        width: 100%;
-        height: 100%;
-        overflow: visible;
-    }
-
-    .node {
-        fill: var(--panel);
-        stroke: var(--line);
-        stroke-width: 3;
-    }
-
-    .node.active {
-        stroke: var(--green);
-        stroke-width: 6;
-    }
-
-    .node-label {
-        fill: var(--text);
-        font-size: 22px;
-        font-weight: 700;
-        text-anchor: middle;
-        dominant-baseline: middle;
-    }
-
-    .edge {
-        stroke: rgba(237, 242, 247, 0.2);
-        stroke-width: 8;
-        stroke-linecap: round;
-    }
-
-    .edge.active {
-        stroke: var(--blue);
-    }
-
-    #marker {
-        position: absolute;
-        width: 42px;
-        height: 42px;
-        border-radius: 50%;
-        background: var(--yellow);
-        box-shadow: 0 0 28px rgba(246, 196, 79, 0.8);
-        transform: translate(-50%, -50%);
-    }
-
-    #caption {
-        position: absolute;
-        left: 70px;
-        right: 70px;
-        bottom: 260px;
-        min-height: 142px;
-        padding: 26px 30px;
-        border: 1px solid rgba(237, 242, 247, 0.14);
-        background: rgba(23, 29, 37, 0.82);
-        border-radius: 8px;
-        font-size: 31px;
-        line-height: 1.32;
-    }
-
-    #caption .muted {
-        color: var(--muted);
-    }
-
-    #progress {
-        position: absolute;
-        left: 58px;
-        right: 58px;
-        bottom: 120px;
-        height: 14px;
-        border-radius: 999px;
-        background: rgba(237, 242, 247, 0.12);
-        overflow: hidden;
-    }
-
-    #progress-fill {
-        width: 0;
-        height: 100%;
-        background: linear-gradient(90deg, var(--blue), var(--green), var(--yellow));
-    }
-
-    #controls {
-        position: fixed;
-        left: 50%;
-        bottom: 22px;
-        z-index: 10;
-        display: flex;
-        align-items: center;
-        gap: 12px;
-        width: min(720px, calc(100vw - 32px));
-        padding: 10px 12px;
-        border: 1px solid rgba(255, 255, 255, 0.16);
-        border-radius: 8px;
-        background: rgba(14, 17, 22, 0.92);
-        transform: translateX(-50%);
-    }
-
-    #play-toggle {
-        min-width: 74px;
-        padding: 8px 12px;
-        border: 0;
-        border-radius: 6px;
-        background: var(--green);
-        color: #06100d;
-        font: inherit;
-        font-weight: 700;
-    }
-
-    #scrubber {
-        flex: 1;
-    }
-
-    #readout {
-        min-width: 112px;
-        text-align: right;
-        font-variant-numeric: tabular-nums;
-    }
-
-    body.hide-controls #controls {
-        display: none;
-    }
-
-    body.export-mode * {
-        animation: none !important;
-        transition-duration: 0s !important;
-    }
+  :root {
+    --bg: #000000;
+    --fg: #ffffff;
+    --red: #ff4d4d;
+    --blue: #3399ff;
+    --green: #2ecc71;
+    --yellow: #f1c40f;
+    --dim-gray: #444444;
+  }
+  html, body {
+    margin: 0;
+    padding: 0;
+    width: 100%;
+    height: 100%;
+    overflow: hidden;
+    background-color: var(--bg);
+    color: var(--fg);
+    font-family: 'Arial', sans-serif;
+    font-weight: 400;
+  }
+  #stage {
+    position: relative;
+    width: 1920px;
+    height: 1080px;
+    box-sizing: border-box;
+    transform-origin: top left;
+    overflow: hidden;
+  }
+  .title-text {
+    position: absolute;
+    font-size: 72px;
+    width: 100%;
+    text-align: center;
+    font-weight: 400;
+    margin: 0;
+  }
+  .main-text {
+    position: absolute;
+    font-size: 44px;
+    line-height: 1.5;
+    font-weight: 400;
+  }
+  .label-text {
+    font-size: 30px;
+    font-family: 'Arial', sans-serif;
+    font-weight: 400;
+    fill: var(--fg);
+  }
+  .formula-box {
+    position: absolute;
+    font-size: 52px;
+    font-weight: 400;
+    font-family: 'Arial', sans-serif;
+  }
+  svg {
+    display: block;
+    width: 100%;
+    height: 100%;
+  }
 </style>
+<base href="file:///C:/Users/touhi/OneDrive/Desktop/mylecture/mylecture/outputs/long/pythagoras/">
 </head>
 <body>
-<main id="stage">
-    <div class="topbar">
-        <div>
-            <div class="eyebrow">Plan source example</div>
-            <div id="title">A renderable video can be built from sections, not fixed timestamps.</div>
-        </div>
-        <div id="clock">00.00s</div>
-    </div>
-
-    <div id="diagram">
-        <svg viewBox="0 0 900 620">
-            <line id="edge-a" class="edge" x1="160" y1="170" x2="450" y2="310" />
-            <line id="edge-b" class="edge" x1="450" y1="310" x2="740" y2="170" />
-            <line id="edge-c" class="edge" x1="450" y1="310" x2="450" y2="520" />
-
-            <circle id="node-plan" class="node" cx="160" cy="170" r="72" />
-            <text class="node-label" x="160" y="170">PLAN</text>
-
-            <circle id="node-audio" class="node" cx="450" cy="310" r="78" />
-            <text class="node-label" x="450" y="310">AUDIO</text>
-
-            <circle id="node-time" class="node" cx="740" cy="170" r="72" />
-            <text class="node-label" x="740" y="170">TIME</text>
-
-            <circle id="node-render" class="node" cx="450" cy="520" r="78" />
-            <text class="node-label" x="450" y="520">RENDER</text>
-        </svg>
-        <div id="marker"></div>
-    </div>
-
-    <div id="caption">
-        <span class="muted">Waiting for a resolved timeline.</span>
-    </div>
-
-    <div id="progress">
-        <div id="progress-fill"></div>
-    </div>
-</main>
-
-<div id="controls">
-    <button id="play-toggle" type="button">Play</button>
-    <input id="scrubber" type="range" min="0" max="1" step="0.01" value="0" aria-label="Timeline">
-    <span id="readout">0.00 / 0.00</span>
-</div>
+<div id="stage"></div>
 
 <script>
-    const VIDEO_PLAN = [
-        {
-            id: "silent-intro",
-            kind: "visual-only",
-            duration: 5,
-            title: "Visual-only introduction",
-            caption: "The source plan specifies this section's visual duration: five seconds, with no narration."
-        },
-        {
-            id: "first-narration",
-            kind: "narration+visual",
-            audio: "audio/first-narration.wav",
-            text: "When a section has narration, the generated audio decides the section duration.",
-            title: "Narration controls duration",
-            caption: "The build step generates this audio, measures it, and assigns the exact timeline length."
-        },
-        {
-            id: "silent-bridge",
-            kind: "visual-only",
-            duration: 5,
-            title: "Visual-only bridge",
-            caption: "This bridge has no voice, so the source plan must explicitly declare how long the visual should run."
-        },
-        {
-            id: "second-narration",
-            kind: "narration+visual",
-            audio: "audio/second-narration.wav",
-            text: "The second narration cue starts only after previous sections have been resolved.",
-            title: "Audio cue is placed automatically",
-            caption: "No manual start time is written by the source file. The builder places this cue after earlier sections."
-        },
-        {
-            id: "silent-finale",
-            kind: "visual-only",
-            duration: 15,
-            title: "Long silent finale",
-            caption: "The final section is visual-only for fifteen seconds, proving rendering can continue after audio ends."
-        }
-    ];
+// Responsive stage scaling
+function scaleStage() {
+  const stage = document.getElementById('stage');
+  const winW = window.innerWidth;
+  const winH = window.innerHeight;
+  const scale = Math.min(winW / 1920, winH / 1080);
+  stage.style.transform = `scale(${scale})`;
+  stage.style.left = `${(winW - 1920 * scale) / 2}px`;
+  stage.style.top = `${(winH - 1080 * scale) / 2}px`;
+}
+window.addEventListener('resize', scaleStage);
+window.addEventListener('DOMContentLoaded', scaleStage);
 
-    window.__VIDEO_PLAN__ = VIDEO_PLAN;
+window.__VIDEO_METADATA__ = {
+  contractVersion: "0.1",
+  title: "The Pythagoras Theorem",
+  aspectRatio: "16:9"
+};
 
-    let activeTime = 0;
-    let playback = {
-        playing: false,
-        startedAt: 0,
-        rafId: null,
-        audio: null,
-        audioCueIndex: -1
-    };
+const VIDEO_PLAN = [
+  {
+    id: "intro",
+    kind: "narration+visual",
+    audio: "audio/intro.wav",
+    text: "Why is this simple triangular shape the secret key to modern navigation, architecture, and game development? Today, we're unlocking the power of the Pythagoras Theorem!"
+  },
+  {
+    id: "triangle_intro",
+    kind: "narration+visual",
+    audio: "audio/triangle_intro.wav",
+    text: "To understand it, let's look at a special triangle—a right-angled triangle. It has one angle that is exactly ninety degrees, marked by this square in the corner."
+  },
+  {
+    id: "triangle_legs",
+    kind: "narration+visual",
+    audio: "audio/triangle_legs.wav",
+    text: "The two sides that meet to form this ninety-degree angle are called the legs. Let's label them side a and side b."
+  },
+  {
+    id: "triangle_hypotenuse",
+    kind: "narration+visual",
+    audio: "audio/triangle_hypotenuse.wav",
+    text: "And the longest side, directly opposite the right angle, is the hypotenuse. Let's label it side c. No matter how you rotate or scale this triangle, the hypotenuse is always the longest side."
+  },
+  {
+    id: "formula_intro",
+    kind: "narration+visual",
+    audio: "audio/formula_intro.wav",
+    text: "The Pythagoras Theorem tells us there is a beautiful, exact mathematical relationship between these three sides. It states that: side a squared, plus side b squared, is always equal to side c squared! In algebraic terms, we write this as: a squared plus b squared equals c squared."
+  },
+  {
+    id: "example_plug",
+    kind: "narration+visual",
+    audio: "audio/example_plug.wav",
+    text: "Let's test this with a real example! Imagine side a has a length of three units, and side b has a length of four units. What is the length of side c?"
+  },
+  {
+    id: "calc_plug",
+    kind: "narration+visual",
+    audio: "audio/calc_plug.wav",
+    text: "Let's plug these numbers into our formula. Three squared is nine. Four squared is sixteen."
+  },
+  {
+    id: "calc_add",
+    kind: "narration+visual",
+    audio: "audio/calc_add.wav",
+    text: "Adding nine and sixteen gives us twenty-five."
+  },
+  {
+    id: "calc_sqrt",
+    kind: "narration+visual",
+    audio: "audio/calc_sqrt.wav",
+    text: "Since c squared equals twenty-five, we take the square root of twenty-five to find c."
+  },
+  {
+    id: "calc_result",
+    kind: "narration+visual",
+    audio: "audio/calc_result.wav",
+    text: "The square root of twenty-five is exactly five! This is the famous three-four-five right-angled triangle, a perfect illustration of the theorem."
+  },
+  {
+    id: "squares_a",
+    kind: "narration+visual",
+    audio: "audio/squares_a.wav",
+    text: "But why does this work? Let's look at the geometry. If we build a physical square on side a, its area is a squared, which is nine square units."
+  },
+  {
+    id: "squares_b",
+    kind: "narration+visual",
+    audio: "audio/squares_b.wav",
+    text: "If we build a square on side b, its area is b squared, which is sixteen square units."
+  },
+  {
+    id: "squares_c",
+    kind: "narration+visual",
+    audio: "audio/squares_c.wav",
+    text: "And if we build a square on the hypotenuse, side c, its area is c squared, which is twenty-five square units."
+  },
+  {
+    id: "squares_sum",
+    kind: "narration+visual",
+    audio: "audio/squares_sum.wav",
+    text: "If you count the grid squares inside, or add the area of the red square and the blue square together... you get exactly the area of the large green square on the hypotenuse! Nine plus sixteen is twenty-five! The sum of the areas of the smaller squares perfectly equals the area of the largest square."
+  },
+  {
+    id: "conclusion",
+    kind: "narration+visual",
+    audio: "audio/conclusion.wav",
+    text: "Whether you are constructing a house, calculating distances on a map, or coding 3D graphics, this fundamental law of space holds true. a squared plus b squared equals c squared. Simply beautiful, and beautifully simple!"
+  }
+];
+window.__VIDEO_PLAN__ = VIDEO_PLAN;
 
-    function clamp(value, min, max) {
-        return Math.max(min, Math.min(max, value));
+// Drawing Helper for Grid Lines within a square defined by 4 vertices
+function getGridPath(p1, p2, p3, p4, divisions) {
+  let d = '';
+  // Interpolate grid lines between edges
+  for (let i = 1; i < divisions; i++) {
+    let ratio = i / divisions;
+    // Line along one direction
+    let startX1 = p1.x + ratio * (p2.x - p1.x);
+    let startY1 = p1.y + ratio * (p2.y - p1.y);
+    let endX1 = p4.x + ratio * (p3.x - p4.x);
+    let endY1 = p4.y + ratio * (p3.y - p4.y);
+    d += `M ${startX1} ${startY1} L ${endX1} ${endY1} `;
+    
+    // Line along perpendicular direction
+    let startX2 = p1.x + ratio * (p4.x - p1.x);
+    let startY2 = p1.y + ratio * (p4.y - p1.y);
+    let endX2 = p2.x + ratio * (p3.x - p2.x);
+    let endY2 = p2.y + ratio * (p3.y - p2.y);
+    d += `M ${startX2} ${startY2} L ${endX2} ${endY2} `;
+  }
+  return d;
+}
+
+function renderSection(segment, localTime, globalTime) {
+  const stage = document.getElementById("stage");
+  stage.innerHTML = "";
+  const t = localTime;
+
+  // Common elements config
+  // Center of coordinates is optimized to leave space on sides for titles and formula steps
+  const ax = 550, ay = 410; // Vertex A (top left of triangle)
+  const bx = 550, by = 650; // Vertex B (bottom left, right angle)
+  const cx = 870, cy = 650; // Vertex C (bottom right of triangle)
+
+  const pA = { x: ax, y: ay };
+  const pB = { x: bx, y: by };
+  const pC = { x: cx, y: cy };
+
+  // Squares points outward
+  // Square A on leg a (left side)
+  const pA1 = pA;
+  const pA2 = { x: ax - 240, y: ay };
+  const pA3 = { x: bx - 240, y: by };
+  const pA4 = pB;
+
+  // Square B on leg b (bottom side)
+  const pB1 = pB;
+  const pB2 = { x: bx, y: by + 320 };
+  const pB3 = { x: cx, y: cy + 320 };
+  const pB4 = pC;
+
+  // Square C on hypotenuse c (top-right outward perpendicular vector: 240, -320)
+  const pC1 = pA;
+  const pC2 = { x: ax + 240, y: ay - 320 };
+  const pC3 = { x: cx + 240, y: cy - 320 };
+  const pC4 = pC;
+
+  // Intro visual
+  if (segment.id === "intro") {
+    // Title & Hook style animations
+    const opacity = Math.min(1, t / 1.0);
+    const textY = 120 + Math.sin(t * 2) * 10;
+    stage.innerHTML = `
+      <div class="title-text" style="top: ${textY}px; color: var(--green); opacity: ${opacity};">The Pythagoras Theorem</div>
+      <div class="main-text" style="top: 450px; left: 150px; width: 1620px; text-align: center; opacity: ${opacity}; line-height: 1.8;">
+        Why is this simple triangular shape the secret key to modern navigation, architecture, and game development?<br>
+        <span style="color: var(--yellow); font-size: 52px;">Today, we are unlocking the secret!</span>
+      </div>
+    `;
+    return;
+  }
+
+  // Render geometry and calculations dynamically
+  let svgContent = "";
+  let formulaHTML = "";
+
+  // Base Triangle opacity
+  let triOpacity = 1;
+  let rightAngleOpacity = 0;
+  let legA_Highlight = false;
+  let legB_Highlight = false;
+  let hyp_Highlight = false;
+  let showLabels = false;
+  let labelA_text = "a";
+  let labelB_text = "b";
+  let labelC_text = "c";
+
+  // Squares variables
+  let sqA_Opacity = 0;
+  let sqB_Opacity = 0;
+  let sqC_Opacity = 0;
+
+  // Formula Box variables
+  let showFormulaBox = false;
+  let formulaStep = 0; // 0: clear, 1: a2+b2=c2, 2: values plug, 3: nine + sixteen, 4: sum, 5: sqrt, 6: final
+
+  if (segment.id === "triangle_intro") {
+    triOpacity = Math.min(1, t / 0.8);
+    rightAngleOpacity = Math.max(0, Math.min(1, (t - 2.0) / 0.8));
+  } else if (segment.id === "triangle_legs") {
+    rightAngleOpacity = 1;
+    legA_Highlight = t > 1.0 && t < 4.0;
+    legB_Highlight = t > 4.0;
+    showLabels = true;
+    labelC_text = ""; // Not yet introduced
+  } else if (segment.id === "triangle_hypotenuse") {
+    rightAngleOpacity = 1;
+    showLabels = true;
+    hyp_Highlight = t > 1.0;
+  } else if (segment.id === "formula_intro") {
+    rightAngleOpacity = 1;
+    showLabels = true;
+    showFormulaBox = true;
+    formulaStep = 1;
+  } else if (segment.id === "example_plug") {
+    rightAngleOpacity = 1;
+    showLabels = true;
+    labelA_text = "a = 3";
+    labelB_text = "b = 4";
+    labelC_text = "c = ?";
+    showFormulaBox = true;
+    formulaStep = 1;
+  } else if (segment.id === "calc_plug") {
+    rightAngleOpacity = 1;
+    showLabels = true;
+    labelA_text = "a = 3";
+    labelB_text = "b = 4";
+    labelC_text = "c = ?";
+    showFormulaBox = true;
+    formulaStep = 2;
+  } else if (segment.id === "calc_add") {
+    rightAngleOpacity = 1;
+    showLabels = true;
+    labelA_text = "a = 3";
+    labelB_text = "b = 4";
+    labelC_text = "c = ?";
+    showFormulaBox = true;
+    formulaStep = 3;
+  } else if (segment.id === "calc_sqrt") {
+    rightAngleOpacity = 1;
+    showLabels = true;
+    labelA_text = "a = 3";
+    labelB_text = "b = 4";
+    labelC_text = "c = ?";
+    showFormulaBox = true;
+    formulaStep = 4;
+  } else if (segment.id === "calc_result") {
+    rightAngleOpacity = 1;
+    showLabels = true;
+    labelA_text = "a = 3";
+    labelB_text = "b = 4";
+    labelC_text = "c = 5";
+    showFormulaBox = true;
+    formulaStep = 5;
+  } else if (segment.id === "squares_a") {
+    rightAngleOpacity = 1;
+    showLabels = true;
+    labelA_text = "a = 3";
+    labelB_text = "b = 4";
+    labelC_text = "c = 5";
+    sqA_Opacity = Math.min(1, t / 1.0);
+  } else if (segment.id === "squares_b") {
+    rightAngleOpacity = 1;
+    showLabels = true;
+    labelA_text = "a = 3";
+    labelB_text = "b = 4";
+    labelC_text = "c = 5";
+    sqA_Opacity = 1;
+    sqB_Opacity = Math.min(1, t / 1.0);
+  } else if (segment.id === "squares_c") {
+    rightAngleOpacity = 1;
+    showLabels = true;
+    labelA_text = "a = 3";
+    labelB_text = "b = 4";
+    labelC_text = "c = 5";
+    sqA_Opacity = 1;
+    sqB_Opacity = 1;
+    sqC_Opacity = Math.min(1, t / 1.0);
+  } else if (segment.id === "squares_sum") {
+    rightAngleOpacity = 1;
+    showLabels = true;
+    labelA_text = "a = 3";
+    labelB_text = "b = 4";
+    labelC_text = "c = 5";
+    sqA_Opacity = 1;
+    sqB_Opacity = 1;
+    sqC_Opacity = 1;
+    // Quick pulsing visualization on the squares based on timeline to show summation
+    if (t > 4.0 && t < 10.0) {
+      sqA_Opacity = 0.5 + Math.abs(Math.sin(t * 3)) * 0.5;
+      sqB_Opacity = 0.5 + Math.abs(Math.sin(t * 3)) * 0.5;
+    } else if (t >= 10.0) {
+      sqC_Opacity = 0.5 + Math.abs(Math.sin(t * 3)) * 0.5;
     }
+  } else if (segment.id === "conclusion") {
+    // Fade whole visualization to show beautifully simple big concluding equation
+    const endOpacity = Math.min(1, t / 1.0);
+    stage.innerHTML = `
+      <div class="title-text" style="top: 250px; color: var(--green); opacity: ${endOpacity}; font-size: 84px;">a² + b² = c²</div>
+      <div class="main-text" style="top: 480px; left: 150px; width: 1620px; text-align: center; opacity: ${endOpacity}; line-height: 1.8;">
+        Whether you are constructing a house, calculating distances on a map,<br>
+        or coding beautiful visual spaces...<br>
+        <span style="color: var(--yellow); font-size: 52px;">This fundamental law of space holds true.</span>
+      </div>
+    `;
+    return;
+  }
 
-    function easeInOut(value) {
-        return 0.5 - Math.cos(clamp(value, 0, 1) * Math.PI) / 2;
+  // Compile main calculation UI on the right half of screen
+  if (showFormulaBox) {
+    let formulaLines = [];
+    if (formulaStep >= 1) {
+      formulaLines.push(`<div style="color: var(--green); font-size: 64px; margin-bottom: 40px;">a² + b² = c²</div>`);
     }
-
-    function setActive(ids) {
-        document.querySelectorAll(".node, .edge").forEach(el => el.classList.remove("active"));
-        ids.forEach(id => {
-            const el = document.getElementById(id);
-            if (el) el.classList.add("active");
-        });
+    if (formulaStep >= 2) {
+      formulaLines.push(`<div style="color: var(--yellow); margin-bottom: 25px;">3² + 4² = c²</div>`);
     }
-
-    function moveMarker(x, y) {
-        const diagram = document.getElementById("diagram");
-        const marker = document.getElementById("marker");
-        const rect = diagram.getBoundingClientRect();
-        marker.style.left = `${(x / 900) * rect.width}px`;
-        marker.style.top = `${(y / 620) * rect.height}px`;
+    if (formulaStep >= 3) {
+      formulaLines.push(`<div style="color: var(--fg); margin-bottom: 25px;">9 + 16 = c²</div>`);
     }
-
-    function renderSection(section, localTime, globalTime) {
-        const localDuration = section.duration || Math.max(1, section.resolvedDuration || 1);
-        const p = clamp(localTime / localDuration, 0, 1);
-        const eased = easeInOut(p);
-
-        document.getElementById("title").textContent = section.title;
-        document.getElementById("caption").textContent = section.caption;
-
-        if (section.id === "silent-intro") {
-            setActive(["node-plan"]);
-            moveMarker(160 + 290 * eased, 170 + 140 * eased);
-        } else if (section.id === "first-narration") {
-            setActive(["edge-a", "node-plan", "node-audio"]);
-            moveMarker(450 + Math.sin(localTime * 4) * 34, 310 + Math.cos(localTime * 4) * 34);
-        } else if (section.id === "silent-bridge") {
-            setActive(["edge-b", "node-audio", "node-time"]);
-            moveMarker(450 + 290 * eased, 310 - 140 * eased);
-        } else if (section.id === "second-narration") {
-            setActive(["edge-c", "node-audio", "node-render"]);
-            moveMarker(450 + Math.sin(localTime * 5) * 28, 310 + 210 * eased);
-        } else {
-            setActive(["node-plan", "node-audio", "node-time", "node-render", "edge-a", "edge-b", "edge-c"]);
-            const orbit = globalTime * 0.9;
-            moveMarker(450 + Math.cos(orbit) * 250, 330 + Math.sin(orbit) * 155);
-        }
+    if (formulaStep >= 4) {
+      formulaLines.push(`<div style="color: var(--fg); margin-bottom: 25px;">25 = c²</div>`);
     }
-
-    window.__RENDER_SECTION__ = renderSection;
-
-    function buildDraftTimeline() {
-        let cursor = 0;
-        const videoTimeline = VIDEO_PLAN.map(section => {
-            const duration = section.kind === "visual-only" ? section.duration : 4;
-            const cue = {
-                start: cursor,
-                end: cursor + duration,
-                duration,
-                sectionId: section.id,
-                item: { ...section, resolvedDuration: duration }
-            };
-            cursor += duration;
-            return cue;
-        });
-
-        return {
-            duration: cursor,
-            videoTimeline,
-            audioTimeline: []
-        };
+    if (formulaStep >= 5) {
+      formulaLines.push(`<div style="color: var(--green); font-size: 56px;">c = 5</div>`);
     }
+    formulaHTML = `
+      <div class="formula-box" style="top: 350px; left: 1100px; width: 700px; text-align: left;">
+        ${formulaLines.join("")}
+      </div>
+    `;
+  }
 
-    function installTimeline(payload) {
-        const videoTimeline = payload.videoTimeline || [];
-        const audioTimeline = payload.audioTimeline || [];
-        const totalDuration = payload.duration || 1;
+  // Compile SVG Content representing the right triangle, right angle box, labels, squares, and grids
+  svgContent += `<svg viewBox="0 0 1920 1080" xmlns="http://www.w3.org/2000/svg">`;
 
-        window.__VIDEO_DURATION__ = totalDuration;
-        window.__VIDEO_TIMELINE__ = videoTimeline;
-        window.__AUDIO_TIMELINE__ = audioTimeline;
+  // Square A
+  if (sqA_Opacity > 0) {
+    svgContent += `
+      <polygon points="${pA1.x},${pA1.y} ${pA2.x},${pA2.y} ${pA3.x},${pA3.y} ${pA4.x},${pA4.y}"
+               fill="var(--red)" fill-opacity="${sqA_Opacity * 0.35}" stroke="var(--red)" stroke-width="4" stroke-opacity="${sqA_Opacity}" />
+      <path d="${getGridPath(pA1, pA2, pA3, pA4, 3)}" stroke="#ffffff" stroke-opacity="${sqA_Opacity * 0.15}" stroke-width="2" fill="none" />
+      <text x="${(pA1.x + pA2.x)/2}" y="${(pA1.y + pA3.y)/2 + 10}" text-anchor="middle" class="label-text" style="font-size: 34px; fill: var(--red); opacity: ${sqA_Opacity};">9</text>
+    `;
+  }
 
-        window.renderAt = function renderAt(time) {
-            activeTime = clamp(Number(time) || 0, 0, totalDuration);
-            let cue = videoTimeline[0];
-            for (const current of videoTimeline) {
-                if (current.start <= activeTime) cue = current;
-                if (current.start > activeTime) break;
-            }
+  // Square B
+  if (sqB_Opacity > 0) {
+    svgContent += `
+      <polygon points="${pB1.x},${pB1.y} ${pB2.x},${pB2.y} ${pB3.x},${pB3.y} ${pB4.x},${pB4.y}"
+               fill="var(--blue)" fill-opacity="${sqB_Opacity * 0.35}" stroke="var(--blue)" stroke-width="4" stroke-opacity="${sqB_Opacity}" />
+      <path d="${getGridPath(pB1, pB2, pB3, pB4, 4)}" stroke="#ffffff" stroke-opacity="${sqB_Opacity * 0.15}" stroke-width="2" fill="none" />
+      <text x="${(pB1.x + pB3.x)/2}" y="${(pB1.y + pB3.y)/2 + 10}" text-anchor="middle" class="label-text" style="font-size: 34px; fill: var(--blue); opacity: ${sqB_Opacity};">16</text>
+    `;
+  }
 
-            const localTime = Math.max(0, activeTime - cue.start);
-            renderSection(cue.item, localTime, activeTime);
-            document.getElementById("clock").textContent = `${activeTime.toFixed(2).padStart(5, "0")}s`;
-            document.getElementById("progress-fill").style.width = `${(activeTime / totalDuration) * 100}%`;
-            updateControls();
-            return activeTime;
-        };
+  // Square C
+  if (sqC_Opacity > 0) {
+    svgContent += `
+      <polygon points="${pC1.x},${pC1.y} ${pC2.x},${pC2.y} ${pC3.x},${pC3.y} ${pC4.x},${pC4.y}"
+               fill="var(--green)" fill-opacity="${sqC_Opacity * 0.35}" stroke="var(--green)" stroke-width="4" stroke-opacity="${sqC_Opacity}" />
+      <path d="${getGridPath(pC1, pC2, pC3, pC4, 5)}" stroke="#ffffff" stroke-opacity="${sqC_Opacity * 0.15}" stroke-width="2" fill="none" />
+      <text x="${(pC1.x + pC3.x)/2}" y="${(pC1.y + pC3.y)/2 + 10}" text-anchor="middle" class="label-text" style="font-size: 34px; fill: var(--green); opacity: ${sqC_Opacity};">25</text>
+    `;
+  }
 
-        window.renderAt(0);
-    }
+  // Right angle visual (24px square box in corner B)
+  if (rightAngleOpacity > 0) {
+    svgContent += `
+      <path d="M ${bx} ${by - 24} L ${bx + 24} ${by - 24} L ${bx + 24} ${by}" 
+            fill="none" stroke="var(--yellow)" stroke-width="4" opacity="${rightAngleOpacity}" />
+    `;
+  }
 
-    function getAudioCueIndexAt(time) {
-        const audioTimeline = window.__AUDIO_TIMELINE__ || [];
-        for (let i = audioTimeline.length - 1; i >= 0; i--) {
-            const cue = audioTimeline[i];
-            if (cue.start <= time && time < cue.start + cue.duration) return i;
-        }
-        return -1;
-    }
+  // Draw Triangle Edges with optional color highlighting
+  const strokeA = legA_Highlight ? "var(--red)" : "var(--fg)";
+  const strokeB = legB_Highlight ? "var(--blue)" : "var(--fg)";
+  const strokeC = hyp_Highlight ? "var(--green)" : "var(--fg)";
+  const widthA = legA_Highlight ? 8 : 4;
+  const widthB = legB_Highlight ? 8 : 4;
+  const widthC = hyp_Highlight ? 8 : 4;
 
-    function stopAudio() {
-        if (playback.audio) {
-            playback.audio.pause();
-            playback.audio = null;
-        }
-    }
+  svgContent += `
+    <!-- Triangle Paths -->
+    <g opacity="${triOpacity}">
+      <line x1="${ax}" y1="${ay}" x2="${bx}" y2="${by}" stroke="${strokeA}" stroke-width="${widthA}" />
+      <line x1="${bx}" y1="${by}" x2="${cx}" y2="${cy}" stroke="${strokeB}" stroke-width="${widthB}" />
+      <line x1="${cx}" y1="${cy}" x2="${ax}" y2="${ay}" stroke="${strokeC}" stroke-width="${widthC}" />
+    </g>
+  `;
 
-    function syncAudio(time) {
-        const audioTimeline = window.__AUDIO_TIMELINE__ || [];
-        const index = getAudioCueIndexAt(time);
-        if (index === playback.audioCueIndex) return;
+  // Drawing Side Labels dynamically based on state
+  if (showLabels) {
+    svgContent += `
+      <text x="${ax - 35}" y="${(ay + by)/2 + 10}" text-anchor="end" class="label-text" style="font-size: 34px; font-weight: ${legA_Highlight ? 'bold' : 'normal'}; fill: ${legA_Highlight ? 'var(--red)' : 'var(--fg)'};">${labelA_text}</text>
+      <text x="${(bx + cx)/2}" y="${by + 45}" text-anchor="middle" class="label-text" style="font-size: 34px; font-weight: ${legB_Highlight ? 'bold' : 'normal'}; fill: ${legB_Highlight ? 'var(--blue)' : 'var(--fg)'};">${labelB_text}</text>
+      <text x="${(ax + cx)/2 + 35}" y="${(ay + cy)/2 - 25}" text-anchor="start" class="label-text" style="font-size: 34px; font-weight: ${hyp_Highlight ? 'bold' : 'normal'}; fill: ${hyp_Highlight ? 'var(--green)' : 'var(--fg)'};">${labelC_text}</text>
+    `;
+  }
 
-        stopAudio();
-        playback.audioCueIndex = index;
-        if (!playback.playing || index < 0) return;
+  svgContent += `</svg>`;
 
-        const cue = audioTimeline[index];
-        const audio = new Audio(cue.src);
-        audio.currentTime = Math.max(0, time - cue.start);
-        playback.audio = audio;
-        audio.play().catch(() => {});
-    }
+  stage.innerHTML = svgContent + formulaHTML;
+}
 
-    function tick() {
-        if (!playback.playing) return;
-
-        window.renderAt((performance.now() / 1000) - playback.startedAt);
-        syncAudio(activeTime);
-
-        if (activeTime >= window.__VIDEO_DURATION__) {
-            pause();
-            return;
-        }
-
-        playback.rafId = requestAnimationFrame(tick);
-    }
-
-    function play() {
-        if (activeTime >= window.__VIDEO_DURATION__) window.renderAt(0);
-        playback.playing = true;
-        playback.audioCueIndex = -1;
-        playback.startedAt = (performance.now() / 1000) - activeTime;
-        document.getElementById("play-toggle").textContent = "Pause";
-        tick();
-    }
-
-    function pause() {
-        playback.playing = false;
-        cancelAnimationFrame(playback.rafId);
-        playback.audioCueIndex = -1;
-        stopAudio();
-        document.getElementById("play-toggle").textContent = "Play";
-    }
-
-    function updateControls() {
-        const total = window.__VIDEO_DURATION__ || 1;
-        document.getElementById("scrubber").max = total.toFixed(2);
-        document.getElementById("scrubber").value = activeTime.toFixed(2);
-        document.getElementById("readout").textContent = `${activeTime.toFixed(2)} / ${total.toFixed(2)}`;
-    }
-
-    document.addEventListener("DOMContentLoaded", () => {
-        const params = new URLSearchParams(window.location.search);
-        if (params.get("controls") === "0" || params.get("export") === "1") {
-            document.body.classList.add("hide-controls");
-        }
-        if (params.get("export") === "1") {
-            document.body.classList.add("export-mode");
-        }
-
-        installTimeline(window.__RESOLVED_TIMELINE__ || buildDraftTimeline());
-
-        document.getElementById("play-toggle").addEventListener("click", () => {
-            playback.playing ? pause() : play();
-        });
-
-        document.getElementById("scrubber").addEventListener("input", event => {
-            window.renderAt(Number(event.target.value));
-            playback.startedAt = (performance.now() / 1000) - activeTime;
-            playback.audioCueIndex = -1;
-            stopAudio();
-            if (playback.playing) syncAudio(activeTime);
-        });
-    });
+window.__RENDER_SECTION__ = renderSection;
+renderSection(VIDEO_PLAN[0], 0, 0);
+</script>
+<style id="resolved-export-motion-guard">
+body.export-mode:not(.viewer-mode) *, body.export-mode:not(.viewer-mode) *::before, body.export-mode:not(.viewer-mode) *::after {
+  animation: none !important;
+  transition: none !important;
+}
+</style>
+<script id="resolved-metadata">
+window.__VIDEO_METADATA__ = { ...(window.__VIDEO_METADATA__ || {}), lastResolved: "2026-06-11T01:02:17.810Z" };
 </script>
 <script id="resolved-timeline">
-window.__RESOLVED_TIMELINE__ = {"duration":35.4,"videoTimeline":[{"start":0,"end":5,"duration":5,"sectionId":"silent-intro","item":{"id":"silent-intro","kind":"visual-only","duration":5,"title":"Visual-only introduction","caption":"The source plan specifies this section's visual duration: five seconds, with no narration.","resolvedDuration":5}},{"start":5,"end":10.275,"duration":5.275,"sectionId":"first-narration","item":{"id":"first-narration","kind":"narration+visual","audio":"audio/first-narration.wav","text":"When a section has narration, the generated audio decides the section duration.","title":"Narration controls duration","caption":"The build step generates this audio, measures it, and assigns the exact timeline length.","resolvedDuration":5.275}},{"start":10.275,"end":15.275,"duration":5,"sectionId":"silent-bridge","item":{"id":"silent-bridge","kind":"visual-only","duration":5,"title":"Visual-only bridge","caption":"This bridge has no voice, so the source plan must explicitly declare how long the visual should run.","resolvedDuration":5}},{"start":15.275,"end":20.4,"duration":5.125,"sectionId":"second-narration","item":{"id":"second-narration","kind":"narration+visual","audio":"audio/second-narration.wav","text":"The second narration cue starts only after previous sections have been resolved.","title":"Audio cue is placed automatically","caption":"No manual start time is written by the source file. The builder places this cue after earlier sections.","resolvedDuration":5.125}},{"start":20.4,"end":35.4,"duration":15,"sectionId":"silent-finale","item":{"id":"silent-finale","kind":"visual-only","duration":15,"title":"Long silent finale","caption":"The final section is visual-only for fifteen seconds, proving rendering can continue after audio ends.","resolvedDuration":15}}],"audioTimeline":[{"start":5,"duration":5.275,"src":"audio/first-narration.wav","text":"When a section has narration, the generated audio decides the section duration.","sectionId":"first-narration"},{"start":15.275,"duration":5.125,"src":"audio/second-narration.wav","text":"The second narration cue starts only after previous sections have been resolved.","sectionId":"second-narration"}]};
+window.__RESOLVED_TIMELINE__ = {"duration":150.95,"videoTimeline":[{"start":0,"end":11.075,"duration":11.075,"sectionId":"intro","item":{"id":"intro","kind":"narration+visual","audio":"audio/intro.wav","text":"Why is this simple triangular shape the secret key to modern navigation, architecture, and game development? Today, we're unlocking the power of the Pythagoras Theorem!","resolvedDuration":11.075}},{"start":11.075,"end":21.85,"duration":10.775,"sectionId":"triangle_intro","item":{"id":"triangle_intro","kind":"narration+visual","audio":"audio/triangle_intro.wav","text":"To understand it, let's look at a special triangle—a right-angled triangle. It has one angle that is exactly ninety degrees, marked by this square in the corner.","resolvedDuration":10.775}},{"start":21.85,"end":29.075000000000003,"duration":7.225,"sectionId":"triangle_legs","item":{"id":"triangle_legs","kind":"narration+visual","audio":"audio/triangle_legs.wav","text":"The two sides that meet to form this ninety-degree angle are called the legs. Let's label them side a and side b.","resolvedDuration":7.225}},{"start":29.075000000000003,"end":41.475,"duration":12.4,"sectionId":"triangle_hypotenuse","item":{"id":"triangle_hypotenuse","kind":"narration+visual","audio":"audio/triangle_hypotenuse.wav","text":"And the longest side, directly opposite the right angle, is the hypotenuse. Let's label it side c. No matter how you rotate or scale this triangle, the hypotenuse is always the longest side.","resolvedDuration":12.4}},{"start":41.475,"end":60.35,"duration":18.875,"sectionId":"formula_intro","item":{"id":"formula_intro","kind":"narration+visual","audio":"audio/formula_intro.wav","text":"The Pythagoras Theorem tells us there is a beautiful, exact mathematical relationship between these three sides. It states that: side a squared, plus side b squared, is always equal to side c squared! In algebraic terms, we write this as: a squared plus b squared equals c squared.","resolvedDuration":18.875}},{"start":60.35,"end":70.325,"duration":9.975,"sectionId":"example_plug","item":{"id":"example_plug","kind":"narration+visual","audio":"audio/example_plug.wav","text":"Let's test this with a real example! Imagine side a has a length of three units, and side b has a length of four units. What is the length of side c?","resolvedDuration":9.975}},{"start":70.325,"end":76.125,"duration":5.8,"sectionId":"calc_plug","item":{"id":"calc_plug","kind":"narration+visual","audio":"audio/calc_plug.wav","text":"Let's plug these numbers into our formula. Three squared is nine. Four squared is sixteen.","resolvedDuration":5.8}},{"start":76.125,"end":79.45,"duration":3.325,"sectionId":"calc_add","item":{"id":"calc_add","kind":"narration+visual","audio":"audio/calc_add.wav","text":"Adding nine and sixteen gives us twenty-five.","resolvedDuration":3.325}},{"start":79.45,"end":84.85000000000001,"duration":5.4,"sectionId":"calc_sqrt","item":{"id":"calc_sqrt","kind":"narration+visual","audio":"audio/calc_sqrt.wav","text":"Since c squared equals twenty-five, we take the square root of twenty-five to find c.","resolvedDuration":5.4}},{"start":84.85000000000001,"end":94.42500000000001,"duration":9.575,"sectionId":"calc_result","item":{"id":"calc_result","kind":"narration+visual","audio":"audio/calc_result.wav","text":"The square root of twenty-five is exactly five! This is the famous three-four-five right-angled triangle, a perfect illustration of the theorem.","resolvedDuration":9.575}},{"start":94.42500000000001,"end":103.60000000000001,"duration":9.175,"sectionId":"squares_a","item":{"id":"squares_a","kind":"narration+visual","audio":"audio/squares_a.wav","text":"But why does this work? Let's look at the geometry. If we build a physical square on side a, its area is a squared, which is nine square units.","resolvedDuration":9.175}},{"start":103.60000000000001,"end":109.65,"duration":6.05,"sectionId":"squares_b","item":{"id":"squares_b","kind":"narration+visual","audio":"audio/squares_b.wav","text":"If we build a square on side b, its area is b squared, which is sixteen square units.","resolvedDuration":6.05}},{"start":109.65,"end":116.95,"duration":7.3,"sectionId":"squares_c","item":{"id":"squares_c","kind":"narration+visual","audio":"audio/squares_c.wav","text":"And if we build a square on the hypotenuse, side c, its area is c squared, which is twenty-five square units.","resolvedDuration":7.3}},{"start":116.95,"end":136,"duration":19.05,"sectionId":"squares_sum","item":{"id":"squares_sum","kind":"narration+visual","audio":"audio/squares_sum.wav","text":"If you count the grid squares inside, or add the area of the red square and the blue square together... you get exactly the area of the large green square on the hypotenuse! Nine plus sixteen is twenty-five! The sum of the areas of the smaller squares perfectly equals the area of the largest square.","resolvedDuration":19.05}},{"start":136,"end":150.95,"duration":14.95,"sectionId":"conclusion","item":{"id":"conclusion","kind":"narration+visual","audio":"audio/conclusion.wav","text":"Whether you are constructing a house, calculating distances on a map, or coding 3D graphics, this fundamental law of space holds true. a squared plus b squared equals c squared. Simply beautiful, and beautifully simple!","resolvedDuration":14.95}}],"audioTimeline":[{"start":0,"duration":11.075,"src":"audio/intro.wav","text":"Why is this simple triangular shape the secret key to modern navigation, architecture, and game development? Today, we're unlocking the power of the Pythagoras Theorem!","sectionId":"intro"},{"start":11.075,"duration":10.775,"src":"audio/triangle_intro.wav","text":"To understand it, let's look at a special triangle—a right-angled triangle. It has one angle that is exactly ninety degrees, marked by this square in the corner.","sectionId":"triangle_intro"},{"start":21.85,"duration":7.225,"src":"audio/triangle_legs.wav","text":"The two sides that meet to form this ninety-degree angle are called the legs. Let's label them side a and side b.","sectionId":"triangle_legs"},{"start":29.075000000000003,"duration":12.4,"src":"audio/triangle_hypotenuse.wav","text":"And the longest side, directly opposite the right angle, is the hypotenuse. Let's label it side c. No matter how you rotate or scale this triangle, the hypotenuse is always the longest side.","sectionId":"triangle_hypotenuse"},{"start":41.475,"duration":18.875,"src":"audio/formula_intro.wav","text":"The Pythagoras Theorem tells us there is a beautiful, exact mathematical relationship between these three sides. It states that: side a squared, plus side b squared, is always equal to side c squared! In algebraic terms, we write this as: a squared plus b squared equals c squared.","sectionId":"formula_intro"},{"start":60.35,"duration":9.975,"src":"audio/example_plug.wav","text":"Let's test this with a real example! Imagine side a has a length of three units, and side b has a length of four units. What is the length of side c?","sectionId":"example_plug"},{"start":70.325,"duration":5.8,"src":"audio/calc_plug.wav","text":"Let's plug these numbers into our formula. Three squared is nine. Four squared is sixteen.","sectionId":"calc_plug"},{"start":76.125,"duration":3.325,"src":"audio/calc_add.wav","text":"Adding nine and sixteen gives us twenty-five.","sectionId":"calc_add"},{"start":79.45,"duration":5.4,"src":"audio/calc_sqrt.wav","text":"Since c squared equals twenty-five, we take the square root of twenty-five to find c.","sectionId":"calc_sqrt"},{"start":84.85000000000001,"duration":9.575,"src":"audio/calc_result.wav","text":"The square root of twenty-five is exactly five! This is the famous three-four-five right-angled triangle, a perfect illustration of the theorem.","sectionId":"calc_result"},{"start":94.42500000000001,"duration":9.175,"src":"audio/squares_a.wav","text":"But why does this work? Let's look at the geometry. If we build a physical square on side a, its area is a squared, which is nine square units.","sectionId":"squares_a"},{"start":103.60000000000001,"duration":6.05,"src":"audio/squares_b.wav","text":"If we build a square on side b, its area is b squared, which is sixteen square units.","sectionId":"squares_b"},{"start":109.65,"duration":7.3,"src":"audio/squares_c.wav","text":"And if we build a square on the hypotenuse, side c, its area is c squared, which is twenty-five square units.","sectionId":"squares_c"},{"start":116.95,"duration":19.05,"src":"audio/squares_sum.wav","text":"If you count the grid squares inside, or add the area of the red square and the blue square together... you get exactly the area of the large green square on the hypotenuse! Nine plus sixteen is twenty-five! The sum of the areas of the smaller squares perfectly equals the area of the largest square.","sectionId":"squares_sum"},{"start":136,"duration":14.95,"src":"audio/conclusion.wav","text":"Whether you are constructing a house, calculating distances on a map, or coding 3D graphics, this fundamental law of space holds true. a squared plus b squared equals c squared. Simply beautiful, and beautifully simple!","sectionId":"conclusion"}],"interactiveTimeline":[],"gameTimeline":[]};
+</script>
+<script id="resolved-render-runtime">
+(() => {
+  const timeline = window.__RESOLVED_TIMELINE__;
+  if (!timeline) return;
+
+  const clamp = (value, min, max) => Math.max(min, Math.min(max, value));
+  const videoTimeline = Array.isArray(timeline.videoTimeline) ? timeline.videoTimeline : [];
+  const audioTimeline = Array.isArray(timeline.audioTimeline) ? timeline.audioTimeline : [];
+
+  window.__VIDEO_DURATION__ = Number(timeline.duration) || 0;
+  window.__VIDEO_TIMELINE__ = videoTimeline;
+  window.__AUDIO_TIMELINE__ = audioTimeline;
+  window.__INTERACTIVE_TIMELINE__ = Array.isArray(timeline.interactiveTimeline) ? timeline.interactiveTimeline : [];
+  window.__GAME_TIMELINE__ = Array.isArray(timeline.gameTimeline) ? timeline.gameTimeline : [];
+
+  function updateOptionalControls(time) {
+    const total = window.__VIDEO_DURATION__ || 0;
+    const scrubber = document.getElementById("scrubber");
+    if (scrubber) {
+      scrubber.max = total.toFixed(3);
+      scrubber.value = time.toFixed(3);
+    }
+
+    const readout = document.getElementById("readout") || document.getElementById("time-display");
+    if (readout) {
+      const mins = Math.floor(time / 60);
+      const secs = Math.floor(time % 60).toString().padStart(2, "0");
+      readout.textContent = readout.id === "time-display"
+        ? `${mins}:${secs}`
+        : `${time.toFixed(2)} / ${total.toFixed(2)}`;
+    }
+
+    const progress = document.getElementById("progress-fill");
+    if (progress && total > 0) {
+      progress.style.width = `${(time / total) * 100}%`;
+    }
+  }
+
+  window.renderAt = function renderAt(time) {
+    const total = window.__VIDEO_DURATION__ || 0;
+    const activeTime = clamp(Number(time) || 0, 0, total);
+    window.__CURRENT_RENDER_TIME__ = activeTime;
+
+    let cue = videoTimeline[0];
+    for (const candidate of videoTimeline) {
+      if (candidate.start <= activeTime) cue = candidate;
+      if (candidate.start > activeTime) break;
+    }
+
+    const renderSection = window.__RENDER_SECTION__ || window.__HTML_RENDER_SECTION__ || window.__AI_RENDER_SECTION__;
+    if (cue && typeof renderSection === "function") {
+      renderSection(cue.item, activeTime - cue.start, activeTime);
+    }
+
+    updateOptionalControls(activeTime);
+    return activeTime;
+  };
+
+  const renderInitial = () => window.renderAt(0);
+  if (document.readyState === "loading") {
+    document.addEventListener("DOMContentLoaded", renderInitial, { once: true });
+  } else {
+    renderInitial();
+  }
+})();
 </script>
 </body>
 </html>

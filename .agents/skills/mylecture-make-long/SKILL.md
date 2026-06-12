@@ -65,8 +65,3 @@ follow: `.agents\mylecture-themes\dark-theme.md`
 
 
 
-
-# when you are done
-Open the viewer with the generated html file.
-Command: `npm run view -- --file path/to/file.html --open`
-

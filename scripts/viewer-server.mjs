@@ -1,4 +1,4 @@
-import { createReadStream, existsSync, readdirSync, statSync, unlinkSync } from 'node:fs';
+import { createReadStream, existsSync, readdirSync, readFileSync, statSync, unlinkSync } from 'node:fs';
 import { createServer } from 'node:http';
 import { spawn } from 'node:child_process';
 import path from 'node:path';
@@ -6,6 +6,56 @@ import { createViewerHtml } from '../packages/lecture-viewer/src/index.mjs';
 
 const rootDir = process.cwd();
 const defaultPort = 4307;
+
+function estimateTextDuration(text) {
+  const words = String(text || '').trim().split(/\s+/).filter(Boolean).length;
+  return Math.max(2.5, words / 2.65);
+}
+
+function tryGetHtmlDuration(fullPath) {
+  try {
+    const content = readFileSync(fullPath, 'utf8');
+    const match = content.match(/window\.__RESOLVED_TIMELINE__\s*=\s*({[^;]+});?/);
+    if (match) {
+      const parsed = JSON.parse(match[1]);
+      if (parsed && typeof parsed.duration === 'number') {
+        return parsed.duration;
+      }
+    }
+    const durMatch = content.match(/window\.__VIDEO_DURATION__\s*=\s*(\d+(?:\.\d+)?)/);
+    if (durMatch) {
+      return Number(durMatch[1]);
+    }
+
+    // Fallback: Estimate duration of unresolved index HTML files by parsing window.__VIDEO_PLAN__ or VIDEO_PLAN
+    const planMatch = content.match(/(?:VIDEO_PLAN|__VIDEO_PLAN__)\s*=\s*\[([\s\S]+?)\]/);
+    if (planMatch) {
+      const planText = planMatch[1];
+      const itemsRegex = /\{\s*([^}]+?)\s*\}/g;
+      let total = 0;
+      let matchItem;
+      while ((matchItem = itemsRegex.exec(planText)) !== null) {
+        const itemContent = matchItem[1];
+        const durMatchItem = itemContent.match(/(?:resolvedDuration|duration)\s*:\s*(\d+(?:\.\d+)?)/);
+        if (durMatchItem) {
+          total += Number(durMatchItem[1]);
+          continue;
+        }
+        const textMatch = itemContent.match(/text\s*:\s*(?:"([^"\\]*(?:\\.[^"\\]*)*)"|'([^'\\]*(?:\\.[^'\\]*)*)'|`([^`\\]*(?:\\.[^`\\]*)*)`)/);
+        if (textMatch) {
+          const extractedText = textMatch[1] || textMatch[2] || textMatch[3] || '';
+          total += estimateTextDuration(extractedText);
+        }
+      }
+      if (total > 0) {
+        return total;
+      }
+    }
+  } catch (e) {
+    // Ignore errors
+  }
+  return null;
+}
 
 function parseArgs(argv) {
   const args = {
@@ -137,11 +187,13 @@ function listFolderFiles(filePath) {
     .map(entry => {
       const fullPath = path.join(folderPath, entry.name);
       const stat = statSync(fullPath);
+      const isHtml = entry.name.endsWith('.html');
       return {
         name: entry.name,
         path: toViewerPath(fullPath),
         size: stat.size,
-        modified: stat.mtime.toISOString()
+        modified: stat.mtime.toISOString(),
+        duration: isHtml ? tryGetHtmlDuration(fullPath) : null
       };
     })
     .sort((a, b) => {
@@ -177,12 +229,14 @@ function listDirectory(inputPath = '') {
     .map(entry => {
       const fullPath = path.join(folderPath, entry.name);
       const stat = statSync(fullPath);
+      const isHtml = entry.name.endsWith('.html');
       return {
         name: entry.name,
         path: toViewerPath(fullPath),
         type: entry.isDirectory() ? 'directory' : 'file',
         size: entry.isFile() ? stat.size : null,
-        modified: stat.mtime.toISOString()
+        modified: stat.mtime.toISOString(),
+        duration: isHtml ? tryGetHtmlDuration(fullPath) : null
       };
     })
     .sort((a, b) => {
@@ -287,63 +341,83 @@ function normalizePositiveInteger(value, fallback, min = 1, max = Number.MAX_SAF
 
 async function resolveLectureFile(filePath, options = {}) {
   const inputPath = resolveInputPath(filePath);
-  const basename = path.basename(inputPath);
-  const outPath = resolvedSiblingPathForIndex(inputPath);
-  if (!isIndexHtmlName(basename)) {
+  const folderPath = path.dirname(inputPath);
+  
+  if (!isIndexHtmlName(path.basename(inputPath))) {
     throw new Error('Resolve is only available for index*.html files.');
+  }
+
+  const files = readdirSync(folderPath)
+    .filter(name => isIndexHtmlName(name))
+    .sort((a, b) => a.localeCompare(b, undefined, { numeric: true, sensitivity: 'base' }));
+
+  if (files.length === 0) {
+    throw new Error('No index*.html files found in the folder.');
   }
 
   const voice = normalizeTtsVoice(options.ttsVoice);
   const provider = detectProvider(voice);
+  let finalResolvedPath = '';
 
-  let childProc = null;
-  activeJob = {
-    type: 'resolve',
-    outPath,
-    inputPath,
-    kill: () => {
-      activeJob.aborted = true;
-      if (childProc) {
-        if (process.platform === 'win32') {
-          spawn('taskkill', ['/pid', childProc.pid, '/f', '/t'], { windowsHide: true });
-        } else {
-          childProc.kill('SIGTERM');
+  for (const file of files) {
+    const fileInputPath = path.join(folderPath, file);
+    const fileOutPath = resolvedSiblingPathForIndex(fileInputPath);
+
+    let childProc = null;
+    activeJob = {
+      type: 'resolve',
+      outPath: fileOutPath,
+      inputPath: fileInputPath,
+      kill: () => {
+        activeJob.aborted = true;
+        if (childProc) {
+          if (process.platform === 'win32') {
+            spawn('taskkill', ['/pid', childProc.pid, '/f', '/t'], { windowsHide: true });
+          } else {
+            childProc.kill('SIGTERM');
+          }
         }
       }
-    }
-  };
+    };
 
-  try {
-    await runCapture('node', [
-      'scripts/build-plan.mjs',
-      '--input', inputPath,
-      '--out', outPath,
-      '--provider', provider,
-      '--voice', voice,
-      '--speed', normalizeTtsSpeed(options.ttsSpeed)
-    ], {
-      cwd: rootDir,
-      windowsHide: true,
-      onSpawn: (child) => {
-        childProc = child;
+    try {
+      console.log(`Resolving scene: ${file} -> ${path.basename(fileOutPath)}`);
+      await runCapture('node', [
+        'scripts/build-plan.mjs',
+        '--input', fileInputPath,
+        '--out', fileOutPath,
+        '--provider', provider,
+        '--voice', voice,
+        '--speed', normalizeTtsSpeed(options.ttsSpeed)
+      ], {
+        cwd: rootDir,
+        windowsHide: true,
+        onSpawn: (child) => {
+          childProc = child;
+        }
+      });
+      
+      if (fileInputPath === inputPath) {
+        finalResolvedPath = toViewerPath(fileOutPath);
       }
-    });
-    return toViewerPath(outPath);
-  } catch (error) {
-    if (existsSync(outPath)) {
-      try {
-        unlinkSync(outPath);
-      } catch (err) {
-        console.error(`Failed to delete partial resolve file: ${err.message}`);
+    } catch (error) {
+      if (existsSync(fileOutPath)) {
+        try {
+          unlinkSync(fileOutPath);
+        } catch (err) {
+          console.error(`Failed to delete partial resolve file: ${err.message}`);
+        }
       }
+      if (activeJob && activeJob.aborted) {
+        throw new Error('Process stopped by user');
+      }
+      throw error;
+    } finally {
+      activeJob = null;
     }
-    if (activeJob && activeJob.aborted) {
-      throw new Error('Process stopped by user');
-    }
-    throw error;
-  } finally {
-    activeJob = null;
   }
+
+  return finalResolvedPath || toViewerPath(resolvedSiblingPathForIndex(path.join(folderPath, files[0])));
 }
 
 async function renderLectureFile(filePath, options = {}) {

@@ -25,6 +25,7 @@ export function createViewerHtml(openPath, initialWidth = 1080, initialHeight = 
   --muted-strong: #c7c7c7;
   --accent: #f5f5f5;
   --focus: rgba(255,255,255,0.34);
+  --sec-width: 15px;
 }
 * { box-sizing: border-box; }
 html, body {
@@ -39,15 +40,20 @@ html, body {
 }
 body {
   display: grid;
-  grid-template-columns: 280px 1fr;
-  grid-template-rows: 1fr auto;
+  grid-template-columns: 280px 1fr var(--agent-bar-width, 320px);
+  grid-template-rows: 1fr auto auto;
+  transition: grid-template-columns 200ms cubic-bezier(0.4, 0, 0.2, 1);
+}
+body.agent-collapsed {
+  --agent-bar-width: 48px;
 }
 body.fullscreen-active {
   grid-template-columns: 1fr;
   grid-template-rows: 1fr;
 }
 #folder-sidebar {
-  grid-row: 1 / 3;
+  grid-column: 1;
+  grid-row: 1 / 4;
   min-width: 0;
   min-height: 0;
   display: grid;
@@ -294,6 +300,7 @@ body.fullscreen-active #folder-sidebar {
 }
 #frame-wrap {
   grid-column: 2;
+  grid-row: 1;
   min-height: 0;
   display: grid;
   place-items: center;
@@ -319,7 +326,10 @@ body.fullscreen-active #preview-shell {
   border: 0;
   box-shadow: none;
 }
-#preview {
+#preview, #preview-preload {
+  position: absolute;
+  top: 0;
+  left: 0;
   border: 0;
   background: #000;
   transform-origin: 0 0;
@@ -410,14 +420,15 @@ body.fullscreen-active #preview-shell {
 }
 #controls {
   grid-column: 2;
+  grid-row: 2;
   display: grid;
   grid-template-columns: auto auto auto 1fr auto auto auto auto auto auto;
-  gap: 8px;
+  gap: 6px;
   align-items: center;
-  padding: 8px 10px 10px;
+  padding: 6px 10px 8px;
   border-top: 1px solid var(--line);
-  background: color-mix(in srgb, var(--panel) 94%, #fff 6%);
-  box-shadow: 0 -16px 50px rgba(0,0,0,0.34);
+  background: #0d0d0d;
+  box-shadow: 0 -10px 30px rgba(0,0,0,0.5);
 }
 body.fullscreen-active #controls {
   grid-column: 1;
@@ -443,16 +454,17 @@ body.fullscreen-active #controls:hover {
 }
 #current-file {
   min-width: 0;
-  height: 30px;
-  padding: 6px 9px;
+  height: 28px;
+  padding: 5px 9px;
   border: 1px solid var(--line);
-  border-radius: 6px;
+  border-radius: 4px;
   background: #0b0b0b;
   color: var(--muted-strong);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
   line-height: 16px;
+  font-size: 11px;
   box-shadow: inset 0 1px 0 rgba(255,255,255,0.03);
 }
 input, button, select {
@@ -460,15 +472,16 @@ input, button, select {
   color: var(--text);
   background: var(--control);
   border: 1px solid var(--line-strong);
-  border-radius: 6px;
+  border-radius: 4px;
   outline: none;
 }
 button {
-  min-height: 30px;
-  padding: 5px 9px;
+  min-height: 28px;
+  height: 28px;
+  padding: 0 8px;
   cursor: pointer;
-  font-weight: 520;
-  font-size: 12px;
+  font-weight: 500;
+  font-size: 11px;
   letter-spacing: 0;
   transition: background 120ms ease, border-color 120ms ease, transform 120ms ease;
 }
@@ -490,66 +503,98 @@ select:focus-visible {
   box-shadow: 0 0 0 3px var(--focus);
 }
 #play {
-  min-width: 34px;
-  width: 34px;
+  min-width: 28px;
+  width: 28px;
+  height: 28px;
   padding: 0;
   display: grid;
   place-items: center;
-  background: #ededed;
-  border-color: #ededed;
-  color: #050505;
+  background: rgba(255, 255, 255, 0.06);
+  border: 1px solid var(--line-strong);
+  color: var(--text);
 }
-#fullscreen {
-  min-width: 34px;
-  width: 34px;
+#fullscreen,
+#seek-back,
+#seek-forward {
+  min-width: 28px;
+  width: 28px;
+  height: 28px;
   padding: 0;
   display: grid;
   place-items: center;
 }
 .control-icon {
-  width: 15px;
-  height: 15px;
+  width: 14px;
+  height: 14px;
   display: block;
   pointer-events: none;
 }
 #play:hover {
-  background: #ffffff;
-  border-color: #ffffff;
+  background: rgba(255, 255, 255, 0.12);
+  border-color: var(--accent);
+  color: var(--accent);
+}
+#play.active {
+  background: rgba(255, 255, 255, 0.1);
+  border-color: var(--accent);
+  color: var(--accent);
 }
 #load,
 #reload,
 #info,
 #subtitles-toggle,
 #live-tts-toggle,
-#fullscreen {
-  background: var(--panel-raised);
+#fullscreen,
+#seek-back,
+#seek-forward {
+  background: rgba(255, 255, 255, 0.04);
+  border: 1px solid var(--line-strong);
+  color: var(--muted-strong);
+}
+#load:hover,
+#reload:hover,
+#info:hover,
+#subtitles-toggle:hover,
+#live-tts-toggle:hover,
+#fullscreen:hover,
+#seek-back:hover,
+#seek-forward:hover {
+  background: rgba(255, 255, 255, 0.08);
+  border-color: #555;
+  color: var(--text);
 }
 #subtitles-toggle.active,
 #live-tts-toggle.active {
-  background: #ededed;
-  border-color: #ededed;
-  color: #050505;
+  background: rgba(255, 255, 255, 0.1);
+  border-color: var(--accent);
+  color: var(--accent);
+}
+#subtitles-toggle.active:hover,
+#live-tts-toggle.active:hover {
+  background: rgba(255, 255, 255, 0.15);
+  border-color: #fff;
+  color: #fff;
 }
 input[type="text"] {
   width: 100%;
-  height: 30px;
-  padding: 6px 9px;
+  height: 28px;
+  padding: 5px 8px;
   background: #0c0c0c;
 }
 select {
-  height: 30px;
+  height: 28px;
   width: auto;
   min-width: 0;
-  padding: 0 22px 0 7px;
-  font-size: 12px;
+  padding: 0 20px 0 6px;
+  font-size: 11px;
   color: var(--muted-strong);
   cursor: pointer;
 }
 #speed {
-  width: 54px;
+  width: 50px;
 }
 #viewport-preset {
-  width: 66px;
+  width: 62px;
 }
 #scrub-wrap {
   position: relative;
@@ -559,39 +604,56 @@ select {
   gap: 10px;
 }
 input[type="range"] {
+  -webkit-appearance: none;
+  appearance: none;
+  background: transparent;
   flex: 1 1 auto;
   min-width: 0;
   width: 100%;
-  height: 22px;
-  accent-color: var(--accent);
+  height: 20px;
   cursor: pointer;
 }
+input[type="range"]:focus {
+  outline: none;
+}
 input[type="range"]::-webkit-slider-runnable-track {
-  height: 4px;
+  width: 100%;
+  height: 3px;
+  cursor: pointer;
+  background: #2d2d2d;
   border-radius: 999px;
-  background: #3a3a3a;
+  border: none;
 }
 input[type="range"]::-webkit-slider-thumb {
-  width: 14px;
-  height: 14px;
-  margin-top: -5px;
+  -webkit-appearance: none;
+  appearance: none;
+  height: 10px;
+  width: 10px;
   border-radius: 50%;
-  background: #f4f4f4;
-  border: 1px solid #ffffff;
-  box-shadow: 0 1px 8px rgba(0,0,0,0.55);
+  background: var(--accent);
+  border: 0;
+  margin-top: -3.5px;
+  box-shadow: 0 1px 4px rgba(0,0,0,0.55);
+  transition: transform 100ms ease;
+}
+input[type="range"]::-webkit-slider-thumb:hover {
+  transform: scale(1.2);
 }
 input[type="range"]::-moz-range-track {
-  height: 4px;
+  width: 100%;
+  height: 3px;
+  cursor: pointer;
+  background: #2d2d2d;
   border-radius: 999px;
-  background: #3a3a3a;
+  border: none;
 }
 input[type="range"]::-moz-range-thumb {
-  width: 14px;
-  height: 14px;
+  width: 10px;
+  height: 10px;
   border-radius: 50%;
-  background: #f4f4f4;
-  border: 1px solid #ffffff;
-  box-shadow: 0 1px 8px rgba(0,0,0,0.55);
+  background: var(--accent);
+  border: 0;
+  box-shadow: 0 1px 4px rgba(0,0,0,0.55);
 }
 #interactive-marker,
 #game-marker {
@@ -622,10 +684,11 @@ input[type="range"]::-moz-range-thumb {
   display: block;
 }
 #time {
-  min-width: 128px;
+  min-width: 110px;
   text-align: right;
   font-variant-numeric: tabular-nums;
   color: var(--muted-strong);
+  font-size: 11px;
 }
 #status {
   color: var(--muted);
@@ -700,6 +763,352 @@ input[type="range"]::-moz-range-thumb {
 #info-branding strong {
   color: var(--muted-strong);
   font-weight: 620;
+}
+
+/* Scene Panel styles */
+#scene-panel {
+  grid-column: 2;
+  grid-row: 3;
+  background: #0d0d0d;
+  border-top: 1px solid var(--line);
+  display: flex;
+  flex-direction: column;
+  min-height: 140px;
+  min-width: 0;
+}
+body.fullscreen-active #scene-panel {
+  display: none;
+}
+.scene-panel-header {
+  padding: 6px 16px;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  background: #090909;
+  border-bottom: 1px solid var(--line);
+}
+.scene-panel-title {
+  font-size: 12px;
+  font-weight: 650;
+  color: var(--muted-strong);
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+.scenes-tabs {
+  display: flex;
+  background: rgba(255, 255, 255, 0.03);
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  padding: 2px;
+  gap: 2px;
+}
+.scenes-tab-btn {
+  background: transparent;
+  border: none;
+  border-radius: 4px;
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 600;
+  padding: 4px 10px;
+  height: 22px;
+  min-height: 22px;
+  cursor: pointer;
+  transition: all 150ms ease;
+  line-height: 14px;
+}
+.scenes-tab-btn:hover {
+  color: var(--text);
+  background: rgba(255, 255, 255, 0.05);
+}
+.scenes-tab-btn.active {
+  color: #050505;
+  background: var(--accent);
+  box-shadow: 0 1px 3px rgba(0,0,0,0.3);
+}
+.timeline-container {
+  position: relative;
+  flex: 1;
+  overflow-x: auto;
+  overflow-y: hidden;
+  background: #090909;
+}
+.timeline-container::-webkit-scrollbar {
+  height: 8px;
+}
+.timeline-container::-webkit-scrollbar-track {
+  background: #090909;
+}
+.timeline-container::-webkit-scrollbar-thumb {
+  background: #202020;
+  border-radius: 4px;
+}
+.timeline-container::-webkit-scrollbar-thumb:hover {
+  background: #2d2d2d;
+}
+.timeline-content {
+  position: relative;
+  min-height: 110px;
+}
+.timeline-ruler {
+  position: relative;
+  height: 28px;
+  background: #121212;
+  border-bottom: 1px solid var(--line);
+  user-select: none;
+  cursor: ew-resize;
+}
+.ruler-tick {
+  position: absolute;
+  bottom: 0;
+  width: 1px;
+  height: 5px;
+  background: var(--line-strong);
+}
+.ruler-tick.major {
+  height: 8px;
+  background: var(--muted);
+}
+.ruler-label {
+  position: absolute;
+  bottom: 11px;
+  left: 0;
+  transform: translateX(-50%);
+  font-size: 9px;
+  color: var(--muted);
+  font-family: monospace;
+  pointer-events: none;
+}
+.timeline-scenes {
+  position: relative;
+  display: flex;
+  background: #090909;
+  padding: 12px 0;
+  min-height: 82px;
+  box-sizing: border-box;
+}
+.scene-card {
+  position: relative;
+  box-sizing: border-box;
+  flex: 0 0 calc(var(--scene-duration, 15) * var(--sec-width, 15px));
+  width: calc(var(--scene-duration, 15) * var(--sec-width, 15px));
+  background: #181818;
+  border: 1px solid var(--line);
+  border-right: 0;
+  padding: 8px 10px;
+  cursor: pointer;
+  transition: background 150ms ease, border-color 150ms ease;
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  height: 58px;
+  text-align: left;
+  overflow: hidden;
+  border-radius: 4px;
+  margin-right: 2px;
+}
+.scene-card::before {
+  content: '';
+  position: absolute;
+  left: 0;
+  top: 0;
+  bottom: 0;
+  width: 3px;
+  background: #0a84ff;
+}
+.scene-card:hover {
+  background: var(--control-hover);
+}
+.scene-card.active {
+  background: rgba(255, 255, 255, 0.08);
+  border: 1px solid var(--accent);
+  box-shadow: inset 0 0 0 1px var(--accent);
+}
+.scene-card.active::before {
+  background: var(--accent);
+}
+.scene-card-name {
+  font-size: 10px;
+  font-weight: 500;
+  color: var(--muted);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  margin-top: 4px;
+}
+.scene-card.active .scene-card-name {
+  color: var(--text);
+}
+.scene-card-label {
+  font-size: 11px;
+  font-weight: 700;
+  color: var(--text);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.timeline-playhead {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: 2px;
+  background: #ff453a;
+  z-index: 100;
+  pointer-events: none;
+  display: none;
+  box-shadow: 0 0 4px rgba(255, 69, 58, 0.4);
+}
+.timeline-playhead.visible {
+  display: block;
+}
+.timeline-playhead-handle {
+  position: absolute;
+  top: 0;
+  left: -7px;
+  width: 14px;
+  height: 14px;
+  background: #ff453a;
+  border-radius: 3px 3px 0 0;
+  clip-path: polygon(0% 0%, 100% 0%, 100% 60%, 50% 100%, 0% 60%);
+  cursor: ew-resize;
+  box-shadow: 0 2px 4px rgba(0,0,0,0.4);
+}
+
+/* Agent Bar styles */
+#agent-bar {
+  grid-column: 3;
+  grid-row: 1 / 4;
+  border-left: 1px solid var(--line);
+  background: #0d0d0d;
+  display: flex;
+  flex-direction: row;
+  overflow: hidden;
+  width: var(--agent-bar-width, 320px);
+  position: relative;
+  transition: width 200ms cubic-bezier(0.4, 0, 0.2, 1);
+}
+body.fullscreen-active #agent-bar {
+  display: none;
+}
+.agent-toggle-col {
+  width: 48px;
+  flex: 0 0 48px;
+  background: #111;
+  border-right: 1px solid var(--line);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  padding: 12px 0;
+  gap: 16px;
+}
+.agent-toggle-btn {
+  background: transparent;
+  border: 0;
+  width: 32px;
+  height: 32px;
+  padding: 0;
+  display: grid;
+  place-items: center;
+  color: var(--muted);
+  cursor: pointer;
+  border-radius: 6px;
+  transition: color 120ms ease, background 120ms ease;
+}
+.agent-toggle-btn:hover {
+  color: var(--text);
+  background: var(--control);
+}
+.agent-icon-badge {
+  background: rgba(255, 255, 255, 0.05);
+  border-radius: 50%;
+  width: 32px;
+  height: 32px;
+  display: grid;
+  place-items: center;
+  color: var(--accent);
+}
+.agent-content-col {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  min-width: 272px;
+  background: #0d0d0d;
+}
+.agent-header {
+  padding: 13px 14px 10px;
+  border-bottom: 1px solid var(--line);
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+.agent-title {
+  font-size: 12px;
+  font-weight: 650;
+  color: var(--muted-strong);
+  text-transform: uppercase;
+}
+.agent-status-tag {
+  background: rgba(255, 255, 255, 0.05);
+  color: var(--muted);
+  font-size: 9px;
+  padding: 2px 6px;
+  border-radius: 4px;
+  text-transform: uppercase;
+  font-weight: bold;
+  letter-spacing: 0.5px;
+}
+.agent-body {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  padding: 16px;
+  gap: 16px;
+  overflow-y: auto;
+}
+.agent-placeholder-card {
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.agent-placeholder-title {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text);
+}
+.agent-placeholder-desc {
+  font-size: 12px;
+  color: var(--muted);
+  line-height: 1.4;
+}
+.agent-input-area {
+  padding: 12px;
+  border-top: 1px solid var(--line);
+  background: #111;
+  display: flex;
+  gap: 8px;
+}
+.agent-input {
+  flex: 1;
+  height: 32px;
+  padding: 6px 10px;
+  font-size: 12px;
+  background: #080808;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  color: var(--text);
+}
+.agent-send-btn {
+  height: 32px;
+  min-height: 32px;
+  padding: 0 12px;
+  background: var(--accent);
+  color: #050505;
+  border: 0;
+  border-radius: 6px;
+  font-weight: bold;
 }
 </style>
 </head>
@@ -821,6 +1230,7 @@ input[type="range"]::-moz-range-thumb {
 <main id="frame-wrap">
   <div id="preview-shell">
     <iframe id="preview" title="Render preview"></iframe>
+    <iframe id="preview-preload" title="Preload preview" style="display: none;"></iframe>
     <div id="subtitle-overlay" aria-live="polite"></div>
   </div>
   <article id="document-preview"></article>
@@ -833,8 +1243,8 @@ input[type="range"]::-moz-range-thumb {
     <button id="reload">Reload</button>
   </div>
   <button id="play" type="button" aria-label="Play" title="Play"></button>
-  <button id="seek-back" title="Back 5 seconds">&#8592; 5s</button>
-  <button id="seek-forward" title="Forward 5 seconds">5s &#8594;</button>
+  <button id="seek-back" title="Back 5 seconds">&#8592;</button>
+  <button id="seek-forward" title="Forward 5 seconds">&#8594;</button>
   <div id="scrub-wrap">
     <input id="scrub" type="range" min="0" max="1" step="0.001" value="0">
     <div id="interactive-marker" title="Interactive segment"></div>
@@ -858,6 +1268,61 @@ input[type="range"]::-moz-range-thumb {
   <div id="status">No file loaded</div>
   <button id="fullscreen" type="button" aria-label="Fullscreen" title="Fullscreen"></button>
 </section>
+<section id="scene-panel">
+  <div class="scene-panel-header">
+    <div class="scene-panel-title">Scenes</div>
+    <div class="scenes-tabs" id="scenes-tabs">
+      <button class="scenes-tab-btn active" data-tab="raw" type="button">Raw</button>
+      <button class="scenes-tab-btn" data-tab="resolved" type="button">Resolved</button>
+      <button class="scenes-tab-btn" data-tab="rendered" type="button">Rendered</button>
+    </div>
+  </div>
+  <div id="timeline-container" class="timeline-container">
+    <div id="timeline-content" class="timeline-content">
+      <div id="timeline-ruler" class="timeline-ruler"></div>
+      <div id="scene-list" class="timeline-scenes">
+        <div style="color: var(--muted); font-size: 12px; padding: 8px 16px;">No scenes detected.</div>
+      </div>
+      <div id="timeline-playhead" class="timeline-playhead">
+        <div class="timeline-playhead-handle"></div>
+      </div>
+    </div>
+  </div>
+</section>
+<aside id="agent-bar">
+  <div class="agent-toggle-col">
+    <button id="agent-toggle-btn" class="agent-toggle-btn" type="button" aria-label="Toggle Agent Panel" title="Toggle Agent Panel">
+      <svg class="control-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+        <polyline points="15 18 9 12 15 6"></polyline>
+      </svg>
+    </button>
+    <div class="agent-icon-badge" title="Lecture Agent">
+      <svg class="control-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+        <path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z"></path>
+        <polyline points="3.27 6.96 12 12.01 20.73 6.96"></polyline>
+        <line x1="12" y1="22.08" x2="12" y2="12"></line>
+      </svg>
+    </div>
+  </div>
+  <div class="agent-content-col">
+    <div class="agent-header">
+      <div class="agent-title">Lecture Agent</div>
+      <span class="agent-status-tag">Standby</span>
+    </div>
+    <div class="agent-body">
+      <div class="agent-placeholder-card">
+        <div class="agent-placeholder-title">Agent Panel</div>
+        <div class="agent-placeholder-desc">
+          This panel is a placeholder for the Lecture Agent. You will be able to interact with the agent to edit and refine your script, visuals, or code here soon.
+        </div>
+      </div>
+    </div>
+    <div class="agent-input-area">
+      <input class="agent-input" type="text" placeholder="Type a message..." disabled>
+      <button class="agent-send-btn" type="button" disabled>Send</button>
+    </div>
+  </div>
+</aside>
 <div id="info-dialog" role="dialog" aria-modal="true" aria-labelledby="info-title">
   <div id="info-panel">
     <div id="info-header">
@@ -894,7 +1359,8 @@ const renderFps = document.getElementById('render-fps');
 const renderResolution = document.getElementById('render-resolution');
 const frameWrap = document.getElementById('frame-wrap');
 const previewShell = document.getElementById('preview-shell');
-const frame = document.getElementById('preview');
+let frame = document.getElementById('preview');
+let framePreload = document.getElementById('preview-preload');
 const documentPreview = document.getElementById('document-preview');
 const currentFileLabel = document.getElementById('current-file');
 const infoButton = document.getElementById('info');
@@ -933,6 +1399,89 @@ let activeJobTimer = 0;
 let activeJobStartedAt = 0;
 let activeJobLabel = '';
 let currentBrowserFolder = '';
+let currentScenesList = [];
+let currentSecWidth = 15;
+
+let currentSceneTab = 'raw';
+let globalEntries = [];
+
+function isRenderedKind(name) {
+  return /^rendered.*\.mp4$/i.test(name) || (name.toLowerCase().endsWith('.mp4') && !name.toLowerCase().startsWith('temp_'));
+}
+
+function getSceneTabForFile(filePath) {
+  const name = fileBaseName(filePath).toLowerCase();
+  if (isResolvedHtmlKind(name)) return 'resolved';
+  if (isIndexHtmlKind(name)) return 'raw';
+  if (isRenderedKind(name)) return 'rendered';
+  return null;
+}
+
+function updateTabUI() {
+  const tabsContainer = document.getElementById('scenes-tabs');
+  if (!tabsContainer) return;
+  const buttons = tabsContainer.querySelectorAll('.scenes-tab-btn');
+  buttons.forEach(btn => {
+    const tabName = btn.getAttribute('data-tab');
+    btn.classList.toggle('active', tabName === currentSceneTab);
+  });
+}
+
+async function switchSceneTab(tab) {
+  if (currentSceneTab === tab) return;
+  const oldTab = currentSceneTab;
+  
+  // Find current scene index
+  let currentIndex = -1;
+  const currentList = getFilesForTab(oldTab);
+  if (currentList) {
+    currentIndex = currentList.findIndex(f => f.path === currentFilePath);
+  }
+  
+  currentSceneTab = tab;
+  updateTabUI();
+  
+  // Get target files
+  const targetList = getFilesForTab(tab);
+  if (targetList && targetList.length > 0) {
+    let targetFile = null;
+    if (currentIndex >= 0 && currentIndex < targetList.length) {
+      targetFile = targetList[currentIndex];
+    } else {
+      targetFile = targetList[0];
+    }
+    if (targetFile) {
+      await loadFile(targetFile.path);
+    }
+  } else {
+    // If no files in target tab, just update scenes panel
+    updateScenePanel(globalEntries);
+  }
+}
+
+function getFilesForTab(tab) {
+  const filesOnly = globalEntries.filter(file => file.type === 'file');
+  if (tab === 'raw') {
+    const raw = filesOnly.filter(file => isIndexHtmlKind(file.name));
+    raw.sort((a, b) => a.name.localeCompare(b.name, undefined, { numeric: true, sensitivity: 'base' }));
+    return raw;
+  }
+  if (tab === 'resolved') {
+    const resolved = filesOnly.filter(file => isResolvedHtmlKind(file.name));
+    resolved.sort((a, b) => a.name.localeCompare(b.name, undefined, { numeric: true, sensitivity: 'base' }));
+    return resolved;
+  }
+  if (tab === 'rendered') {
+    const rendered = filesOnly.filter(file => isRenderedKind(file.name));
+    rendered.sort((a, b) => a.name.localeCompare(b.name, undefined, { numeric: true, sensitivity: 'base' }));
+    return rendered;
+  }
+  return [];
+}
+
+const sceneListContainer = document.getElementById('scene-list');
+const agentToggleBtn = document.getElementById('agent-toggle-btn');
+const timelineRuler = document.getElementById('timeline-ruler');
 
 const player = createLecturePlayer({
   iframe: frame,
@@ -956,11 +1505,16 @@ function resizePreview() {
 
   previewShell.style.width = Math.floor(renderViewport.width * scale) + 'px';
   previewShell.style.height = Math.floor(renderViewport.height * scale) + 'px';
-  frame.width = renderViewport.width;
-  frame.height = renderViewport.height;
-  frame.style.width = renderViewport.width + 'px';
-  frame.style.height = renderViewport.height + 'px';
-  frame.style.transform = 'scale(' + scale + ')';
+  
+  [frame, framePreload].forEach(f => {
+    if (!f) return;
+    f.width = renderViewport.width;
+    f.height = renderViewport.height;
+    f.style.width = renderViewport.width + 'px';
+    f.style.height = renderViewport.height + 'px';
+    f.style.transform = 'scale(' + scale + ')';
+  });
+  
   viewportText.textContent = renderViewport.width + 'x' + renderViewport.height + ' @ ' + scale.toFixed(3) + 'x';
   syncViewportPreset();
 }
@@ -1335,6 +1889,8 @@ function renderFolderFiles(payload) {
     ? payload.entries
     : (Array.isArray(payload?.files) ? payload.files.map(file => ({ ...file, type: 'file' })) : []);
 
+  globalEntries = entries;
+
   if (payload?.parent) {
     const parentButton = document.createElement('button');
     parentButton.type = 'button';
@@ -1384,6 +1940,383 @@ function renderFolderFiles(payload) {
     });
     fileList.append(button);
   }
+
+  updateScenePanel(entries);
+}
+
+function updateScenePanel(entries) {
+  let filesOnly = entries;
+  if (entries.length > 0 && (entries[0].type === 'directory' || !('timelineStart' in entries[0]))) {
+    filesOnly = entries.filter(file => file.type === 'file');
+  }
+
+  const rawFiles = filesOnly.filter(file => isIndexHtmlKind(file.name));
+  rawFiles.sort((a, b) => a.name.localeCompare(b.name, undefined, { numeric: true, sensitivity: 'base' }));
+
+  const resolvedFiles = filesOnly.filter(file => isResolvedHtmlKind(file.name));
+  resolvedFiles.sort((a, b) => a.name.localeCompare(b.name, undefined, { numeric: true, sensitivity: 'base' }));
+
+  const renderedFiles = filesOnly.filter(file => isRenderedKind(file.name));
+  renderedFiles.sort((a, b) => a.name.localeCompare(b.name, undefined, { numeric: true, sensitivity: 'base' }));
+
+  const getFileSuffix = (name) => {
+    const match = name.match(/^(?:index|resolved|rendered)(.*)\.(?:html|mp4)$/i);
+    return match ? match[1] : '';
+  };
+
+  renderedFiles.forEach(rf => {
+    if (!rf.duration) {
+      const suffix = getFileSuffix(rf.name);
+      const matchingResolved = resolvedFiles.find(f => getFileSuffix(f.name) === suffix);
+      if (matchingResolved && matchingResolved.duration) {
+        rf.duration = matchingResolved.duration;
+      } else {
+        const matchingRaw = rawFiles.find(f => getFileSuffix(f.name) === suffix);
+        if (matchingRaw && matchingRaw.duration) {
+          rf.duration = matchingRaw.duration;
+        }
+      }
+    }
+  });
+
+  let activeFiles = [];
+  if (currentSceneTab === 'raw') {
+    activeFiles = rawFiles;
+  } else if (currentSceneTab === 'resolved') {
+    activeFiles = resolvedFiles;
+  } else if (currentSceneTab === 'rendered') {
+    activeFiles = renderedFiles;
+  }
+
+  let accumulatedTime = 0;
+  activeFiles.forEach(file => {
+    const dur = Number(file.duration);
+    file.duration = (Number.isFinite(dur) && dur > 0) ? dur : 15;
+    file.timelineStart = accumulatedTime;
+    accumulatedTime += file.duration;
+  });
+  
+  currentScenesList = activeFiles;
+  
+  const timelineContent = document.getElementById('timeline-content');
+  const container = document.getElementById('timeline-container');
+  if (!timelineContent || !container) return;
+  
+  const totalDuration = accumulatedTime;
+  const containerWidth = container.clientWidth;
+  if (containerWidth > 0 && totalDuration > 0) {
+    currentSecWidth = Math.max(3, (containerWidth - 24) / totalDuration);
+  } else {
+    currentSecWidth = 15;
+  }
+  
+  timelineContent.style.setProperty('--sec-width', currentSecWidth + 'px');
+  
+  const totalWidth = totalDuration * currentSecWidth;
+  timelineContent.style.width = totalWidth + 'px';
+  
+  const ruler = document.getElementById('timeline-ruler');
+  if (ruler) {
+    ruler.innerHTML = '';
+    let interval = 5;
+    if (totalDuration > 120) interval = 10;
+    if (totalDuration > 300) interval = 30;
+    if (totalDuration > 900) interval = 60;
+    
+    for (let sec = 0; sec <= totalDuration; sec += interval) {
+      const tick = document.createElement('div');
+      tick.className = 'ruler-tick';
+      tick.style.left = (sec * currentSecWidth) + 'px';
+      
+      tick.classList.add('major');
+      const label = document.createElement('span');
+      label.className = 'ruler-label';
+      label.textContent = formatTimeShort(sec);
+      tick.appendChild(label);
+      ruler.appendChild(tick);
+    }
+  }
+  
+  if (!sceneListContainer) return;
+  sceneListContainer.innerHTML = '';
+  
+  if (activeFiles.length === 0) {
+    const empty = document.createElement('div');
+    empty.style.color = 'var(--muted)';
+    empty.style.fontSize = '12px';
+    empty.style.padding = '8px 16px';
+    empty.textContent = 'No ' + currentSceneTab + ' files found.';
+    sceneListContainer.appendChild(empty);
+    return;
+  }
+  
+  activeFiles.forEach((file, index) => {
+    const isCurrent = file.path === currentFilePath;
+    const card = document.createElement('div');
+    card.className = 'scene-card' + (isCurrent ? ' active' : '');
+    card.style.setProperty('--scene-duration', file.duration);
+    
+    const label = document.createElement('div');
+    label.className = 'scene-card-label';
+    label.textContent = 'Scene ' + (index + 1);
+    
+    const name = document.createElement('div');
+    name.className = 'scene-card-name';
+    name.textContent = file.name + ' (' + file.duration.toFixed(1) + 's)';
+    
+    card.appendChild(label);
+    card.appendChild(name);
+    
+    card.addEventListener('click', () => {
+      if (file.path !== currentFilePath) {
+        loadFile(file.path);
+      }
+    });
+    
+    sceneListContainer.appendChild(card);
+  });
+  
+  updatePlayheadPosition();
+}
+
+function formatTimeShort(seconds) {
+  const minutes = Math.floor(seconds / 60);
+  const secs = Math.floor(seconds % 60);
+  return minutes + ':' + String(secs).padStart(2, '0');
+}
+
+function formatTimecode(seconds) {
+  seconds = Math.max(0, seconds);
+  const minutes = Math.floor(seconds / 60);
+  const secs = Math.floor(seconds % 60);
+  const hundredths = Math.floor((seconds % 1) * 100);
+  return minutes + ':' + String(secs).padStart(2, '0') + '.' + String(hundredths).padStart(2, '0');
+}
+
+let isDraggingTimeline = false;
+let isLoadFilePending = false;
+
+function handleTimelinePointerDown(event) {
+  if (event.button !== 0) return;
+  isDraggingTimeline = true;
+  if (timelineRuler) {
+    timelineRuler.setPointerCapture(event.pointerId);
+  }
+  seekFromTimelineEvent(event);
+}
+
+function handleTimelinePointerMove(event) {
+  if (!isDraggingTimeline) return;
+  seekFromTimelineEvent(event);
+}
+
+function handleTimelinePointerUp(event) {
+  if (!isDraggingTimeline) return;
+  isDraggingTimeline = false;
+  if (timelineRuler) {
+    try {
+      timelineRuler.releasePointerCapture(event.pointerId);
+    } catch (e) {}
+  }
+}
+
+async function seekFromTimelineEvent(event) {
+  if (!timelineRuler || currentScenesList.length === 0) return;
+  const rect = timelineRuler.getBoundingClientRect();
+  const clickedX = event.clientX - rect.left;
+  const clickedTime = Math.max(0, clickedX / currentSecWidth);
+  await seekToGlobalTime(clickedTime);
+}
+
+
+
+async function seekToGlobalTime(globalTime) {
+  if (currentScenesList.length === 0) {
+    player.seek(globalTime);
+    return;
+  }
+  
+  let targetScene = currentScenesList.find(file => globalTime >= file.timelineStart && globalTime < file.timelineStart + file.duration);
+  if (!targetScene) {
+    targetScene = currentScenesList[currentScenesList.length - 1];
+  }
+  if (!targetScene) return;
+  
+  const localTime = Math.max(0, Math.min(targetScene.duration, globalTime - targetScene.timelineStart));
+  
+  if (targetScene.path !== currentFilePath) {
+    if (preloadedFilePath === targetScene.path && !isPreloading) {
+      await swapToPreloadedScene(targetScene.path);
+      player.seek(localTime);
+    } else {
+      if (isLoadFilePending) return;
+      isLoadFilePending = true;
+      const success = await loadFile(targetScene.path);
+      isLoadFilePending = false;
+      if (success) {
+        player.seek(localTime);
+      }
+    }
+  } else {
+    player.seek(localTime);
+  }
+}
+
+async function seekGlobalBy(seconds) {
+  const state = playerState();
+  if (!state.loaded) return;
+  const activeScene = currentScenesList.find(file => file.path === currentFilePath);
+  const globalTime = activeScene ? (activeScene.timelineStart + state.time) : state.time;
+  const totalDuration = currentScenesList.length > 0
+    ? currentScenesList.reduce((acc, file) => acc + file.duration, 0)
+    : state.duration;
+  const targetTime = Math.max(0, Math.min(totalDuration, globalTime + seconds));
+  await seekToGlobalTime(targetTime);
+}
+
+
+
+function updatePlayheadPosition(state = playerState()) {
+  const playhead = document.getElementById('timeline-playhead');
+  const container = document.getElementById('timeline-container');
+  if (!playhead || !container) return;
+  
+  if (!state.loaded || currentScenesList.length === 0) {
+    playhead.classList.remove('visible');
+    return;
+  }
+  
+  const activeScene = currentScenesList.find(file => file.path === currentFilePath);
+  if (!activeScene) {
+    playhead.classList.remove('visible');
+    return;
+  }
+  
+  if (state.duration > 0 && Math.abs(activeScene.duration - state.duration) > 0.5) {
+    activeScene.duration = state.duration;
+    
+    let accumulatedTime = 0;
+    currentScenesList.forEach(file => {
+      file.timelineStart = accumulatedTime;
+      accumulatedTime += file.duration;
+    });
+    
+    const totalDuration = accumulatedTime;
+    const containerWidth = container.clientWidth;
+    if (containerWidth > 0 && totalDuration > 0) {
+      currentSecWidth = Math.max(3, (containerWidth - 24) / totalDuration);
+    }
+    
+    const timelineContent = document.getElementById('timeline-content');
+    if (timelineContent) {
+      timelineContent.style.setProperty('--sec-width', currentSecWidth + 'px');
+      const totalWidth = accumulatedTime * currentSecWidth;
+      timelineContent.style.width = totalWidth + 'px';
+    }
+    
+    const cards = sceneListContainer.querySelectorAll('.scene-card');
+    currentScenesList.forEach((file, index) => {
+      const card = cards[index];
+      if (card) {
+        card.style.setProperty('--scene-duration', file.duration);
+        const nameDiv = card.querySelector('.scene-card-name');
+        if (nameDiv) nameDiv.textContent = file.name + ' (' + file.duration.toFixed(1) + 's)';
+      }
+    });
+    
+    const ruler = document.getElementById('timeline-ruler');
+    if (ruler) {
+      ruler.innerHTML = '';
+      let interval = 5;
+      if (totalDuration > 120) interval = 10;
+      if (totalDuration > 300) interval = 30;
+      if (totalDuration > 900) interval = 60;
+      
+      for (let sec = 0; sec <= totalDuration; sec += interval) {
+        const tick = document.createElement('div');
+        tick.className = 'ruler-tick';
+        tick.style.left = (sec * currentSecWidth) + 'px';
+        tick.classList.add('major');
+        const label = document.createElement('span');
+        label.className = 'ruler-label';
+        label.textContent = formatTimeShort(sec);
+        tick.appendChild(label);
+        ruler.appendChild(tick);
+      }
+    }
+  }
+  
+  const globalTime = activeScene.timelineStart + state.time;
+  const playheadLeft = globalTime * currentSecWidth;
+  
+  playhead.style.left = playheadLeft + 'px';
+  playhead.classList.add('visible');
+  
+  if (state.playing) {
+    container.scrollLeft = playheadLeft - container.clientWidth / 2;
+  } else {
+    const scrollLeft = container.scrollLeft;
+    const clientWidth = container.clientWidth;
+    if (playheadLeft < scrollLeft || playheadLeft > scrollLeft + clientWidth - 40) {
+      container.scrollLeft = playheadLeft - clientWidth / 2;
+    }
+  }
+}
+
+let preloadedFilePath = '';
+let isPreloading = false;
+
+function preloadNextScene() {
+  if (currentScenesList.length === 0) return;
+  const currentIndex = currentScenesList.findIndex(file => file.path === currentFilePath);
+  if (currentIndex > -1 && currentIndex < currentScenesList.length - 1) {
+    const nextScene = currentScenesList[currentIndex + 1];
+    const nextPath = nextScene.path;
+    
+    if (preloadedFilePath === nextPath || isPreloading) return;
+    
+    preloadedFilePath = nextPath;
+    isPreloading = true;
+    
+    framePreload.src = fileUrl(nextPath);
+    
+    const handlePreloadLoad = () => {
+      isPreloading = false;
+      framePreload.removeEventListener('load', handlePreloadLoad);
+    };
+    framePreload.addEventListener('load', handlePreloadLoad);
+  } else {
+    preloadedFilePath = '';
+    framePreload.src = 'about:blank';
+  }
+}
+
+async function swapToPreloadedScene(nextPath) {
+  if (preloadedFilePath !== nextPath || isPreloading) {
+    await loadFile(nextPath);
+    player.play();
+    return;
+  }
+  
+  player.pause();
+  frame.removeEventListener('load', player.boundFrameLoad);
+  
+  frame.style.display = 'none';
+  framePreload.style.display = 'block';
+  
+  const temp = frame;
+  frame = framePreload;
+  framePreload = temp;
+  
+  player.iframe = frame;
+  frame.addEventListener('load', player.boundFrameLoad);
+  
+  setCurrentFile(nextPath);
+  player.handleFrameLoad();
+  player.play();
+  
+  preloadedFilePath = '';
+  preloadNextScene();
 }
 
 async function browseFolder(folderPath = '') {
@@ -1641,16 +2574,25 @@ function formatTime(seconds) {
 
 function updateControls(state = playerState()) {
   lastPlayerState = state;
-  scrubber.max = String(state.duration || 1);
-  scrubber.value = String(state.time || 0);
-  timeReadout.textContent = formatTime(state.time) + ' / ' + formatTime(state.duration);
+  const activeScene = currentScenesList.find(file => file.path === currentFilePath);
+  const globalTime = activeScene ? (activeScene.timelineStart + state.time) : state.time;
+  const totalDuration = currentScenesList.length > 0
+    ? currentScenesList.reduce((acc, file) => acc + file.duration, 0)
+    : (state.duration || 1);
+
+  scrubber.max = String(totalDuration || 1);
+  scrubber.value = String(globalTime || 0);
+  timeReadout.textContent = formatTime(globalTime) + ' / ' + formatTime(totalDuration);
   setIconButton(playButton, state.playing ? 'pause' : 'play', state.playing ? 'Pause' : 'Play');
+  playButton.classList.toggle('active', state.playing);
   subtitlesToggle.classList.toggle('active', state.subtitlesEnabled);
   subtitlesToggle.setAttribute('aria-pressed', state.subtitlesEnabled ? 'true' : 'false');
   liveTtsToggle.classList.toggle('active', state.liveTtsEnabled);
   liveTtsToggle.setAttribute('aria-pressed', state.liveTtsEnabled ? 'true' : 'false');
   interactiveMarker.classList.toggle('visible', state.interactiveTimeline.length > 0);
   gameMarker.classList.toggle('visible', state.gameTimeline.length > 0);
+  
+  updatePlayheadPosition(state);
 }
 
 function fileUrl(filePath) {
@@ -1666,7 +2608,27 @@ function setCurrentFile(filePath) {
   currentFileLabel.title = currentFilePath;
   const isMp4 = fileExtension(currentFilePath) === 'mp4';
   document.body.classList.toggle('file-kind-mp4', isMp4);
+  
+  const targetTab = getSceneTabForFile(currentFilePath);
+  if (targetTab && targetTab !== currentSceneTab) {
+    currentSceneTab = targetTab;
+    updateTabUI();
+    if (globalEntries && globalEntries.length > 0) {
+      updateScenePanel(globalEntries);
+    }
+  } else if (sceneListContainer) {
+    const cards = sceneListContainer.querySelectorAll('.scene-card');
+    currentScenesList.forEach((file, index) => {
+      const card = cards[index];
+      if (card) {
+        const isCurrent = file.path === currentFilePath;
+        card.classList.toggle('active', isCurrent);
+      }
+    });
+  }
+  
   syncIdeActions();
+  updatePlayheadPosition();
 }
 
 async function openCurrentFolder() {
@@ -1684,12 +2646,12 @@ async function openCurrentFolder() {
 async function loadFile(filePath = currentFilePath) {
   if (!filePath) {
     setStatus('Select a file first');
-    return;
+    return false;
   }
 
   if (isDocumentPreviewFile(filePath)) {
     await loadDocumentFile(filePath);
-    return;
+    return true;
   }
 
   setPreviewMode('html');
@@ -1702,9 +2664,12 @@ async function loadFile(filePath = currentFilePath) {
   try {
     await player.load(currentFilePath);
     refreshFolderFiles();
+    preloadNextScene();
+    return true;
   } catch (error) {
     setStatus(error.message);
     refreshFolderFiles();
+    return false;
   }
 }
 
@@ -1749,7 +2714,10 @@ function seekFromPointer(event) {
   if (!state.loaded) return;
   const rect = scrubber.getBoundingClientRect();
   const ratio = Math.max(0, Math.min(1, (event.clientX - rect.left) / rect.width));
-  player.seek(ratio * state.duration);
+  const totalDuration = currentScenesList.length > 0
+    ? currentScenesList.reduce((acc, file) => acc + file.duration, 0)
+    : state.duration;
+  seekToGlobalTime(ratio * totalDuration);
 }
 
 function handleViewerShortcut(event) {
@@ -1772,11 +2740,11 @@ function handleViewerShortcut(event) {
   } else if (event.ctrlKey && event.key === 'ArrowRight') {
     event.preventDefault();
     event.stopPropagation();
-    player.seekBy(5);
+    seekGlobalBy(5);
   } else if (event.ctrlKey && event.key === 'ArrowLeft') {
     event.preventDefault();
     event.stopPropagation();
-    player.seekBy(-5);
+    seekGlobalBy(-5);
   } else if (event.ctrlKey && event.key.toLowerCase() === 'f') {
     event.preventDefault();
     event.stopPropagation();
@@ -1814,6 +2782,15 @@ player.on('ready', state => {
 player.on('statechange', updateControls);
 player.on('timeupdate', updateControls);
 player.on('error', error => setStatus(error.message));
+
+player.on('ended', async () => {
+  const currentIndex = currentScenesList.findIndex(file => file.path === currentFilePath);
+  if (currentIndex > -1 && currentIndex < currentScenesList.length - 1) {
+    const nextScene = currentScenesList[currentIndex + 1];
+    setStatus('Auto-advancing to ' + nextScene.name + '...');
+    await swapToPreloadedScene(nextScene.path);
+  }
+});
 
 loadButton.addEventListener('click', pickAndLoadFile);
 openFolderButton.addEventListener('click', openCurrentFolder);
@@ -1868,8 +2845,8 @@ if (stopJobBtn) {
   stopJobBtn.addEventListener('click', runStopJob);
 }
 playButton.addEventListener('click', () => player.togglePlay());
-seekBackButton.addEventListener('click', () => player.seekBy(-5));
-seekForwardButton.addEventListener('click', () => player.seekBy(5));
+seekBackButton.addEventListener('click', () => seekGlobalBy(-5));
+seekForwardButton.addEventListener('click', () => seekGlobalBy(5));
 subtitlesToggle.addEventListener('click', () => {
   const state = playerState();
   player.setSubtitlesEnabled(!state.subtitlesEnabled);
@@ -1879,8 +2856,18 @@ liveTtsToggle.addEventListener('click', () => {
   player.setLiveTtsEnabled(!state.liveTtsEnabled);
 });
 scrubber.addEventListener('input', event => {
-  player.seek(Number(event.target.value));
+  seekToGlobalTime(Number(event.target.value));
 });
+const tabsContainer = document.getElementById('scenes-tabs');
+if (tabsContainer) {
+  tabsContainer.addEventListener('click', event => {
+    const btn = event.target.closest('.scenes-tab-btn');
+    if (btn) {
+      const tab = btn.getAttribute('data-tab');
+      switchSceneTab(tab);
+    }
+  });
+}
 scrubber.addEventListener('pointerdown', seekFromPointer);
 scrubber.addEventListener('click', seekFromPointer);
 interactiveMarker.addEventListener('pointerdown', event => {
@@ -1930,7 +2917,36 @@ document.addEventListener('keydown', event => {
 if ('speechSynthesis' in window) {
   window.speechSynthesis.onvoiceschanged = () => {};
 }
-window.addEventListener('resize', resizePreview);
+window.addEventListener('resize', () => {
+  resizePreview();
+  if (currentScenesList.length > 0) {
+    updateScenePanel(currentScenesList);
+  }
+});
+
+if (timelineRuler) {
+  timelineRuler.addEventListener('pointerdown', handleTimelinePointerDown);
+  timelineRuler.addEventListener('pointermove', handleTimelinePointerMove);
+  window.addEventListener('pointerup', handleTimelinePointerUp);
+  window.addEventListener('pointercancel', handleTimelinePointerUp);
+}
+if (agentToggleBtn) {
+  agentToggleBtn.addEventListener('click', () => {
+    document.body.classList.toggle('agent-collapsed');
+    
+    const isCollapsed = document.body.classList.contains('agent-collapsed');
+    agentToggleBtn.innerHTML = isCollapsed
+      ? '<svg class="control-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="11 18 17 12 11 6"></polyline></svg>'
+      : '<svg class="control-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="15 18 9 12 15 6"></polyline></svg>';
+    
+    setTimeout(resizePreview, 210);
+  });
+}
+
+document.body.classList.add('agent-collapsed');
+if (agentToggleBtn) {
+  agentToggleBtn.innerHTML = '<svg class="control-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="11 18 17 12 11 6"></polyline></svg>';
+}
 
 setCurrentFile(currentFilePath);
 resizePreview();
