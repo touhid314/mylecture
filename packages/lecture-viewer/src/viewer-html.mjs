@@ -543,6 +543,7 @@ select:focus-visible {
 }
 #load,
 #reload,
+#publish,
 #info,
 #subtitles-toggle,
 #live-tts-toggle,
@@ -555,6 +556,7 @@ select:focus-visible {
 }
 #load:hover,
 #reload:hover,
+#publish:hover,
 #info:hover,
 #subtitles-toggle:hover,
 #live-tts-toggle:hover,
@@ -767,6 +769,156 @@ input[type="range"]::-moz-range-thumb {
   font-weight: 620;
 }
 
+#publish-dialog {
+  position: fixed;
+  inset: 0;
+  z-index: 2000;
+  display: none;
+  place-items: center;
+  padding: 18px;
+  background: rgba(0,0,0,0.65);
+  backdrop-filter: blur(4px);
+}
+#publish-dialog.visible {
+  display: grid;
+}
+#publish-panel {
+  width: min(520px, 100%);
+  max-height: min(850px, calc(100vh - 36px));
+  display: flex;
+  flex-direction: column;
+  border: 1px solid var(--line-strong);
+  border-radius: 8px;
+  background: #101010;
+  box-shadow: 0 22px 70px rgba(0,0,0,0.7);
+}
+#publish-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 14px 16px;
+  border-bottom: 1px solid var(--line);
+}
+#publish-title {
+  font-weight: 650;
+  color: var(--text);
+  font-size: 15px;
+}
+#publish-close {
+  background: transparent;
+  border: 0;
+  color: var(--muted);
+  cursor: pointer;
+  padding: 4px;
+}
+#publish-close:hover {
+  color: var(--text);
+}
+#publish-form {
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  margin: 0;
+}
+#publish-form-content {
+  padding: 16px;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  max-height: calc(100vh - 220px);
+}
+.form-group {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+}
+.form-group label {
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--muted-strong);
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+.form-group input[type="text"],
+.form-group input[type="number"],
+.form-group select,
+.form-group textarea {
+  width: 100%;
+  padding: 6px 10px;
+  background: #090909;
+  border: 1px solid var(--line-strong);
+  border-radius: 4px;
+  color: var(--text);
+  outline: none;
+  font-size: 13px;
+}
+.form-group textarea {
+  min-height: 60px;
+  resize: vertical;
+}
+.form-group input:focus,
+.form-group select:focus,
+.form-group textarea:focus {
+  border-color: #6a6a6a;
+}
+.form-row {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 12px;
+}
+.checkbox-group {
+  flex-direction: row;
+  align-items: center;
+  gap: 8px;
+  padding: 4px 0;
+}
+.checkbox-group label {
+  text-transform: none;
+  font-weight: normal;
+  letter-spacing: 0;
+  font-size: 13px;
+  cursor: pointer;
+}
+.checkbox-group input {
+  cursor: pointer;
+}
+#publish-footer {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  padding: 12px 16px;
+  border-top: 1px solid var(--line);
+  background: #0b0b0b;
+}
+#publish-submit {
+  background: #ededed;
+  color: #050505;
+  border: 1px solid #ededed;
+}
+#publish-submit:hover {
+  background: #fff;
+  border-color: #fff;
+}
+#publish-submit:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+#publish-status-box {
+  margin: 0 16px 12px;
+  border-radius: 4px;
+  border: 1px solid #331c1c;
+}
+#publish-status-box.success {
+  border-color: #1c3322;
+  color: #b8f7c8;
+}
+#publish-status-box.error {
+  border-color: #552222;
+  color: #ffb4b4;
+}
+
 /* Scene Panel styles */
 #scene-panel {
   grid-column: 2;
@@ -923,6 +1075,17 @@ body.fullscreen-active #scene-panel {
   bottom: 0;
   width: 3px;
   background: #0a84ff;
+}
+.scene-card.non-time-element {
+  flex: 0 0 120px;
+  width: 120px;
+  background: #151515;
+}
+.scene-card.non-time-element::before {
+  background: #30d158;
+}
+.scene-card.non-time-element.game-card::before {
+  background: #ffd60a;
 }
 .scene-card:hover {
   background: var(--control-hover);
@@ -1302,8 +1465,135 @@ body.file-kind-mp4 .timeline-ruler {
   cursor: not-allowed;
   opacity: 0.5;
 }
-body.file-kind-mp4 .timeline-playhead-handle {
-  cursor: not-allowed;
+#publish {
+  background: var(--accent);
+  color: #050505;
+  border: none;
+  font-weight: bold;
+}
+#publish:hover {
+  background: #ffffff;
+  color: #000000;
+  border-color: #ffffff;
+}
+#publish-dialog {
+  position: fixed;
+  inset: 0;
+  z-index: 2000;
+  display: none;
+  place-items: center;
+  padding: 18px;
+  background: rgba(0,0,0,0.65);
+}
+#publish-dialog.visible {
+  display: grid;
+}
+#publish-panel {
+  width: min(540px, 100%);
+  max-height: min(720px, calc(100vh - 36px));
+  overflow-y: auto;
+  border: 1px solid var(--line-strong);
+  border-radius: 8px;
+  background: #101010;
+  box-shadow: 0 22px 70px rgba(0,0,0,0.62);
+  display: flex;
+  flex-direction: column;
+}
+#publish-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 14px 16px;
+  border-bottom: 1px solid var(--line);
+}
+#publish-title {
+  font-weight: 650;
+  color: var(--text);
+  font-size: 13px;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+#publish-close {
+  min-height: 28px;
+  height: 28px;
+  padding: 0 10px;
+  background: rgba(255, 255, 255, 0.04);
+  border: 1px solid var(--line-strong);
+  color: var(--muted-strong);
+}
+#publish-close:hover {
+  background: rgba(255, 255, 255, 0.08);
+  color: var(--text);
+}
+#publish-form {
+  padding: 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+.form-group {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+}
+.form-group label {
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--muted-strong);
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+.form-group input[type="text"],
+.form-group input[type="number"],
+.form-group select,
+.form-group textarea {
+  padding: 8px 10px;
+  background: #080808;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  color: var(--text);
+  font-size: 12px;
+  font-family: inherit;
+  box-sizing: border-box;
+}
+.form-group input:focus,
+.form-group select:focus,
+.form-group textarea:focus {
+  border-color: var(--accent);
+}
+#new-course-fields {
+  display: none;
+  flex-direction: column;
+  gap: 12px;
+  padding: 12px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: rgba(255,255,255,0.015);
+  margin-top: 2px;
+}
+#publish-status {
+  font-size: 12px;
+  padding: 10px 12px;
+  border-radius: 6px;
+  display: none;
+  line-height: 1.4;
+  white-space: pre-wrap;
+}
+#publish-status.info {
+  background: rgba(10, 132, 255, 0.1);
+  border: 1px solid rgba(10, 132, 255, 0.25);
+  color: #0a84ff;
+}
+#publish-status.success {
+  background: rgba(48, 209, 88, 0.1);
+  border: 1px solid rgba(48, 209, 88, 0.25);
+  color: #30d158;
+}
+#publish-status.error {
+  background: rgba(255, 69, 58, 0.1);
+  border: 1px solid rgba(255, 69, 58, 0.25);
+  color: #ff453a;
 }
 </style>
 </head>
@@ -1425,6 +1715,7 @@ body.file-kind-mp4 .timeline-playhead-handle {
         </div>
       </div>
     </div>
+    <button id="publish" type="button" style="grid-column: 1 / -1; width: 100%;">Publish</button>
   </div>
   <div id="job-status" role="status" aria-live="polite">
     <span id="job-status-text"></span>
@@ -1538,6 +1829,82 @@ body.file-kind-mp4 .timeline-playhead-handle {
     </div>
   </div>
 </div>
+<div id="publish-dialog" role="dialog" aria-modal="true" aria-labelledby="publish-title">
+  <div id="publish-panel">
+    <div id="publish-header">
+      <div id="publish-title">Publish to course website</div>
+      <button id="publish-close" type="button">Close</button>
+    </div>
+    <form id="publish-form">
+      <div id="publish-form-content">
+        <div class="form-group">
+          <label for="publish-course-select">Course</label>
+          <select id="publish-course-select" required>
+            <option value="">-- Select Course --</option>
+            <option value="__new__">[Create New Course]</option>
+          </select>
+        </div>
+        
+        <div id="new-course-fields" style="display: none; border-left: 2px solid var(--line-strong); padding-left: 12px; margin-bottom: 8px;">
+          <div class="form-group">
+            <label for="publish-new-course-slug">New Course Slug</label>
+            <input type="text" id="publish-new-course-slug" placeholder="e.g. system-design">
+          </div>
+          <div class="form-group">
+            <label for="publish-new-course-title">New Course Title</label>
+            <input type="text" id="publish-new-course-title" placeholder="e.g. System Design Foundation">
+          </div>
+          <div class="form-group">
+            <label for="publish-new-course-desc">New Course Description</label>
+            <textarea id="publish-new-course-desc" placeholder="Course description..."></textarea>
+          </div>
+          <div class="form-group checkbox-group">
+            <input type="checkbox" id="publish-new-course-published" checked>
+            <label for="publish-new-course-published">Publish Course catalog</label>
+          </div>
+        </div>
+
+        <div class="form-group">
+          <label for="publish-module">Module Name</label>
+          <input type="text" id="publish-module" placeholder="e.g. Module 1: Introduction">
+        </div>
+        
+        <div class="form-row">
+          <div class="form-group">
+            <label for="publish-lecture-slug">Lecture Slug</label>
+            <input type="text" id="publish-lecture-slug" required placeholder="e.g. intro-to-databases">
+          </div>
+          <div class="form-group">
+            <label for="publish-lecture-order">Lecture Number / Order</label>
+            <input type="number" id="publish-lecture-order" min="1" placeholder="e.g. 1">
+          </div>
+        </div>
+
+        <div class="form-group">
+          <label for="publish-lecture-title">Lecture Title</label>
+          <input type="text" id="publish-lecture-title" required placeholder="e.g. Introduction to Databases">
+        </div>
+
+        <div class="form-group">
+          <label for="publish-lecture-desc">Lecture Description</label>
+          <textarea id="publish-lecture-desc" placeholder="Lecture description..."></textarea>
+        </div>
+
+        <div class="form-group checkbox-group">
+          <input type="checkbox" id="publish-lecture-published" checked>
+          <label for="publish-lecture-published">Make visible to students (Publish)</label>
+        </div>
+      </div>
+      
+      <div id="publish-status-box" style="display: none; border-top: 1px solid var(--line); padding: 12px 16px; background: #080808; font-family: monospace; font-size: 11px; max-height: 120px; overflow-y: auto; white-space: pre-wrap; margin: 0 16px 12px; border-radius: 4px; border: 1px solid #331c1c;"></div>
+
+      <div id="publish-footer">
+        <button id="publish-cancel" type="button">Cancel</button>
+        <button id="publish-submit" type="submit">Publish!</button>
+      </div>
+    </form>
+  </div>
+</div>
 <script type="module">
 import { createLecturePlayer, lectureViewerVersion } from '/lecture-viewer/player/index.mjs';
 
@@ -1580,6 +1947,25 @@ const infoCloseButton = document.getElementById('info-close');
 const infoContent = document.getElementById('info-content');
 const loadButton = document.getElementById('load');
 const reloadButton = document.getElementById('reload');
+const publishButton = document.getElementById('publish');
+const publishDialog = document.getElementById('publish-dialog');
+const publishCloseButton = document.getElementById('publish-close');
+const publishCancelButton = document.getElementById('publish-cancel');
+const publishForm = document.getElementById('publish-form');
+const publishCourseSelect = document.getElementById('publish-course-select');
+const newCourseFields = document.getElementById('new-course-fields');
+const publishNewCourseSlug = document.getElementById('publish-new-course-slug');
+const publishNewCourseTitle = document.getElementById('publish-new-course-title');
+const publishNewCourseDesc = document.getElementById('publish-new-course-desc');
+const publishNewCoursePublished = document.getElementById('publish-new-course-published');
+const publishModule = document.getElementById('publish-module');
+const publishLectureSlug = document.getElementById('publish-lecture-slug');
+const publishLectureTitle = document.getElementById('publish-lecture-title');
+const publishLectureDesc = document.getElementById('publish-lecture-desc');
+const publishLectureOrder = document.getElementById('publish-lecture-order');
+const publishLecturePublished = document.getElementById('publish-lecture-published');
+const publishStatusBox = document.getElementById('publish-status-box');
+const publishSubmitButton = document.getElementById('publish-submit');
 const playButton = document.getElementById('play');
 const seekBackButton = document.getElementById('seek-back');
 const seekForwardButton = document.getElementById('seek-forward');
@@ -2208,19 +2594,43 @@ function updateScenePanel(entries) {
 
   let activeFiles = [];
   if (currentSceneTab === 'raw') {
-    activeFiles = rawFiles;
+    activeFiles = [...rawFiles];
   } else if (currentSceneTab === 'resolved') {
-    activeFiles = resolvedFiles;
+    activeFiles = [...resolvedFiles];
   } else if (currentSceneTab === 'rendered') {
-    activeFiles = renderedFiles;
+    activeFiles = [...renderedFiles];
+  }
+
+  if (currentSceneTab === 'raw' || currentSceneTab === 'resolved') {
+    const interactiveFile = filesOnly.find(file => file.name.toLowerCase() === 'interactive.html');
+    if (interactiveFile) {
+      activeFiles.push({
+        ...interactiveFile,
+        isNonTime: true,
+        duration: 0
+      });
+    }
+    const gameFile = filesOnly.find(file => file.name.toLowerCase() === 'game.html');
+    if (gameFile) {
+      activeFiles.push({
+        ...gameFile,
+        isNonTime: true,
+        duration: 0
+      });
+    }
   }
 
   let accumulatedTime = 0;
   activeFiles.forEach(file => {
-    const dur = Number(file.duration);
-    file.duration = (Number.isFinite(dur) && dur > 0) ? dur : 15;
-    file.timelineStart = accumulatedTime;
-    accumulatedTime += file.duration;
+    if (file.isNonTime) {
+      file.duration = 0;
+      file.timelineStart = accumulatedTime;
+    } else {
+      const dur = Number(file.duration);
+      file.duration = (Number.isFinite(dur) && dur > 0) ? dur : 15;
+      file.timelineStart = accumulatedTime;
+      accumulatedTime += file.duration;
+    }
   });
   
   currentScenesList = activeFiles;
@@ -2279,15 +2689,31 @@ function updateScenePanel(entries) {
     const isCurrent = file.path === currentFilePath;
     const card = document.createElement('div');
     card.className = 'scene-card' + (isCurrent ? ' active' : '');
-    card.style.setProperty('--scene-duration', file.duration);
+    if (file.isNonTime) {
+      card.classList.add('non-time-element');
+      const isGame = file.name.toLowerCase() === 'game.html';
+      if (isGame) {
+        card.classList.add('game-card');
+      }
+    } else {
+      card.style.setProperty('--scene-duration', file.duration);
+    }
     
     const label = document.createElement('div');
     label.className = 'scene-card-label';
-    label.textContent = 'Scene ' + (index + 1);
+    if (file.isNonTime) {
+      label.textContent = file.name.toLowerCase() === 'game.html' ? 'Game' : 'Interactive';
+    } else {
+      label.textContent = 'Scene ' + (index + 1);
+    }
     
     const name = document.createElement('div');
     name.className = 'scene-card-name';
-    name.textContent = file.name + ' (' + file.duration.toFixed(1) + 's)';
+    if (file.isNonTime) {
+      name.textContent = file.name;
+    } else {
+      name.textContent = file.name + ' (' + file.duration.toFixed(1) + 's)';
+    }
     
     card.appendChild(label);
     card.appendChild(name);
@@ -2361,6 +2787,9 @@ async function seekToGlobalTime(globalTime) {
   const isMp4 = fileExtension(currentFilePath) === 'mp4';
   if (isMp4) return;
   
+  const activeScene = currentScenesList.find(file => file.path === currentFilePath);
+  if (activeScene && activeScene.isNonTime) return;
+  
   if (currentScenesList.length === 0) {
     player.seek(globalTime);
     return;
@@ -2417,13 +2846,13 @@ function updatePlayheadPosition(state = playerState()) {
   const container = document.getElementById('timeline-container');
   if (!playhead || !container) return;
   
-  if (!state.loaded || currentScenesList.length === 0) {
+  if (!state.loaded || currentScenesList.length === 0 || state.interactiveActive || state.gameActive) {
     playhead.classList.remove('visible');
     return;
   }
   
   const activeScene = currentScenesList.find(file => file.path === currentFilePath);
-  if (!activeScene) {
+  if (!activeScene || activeScene.isNonTime) {
     playhead.classList.remove('visible');
     return;
   }
@@ -2454,9 +2883,11 @@ function updatePlayheadPosition(state = playerState()) {
     currentScenesList.forEach((file, index) => {
       const card = cards[index];
       if (card) {
-        card.style.setProperty('--scene-duration', file.duration);
-        const nameDiv = card.querySelector('.scene-card-name');
-        if (nameDiv) nameDiv.textContent = file.name + ' (' + file.duration.toFixed(1) + 's)';
+        if (!file.isNonTime) {
+          card.style.setProperty('--scene-duration', file.duration);
+          const nameDiv = card.querySelector('.scene-card-name');
+          if (nameDiv) nameDiv.textContent = file.name + ' (' + file.duration.toFixed(1) + 's)';
+        }
       }
     });
     
@@ -2770,6 +3201,140 @@ function closeInfoDialog() {
   infoButton.focus();
 }
 
+function openPublishDialog() {
+  if (currentBrowserFolder) {
+    const folderName = fileBaseName(currentBrowserFolder);
+    publishLectureSlug.value = folderName.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '');
+    publishLectureTitle.value = folderName.replace(/[_-]+/g, ' ').replace(/\b\w/g, c => c.toUpperCase());
+  } else {
+    publishLectureSlug.value = '';
+    publishLectureTitle.value = '';
+  }
+  
+  publishModule.value = '';
+  publishLectureDesc.value = '';
+  publishLectureOrder.value = '';
+  publishLecturePublished.checked = true;
+  
+  publishCourseSelect.innerHTML = '<option value="">-- Select Course --</option><option value="__new__">[Create New Course]</option>';
+  publishCourseSelect.value = '';
+  newCourseFields.style.display = 'none';
+  
+  publishNewCourseSlug.value = '';
+  publishNewCourseTitle.value = '';
+  publishNewCourseDesc.value = '';
+  publishNewCoursePublished.checked = true;
+  
+  publishStatusBox.style.display = 'none';
+  publishStatusBox.textContent = '';
+  publishStatusBox.className = '';
+  
+  publishDialog.style.display = 'grid';
+  publishButton.blur();
+  
+  fetchCoursesList();
+}
+
+function closePublishDialog() {
+  publishDialog.style.display = 'none';
+  publishButton.focus();
+}
+
+async function fetchCoursesList() {
+  try {
+    const res = await fetch('/list-courses');
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || 'Failed to list courses');
+    
+    let optionsHtml = '<option value="">-- Select Course --</option><option value="__new__">[Create New Course]</option>';
+    if (data.courses && data.courses.length > 0) {
+      data.courses.forEach(course => {
+        optionsHtml += '<option value="' + course.slug + '">' + course.title + ' (' + course.slug + ')</option>';
+      });
+    }
+    publishCourseSelect.innerHTML = optionsHtml;
+  } catch (err) {
+    console.error('Error fetching courses list:', err);
+    publishStatusBox.style.display = 'block';
+    publishStatusBox.textContent = 'Warning: Could not fetch course database list: ' + err.message + '. Defaulting to [Create New Course] option.';
+    publishStatusBox.className = 'error';
+    publishCourseSelect.value = '__new__';
+    newCourseFields.style.display = 'block';
+  }
+}
+
+function handleCourseSelectChange() {
+  const isNew = publishCourseSelect.value === '__new__';
+  newCourseFields.style.display = isNew ? 'block' : 'none';
+  if (isNew) {
+    publishNewCourseSlug.required = true;
+    publishNewCourseTitle.required = true;
+  } else {
+    publishNewCourseSlug.required = false;
+    publishNewCourseTitle.required = false;
+  }
+}
+
+async function handlePublishSubmit(event) {
+  event.preventDefault();
+  
+  const course = publishCourseSelect.value;
+  if (!course) {
+    alert('Please select or create a course.');
+    return;
+  }
+  
+  if (!currentBrowserFolder) {
+    alert('No active folder selected.');
+    return;
+  }
+  
+  publishSubmitButton.disabled = true;
+  publishSubmitButton.textContent = 'Publishing...';
+  publishStatusBox.style.display = 'block';
+  publishStatusBox.className = '';
+  publishStatusBox.textContent = 'Starting publish process...\\n';
+  
+  const payload = {
+    course: course === '__new__' ? publishNewCourseSlug.value : course,
+    slug: publishLectureSlug.value,
+    title: publishLectureTitle.value,
+    description: publishLectureDesc.value,
+    module: publishModule.value,
+    order: publishLectureOrder.value,
+    published: publishLecturePublished.checked,
+    sourceDir: currentBrowserFolder
+  };
+  
+  if (course === '__new__') {
+    payload.courseTitle = publishNewCourseTitle.value;
+    payload.courseDescription = publishNewCourseDesc.value;
+    payload.coursePublished = publishNewCoursePublished.checked;
+  }
+  
+  try {
+    const res = await fetch('/publish-lecture', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload)
+    });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || 'Publish failed');
+    
+    publishStatusBox.className = 'success';
+    publishStatusBox.textContent = 'Successfully published!\\n\\n' + (data.output || '');
+    playNotificationSound(true);
+    refreshFolderFiles();
+  } catch (err) {
+    publishStatusBox.className = 'error';
+    publishStatusBox.textContent = 'Error publishing lecture:\\n' + err.message;
+    playNotificationSound(false);
+  } finally {
+    publishSubmitButton.disabled = false;
+    publishSubmitButton.textContent = 'Publish!';
+  }
+}
+
 function isFullscreenActive() {
   return Boolean(document.fullscreenElement);
 }
@@ -2833,13 +3398,25 @@ function updateControls(state = playerState()) {
   subtitlesToggle.setAttribute('aria-pressed', state.subtitlesEnabled ? 'true' : 'false');
   liveTtsToggle.classList.toggle('active', state.liveTtsEnabled);
   liveTtsToggle.setAttribute('aria-pressed', state.liveTtsEnabled ? 'true' : 'false');
-  interactiveMarker.classList.toggle('visible', state.interactiveTimeline.length > 0);
-  gameMarker.classList.toggle('visible', state.gameTimeline.length > 0);
+  
+  const hasInteractiveFile = globalEntries.some(file => file.type === 'file' && file.name.toLowerCase() === 'interactive.html');
+  const hasGameFile = globalEntries.some(file => file.type === 'file' && file.name.toLowerCase() === 'game.html');
+
+  interactiveMarker.classList.toggle('visible', hasInteractiveFile || state.interactiveTimeline.length > 0);
+  gameMarker.classList.toggle('visible', hasGameFile || state.gameTimeline.length > 0);
   
   const isMp4 = fileExtension(currentFilePath) === 'mp4';
-  scrubber.disabled = isMp4;
-  seekBackButton.disabled = isMp4;
-  seekForwardButton.disabled = isMp4;
+  const isNonTime = state.interactiveActive || state.gameActive;
+  
+  scrubber.disabled = isMp4 || isNonTime;
+  seekBackButton.disabled = isMp4 || isNonTime;
+  seekForwardButton.disabled = isMp4 || isNonTime;
+  playButton.disabled = isNonTime;
+  
+  viewportPreset.disabled = isNonTime;
+  if (isNonTime) {
+    setPreviewViewport(1920, 1080);
+  }
   
   updatePlayheadPosition(state);
 }
@@ -2970,6 +3547,10 @@ function seekFromPointer(event) {
 }
 
 function handleViewerShortcut(event) {
+  const state = playerState();
+  if (state.interactiveActive || state.gameActive) {
+    return;
+  }
   const isSpace = event.code === 'Space' || event.key === ' ' || event.key === 'Spacebar';
   const target = event.target;
   const isTextInput = target instanceof HTMLInputElement ||
@@ -3067,6 +3648,14 @@ infoCloseButton.addEventListener('click', closeInfoDialog);
 infoDialog.addEventListener('click', event => {
   if (event.target === infoDialog) closeInfoDialog();
 });
+publishButton.addEventListener('click', openPublishDialog);
+publishCloseButton.addEventListener('click', closePublishDialog);
+publishCancelButton.addEventListener('click', closePublishDialog);
+publishDialog.addEventListener('click', event => {
+  if (event.target === publishDialog) closePublishDialog();
+});
+publishCourseSelect.addEventListener('change', handleCourseSelectChange);
+publishForm.addEventListener('submit', handlePublishSubmit);
 reloadButton.addEventListener('click', () => loadFile());
 resolveMenuToggle.addEventListener('click', event => {
   event.stopPropagation();
@@ -3123,22 +3712,42 @@ scrubber.addEventListener('click', seekFromPointer);
 interactiveMarker.addEventListener('pointerdown', event => {
   event.preventDefault();
   event.stopPropagation();
-  player.seekToInteractive();
+  const interactiveFile = globalEntries.find(file => file.type === 'file' && file.name.toLowerCase() === 'interactive.html');
+  if (interactiveFile) {
+    loadFile(interactiveFile.path);
+  } else {
+    player.seekToInteractive();
+  }
 });
 interactiveMarker.addEventListener('click', event => {
   event.preventDefault();
   event.stopPropagation();
-  player.seekToInteractive();
+  const interactiveFile = globalEntries.find(file => file.type === 'file' && file.name.toLowerCase() === 'interactive.html');
+  if (interactiveFile) {
+    loadFile(interactiveFile.path);
+  } else {
+    player.seekToInteractive();
+  }
 });
 gameMarker.addEventListener('pointerdown', event => {
   event.preventDefault();
   event.stopPropagation();
-  player.seekToGame();
+  const gameFile = globalEntries.find(file => file.type === 'file' && file.name.toLowerCase() === 'game.html');
+  if (gameFile) {
+    loadFile(gameFile.path);
+  } else {
+    player.seekToGame();
+  }
 });
 gameMarker.addEventListener('click', event => {
   event.preventDefault();
   event.stopPropagation();
-  player.seekToGame();
+  const gameFile = globalEntries.find(file => file.type === 'file' && file.name.toLowerCase() === 'game.html');
+  if (gameFile) {
+    loadFile(gameFile.path);
+  } else {
+    player.seekToGame();
+  }
 });
 speedSelect.addEventListener('change', () => {
   player.setSpeed(Number(speedSelect.value) || 1);
@@ -3159,9 +3768,14 @@ document.addEventListener('mousemove', event => {
 });
 document.addEventListener('keydown', handleViewerShortcut, true);
 document.addEventListener('keydown', event => {
-  if (event.key === 'Escape' && infoDialog.classList.contains('visible')) {
-    event.preventDefault();
-    closeInfoDialog();
+  if (event.key === 'Escape') {
+    if (infoDialog.classList.contains('visible')) {
+      event.preventDefault();
+      closeInfoDialog();
+    } else if (publishDialog && publishDialog.style.display === 'grid') {
+      event.preventDefault();
+      closePublishDialog();
+    }
   }
 });
 if ('speechSynthesis' in window) {
@@ -3301,7 +3915,8 @@ async function sendChat() {
       },
       body: JSON.stringify({
         message: msg,
-        currentFile: currentFilePath
+        currentFile: currentFilePath,
+        currentDir: currentBrowserFolder
       })
     });
     

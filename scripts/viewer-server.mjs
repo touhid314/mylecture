@@ -1078,6 +1078,7 @@ const server = createServer(async (request, response) => {
           const payload = JSON.parse(bodyData || '{}');
           const message = payload.message || '';
           const currentFile = payload.currentFile || '';
+          const currentDir = payload.currentDir || '';
 
           if (!message) {
             sendJson(response, 400, { error: 'Missing message parameter.' });
@@ -1099,7 +1100,11 @@ const server = createServer(async (request, response) => {
           let task = '';
           if (currentFile) {
             const relPath = path.relative(rootDir, resolveInputPath(currentFile)).replaceAll(path.sep, '/');
-            task = `[Context: The user is currently viewing the file "${relPath}" in the editor. Use this as the target file if they refer to "this file", "the script", "the code", or "the HTML".]\n\n`;
+            task += `[Context: The user is currently viewing the file "${relPath}" in the editor. Use this as the target file if they refer to "this file", "the script", "the code", or "the HTML".]\n\n`;
+          }
+          if (currentDir) {
+            const relDir = path.relative(rootDir, resolveInputPath(currentDir)).replaceAll(path.sep, '/') || '.';
+            task += `[Context: The folder browser is currently in the directory "${relDir}" of the repository.]\n\n`;
           }
           task += message;
 
@@ -1169,6 +1174,155 @@ const server = createServer(async (request, response) => {
               sendJson(response, 500, { error: output || `Agent exited with code ${code}` });
             }
           });
+        } catch (error) {
+          sendJson(response, 500, { error: error.message });
+        }
+      });
+    } catch (error) {
+      sendJson(response, 500, { error: error.message });
+    }
+    return;
+  }
+
+  if (requestUrl.pathname === '/list-courses') {
+    try {
+      const websiteDir = path.resolve(rootDir, '../mylecture-website');
+      const output = await runCapture('node', ['scripts/admin.mjs', 'list'], {
+        cwd: websiteDir,
+        env: { ...process.env, NO_COLOR: '1' }
+      });
+
+      const lines = output.split(/\r?\n/);
+      const courses = [];
+      for (const line of lines) {
+        const match = line.match(/^\[(published|draft)\]\s+([^\s]+)\s+-\s+(.+)$/);
+        if (match) {
+          courses.push({
+            published: match[1] === 'published',
+            slug: match[2],
+            title: match[3]
+          });
+        }
+      }
+
+      sendJson(response, 200, { ok: true, courses });
+    } catch (error) {
+      sendJson(response, 500, { error: error.message });
+    }
+    return;
+  }
+
+  if (requestUrl.pathname === '/publish-lecture') {
+    try {
+      let bodyData = '';
+      request.on('data', chunk => { bodyData += chunk; });
+      request.on('end', async () => {
+        try {
+          const payload = JSON.parse(bodyData || '{}');
+          
+          const course = payload.course || '';
+          const slug = payload.slug || '';
+          const title = payload.title || '';
+          const description = payload.description || '';
+          const moduleName = payload.module || '';
+          const order = payload.order || '';
+          const thumbnailUrl = payload.thumbnailUrl || '';
+          const published = payload.published ? 'true' : 'false';
+          
+          const courseTitle = payload.courseTitle || '';
+          const courseDescription = payload.courseDescription || '';
+          const coursePublished = payload.coursePublished !== undefined ? (payload.coursePublished ? 'true' : 'false') : null;
+          
+          const sourceDirRaw = payload.sourceDir || '';
+          if (!sourceDirRaw) {
+            sendJson(response, 400, { error: 'Missing source directory.' });
+            return;
+          }
+          
+          const sourceDir = resolveInputPath(sourceDirRaw);
+          if (!existsSync(sourceDir) || !statSync(sourceDir).isDirectory()) {
+            sendJson(response, 400, { error: `Directory does not exist: ${sourceDirRaw}` });
+            return;
+          }
+
+          const args = [
+            'scripts/admin.mjs',
+            'upload-lecture',
+            '--course', course,
+            '--slug', slug,
+            '--title', title,
+            '--source-dir', sourceDir,
+            '--published', published
+          ];
+
+          if (description) args.push('--description', description);
+          if (moduleName) args.push('--module', moduleName);
+          if (order) args.push('--order', order);
+          if (thumbnailUrl) args.push('--thumbnail-url', thumbnailUrl);
+
+          if (courseTitle) args.push('--course-title', courseTitle);
+          if (courseDescription) args.push('--course-description', courseDescription);
+          if (coursePublished !== null) args.push('--course-published', coursePublished);
+
+          const websiteDir = path.resolve(rootDir, '../mylecture-website');
+          
+          console.log(`Starting publish process: node ${args.map(a => `"${a}"`).join(' ')}`);
+
+          let stdout = '';
+          let stderr = '';
+          let childProc = null;
+
+          activeJob = {
+            type: 'publish',
+            kill: () => {
+              activeJob.aborted = true;
+              if (childProc) killProcessTree(childProc);
+            }
+          };
+
+          const child = spawn('node', args, {
+            cwd: websiteDir,
+            stdio: ['ignore', 'pipe', 'pipe'],
+            windowsHide: true,
+            env: {
+              ...process.env,
+              NO_COLOR: '1'
+            }
+          });
+          childProc = child;
+
+          child.stdout.on('data', chunk => {
+            const str = chunk.toString();
+            stdout += str;
+            console.log(str.trim());
+          });
+
+          child.stderr.on('data', chunk => {
+            const str = chunk.toString();
+            stderr += str;
+            console.error(str.trim());
+          });
+
+          child.on('error', err => {
+            activeJob = null;
+            sendJson(response, 500, { error: err.message });
+          });
+
+          child.on('close', code => {
+            activeJob = null;
+            if (code === 0) {
+              sendJson(response, 200, { ok: true, output: stdout.trim() });
+            } else {
+              const output = `${stdout}\n${stderr}`
+                .split(/\r?\n/)
+                .map(line => line.trim())
+                .filter(Boolean)
+                .slice(-80)
+                .join('\n');
+              sendJson(response, 500, { error: output || `Publish exited with code ${code}` });
+            }
+          });
+
         } catch (error) {
           sendJson(response, 500, { error: error.message });
         }

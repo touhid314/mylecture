@@ -346,7 +346,7 @@ class LecturePlayer {
   handleFrameLoad() {
     try {
       const win = this.iframe.contentWindow;
-      
+
       // Check if loading an MP4 file
       const isMp4 = String(this.state.src || '').toLowerCase().endsWith('.mp4');
       if (isMp4) {
@@ -356,7 +356,7 @@ class LecturePlayer {
           this.nativeVideo = videoEl;
           this.nativeVideo.playbackRate = this.speed;
           this.nativeVideo.defaultPlaybackRate = this.speed;
-          
+
           const onMetadata = () => {
             const duration = videoEl.duration || 0;
             this.state.duration = duration;
@@ -372,18 +372,18 @@ class LecturePlayer {
             this.state.subtitleTimeline = [];
             this.state.interactiveTimeline = [];
             this.state.gameTimeline = [];
-            
+
             const snapshot = this.snapshot();
             this.emit('ready', snapshot);
             this.emit('statechange', snapshot);
           };
-          
+
           if (videoEl.readyState >= 1) { // HAVE_METADATA or higher
             onMetadata();
           } else {
             videoEl.addEventListener('loadedmetadata', onMetadata, { once: true });
           }
-          
+
           videoEl.onplay = () => {
             if (!this.state.playing) {
               this.state.playing = true;
@@ -402,7 +402,7 @@ class LecturePlayer {
             this.state.time = videoEl.currentTime;
             this.emit('timeupdate', this.snapshot());
           };
-          
+
           videoEl.onended = () => {
             this.state.playing = false;
             this.state.completed = true;
@@ -425,8 +425,12 @@ class LecturePlayer {
         Number(win.__RESOLVED_TIMELINE__?.duration) ||
         (timeline.at(-1)?.end || 0);
 
-      const isGameOnly = typeof win.__START_GAME__ === 'function';
-      const isInteractiveOnly = typeof win.__START_INTERACTIVE__ === 'function';
+      const cleanSrcPath = String(this.state.src || '').split('?')[0].toLowerCase();
+      const isInteractiveFile = cleanSrcPath.endsWith('/interactive.html');
+      const isGameFile = cleanSrcPath.endsWith('/game.html');
+
+      const isGameOnly = typeof win.__START_GAME__ === 'function' || isGameFile;
+      const isInteractiveOnly = typeof win.__START_INTERACTIVE__ === 'function' || isInteractiveFile;
 
       if (!timeline.length || !Number.isFinite(duration) || duration <= 0) {
         if (!isGameOnly && !isInteractiveOnly) {
@@ -443,12 +447,14 @@ class LecturePlayer {
       this.state.duration = isGameOnly || isInteractiveOnly ? 0 : duration;
       this.state.loaded = true;
       this.state.resolved = typeof win.renderAt === 'function' || isGameOnly || isInteractiveOnly;
-      
+
       if (!isGameOnly && !isInteractiveOnly) {
         this.renderAt(0);
       }
 
-      const detectedViewport = detectMetadataViewport(win) || detectDocumentViewport(win);
+      const detectedViewport = (isGameOnly || isInteractiveOnly)
+        ? { width: 1920, height: 1080 }
+        : (detectMetadataViewport(win) || detectDocumentViewport(win));
       const snapshot = { ...this.snapshot(), detectedViewport };
       this.emit('ready', snapshot);
       this.emit('statechange', snapshot);
@@ -733,7 +739,7 @@ class LecturePlayer {
       this.state.time = targetTime;
       this.nativeVideo.currentTime = targetTime;
       this.state.completed = targetTime >= this.state.duration;
-      
+
       if (shouldResume) {
         this.state.playing = true;
         this.nativeVideo.play().catch(e => {
@@ -770,11 +776,17 @@ class LecturePlayer {
     const win = this.iframe.contentWindow;
     const interactive = this.state.interactiveTimeline[0]?.item || { id: 'interactive' };
     if (this.state.gameActive) this.stopGameSection();
-    if (typeof win.__START_INTERACTIVE__ === 'function') {
+
+    const cleanSrcPath = String(this.state.src || '').split('?')[0].toLowerCase();
+    const isInteractiveFile = cleanSrcPath.endsWith('/interactive.html');
+
+    if (typeof win.__START_INTERACTIVE__ === 'function' || isInteractiveFile) {
       this.state.interactiveActive = true;
       this.stopLiveTts();
       this.updateSubtitleOverlay();
-      win.__START_INTERACTIVE__(interactive);
+      if (typeof win.__START_INTERACTIVE__ === 'function') {
+        win.__START_INTERACTIVE__(interactive);
+      }
       this.setStatus('Interactive: ' + (interactive.title || interactive.id || 'ready'));
       this.emit('interactive', interactive);
       return;
@@ -793,11 +805,17 @@ class LecturePlayer {
     const win = this.iframe.contentWindow;
     const game = this.state.gameTimeline[0]?.item || { id: 'game' };
     if (this.state.interactiveActive) this.stopInteractiveSection();
-    if (typeof win.__START_GAME__ === 'function') {
+
+    const cleanSrcPath = String(this.state.src || '').split('?')[0].toLowerCase();
+    const isGameFile = cleanSrcPath.endsWith('/game.html');
+
+    if (typeof win.__START_GAME__ === 'function' || isGameFile) {
       this.state.gameActive = true;
       this.stopLiveTts();
       this.updateSubtitleOverlay();
-      win.__START_GAME__(game);
+      if (typeof win.__START_GAME__ === 'function') {
+        win.__START_GAME__(game);
+      }
       this.setStatus('Game: ' + (game.title || game.id || 'ready'));
       this.emit('game', game);
     }
