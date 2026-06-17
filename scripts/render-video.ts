@@ -1,3 +1,4 @@
+// @ts-nocheck
 import { chromium } from 'playwright';
 import { spawn } from 'node:child_process';
 import os from 'node:os';
@@ -276,7 +277,7 @@ async function resolveRenderableHtml(htmlPath, args) {
   console.log(`Building resolved HTML: ${resolvedPath}`);
 
   const buildArgs = [
-    'scripts/build-plan.mjs',
+    'scripts/build-plan.ts',
     '--input', htmlPath,
     '--out', resolvedPath,
     '--provider', args.ttsProvider,
@@ -286,7 +287,7 @@ async function resolveRenderableHtml(htmlPath, args) {
   ];
 
   if (args.forceAudio) buildArgs.push('--force-audio');
-  await run('node', buildArgs);
+  await run(process.execPath, ['--import', 'tsx', ...buildArgs]);
   return resolvedPath;
 }
 

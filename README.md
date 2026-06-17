@@ -37,8 +37,8 @@ python -c "from huggingface_hub import snapshot_download; snapshot_download('onn
 npm run render:video
 npm run render:video -- --html tests/fixtures/input-contract-test/index.html --out tests/fixtures/input-contract-test/rendered.mp4
 npm run build:plan -- --input tests/fixtures/input-contract-test/index.html --out tests/fixtures/input-contract-test/resolved.html
-npm run view -- --file outputs/bloomfilter/resolved.html
-npm run view -- --file outputs/dijkstras-algorithm/index.html --open
+npm run ide -- --file outputs/bloomfilter/resolved.html
+npm run ide -- --file outputs/dijkstras-algorithm/index.html --open
 npm test
 ```
 
@@ -64,8 +64,8 @@ The resolver writes a generated `lastResolved` timestamp into `window.__VIDEO_ME
 Renderer-friendly source HTML is deterministic but not always auto-playable. Use the local viewer to play, pause, and scrub either source or resolved render HTML:
 
 ```bash
-npm run view
-npm run view -- --file outputs/bloomfilter/resolved.html
+npm run ide
+npm run ide -- --file outputs/bloomfilter/resolved.html
 ```
 
 Resolved files preview with the real timeline and audio cues. Source files without a resolved timeline use estimated narration durations for visual preview.
@@ -96,7 +96,7 @@ player.play();
 player.seek(12.5);
 ```
 
-The local viewer is now one host UI around that player core; server-only behavior such as `/pick`, `/files`, and `/viewer-state` stays in `scripts/viewer-server.mjs`.
+The local IDE server is now one host UI around that player core; server-only behavior such as `/pick`, `/files`, and `/viewer-state` stays in `scripts/ide-server.ts`.
 
 ## Rendering
 

@@ -5,7 +5,7 @@ Reusable viewer runtime for contract-compliant lecture HTML.
 This package is split into two concerns:
 
 - `src/player/index.mjs`: the reusable player core.
-- `src/viewer-html.mjs`: the default local viewer UI used by `scripts/viewer-server.mjs`.
+- `src/viewer-html.mjs`: the default local viewer UI used by `scripts/ide-server.ts`.
 
 The player core can be embedded by an IDE, website, or custom app. The local viewer UI is only one host around that core.
 
@@ -117,7 +117,7 @@ That default UI includes file loading, play/pause, scrubber, subtitles, Live TTS
 
 ## Local Server
 
-The package does not require `scripts/viewer-server.mjs`.
+The package does not require `scripts/ide-server.ts`.
 
 That script is a repo-local development host. It provides browser access to local files and conveniences that are not part of the reusable player core:
 

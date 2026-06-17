@@ -1,3 +1,4 @@
+// @ts-nocheck
 import { createReadStream, existsSync, mkdirSync, readdirSync, readFileSync, rmSync, statSync, unlinkSync, writeFileSync } from 'node:fs';
 import { createServer } from 'node:http';
 import { spawn } from 'node:child_process';
@@ -98,7 +99,7 @@ function parseArgs(argv) {
 
 function printHelp() {
   console.log(`Usage:
-  node scripts/viewer-server.mjs [options]
+  npm run ide -- [options]
 
 Options:
   --port <number>   Local server port. Default: ${defaultPort}
@@ -399,8 +400,10 @@ async function resolveLectureFile(filePath, options = {}) {
 
     try {
       console.log(`Resolving scene: ${file} -> ${path.basename(fileOutPath)}`);
-      await runCapture('node', [
-        'scripts/build-plan.mjs',
+      await runCapture(process.execPath, [
+        '--import',
+        'tsx',
+        'scripts/build-plan.ts',
         '--input', fileInputPath,
         '--out', fileOutPath,
         '--provider', provider,
@@ -442,7 +445,7 @@ function renderArgsForFile(inputPath, outPath, options = {}, extraArgs = []) {
   const voice = normalizeTtsVoice(options.ttsVoice);
   const provider = detectProvider(voice);
   const renderArgs = [
-    'scripts/render-video.mjs',
+    'scripts/render-video.ts',
     '--html', inputPath,
     '--out', outPath,
     '--fps', normalizePositiveInteger(options.fps, 60, 1, 240),
@@ -468,7 +471,7 @@ function buildPlanArgsForIndex(inputPath, outPath, options = {}) {
   const voice = normalizeTtsVoice(options.ttsVoice);
   const provider = detectProvider(voice);
   return [
-    'scripts/build-plan.mjs',
+    'scripts/build-plan.ts',
     '--input', inputPath,
     '--out', outPath,
     '--provider', provider,
@@ -568,7 +571,7 @@ async function renderLectureFile(filePath, options = {}) {
   };
 
   try {
-    await runCapture('node', renderArgs, {
+    await runCapture(process.execPath, ['--import', 'tsx', ...renderArgs], {
       cwd: rootDir,
       windowsHide: true,
       onSpawn: (child) => {
@@ -627,7 +630,7 @@ async function renderLectureBatch(inputPath, sceneFiles, options = {}) {
         let childProc = null;
         console.log(`Resolving scene ${index + 1}/${sceneFiles.length}: ${path.basename(scenePath)} -> ${path.basename(resolvedPath)}`);
         try {
-          await runCapture('node', buildArgs, {
+          await runCapture(process.execPath, ['--import', 'tsx', ...buildArgs], {
             cwd: rootDir,
             windowsHide: true,
             onSpawn: (child) => {
@@ -662,7 +665,7 @@ async function renderLectureBatch(inputPath, sceneFiles, options = {}) {
       ]);
       let childProc = null;
       console.log(`Rendering scene ${index + 1}/${sceneFiles.length}: ${path.basename(scenePath)} -> ${path.basename(sceneOutput)}`);
-      await runCapture('node', renderArgs, {
+      await runCapture(process.execPath, ['--import', 'tsx', ...renderArgs], {
         cwd: rootDir,
         windowsHide: true,
         onSpawn: (child) => {
@@ -1386,6 +1389,6 @@ server.on('error', error => {
 server.listen(args.port, '127.0.0.1', () => {
   const encodedFile = args.openPath ? `?file=${encodeURIComponent(args.openPath)}` : '';
   const url = `http://127.0.0.1:${args.port}/${encodedFile}`;
-  console.log(`Render HTML viewer running at ${url}`);
+  console.log(`IDE server running at ${url}`);
   if (args.openBrowser) openBrowser(url);
 });
