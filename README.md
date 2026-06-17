@@ -9,10 +9,10 @@ The renderer takes a contract-compliant HTML input file, resolves narration dura
 ```text
 docs/       Renderer usage and HTML input contract
 outputs/    Renderer-ready generated videos and HTML outputs
-scripts/    Node.js build and render CLIs
+src/        TypeScript CLIs, local IDE server, Python utilities, and social tools
 skills/     Local workflow notes for generating renderer-ready HTML
 tests/      Structured renderer fixtures and smoke tests
-tools/      Python support utilities, including TTS
+.agents/   Contracts, templates, examples, themes, and local agent instructions
 .render/    Temporary render artifacts
 ```
 
@@ -80,11 +80,11 @@ Viewer features:
 - `Live TTS` is enabled by default and uses Chrome Web Speech only when a narration segment has no usable audio file.
 - Click the time bar or use the 5-second buttons to seek.
 
-The reusable playback engine lives in `packages/lecture-viewer/src/player/index.mjs`.
+The reusable playback engine lives in `packages/lecture-viewer/src/player/index.ts`.
 Host UIs can import `createLecturePlayer()` and provide their own controls around an iframe:
 
 ```js
-import { createLecturePlayer } from './packages/lecture-viewer/src/player/index.mjs';
+import { createLecturePlayer } from './packages/lecture-viewer/dist/player/index.js';
 
 const player = createLecturePlayer({
   iframe: document.querySelector('iframe'),
@@ -96,7 +96,7 @@ player.play();
 player.seek(12.5);
 ```
 
-The local IDE server is now one host UI around that player core; server-only behavior such as `/pick`, `/files`, and `/viewer-state` stays in `scripts/ide-server.ts`.
+The local IDE server is now one host UI around that player core; server-only behavior such as `/pick`, `/files`, and `/viewer-state` stays in `src/ide-server.ts`.
 
 ## Rendering
 

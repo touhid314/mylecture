@@ -4,8 +4,8 @@ Reusable viewer runtime for contract-compliant lecture HTML.
 
 This package is split into two concerns:
 
-- `src/player/index.mjs`: the reusable player core.
-- `src/viewer-html.mjs`: the default local viewer UI used by `scripts/ide-server.ts`.
+- `src/player/index.ts`: the reusable player core.
+- `src/viewer-html.ts`: the default local viewer UI used by `src/ide-server.ts`.
 
 The player core can be embedded by an IDE, website, or custom app. The local viewer UI is only one host around that core.
 
@@ -76,8 +76,6 @@ player.on('ready', state => {});
 player.on('statechange', state => {});
 player.on('timeupdate', state => {});
 player.on('ended', state => {});
-player.on('interactive', segment => {});
-player.on('game', segment => {});
 player.on('status', message => {});
 player.on('error', error => {});
 ```
@@ -94,8 +92,6 @@ Common state fields:
   timeline,
   audioTimeline,
   subtitleTimeline,
-  interactiveTimeline,
-  gameTimeline,
   resolved,
   subtitlesEnabled,
   liveTtsEnabled,
@@ -117,7 +113,7 @@ That default UI includes file loading, play/pause, scrubber, subtitles, Live TTS
 
 ## Local Server
 
-The package does not require `scripts/ide-server.ts`.
+The package does not require `src/ide-server.ts`.
 
 That script is a repo-local development host. It provides browser access to local files and conveniences that are not part of the reusable player core:
 
