@@ -1,4 +1,14 @@
 // @ts-nocheck
+/**
+ * build-plan.ts
+ * Summer 2026, Touhidul Islam
+ *
+ * Resolves a source lecture HTML file into a renderable HTML file.
+ * The source page exposes a video plan on window.__VIDEO_PLAN__. This script
+ * reads that plan in Playwright, generates or reuses narration audio,
+ * measures audio duration with ffprobe, builds the resolved timelines,
+ * and injects the runtime metadata needed by the renderer and IDE.
+ */
 import { chromium } from 'playwright';
 import { spawn } from 'node:child_process';
 import os from 'node:os';
@@ -8,6 +18,8 @@ import { pathToFileURL } from 'node:url';
 
 const rootDir = process.cwd();
 
+// Worker defaults are intentionally based on local machine capacity, except Kokoro
+// TTS is capped lower because concurrent model startup can be expensive.
 function defaultWorkerCount() {
   return Math.max(1, os.cpus()?.length || 1);
 }
@@ -16,6 +28,7 @@ function defaultAudioWorkerCount(provider) {
   return provider === 'kokoro' ? 6 : defaultWorkerCount();
 }
 
+// Parse CLI options for resolving source HTML into timeline-ready HTML.
 function parseArgs(argv) {
   const args = {
     input: path.join('tests', 'fixtures', 'plan-pipeline', 'source.html'),
@@ -64,6 +77,7 @@ function parseArgs(argv) {
   return args;
 }
 
+// Human-facing CLI help kept close to parseArgs so option behavior is easy to audit.
 function printHelp() {
   console.log(`Usage:
   npm run build:plan -- [options]
@@ -79,6 +93,7 @@ Options:
 `);
 }
 
+// Run a child command while streaming its output directly to this process.
 function run(command, args, options = {}) {
   return new Promise((resolve, reject) => {
     const child = spawn(command, args, {
@@ -95,6 +110,7 @@ function run(command, args, options = {}) {
   });
 }
 
+// Run a child command and return stdout, used for tools where the output is data.
 function runCapture(command, args, options = {}) {
   return new Promise((resolve, reject) => {
     const child = spawn(command, args, {
@@ -115,18 +131,22 @@ function runCapture(command, args, options = {}) {
   });
 }
 
+// Resolve user-provided paths relative to the repository root.
 function resolveProjectPath(inputPath) {
   return path.resolve(rootDir, inputPath);
 }
 
+// HTML references should be slash-separated even on Windows.
 function toPosixRelative(fromFile, targetFile) {
   return path.relative(path.dirname(fromFile), targetFile).split(path.sep).join('/');
 }
 
+// Safely embed JSON into an HTML script tag without allowing a raw "<" escape hatch.
 function jsString(value) {
   return JSON.stringify(value).replace(/</g, '\\u003c');
 }
 
+// Accept legacy and shorthand section names while normalizing to the resolver contract.
 function normalizeSectionKind(kind) {
   if (kind === 'visual-only' || kind === 'visual') return 'visual-only';
   if (kind === 'narration+visual' || kind === 'narration') return 'narration+visual';
@@ -135,6 +155,7 @@ function normalizeSectionKind(kind) {
   return kind;
 }
 
+// Narration sections default to audio/<section-id>.wav and only write WAV files.
 function normalizeAudioRequest(requestedAudio, sectionId) {
   const rawAudio = requestedAudio || `audio/${sectionId}.wav`;
   const parsed = path.parse(rawAudio);
@@ -150,6 +171,7 @@ function normalizeAudioRequest(requestedAudio, sectionId) {
   return path.join(parsed.dir, `${parsed.name}.wav`);
 }
 
+// File existence checks are wrapped because statSync throws for missing paths.
 function isFile(pathName) {
   try {
     return statSync(pathName).isFile();
@@ -158,6 +180,7 @@ function isFile(pathName) {
   }
 }
 
+// Load the source HTML in Chromium so the plan is read after the page's scripts run.
 async function readPlanFromHtml(inputPath) {
   const browser = await chromium.launch({
     args: ['--allow-file-access-from-files']
@@ -167,11 +190,7 @@ async function readPlanFromHtml(inputPath) {
 
   page.on('pageerror', error => errors.push(error.message));
   await page.goto(pathToFileURL(inputPath).href, { waitUntil: 'load' });
-  const plan = await page.evaluate(() => (
-    window.__VIDEO_PLAN__ ||
-    window.__HTML_VIDEO_PLAN__ ||
-    window.__AI_VIDEO_PLAN__
-  ));
+  const plan = await page.evaluate(() => window.__VIDEO_PLAN__);
   await browser.close();
 
   if (errors.length > 0) {
@@ -184,6 +203,8 @@ async function readPlanFromHtml(inputPath) {
   return plan;
 }
 
+// Single-file TTS helper retained for direct generation paths; batch generation below
+// is the main path for normal resolve runs.
 async function generateAudio({ text, outputPath, provider, voice, speed }) {
   const code = [
     'import os',
@@ -214,6 +235,7 @@ async function generateAudio({ text, outputPath, provider, voice, speed }) {
   });
 }
 
+// Generate missing narration audio in one Python process to avoid repeated model loads.
 async function runAudioJobs(audioJobs, maxWorkers) {
   if (audioJobs.length === 0) return;
 
@@ -279,6 +301,7 @@ async function runAudioJobs(audioJobs, maxWorkers) {
   }
 }
 
+// ffprobe gives the actual narration length; this drives the final timeline timing.
 async function measureAudioDuration(audioPath) {
   const output = await runCapture('ffprobe', [
     '-v', 'error',
@@ -293,6 +316,7 @@ async function measureAudioDuration(audioPath) {
   return duration;
 }
 
+// Convert the authored plan into render, audio, interactive, and game timelines.
 async function resolveTimeline(plan, inputPath, outputPath, args) {
   const outputDir = path.dirname(outputPath);
 
@@ -304,6 +328,7 @@ async function resolveTimeline(plan, inputPath, outputPath, args) {
   const audioInfoBySection = new Map();
   const audioJobs = [];
 
+  // First pass: decide which narration files need to exist before timing can be resolved.
   for (const [index, section] of plan.entries()) {
     if (!section || typeof section !== 'object') {
       throw new Error(`Plan item ${index} must be an object.`);
@@ -347,6 +372,7 @@ async function resolveTimeline(plan, inputPath, outputPath, args) {
 
   await runAudioJobs(audioJobs, args.audioWorkers);
 
+  // Second pass: construct the ordered timelines now that narration durations are known.
   for (const [index, section] of plan.entries()) {
     if (!section || typeof section !== 'object') {
       throw new Error(`Plan item ${index} must be an object.`);
@@ -435,6 +461,7 @@ async function resolveTimeline(plan, inputPath, outputPath, args) {
   };
 }
 
+// Inject resolved metadata and a deterministic renderAt(time) runtime into the output HTML.
 function writeResolvedHtml(inputPath, outputPath, timeline, resolvedAt = new Date().toISOString()) {
   const source = readFileSync(inputPath, 'utf8');
   const sourceDir = path.dirname(inputPath);
@@ -536,6 +563,7 @@ function writeResolvedHtml(inputPath, outputPath, timeline, resolvedAt = new Dat
   writeFileSync(outputPath, html, 'utf8');
 }
 
+// CLI entrypoint: read source plan, resolve media/timing, and write renderable HTML.
 async function main() {
   const args = parseArgs(process.argv.slice(2));
   const inputPath = resolveProjectPath(args.input);

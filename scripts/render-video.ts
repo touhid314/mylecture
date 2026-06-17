@@ -1,4 +1,14 @@
 // @ts-nocheck
+/**
+ * render-video.ts
+ * Summer 2026, Touhidul Islam
+ *
+ * Renders a lecture HTML file to video. If the input is an unresolved plan
+ * source, this script first calls build-plan.ts to create resolved HTML.
+ * It then uses Playwright to render deterministic frames via window.renderAt,
+ * mixes narration audio with ffmpeg, and encodes the final MP4 with the best
+ * available H.264 encoder.
+ */
 import { chromium } from 'playwright';
 import { spawn } from 'node:child_process';
 import os from 'node:os';
@@ -9,14 +19,17 @@ import { pathToFileURL } from 'node:url';
 
 const rootDir = process.cwd();
 
+// Default frame-render parallelism follows the local CPU count.
 function defaultWorkerCount() {
   return Math.max(1, os.cpus()?.length || 1);
 }
 
+// Kokoro audio generation is intentionally capped lower than frame rendering.
 function defaultTtsAudioWorkerCount(provider) {
   return provider === 'kokoro' ? 6 : defaultWorkerCount();
 }
 
+// Parse render, auto-build, audio, frame, and encoder options from the CLI.
 function parseArgs(argv) {
   const args = {
     html: path.join('tests', 'fixtures', 'input-contract-test', 'index.html'),
@@ -113,6 +126,7 @@ function parseArgs(argv) {
   return args;
 }
 
+// Human-facing CLI help for the render command.
 function printHelp() {
   console.log(`Usage:
   npm run render:video -- [options]
@@ -144,6 +158,7 @@ Options:
 `);
 }
 
+// Run a child process while streaming output directly to the terminal.
 function run(command, args, options = {}) {
   return new Promise((resolve, reject) => {
     const child = spawn(command, args, {
@@ -160,6 +175,7 @@ function run(command, args, options = {}) {
   });
 }
 
+// Run a child process and capture stdout/stderr for inspection.
 function runCapture(command, args, options = {}) {
   return new Promise((resolve, reject) => {
     const child = spawn(command, args, {
@@ -180,6 +196,7 @@ function runCapture(command, args, options = {}) {
   });
 }
 
+// Run a child process and return only its exit code for encoder fallback logic.
 function runExitCode(command, args, options = {}) {
   return new Promise((resolve, reject) => {
     const child = spawn(command, args, {
@@ -193,10 +210,12 @@ function runExitCode(command, args, options = {}) {
   });
 }
 
+// Log elapsed timings consistently across render stages.
 function formatSeconds(ms) {
   return `${(ms / 1000).toFixed(2)}s`;
 }
 
+// Chromium flags keep file URLs, GPU rendering, WebGL, and background timing stable.
 function chromiumLaunchArgs() {
   return [
     '--allow-file-access-from-files',
@@ -212,54 +231,62 @@ function chromiumLaunchArgs() {
   ];
 }
 
+// Each render starts with a clean frame directory to avoid stale frames in ffmpeg input.
 function ensureCleanDir(dir) {
   rmSync(dir, { recursive: true, force: true });
   mkdirSync(dir, { recursive: true });
 }
 
+// ffmpeg expects a zero-padded numeric image sequence.
 function frameName(index, extension) {
   return `frame_${String(index).padStart(6, '0')}.${extension}`;
 }
 
+// Resolve user-provided paths relative to the current project root.
 function resolveProjectPath(inputPath) {
   return path.resolve(rootDir, inputPath);
 }
 
+// Remote assets are passed through; local assets are resolved against the HTML file.
 function isRemoteUrl(inputPath) {
   return /^[a-z][a-z0-9+.-]*:\/\//i.test(inputPath);
 }
 
+// Audio cue paths are relative to the rendered HTML's folder.
 function resolveHtmlAsset(htmlPath, assetPath) {
   if (!assetPath) return null;
   if (isRemoteUrl(assetPath)) return assetPath;
   return path.resolve(path.dirname(htmlPath), assetPath);
 }
 
+// Fail early when a required input is missing.
 function assertFileExists(filePath, label) {
   if (!existsSync(filePath)) {
     throw new Error(`${label} does not exist: ${filePath}`);
   }
 }
 
+// Source plan files need build-plan.ts before they can be rendered frame-by-frame.
 function isPlanSourceHtml(htmlPath) {
   const html = readFileSync(htmlPath, 'utf8');
   return (
-    html.includes('__VIDEO_PLAN__') ||
-    html.includes('__HTML_VIDEO_PLAN__') ||
-    html.includes('__AI_VIDEO_PLAN__')
+    html.includes('__VIDEO_PLAN__')
   ) && !html.includes('id="resolved-timeline"');
 }
 
+// Match the historical rendered*.mp4 naming convention for index/resolved variants.
 function defaultOutputPath(htmlPath) {
   const basename = path.basename(htmlPath);
   const match = basename.match(/^(?:index|resolved)(.*)\.html$/i);
   return path.join(path.dirname(htmlPath), `rendered${match?.[1] || ''}.mp4`);
 }
 
+// Auto-build defaults to a sibling resolved.html next to the source HTML.
 function defaultResolvedPath(htmlPath) {
   return path.join(path.dirname(htmlPath), 'resolved.html');
 }
 
+// Detect unresolved plan HTML and produce resolved HTML before frame capture.
 async function resolveRenderableHtml(htmlPath, args) {
   if (!args.autoBuildPlan || !isPlanSourceHtml(htmlPath)) {
     return htmlPath;
@@ -291,6 +318,7 @@ async function resolveRenderableHtml(htmlPath, args) {
   return resolvedPath;
 }
 
+// Build an ffmpeg filter graph that delays and mixes all timeline audio cues.
 function buildAudioMixArgs(audioTimeline, htmlPath, outputPath, totalDuration) {
   const inputs = [];
   const filters = [];
@@ -337,6 +365,7 @@ function buildAudioMixArgs(audioTimeline, htmlPath, outputPath, totalDuration) {
   ];
 }
 
+// Query ffmpeg once so auto codec selection can prefer available hardware encoders.
 async function availableFfmpegEncoders() {
   try {
     const { stdout, stderr } = await runCapture('ffmpeg', ['-hide_banner', '-encoders']);
@@ -346,6 +375,7 @@ async function availableFfmpegEncoders() {
   }
 }
 
+// Auto mode tries GPU encoders first and falls back to libx264.
 async function videoCodecCandidates(requestedCodec) {
   if (requestedCodec !== 'auto') return [requestedCodec];
 
@@ -355,6 +385,7 @@ async function videoCodecCandidates(requestedCodec) {
   return detected.length > 0 ? detected : ['libx264'];
 }
 
+// Encoder-specific ffmpeg arguments stay isolated so fallback behavior is simple.
 function videoCodecArgs(codec, args) {
   if (codec === 'h264_nvenc') {
     return ['-c:v', 'h264_nvenc', '-preset', 'fast'];
@@ -368,6 +399,7 @@ function videoCodecArgs(codec, args) {
   return ['-c:v', 'libx264', '-preset', args.x264Preset, '-threads', '0'];
 }
 
+// Build the final image-sequence-to-MP4 ffmpeg command.
 function buildVideoEncodeArgs({ args, codec, framesDir, fps, audioTimeline, mixedAudioPath, outputPath }) {
   const ffmpegArgs = [
     '-y',
@@ -400,6 +432,7 @@ function buildVideoEncodeArgs({ args, codec, framesDir, fps, audioTimeline, mixe
   return ffmpegArgs;
 }
 
+// Try candidate encoders in order, preserving explicit codec failures as hard errors.
 async function encodeVideoWithFallback({ args, framesDir, fps, audioTimeline, mixedAudioPath, outputPath }) {
   const candidates = await videoCodecCandidates(args.videoCodec);
 
@@ -427,6 +460,7 @@ async function encodeVideoWithFallback({ args, framesDir, fps, audioTimeline, mi
   throw new Error('No usable video encoder found.');
 }
 
+// Read the resolved timeline from the page after its scripts have initialized.
 async function getTimelineFromPage(page) {
   return await page.evaluate(() => {
     // Inject SFX for Quick Sort Comparison
@@ -448,6 +482,7 @@ async function getTimelineFromPage(page) {
   });
 }
 
+// Prepare a Playwright page with export-mode timing and animation suppression.
 async function preparePage(browser, url, width, height) {
   const page = await browser.newPage({
     viewport: { width, height },
@@ -474,6 +509,7 @@ async function preparePage(browser, url, width, height) {
   return page;
 }
 
+// Render one exact timeline frame by calling the page's deterministic renderAt(time).
 async function renderSingleFrame(page, framesDir, frame, fps, options, totalFrames) {
   const extension = options.frameFormat === 'jpeg' ? 'jpg' : 'png';
   const time = frame / fps;
@@ -496,6 +532,7 @@ async function renderSingleFrame(page, framesDir, frame, fps, options, totalFram
   }
 }
 
+// Render frames in parallel across multiple Playwright pages.
 async function renderFrames(browser, url, framesDir, frameCount, fps, args) {
   const workerCount = Math.min(args.workers, frameCount);
   const pages = await Promise.all(
@@ -513,6 +550,7 @@ async function renderFrames(browser, url, framesDir, frameCount, fps, args) {
   await Promise.all(pages.map(page => page.close()));
 }
 
+// Prefer explicit video metadata, then inspect known frame containers, then canvas size.
 async function detectPageViewport(page) {
   return await page.evaluate(() => {
     const presets = {
@@ -579,6 +617,7 @@ async function detectPageViewport(page) {
   });
 }
 
+// CLI entrypoint: resolve input, capture frames, mix audio, encode video, and clean up.
 async function main() {
   const totalStart = performance.now();
   const args = parseArgs(process.argv.slice(2));

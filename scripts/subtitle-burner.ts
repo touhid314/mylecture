@@ -1,4 +1,13 @@
 // @ts-nocheck
+/**
+ * subtitle-burner.ts
+ * Summer 2026, Touhidul Islam
+ *
+ * Burns subtitles into a rendered MP4. The script accepts an existing SRT
+ * file or can generate one with a local Whisper CLI, converts the cues to ASS
+ * styling, and invokes ffmpeg to produce either overlay captions or a padded
+ * below-video caption layout.
+ */
 import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -6,6 +15,7 @@ import { spawn } from 'node:child_process';
 
 const rootDir = process.cwd();
 
+// Parse subtitle source, layout, and temporary-file options from the CLI.
 function parseArgs(argv) {
   const args = {
     input: '',
@@ -56,6 +66,7 @@ function parseArgs(argv) {
   return args;
 }
 
+// Human-facing CLI help for subtitle burning.
 function printHelp() {
   console.log(`Usage:
   npm run subtitle:burn -- --input rendered.mp4 --srt captions.srt --out rendered-subtitled.mp4
@@ -75,20 +86,24 @@ Options:
 `);
 }
 
+// Resolve user input relative to the repository root.
 function resolveProjectPath(filePath) {
   return path.resolve(rootDir, filePath);
 }
 
+// Fail early when required media or subtitle files are missing.
 function assertFileExists(filePath, label) {
   if (!existsSync(filePath)) throw new Error(`${label} does not exist: ${filePath}`);
 }
 
+// Default output name preserves the source name and records the subtitle layout.
 function defaultOutputPath(inputPath, layout) {
   const parsed = path.parse(inputPath);
   const suffix = layout === 'below' ? '-subtitled-below' : '-subtitled';
   return path.join(parsed.dir, `${parsed.name}${suffix}.mp4`);
 }
 
+// Run a child command while streaming output directly to this process.
 function run(command, args, options = {}) {
   return new Promise((resolve, reject) => {
     const child = spawn(command, args, {
@@ -104,6 +119,7 @@ function run(command, args, options = {}) {
   });
 }
 
+// Run a child command and capture stdout/stderr for tools like ffprobe.
 function runCapture(command, args, options = {}) {
   return new Promise((resolve, reject) => {
     const child = spawn(command, args, {
@@ -123,6 +139,7 @@ function runCapture(command, args, options = {}) {
   });
 }
 
+// Read video dimensions so caption sizing and padding can be computed.
 async function probeVideo(inputPath) {
   const { stdout } = await runCapture('ffprobe', [
     '-v', 'error',
@@ -140,6 +157,7 @@ async function probeVideo(inputPath) {
   return { width, height };
 }
 
+// Convert SRT timestamps into seconds.
 function parseSrtTime(value) {
   const match = String(value).trim().match(/^(\d+):(\d+):(\d+),(\d+)$/);
   if (!match) throw new Error(`Invalid SRT timestamp: ${value}`);
@@ -147,6 +165,7 @@ function parseSrtTime(value) {
   return h * 3600 + m * 60 + s + ms / 1000;
 }
 
+// Parse plain SRT blocks into normalized cue objects.
 function parseSrt(srt) {
   return String(srt)
     .replace(/\r/g, '')
@@ -165,6 +184,7 @@ function parseSrt(srt) {
     .filter(cue => cue && cue.end > cue.start);
 }
 
+// Keep captions readable by splitting long cue text into short word groups.
 function chunkWords(text, maxWords = 8) {
   const words = String(text).split(/\s+/).filter(Boolean);
   if (words.length <= maxWords) return [words.join(' ')];
@@ -175,6 +195,7 @@ function chunkWords(text, maxWords = 8) {
   return chunks;
 }
 
+// Spread split text chunks across the original cue time span.
 function splitCues(cues) {
   const result = [];
   for (const cue of cues) {
@@ -192,6 +213,7 @@ function splitCues(cues) {
   return result;
 }
 
+// ASS timestamps use centiseconds rather than SRT milliseconds.
 function assTime(seconds) {
   const safe = Math.max(0, Number(seconds) || 0);
   const h = Math.floor(safe / 3600);
@@ -201,12 +223,14 @@ function assTime(seconds) {
   return `${h}:${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}.${String(cs).padStart(2, '0')}`;
 }
 
+// Remove ASS control characters from caption text before interpolation.
 function escapeAssText(text) {
   return String(text)
     .replace(/[{}]/g, '')
     .replace(/\r?\n/g, '\\N');
 }
 
+// Build the ASS subtitle file used by ffmpeg's subtitles filter.
 function buildAss(cues, dimensions, layout, bandHeight) {
   const { width, height } = dimensions;
   const fontSize = layout === 'below'
@@ -239,6 +263,7 @@ ${events}
 `;
 }
 
+// Parse aspect-ratio arguments used when adding a caption band below the video.
 function parseAspect(value) {
   const match = String(value || '').trim().match(/^(\d+(?:\.\d+)?):(\d+(?:\.\d+)?)$/);
   if (!match) throw new Error('--below-aspect must be in w:h format');
@@ -248,10 +273,12 @@ function parseAspect(value) {
   return { width, height };
 }
 
+// ffmpeg H.264 outputs are safest with even dimensions.
 function even(value) {
   return Math.ceil(value / 2) * 2;
 }
 
+// Compute the padded canvas and caption position for below-video subtitles.
 function belowDimensions(source, args) {
   const minimumCaptionBandHeight = args.belowPixels || 1;
   const minimumHeight = source.height + minimumCaptionBandHeight;
@@ -283,10 +310,12 @@ function belowDimensions(source, args) {
   };
 }
 
+// Escape Windows paths for ffmpeg filter syntax.
 function escapeFilterPath(filePath) {
   return path.resolve(filePath).replace(/\\/g, '/').replace(/:/g, '\\:').replace(/'/g, "\\'");
 }
 
+// Use a local Whisper CLI to produce an SRT when the user does not provide one.
 async function generateWhisperSrt(inputPath, tempDir, model) {
   await run('whisper', [
     inputPath,
@@ -299,6 +328,7 @@ async function generateWhisperSrt(inputPath, tempDir, model) {
   return expected;
 }
 
+// CLI entrypoint: get captions, generate ASS, run ffmpeg, and clean temp files.
 async function main() {
   const args = parseArgs(process.argv.slice(2));
   const inputPath = resolveProjectPath(args.input);

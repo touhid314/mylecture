@@ -1,4 +1,13 @@
 // @ts-nocheck
+/**
+ * ide-server.ts
+ * Summer 2026, Touhidul Islam
+ *
+ * Local HTTP server for the MyLecture IDE. It serves the viewer UI, browses
+ * lecture files, resolves source plans into renderable HTML, renders videos,
+ * talks to the Python coding agent, and publishes rendered lecture folders to
+ * the website package. This server is intentionally local-only on 127.0.0.1.
+ */
 import { createReadStream, existsSync, mkdirSync, readdirSync, readFileSync, rmSync, statSync, unlinkSync, writeFileSync } from 'node:fs';
 import { createServer } from 'node:http';
 import { spawn } from 'node:child_process';
@@ -8,11 +17,13 @@ import { createViewerHtml } from '../packages/lecture-viewer/src/index.mjs';
 const rootDir = process.cwd();
 const defaultPort = 4307;
 
+// Source files without resolved timelines use this estimate for preview timing.
 function estimateTextDuration(text) {
   const words = String(text || '').trim().split(/\s+/).filter(Boolean).length;
   return Math.max(2.5, words / 2.65);
 }
 
+// Inspect HTML for resolved duration metadata, falling back to rough plan estimates.
 function tryGetHtmlDuration(fullPath) {
   try {
     const content = readFileSync(fullPath, 'utf8');
@@ -58,6 +69,7 @@ function tryGetHtmlDuration(fullPath) {
   return null;
 }
 
+// Parse server startup options such as port, initial file, and preview dimensions.
 function parseArgs(argv) {
   const args = {
     port: defaultPort,
@@ -97,6 +109,7 @@ function parseArgs(argv) {
   return args;
 }
 
+// Human-facing CLI help for the local IDE server.
 function printHelp() {
   console.log(`Usage:
   npm run ide -- [options]
@@ -110,6 +123,7 @@ Options:
 `);
 }
 
+// Open the IDE URL in the user's default browser when --open is provided.
 function openBrowser(url) {
   const command = process.platform === 'win32' ? 'cmd' : process.platform === 'darwin' ? 'open' : 'xdg-open';
   const browserArgs = process.platform === 'win32'
@@ -124,6 +138,7 @@ function openBrowser(url) {
   child.unref();
 }
 
+// Static file MIME types used by /files and /lecture-viewer routes.
 const mimeTypes = new Map([
   ['.html', 'text/html; charset=utf-8'],
   ['.avsl', 'text/plain; charset=utf-8'],
@@ -144,6 +159,7 @@ const mimeTypes = new Map([
   ['.mp4', 'video/mp4']
 ]);
 
+// Small response helpers keep route handlers readable.
 function sendText(response, status, body, contentType = 'text/plain; charset=utf-8') {
   response.writeHead(status, { 'content-type': contentType });
   response.end(body);
@@ -153,6 +169,7 @@ function sendJson(response, status, payload) {
   sendText(response, status, JSON.stringify(payload), 'application/json; charset=utf-8');
 }
 
+// Normalize user-provided paths while allowing absolute Windows paths from the UI.
 function resolveInputPath(inputPath) {
   let cleaned = String(inputPath || '').trim();
 
@@ -164,6 +181,7 @@ function resolveInputPath(inputPath) {
   return isAbs ? path.resolve(cleaned) : path.resolve(rootDir, cleaned);
 }
 
+// Validate and normalize a file selected by the IDE.
 function normalizeOpenPath(inputPath) {
   const resolvedPath = resolveInputPath(inputPath);
   if (!existsSync(resolvedPath) || !statSync(resolvedPath).isFile()) {
@@ -172,10 +190,12 @@ function normalizeOpenPath(inputPath) {
   return resolvedPath.replaceAll(path.sep, '/');
 }
 
+// Viewer-facing paths are normalized to slash separators for browser consistency.
 function toViewerPath(filePath) {
   return path.resolve(filePath).replaceAll(path.sep, '/');
 }
 
+// List sibling files for the current lecture file panel.
 function listFolderFiles(filePath) {
   const resolvedPath = resolveInputPath(filePath);
   if (!existsSync(resolvedPath) || !statSync(resolvedPath).isFile()) {
@@ -209,6 +229,7 @@ function listFolderFiles(filePath) {
   };
 }
 
+// Default file browser location prefers the Python agent output folder when present.
 function defaultBrowserFolder() {
   const targetPath = 'C:\\Users\\touhi\\OneDrive\\Desktop\\mylecture\\lecture-agent\\workspace\\outputs';
   if (existsSync(targetPath) && statSync(targetPath).isDirectory()) {
@@ -217,6 +238,7 @@ function defaultBrowserFolder() {
   return rootDir;
 }
 
+// Resolve and validate folders for the IDE directory browser.
 function resolveDirectoryPath(inputPath = '') {
   const resolvedPath = inputPath ? resolveInputPath(inputPath) : defaultBrowserFolder();
   if (!existsSync(resolvedPath) || !statSync(resolvedPath).isDirectory()) {
@@ -225,6 +247,7 @@ function resolveDirectoryPath(inputPath = '') {
   return resolvedPath;
 }
 
+// List files and folders for the browse-folder endpoint.
 function listDirectory(inputPath = '') {
   const folderPath = resolveDirectoryPath(inputPath);
   const entries = readdirSync(folderPath, { withFileTypes: true })
@@ -259,6 +282,7 @@ function listDirectory(inputPath = '') {
   };
 }
 
+// Resolve the parent folder for an existing file.
 function folderForFile(filePath) {
   const resolvedPath = resolveInputPath(filePath);
   if (!existsSync(resolvedPath) || !statSync(resolvedPath).isFile()) {
@@ -267,6 +291,7 @@ function folderForFile(filePath) {
   return path.dirname(resolvedPath);
 }
 
+// Ask the operating system to open a folder in the native file explorer.
 function openFolderPath(folderPath) {
   const resolvedPath = resolveDirectoryPath(folderPath);
   const command = process.platform === 'win32' ? 'explorer.exe' : process.platform === 'darwin' ? 'open' : 'xdg-open';
@@ -288,6 +313,7 @@ function openFolder(filePath) {
   return openFolderPath(folderPath);
 }
 
+// Helpers for consistent output naming next to the selected source or resolved HTML.
 function siblingPath(filePath, name) {
   return path.join(path.dirname(resolveInputPath(filePath)), name);
 }
@@ -302,6 +328,7 @@ function finalBatchOutputPath(filePath) {
   return siblingPath(filePath, 'rendered.mp4');
 }
 
+// Scene naming conventions drive resolve/render batching.
 function isIndexHtmlName(name) {
   return /^index.*\.html$/i.test(name);
 }
@@ -316,6 +343,7 @@ function resolvedSiblingPathForIndex(filePath) {
   return siblingPath(filePath, `resolved${suffix}.html`);
 }
 
+// TTS options are normalized before being passed through to build-plan.ts.
 function normalizeTtsVoice(value) {
   const voice = String(value || '').trim();
   return voice || 'af_heart';
@@ -346,6 +374,7 @@ function normalizePositiveInteger(value, fallback, min = 1, max = Number.MAX_SAF
   return String(number);
 }
 
+// Stop child process trees for long-running resolve, render, publish, or agent jobs.
 function killProcessTree(childProc) {
   if (!childProc) return;
   if (process.platform === 'win32') {
@@ -355,6 +384,7 @@ function killProcessTree(childProc) {
   }
 }
 
+// Resolve one file or a scene set by invoking build-plan.ts as a child process.
 async function resolveLectureFile(filePath, options = {}) {
   const inputPath = resolveInputPath(filePath);
   const folderPath = path.dirname(inputPath);
@@ -440,6 +470,7 @@ async function resolveLectureFile(filePath, options = {}) {
   return finalResolvedPath || toViewerPath(resolvedSiblingPathForIndex(path.join(folderPath, files[0])));
 }
 
+// Build the render-video.ts child-process argument list for one HTML file.
 function renderArgsForFile(inputPath, outPath, options = {}, extraArgs = []) {
   const basename = path.basename(inputPath);
   const voice = normalizeTtsVoice(options.ttsVoice);
@@ -467,6 +498,7 @@ function renderArgsForFile(inputPath, outPath, options = {}, extraArgs = []) {
   return renderArgs;
 }
 
+// Build the build-plan.ts child-process argument list for one index HTML file.
 function buildPlanArgsForIndex(inputPath, outPath, options = {}) {
   const voice = normalizeTtsVoice(options.ttsVoice);
   const provider = detectProvider(voice);
@@ -481,6 +513,7 @@ function buildPlanArgsForIndex(inputPath, outPath, options = {}) {
   ];
 }
 
+// Determine which sibling scenes belong to the same lecture render batch.
 function renderSceneSet(inputPath) {
   const folderPath = path.dirname(inputPath);
   const basename = path.basename(inputPath);
@@ -491,6 +524,7 @@ function renderSceneSet(inputPath) {
     .map(name => path.join(folderPath, name));
 }
 
+// Run asynchronous work with a fixed concurrency limit.
 async function runLimited(items, limit, worker) {
   let nextIndex = 0;
   let firstError = null;
@@ -509,10 +543,12 @@ async function runLimited(items, limit, worker) {
   if (firstError) throw firstError;
 }
 
+// Escape file paths for ffmpeg concat list files.
 function ffmpegConcatPath(filePath) {
   return path.resolve(filePath).replaceAll('\\', '/').replaceAll("'", "'\\''");
 }
 
+// Concatenate per-scene MP4 renders into the final lecture video.
 async function concatRenderedScenes(tempFiles, outputPath, listPath) {
   const listBody = tempFiles
     .map(file => `file '${ffmpegConcatPath(file)}'`)
@@ -533,6 +569,7 @@ async function concatRenderedScenes(tempFiles, outputPath, listPath) {
   });
 }
 
+// Remove temporary scene MP4s after a successful batch concat.
 function deleteIntermediateSceneRenders(sceneOutputs, finalOutputPath) {
   const finalResolvedPath = path.resolve(finalOutputPath);
   for (const sceneOutput of sceneOutputs) {
@@ -545,6 +582,7 @@ function deleteIntermediateSceneRenders(sceneOutputs, finalOutputPath) {
   }
 }
 
+// Render a single lecture file, or delegate to batch rendering for scene folders.
 async function renderLectureFile(filePath, options = {}) {
   const inputPath = resolveInputPath(filePath);
   const basename = path.basename(inputPath);
@@ -596,6 +634,7 @@ async function renderLectureFile(filePath, options = {}) {
   }
 }
 
+// Resolve and render multiple scenes, then concatenate them into one final MP4.
 async function renderLectureBatch(inputPath, sceneFiles, options = {}) {
   const batchId = `${Date.now()}-${Math.random().toString(16).slice(2)}`;
   const tempDir = path.resolve(rootDir, '.render', 'batch-render', batchId);
@@ -719,12 +758,14 @@ async function renderLectureBatch(inputPath, sceneFiles, options = {}) {
   }
 }
 
+// Resolve /files URLs to local workspace files without allowing path traversal.
 function resolveWorkspacePath(urlPath) {
   const rawPath = decodeURIComponent(urlPath.replace(/^\/files\/?/, ''));
   if (!rawPath) return rootDir;
   return resolveInputPath(rawPath);
 }
 
+// Resolve browser package assets served under /lecture-viewer.
 function resolveViewerPackagePath(urlPath) {
   const rawPath = decodeURIComponent(urlPath.replace(/^\/lecture-viewer\/?/, ''));
   if (!rawPath) return null;
@@ -736,6 +777,7 @@ function resolveViewerPackagePath(urlPath) {
   return resolvedPath;
 }
 
+// Stream a workspace file to the browser with a conservative MIME type.
 function serveFile(request, response) {
   const requestUrl = new URL(request.url, 'http://localhost');
   const resolvedPath = resolveWorkspacePath(requestUrl.pathname);
@@ -792,6 +834,7 @@ function serveFile(request, response) {
   }
 }
 
+// Stream the packaged lecture-viewer runtime used by preview iframes.
 function serveViewerPackageFile(request, response) {
   const requestUrl = new URL(request.url, 'http://localhost');
   const resolvedPath = resolveViewerPackagePath(requestUrl.pathname);
@@ -809,6 +852,7 @@ function serveViewerPackageFile(request, response) {
   createReadStream(resolvedPath).pipe(response);
 }
 
+// Capture child-process output while still allowing callers to track spawned jobs.
 function runCapture(command, args, options = {}) {
   return new Promise((resolve, reject) => {
     const child = spawn(command, args, {
@@ -841,6 +885,7 @@ function runCapture(command, args, options = {}) {
   });
 }
 
+// Windows-native picker used by the browser UI's Pick/Open command.
 async function pickHtmlFile() {
   if (process.platform !== 'win32') {
     throw new Error('Native file picker is only implemented for Windows in this viewer.');
@@ -886,6 +931,7 @@ async function pickHtmlFile() {
   return normalizeOpenPath(resolvedPath);
 }
 
+// Server-wide state tracks the selected file, preview size, and active background job.
 const args = parseArgs(process.argv.slice(2));
 let activeJob = null;
 let activeAgentLog = '';
@@ -896,6 +942,7 @@ const viewerState = {
   height: args.height
 };
 
+// If another IDE server is already running, pass the selected file to it instead.
 async function pushFileToExistingViewer(args) {
   const url = new URL(`http://127.0.0.1:${args.port}/open-file`);
   url.searchParams.set('file', args.openPath);
@@ -918,9 +965,11 @@ async function pushFileToExistingViewer(args) {
   console.log(`Sent file to existing viewer on port ${args.port}: ${payload.path || args.openPath}`);
 }
 
+// Main route table for the local IDE API and viewer UI.
 const server = createServer(async (request, response) => {
   const requestUrl = new URL(request.url, 'http://localhost');
 
+  // Serve the IDE shell. The actual lecture preview is loaded through iframes/assets.
   if (requestUrl.pathname === '/' || requestUrl.pathname === '/viewer') {
     const width = Number(requestUrl.searchParams.get('width')) || args.width;
     const height = Number(requestUrl.searchParams.get('height')) || args.height;
@@ -934,6 +983,7 @@ const server = createServer(async (request, response) => {
     return;
   }
 
+  // Lightweight polling endpoint used by the UI to detect selected-file changes.
   if (requestUrl.pathname === '/viewer-state') {
     const since = Number(requestUrl.searchParams.get('since')) || 0;
     sendJson(response, 200, {
@@ -946,6 +996,7 @@ const server = createServer(async (request, response) => {
     return;
   }
 
+  // Change the currently selected file from another server instance or the browser UI.
   if (requestUrl.pathname === '/open-file') {
     try {
       const requestedPath = requestUrl.searchParams.get('file') || '';
@@ -973,6 +1024,7 @@ const server = createServer(async (request, response) => {
     return;
   }
 
+  // Return files next to the selected lecture file for the sidebar.
   if (requestUrl.pathname === '/folder-files') {
     try {
       const requestedPath = requestUrl.searchParams.get('file') || viewerState.path || args.openPath;
@@ -984,6 +1036,7 @@ const server = createServer(async (request, response) => {
     return;
   }
 
+  // Return directory entries for the full folder browser.
   if (requestUrl.pathname === '/browse-folder') {
     try {
       const requestedPath = requestUrl.searchParams.get('dir') || '';
@@ -994,6 +1047,7 @@ const server = createServer(async (request, response) => {
     return;
   }
 
+  // Open a folder in the native OS file explorer.
   if (requestUrl.pathname === '/open-folder') {
     try {
       const requestedFolder = requestUrl.searchParams.get('dir') || '';
@@ -1009,6 +1063,7 @@ const server = createServer(async (request, response) => {
     return;
   }
 
+  // Resolve source index*.html files into resolved*.html timeline files.
   if (requestUrl.pathname === '/resolve-file') {
     try {
       const requestedPath = requestUrl.searchParams.get('file') || '';
@@ -1033,6 +1088,7 @@ const server = createServer(async (request, response) => {
     return;
   }
 
+  // Render selected index*.html or resolved*.html files to MP4.
   if (requestUrl.pathname === '/render-file') {
     try {
       const requestedPath = requestUrl.searchParams.get('file') || '';
@@ -1056,6 +1112,7 @@ const server = createServer(async (request, response) => {
     return;
   }
 
+  // Stop the active long-running resolve, render, agent, or publish job.
   if (requestUrl.pathname === '/stop-job') {
     try {
       if (!activeJob) {
@@ -1072,6 +1129,7 @@ const server = createServer(async (request, response) => {
     return;
   }
 
+  // Send the user's message plus current IDE context to the Python coding agent.
   if (requestUrl.pathname === '/agent-chat') {
     try {
       let bodyData = '';
@@ -1187,6 +1245,7 @@ const server = createServer(async (request, response) => {
     return;
   }
 
+  // Ask the website package for available courses before publishing.
   if (requestUrl.pathname === '/list-courses') {
     try {
       const websiteDir = path.resolve(rootDir, '../mylecture-website');
@@ -1215,6 +1274,7 @@ const server = createServer(async (request, response) => {
     return;
   }
 
+  // Publish a rendered lecture folder through the website admin script.
   if (requestUrl.pathname === '/publish-lecture') {
     try {
       let bodyData = '';
@@ -1336,11 +1396,13 @@ const server = createServer(async (request, response) => {
     return;
   }
 
+  // Return the buffered stdout/stderr from the currently running Python agent job.
   if (requestUrl.pathname === '/agent-log') {
     sendJson(response, 200, { log: activeAgentLog });
     return;
   }
 
+  // Open a native file picker and return the selected path to the browser UI.
   if (requestUrl.pathname === '/pick') {
     try {
       const pickedPath = await pickHtmlFile();
@@ -1351,11 +1413,13 @@ const server = createServer(async (request, response) => {
     return;
   }
 
+  // Serve arbitrary workspace files selected by the IDE preview.
   if (requestUrl.pathname.startsWith('/files/')) {
     serveFile(request, response);
     return;
   }
 
+  // Serve the reusable lecture-viewer package files.
   if (requestUrl.pathname.startsWith('/lecture-viewer/')) {
     serveViewerPackageFile(request, response);
     return;
@@ -1364,6 +1428,7 @@ const server = createServer(async (request, response) => {
   sendText(response, 404, 'Not found');
 });
 
+// If a server already owns the port, either hand off the requested file or fail clearly.
 server.on('error', error => {
   if (error.code === 'EADDRINUSE' && args.openPath) {
     pushFileToExistingViewer(args)
@@ -1386,6 +1451,7 @@ server.on('error', error => {
   process.exit(1);
 });
 
+// Bind only to localhost; this IDE server is not intended for network exposure.
 server.listen(args.port, '127.0.0.1', () => {
   const encodedFile = args.openPath ? `?file=${encodeURIComponent(args.openPath)}` : '';
   const url = `http://127.0.0.1:${args.port}/${encodedFile}`;
