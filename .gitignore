@@ -15,3 +15,4 @@ models/kokoro-onnx/
 trash/
 .logs/
 task_plan.md
+*.wav

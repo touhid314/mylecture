@@ -1,0 +1,676 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>PCA Concepts</title>
+<style>
+  :root {
+    --ink: #111111;
+    --blue: #1d70b8;
+    --cyan: #48d7df;
+    --red: #ef4b4b;
+    --yellow: #f2d84b;
+    --green: #55c85a;
+    --grid: #d8dee8;
+    --hi: #ff3131;
+  }
+  html, body {
+    margin: 0;
+    width: 100%;
+    height: 100%;
+    overflow: hidden;
+    background: #ffffff;
+    color: var(--ink);
+    font-family: Arial, sans-serif;
+  }
+  #stage {
+    position: relative;
+    width: 100vw;
+    height: 100vh;
+    box-sizing: border-box;
+    padding: 4vh 4.5vw;
+    background: #ffffff;
+  }
+  .center-screen {
+    position: absolute;
+    inset: 0;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    text-align: center;
+    padding: 5vh 7vw;
+    box-sizing: border-box;
+  }
+  .title {
+    font-size: clamp(42px, 5.7vw, 94px);
+    line-height: 1.08;
+    white-space: pre-line;
+  }
+  .subtitle {
+    margin-top: 3vh;
+    font-size: clamp(34px, 4.1vw, 66px);
+    line-height: 1.14;
+    white-space: pre-line;
+  }
+  .top-text {
+    position: absolute;
+    top: 4vh;
+    left: 5vw;
+    right: 5vw;
+    text-align: center;
+    font-size: clamp(28px, 3vw, 50px);
+    line-height: 1.16;
+    white-space: pre-line;
+  }
+  .note {
+    position: absolute;
+    left: 8vw;
+    right: 8vw;
+    bottom: 4vh;
+    text-align: center;
+    font-size: clamp(22px, 2vw, 34px);
+    line-height: 1.22;
+    color: #333333;
+    white-space: pre-line;
+  }
+  .label {
+    position: absolute;
+    max-width: 26vw;
+    padding: 0.7vh 0.9vw;
+    background: rgba(255,255,255,0.92);
+    border: 2px solid #111111;
+    border-radius: 6px;
+    font-size: clamp(22px, 2vw, 34px);
+    line-height: 1.15;
+    text-align: center;
+    white-space: pre-line;
+    box-sizing: border-box;
+  }
+  .svgbox {
+    position: absolute;
+    overflow: visible;
+  }
+  svg {
+    display: block;
+    width: 100%;
+    height: 100%;
+    overflow: visible;
+  }
+  table {
+    border-collapse: collapse;
+    font-family: sans-serif;
+    font-size: clamp(24px, 2vw, 36px);
+    background: #ffffff;
+  }
+  th, td {
+    border: 2px solid #ffffff;
+    padding: 0.75vh 1vw;
+    text-align: center;
+    min-width: 5.1vw;
+  }
+  th {
+    background: #2d5b93;
+    color: #ffffff;
+  }
+  td.gene {
+    background: #2d5b93;
+    color: #ffffff;
+  }
+  td.val {
+    background: #dceeff;
+    color: #111111;
+  }
+  .table-wrap {
+    position: absolute;
+  }
+  .small-grid table {
+    font-size: clamp(20px, 1.6vw, 30px);
+  }
+  .highlight-cell {
+    box-shadow: inset 0 0 0 4px var(--hi);
+    background: #ffd7d7 !important;
+  }
+  .big-word {
+    position: absolute;
+    inset: 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: clamp(82px, 14vw, 230px);
+  }
+</style>
+</head>
+<body>
+<main id="stage" aria-label="PCA animation"></main>
+
+<script>
+window.__VIDEO_METADATA__ = {
+  contractVersion: "0.2",
+  title: "Principal Component Analysis (PCA) Concepts in Less Than 5 Minutes",
+  aspectRatio: "16:9"
+};
+
+const VIDEO_PLAN = [
+  { id: "main-title", kind: "narration+visual", audio: "audio/main-title.wav", text: "Hello, today we're going to be talking about the main ideas behind principal component analysis, and we're going to cover those concepts in less than 5 minutes." },
+  { id: "cells-normal", kind: "narration+visual", audio: "audio/cells-normal.wav", text: "Let's say we had some normal cells..." },
+  { id: "cells-psst", kind: "narration+visual", audio: "audio/cells-psst.wav", text: "If you're not a biologist, imagine that these could be people, or cars, or cities, or etc. They could be anything." },
+  { id: "cells-suspect", kind: "narration+visual", audio: "audio/cells-suspect.wav", text: "Even though they look the same, we suspect that there are differences..." },
+  { id: "cells-type1", kind: "narration+visual", audio: "audio/cells-type1.wav", text: "These might be one type of cell, or one type of person, or car, or city, etc." },
+  { id: "cells-type2", kind: "narration+visual", audio: "audio/cells-type2.wav", text: "These might be another type of cell..." },
+  { id: "cells-type3", kind: "narration+visual", audio: "audio/cells-type3.wav", text: "And lastly, these might be a third type of cell." },
+  { id: "cells-outside", kind: "narration+visual", audio: "audio/cells-outside.wav", text: "Unfortunately, we can't observe differences from the outside..." },
+  { id: "seq-rna", kind: "narration+visual", audio: "audio/seq-rna.wav", text: "So we sequence the messenger RNA in each cell to identify which genes are active. This tells us what the cell is doing." },
+  { id: "seq-people", kind: "narration+visual", audio: "audio/seq-people.wav", text: "If they were people, we could measure their weight, blood pressure, reading level, etc." },
+  { id: "data-intro", kind: "narration+visual", audio: "audio/data-intro.wav", text: "Okay, here's the data." },
+  { id: "data-columns", kind: "narration+visual", audio: "audio/data-columns.wav", text: "Each column shows how much each gene is transcribed in each cell." },
+  { id: "two-cells", kind: "narration+visual", audio: "audio/two-cells.wav", text: "For now, let's imagine there are only 2 cells." },
+  { id: "plot-two", kind: "narration+visual", audio: "audio/plot-two.wav", text: "If we just have two cells, then we can plot the measurements for each gene." },
+  { id: "gene1", kind: "narration+visual", audio: "audio/gene1.wav", text: "This gene, Gene 1, is highly transcribed in Cell 1, and lowly transcribed in Cell 2." },
+  { id: "gene9", kind: "narration+visual", audio: "audio/gene9.wav", text: "And this gene, Gene 9, is lowly transcribed in Cell 1, and highly transcribed in Cell 2." },
+  { id: "inverse", kind: "narration+visual", audio: "audio/inverse.wav", text: "In general, Cell 1 and Cell 2 have an inverse correlation. This means that they are probably two different types of cells, since they are using different genes." },
+  { id: "three-cells", kind: "narration+visual", audio: "audio/three-cells.wav", text: "Now let's imagine there are 3 cells." },
+  { id: "plot12", kind: "narration+visual", audio: "audio/plot12.wav", text: "We've already seen how we can plot the first two cells to see how closely they are related." },
+  { id: "plot13", kind: "narration+visual", audio: "audio/plot13.wav", text: "Now we can also compare Cell 1 to Cell 3. Cell 1 and Cell 3 are positively correlated, suggesting they are doing similar things." },
+  { id: "plot23", kind: "narration+visual", audio: "audio/plot23.wav", text: "Lastly, we can also compare Cell 2 to Cell 3. The negative correlation suggests that Cell 2 is doing something different from Cell 3." },
+  { id: "three-d", kind: "narration+visual", audio: "audio/three-d.wav", text: "Alternatively, we could try to plot all three cells at once on a 3-dimensional graph." },
+  { id: "axis1", kind: "narration+visual", audio: "audio/axis1.wav", text: "Cell 1 could be the vertical axis..." },
+  { id: "axis2", kind: "narration+visual", audio: "audio/axis2.wav", text: "Cell 2 could be the horizontal axis..." },
+  { id: "axis3", kind: "narration+visual", audio: "audio/axis3.wav", text: "And Cell 3 could be depth." },
+  { id: "rotate", kind: "narration+visual", audio: "audio/rotate.wav", text: "We could then rotate this graph around to see how the cells are related to each other." },
+  { id: "four-cells", kind: "narration+visual", audio: "audio/four-cells.wav", text: "But what do we do when we have 4 or more cells?" },
+  { id: "many-plots", kind: "narration+visual", audio: "audio/many-plots.wav", text: "Draw tons and tons of 2 cell plots and try to make sense of them all?" },
+  { id: "crazy-plot", kind: "narration+visual", audio: "audio/crazy-plot.wav", text: "Or draw some crazy graph that has an axis for each cell and makes our brain explode?" },
+  { id: "silly", kind: "narration+visual", audio: "audio/silly.wav", text: "No, both of those options are just plain silly." },
+  { id: "pca-intro", kind: "narration+visual", audio: "audio/pca-intro.wav", text: "Instead, we draw a Principal Component Analysis (PCA) plot." },
+  { id: "pca-converts", kind: "narration+visual", audio: "audio/pca-converts.wav", text: "A PCA plot converts the correlations, or lack thereof, among all of the cells into a 2-D graph." },
+  { id: "cluster1", kind: "narration+visual", audio: "audio/cluster1.wav", text: "Cells that are highly correlated cluster together. This cluster of cells are highly correlated with each other..." },
+  { id: "cluster2", kind: "narration+visual", audio: "audio/cluster2.wav", text: "So are these..." },
+  { id: "cluster3", kind: "narration+visual", audio: "audio/cluster3.wav", text: "And so are these." },
+  { id: "color-code", kind: "narration+visual", audio: "audio/color-code.wav", text: "To make the clusters easier to see, we can color code them..." },
+  { id: "back-cells", kind: "narration+visual", audio: "audio/back-cells.wav", text: "Once we've identified the clusters in the PCA plot, we can go back to the original cells..." },
+  { id: "final-types", kind: "narration+visual", audio: "audio/final-types.wav", text: "And see that they represent 3 different types of cells doing 3 different types of things with their genes!!!" },
+  { id: "axes-intro", kind: "narration+visual", audio: "audio/axes-intro.wav", text: "Here's one last main idea about how to interpret PCA plots: The axes are ranked in order of importance." },
+  { id: "pc1-important", kind: "narration+visual", audio: "audio/pc1-important.wav", text: "Differences along the first principal component axis, PC1, are more important than differences along the second principal component axis, PC2." },
+  { id: "distance-start", kind: "narration+visual", audio: "audio/distance-start.wav", text: "If the plot looked like this..." },
+  { id: "distance-both", kind: "narration+visual", audio: "audio/distance-both.wav", text: "Where the distance between these two clusters is about the same as the distance between these two clusters..." },
+  { id: "bottom-more", kind: "narration+visual", audio: "audio/bottom-more.wav", text: "Then these two clusters are more different from each other..." },
+  { id: "left-less", kind: "narration+visual", audio: "audio/left-less.wav", text: "Than these two clusters." },
+  { id: "methods-intro", kind: "narration+visual", audio: "audio/methods-intro.wav", text: "Before we go, you should know that PCA is just one way to make sense of this type of data. There are lots of other methods that are variations on this theme of dimension reduction." },
+  { id: "methods-heatmap", kind: "narration+visual", audio: "audio/methods-heatmap.wav", text: "These methods include heatmaps..." },
+  { id: "methods-tsne", kind: "narration+visual", audio: "audio/methods-tsne.wav", text: "t-SNE plots..." },
+  { id: "methods-mds", kind: "narration+visual", audio: "audio/methods-mds.wav", text: "And Multi-Dimensional Scaling, MDS, plots." },
+  { id: "note", kind: "narration+visual", audio: "audio/note.wav", text: "Together, these methods are used to reduce complex data into visual summaries that are easier to interpret. Key idea: PCA is a dimension reduction method that summarizes many measured variables with a smaller number of ranked principal components." },
+  { id: "end", kind: "narration+visual", audio: "audio/end.wav", text: "This concludes the overview of the main ideas behind PCA." }
+];
+window.__VIDEO_PLAN__ = VIDEO_PLAN;
+
+const stage = document.getElementById("stage");
+const genes = [
+  ["Gene1", 3, 0.25, 2.8, 0.1],
+  ["Gene2", 2.9, 0.8, 2.2, 1.8],
+  ["Gene3", 2.2, 1, 1.5, 3.2],
+  ["Gene4", 2, 1.4, 2, 0.3],
+  ["Gene5", 1.3, 1.6, 1.6, 0],
+  ["Gene6", 1.5, 2, 2.1, 3],
+  ["Gene7", 1, 2.2, 1.2, 2.8],
+  ["Gene8", 1, 2.7, 0.9, 0.3],
+  ["Gene9", 0.4, 3, 0.6, 0.1]
+];
+const cellPoints = [
+  [182,190], [178,250], [124,220], [128,160], [74,192], [82,260],
+  [236,154], [278,178], [244,98], [298,116],
+  [238,236], [284,250], [246,304], [302,312], [332,262]
+];
+const plot2 = genes.map(function(row) { return [row[2], row[1], row[0]]; });
+const pcaClusters = [
+  { color: "#48d7df", pts: [[118,98], [152,82], [176,118], [138,140], [196,92], [164,158]] },
+  { color: "#f2d84b", pts: [[322,196], [356,174], [384,210], [344,232], [402,188]] },
+  { color: "#ef4b4b", pts: [[178,312], [216,286], [248,326], [206,352]] }
+];
+
+function esc(value) {
+  return String(value).replace(/[&<>"']/g, function(ch) {
+    return ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[ch];
+  });
+}
+function clearStage() {
+  stage.innerHTML = "";
+}
+function add(html) {
+  stage.insertAdjacentHTML("beforeend", html);
+}
+function textBlock(cls, text, style) {
+  add('<div class="' + cls + '" style="' + (style || "") + '">' + esc(text) + '</div>');
+}
+function box(cls, left, top, width, height, html, extra) {
+  add('<div class="' + cls + '" style="left:' + left + ';top:' + top + ';width:' + width + ';height:' + height + ';' + (extra || "") + '">' + html + '</div>');
+}
+function tableHtml(cols, rowHi, colHi) {
+  let html = '<table><thead><tr><th></th>';
+  for (let c = 1; c <= cols; c += 1) html += '<th class="' + (colHi === c ? "highlight-cell" : "") + '">Cell' + c + '</th>';
+  html += '</tr></thead><tbody>';
+  for (let r = 0; r < genes.length; r += 1) {
+    html += '<tr><td class="gene ' + (rowHi === r ? "highlight-cell" : "") + '">' + genes[r][0] + '</td>';
+    for (let c = 1; c <= cols; c += 1) {
+      const hi = rowHi === r || colHi === c ? " highlight-cell" : "";
+      html += '<td class="val' + hi + '">' + genes[r][c] + '</td>';
+    }
+    html += '</tr>';
+  }
+  html += '</tbody></table>';
+  return html;
+}
+function cellsSvg(mode, showRings) {
+  let html = '<svg viewBox="0 0 410 390" aria-label="cell cluster">';
+  for (let i = 0; i < cellPoints.length; i += 1) {
+    let fill = "#55c85a";
+    if (mode === "typed" || mode === "typed-final") {
+      if (i <= 5) fill = "#48d7df";
+      else if (i >= 6 && i <= 9) fill = "#ef4b4b";
+      else fill = "#f2d84b";
+    } else if (mode === "cyan" && i <= 5) fill = "#48d7df";
+    else if (mode === "red" && i >= 6 && i <= 9) fill = "#ef4b4b";
+    else if (mode === "yellow" && i >= 10) fill = "#f2d84b";
+    html += '<circle cx="' + cellPoints[i][0] + '" cy="' + cellPoints[i][1] + '" r="27" fill="' + fill + '" stroke="#111" stroke-width="3"/>';
+  }
+  if (showRings === "cyan") html += '<ellipse cx="128" cy="213" rx="112" ry="92" fill="none" stroke="#ff3131" stroke-width="7"/>';
+  if (showRings === "red") html += '<ellipse cx="274" cy="138" rx="84" ry="74" fill="none" stroke="#ff3131" stroke-width="7"/>';
+  if (showRings === "yellow") html += '<ellipse cx="280" cy="274" rx="100" ry="88" fill="none" stroke="#ff3131" stroke-width="7"/>';
+  html += '</svg>';
+  return html;
+}
+function scatterSvg(options) {
+  const o = options || {};
+  const xLabel = o.xLabel || "Cell2";
+  const yLabel = o.yLabel || "Cell1";
+  const pts = o.points || plot2;
+  let html = '<svg viewBox="0 0 520 440" aria-label="scatter plot">';
+  html += '<line x1="70" y1="360" x2="456" y2="360" stroke="#111" stroke-width="4"/>';
+  html += '<line x1="70" y1="360" x2="70" y2="42" stroke="#111" stroke-width="4"/>';
+  for (let i = 0; i <= 4; i += 1) {
+    const x = 70 + i * 96.5;
+    const y = 360 - i * 79.5;
+    html += '<line x1="' + x + '" y1="360" x2="' + x + '" y2="365" stroke="#111" stroke-width="3"/>';
+    html += '<line x1="65" y1="' + y + '" x2="70" y2="' + y + '" stroke="#111" stroke-width="3"/>';
+  }
+  html += '<text x="263" y="424" text-anchor="middle" font-size="34">' + esc(xLabel) + '</text>';
+  html += '<text x="18" y="200" text-anchor="middle" font-size="34" transform="rotate(-90 18 200)">' + esc(yLabel) + '</text>';
+  if (o.line === "down") html += '<line x1="104" y1="90" x2="425" y2="326" stroke="#111" stroke-width="5"/>';
+  if (o.line === "up") html += '<line x1="104" y1="326" x2="425" y2="82" stroke="#111" stroke-width="5"/>';
+  for (let p = 0; p < pts.length; p += 1) {
+    const x = 70 + pts[p][0] / 4 * 386;
+    const y = 360 - pts[p][1] / 4 * 318;
+    const hi = o.highlight === p;
+    html += '<circle cx="' + x + '" cy="' + y + '" r="' + (hi ? 13 : 8) + '" fill="' + (hi ? "#ff3131" : "#1d70b8") + '" stroke="#111" stroke-width="3"/>';
+    if (hi) html += '<circle cx="' + x + '" cy="' + y + '" r="24" fill="none" stroke="#ff3131" stroke-width="5"/>';
+  }
+  html += '</svg>';
+  return html;
+}
+function miniScatter(xLabel, yLabel, trend) {
+  const points = trend === "up" ? [[.5,.7], [1.1,1.1], [1.8,1.6], [2.5,2.4], [3.2,3.0]] : [[.5,3.2], [1.1,2.6], [1.7,2.0], [2.5,1.3], [3.2,.7]];
+  return scatterSvg({ xLabel: xLabel, yLabel: yLabel, points: points, line: trend });
+}
+function pcaSvg(options) {
+  const o = options || {};
+  let clusters = pcaClusters;
+  if (o.layout === "distance") {
+    clusters = [
+      { color: "#48d7df", pts: [[128,92], [158,78], [188,104], [150,130]] },
+      { color: "#ef4b4b", pts: [[132,288], [166,264], [194,302], [154,326]] },
+      { color: "#f2d84b", pts: [[366,272], [396,246], [426,286], [388,314]] }
+    ];
+  }
+  let html = '<svg viewBox="0 0 540 430" aria-label="PCA plot">';
+  html += '<line x1="72" y1="352" x2="468" y2="352" stroke="#111" stroke-width="4"/>';
+  html += '<line x1="72" y1="352" x2="72" y2="42" stroke="#111" stroke-width="4"/>';
+  html += '<text x="270" y="420" text-anchor="middle" font-size="38">PC1</text>';
+  html += '<text x="18" y="198" text-anchor="middle" font-size="38" transform="rotate(-90 18 198)">PC2</text>';
+  for (let c = 0; c < clusters.length; c += 1) {
+    for (let p = 0; p < clusters[c].pts.length; p += 1) {
+      const pt = clusters[c].pts[p];
+      const fill = o.color ? clusters[c].color : "#1d70b8";
+      html += '<circle cx="' + pt[0] + '" cy="' + pt[1] + '" r="11" fill="' + fill + '" stroke="#111" stroke-width="3"/>';
+    }
+  }
+  if (o.ring === 1 || o.allRings) html += '<ellipse cx="158" cy="115" rx="78" ry="62" fill="none" stroke="#ff3131" stroke-width="6"/>';
+  if (o.ring === 2 || o.allRings) html += '<ellipse cx="360" cy="202" rx="82" ry="62" fill="none" stroke="#ff3131" stroke-width="6"/>';
+  if (o.ring === 3 || o.allRings) html += '<ellipse cx="212" cy="320" rx="82" ry="66" fill="none" stroke="#ff3131" stroke-width="6"/>';
+  if (o.axisHi) html += '<rect x="82" y="335" width="374" height="34" fill="rgba(255,49,49,0.18)" stroke="#ff3131" stroke-width="5"/>';
+  if (o.layout === "distance" && o.distance === "both") {
+    html += '<line x1="162" y1="136" x2="162" y2="258" stroke="#ff3131" stroke-width="7"/>';
+    html += '<line x1="204" y1="292" x2="352" y2="292" stroke="#ff3131" stroke-width="7"/>';
+  }
+  if (o.layout === "distance" && o.box === "bottom") html += '<rect x="108" y="226" width="346" height="118" fill="none" stroke="#ff3131" stroke-width="7"/>';
+  if (o.layout === "distance" && o.box === "left") html += '<rect x="96" y="48" width="132" height="304" fill="none" stroke="#ff3131" stroke-width="7"/>';
+  html += '</svg>';
+  return html;
+}
+function graph3dSvg(rot) {
+  const shift = Math.sin(rot) * 24;
+  let html = '<svg viewBox="0 0 520 430" aria-label="3D plot">';
+  html += '<line x1="110" y1="330" x2="410" y2="330" stroke="#111" stroke-width="5"/>';
+  html += '<line x1="110" y1="330" x2="110" y2="70" stroke="#111" stroke-width="5"/>';
+  html += '<line x1="110" y1="330" x2="' + (290 + shift) + '" y2="172" stroke="#111" stroke-width="5"/>';
+  html += '<text x="260" y="390" font-size="34">Cell2</text>';
+  html += '<text x="54" y="198" font-size="34" transform="rotate(-90 54 198)">Cell1</text>';
+  html += '<text x="' + (312 + shift) + '" y="168" font-size="34">Cell3</text>';
+  for (let i = 0; i < genes.length; i += 1) {
+    const x = 118 + genes[i][1] * 75 + Math.sin(rot + i) * 16;
+    const y = 338 - genes[i][2] * 72 - genes[i][3] * 21;
+    html += '<circle cx="' + x + '" cy="' + y + '" r="11" fill="#1d70b8" stroke="#111" stroke-width="3"/>';
+  }
+  html += '</svg>';
+  return html;
+}
+function manyPlotsSvg() {
+  let html = '<svg viewBox="0 0 520 430">';
+  for (let r = 0; r < 4; r += 1) {
+    for (let c = 0; c < 4; c += 1) {
+      const x = 28 + c * 120;
+      const y = 24 + r * 94;
+      html += '<rect x="' + x + '" y="' + y + '" width="94" height="72" fill="#f7fbff" stroke="#111" stroke-width="2"/>';
+      html += '<line x1="' + (x+14) + '" y1="' + (y+58) + '" x2="' + (x+84) + '" y2="' + (y+58) + '" stroke="#111" stroke-width="2"/>';
+      html += '<line x1="' + (x+14) + '" y1="' + (y+58) + '" x2="' + (x+14) + '" y2="' + (y+10) + '" stroke="#111" stroke-width="2"/>';
+      html += '<circle cx="' + (x+34) + '" cy="' + (y+32) + '" r="4" fill="#1d70b8"/><circle cx="' + (x+56) + '" cy="' + (y+44) + '" r="4" fill="#1d70b8"/><circle cx="' + (x+74) + '" cy="' + (y+22) + '" r="4" fill="#1d70b8"/>';
+    }
+  }
+  html += '</svg>';
+  return html;
+}
+function crazySvg() {
+  let html = '<svg viewBox="0 0 520 430">';
+  const center = [260, 238];
+  for (let i = 0; i < 7; i += 1) {
+    const a = -2.7 + i * 0.82;
+    const x = center[0] + Math.cos(a) * 190;
+    const y = center[1] + Math.sin(a) * 155;
+    html += '<line x1="' + center[0] + '" y1="' + center[1] + '" x2="' + x + '" y2="' + y + '" stroke="#111" stroke-width="4"/>';
+    html += '<text x="' + x + '" y="' + (y - 10) + '" text-anchor="middle" font-size="30">Cell' + (i+1) + '</text>';
+  }
+  for (let p = 0; p < 16; p += 1) {
+    const x = 155 + (p * 41) % 230;
+    const y = 126 + (p * 67) % 190;
+    html += '<circle cx="' + x + '" cy="' + y + '" r="10" fill="#1d70b8" stroke="#111" stroke-width="3"/>';
+  }
+  html += '</svg>';
+  return html;
+}
+function heatmapSvg() {
+  const colors = ["#1d70b8","#48d7df","#f2d84b","#ef4b4b","#7bc96f"];
+  let html = '<svg viewBox="0 0 260 210">';
+  for (let r = 0; r < 8; r += 1) for (let c = 0; c < 9; c += 1) {
+    html += '<rect x="' + (18+c*24) + '" y="' + (16+r*22) + '" width="22" height="20" fill="' + colors[(r*2+c*3)%colors.length] + '"/>';
+  }
+  html += '</svg>';
+  return html;
+}
+function methodsSvg(type) {
+  if (type === "heatmap") return heatmapSvg();
+  const pts = type === "tsne" ? [[62,54],[78,76],[96,58],[144,126],[162,150],[178,132],[94,154],[116,172],[132,148]] : [[58,132],[86,98],[116,122],[154,82],[188,112],[158,172],[206,150]];
+  let html = '<svg viewBox="0 0 260 210">';
+  html += '<line x1="30" y1="178" x2="228" y2="178" stroke="#111" stroke-width="3"/><line x1="30" y1="178" x2="30" y2="24" stroke="#111" stroke-width="3"/>';
+  for (let i = 0; i < pts.length; i += 1) {
+    const col = i < 3 ? "#48d7df" : i < 6 ? "#f2d84b" : "#ef4b4b";
+    html += '<circle cx="' + pts[i][0] + '" cy="' + pts[i][1] + '" r="9" fill="' + col + '" stroke="#111" stroke-width="2"/>';
+  }
+  html += '</svg>';
+  return html;
+}
+function titleScreen(main, sub) {
+  add('<section class="center-screen"><div class="title">' + esc(main) + '</div>' + (sub ? '<div class="subtitle">' + esc(sub) + '</div>' : '') + '</section>');
+}
+
+function renderSection(segment, localTime, globalTime) {
+  clearStage();
+  const t = Math.max(0, localTime || 0);
+
+  if (segment.id === "main-title") {
+    titleScreen("Principal Component Analysis (PCA)", "concepts in less than 5 minutes!");
+    return;
+  }
+
+  if (segment.id.startsWith("cells-") || segment.id.startsWith("seq-")) {
+    let mode = "green";
+    let ring = "";
+    let top = "Let's say we had some normal cells...";
+    let note = "";
+    if (segment.id === "cells-psst") note = "(psst - if you're not a biologist, these could be people, cars, cities, etc.)";
+    if (segment.id === "cells-suspect") top = "Even though they look the same,\nwe suspect that there are differences...";
+    if (segment.id === "cells-type1") { mode = "cyan"; ring = "cyan"; top = "These might be one type of cell..."; note = "(or one type of person, car, city, etc.)"; }
+    if (segment.id === "cells-type2") { mode = "red"; ring = "red"; top = "These might be another type of cell..."; }
+    if (segment.id === "cells-type3") { mode = "yellow"; ring = "yellow"; top = "And lastly, these might be a third type of cell."; }
+    if (segment.id === "cells-outside") top = "Unfortunately, we can't observe differences from the outside...";
+    if (segment.id === "seq-rna") top = "...so we sequence the mRNA in each cell to identify which genes are active.\nThis tells us what the cell is doing.";
+    if (segment.id === "seq-people") {
+      top = "...so we sequence the mRNA in each cell to identify which genes are active.\nThis tells us what the cell is doing.";
+      note = "(If they were people, we could measure height, blood pressure, reading level, etc.)";
+    }
+    textBlock("top-text", top);
+    box("svgbox", "30vw", "20vh", "40vw", "52vh", cellsSvg(mode, ring));
+    if (note) textBlock("note", note);
+    return;
+  }
+
+  if (segment.id === "data-intro" || segment.id === "data-columns" || segment.id === "two-cells" || segment.id === "plot-two") {
+    const cols = segment.id === "two-cells" || segment.id === "plot-two" ? 2 : 4;
+    const colHi = segment.id === "data-columns" ? 1 + (Math.floor(t * 1.35) % 4) : 0;
+    let top = "Here's the data...";
+    if (segment.id === "data-columns") top = "Each column shows how much each gene is transcribed in each cell.";
+    if (segment.id === "two-cells") top = "For now, let's imagine there were only 2 cells.";
+    if (segment.id === "plot-two") top = "If we just have 2 cells, we can plot the measurements for each gene.";
+    textBlock("top-text", top);
+    box("table-wrap", cols === 2 ? "55vw" : "42vw", "18vh", cols === 2 ? "44vw" : "56vw", "66vh", tableHtml(cols, -1, colHi));
+    if (segment.id === "plot-two") box("svgbox", "6vw", "24vh", "42vw", "54vh", scatterSvg({ line: "" }));
+    return;
+  }
+
+  if (segment.id === "gene1" || segment.id === "gene9" || segment.id === "inverse") {
+    const hi = segment.id === "gene1" ? 0 : segment.id === "gene9" ? 8 : -1;
+    const line = segment.id === "inverse" ? "down" : "";
+    const top = segment.id === "gene1" ? "Gene1 is high in Cell1 and low in Cell2." : segment.id === "gene9" ? "Gene9 is low in Cell1 and high in Cell2." : "In general, Cell1 and Cell2 have an inverse correlation.";
+    textBlock("top-text", top);
+    box("svgbox", "5vw", "23vh", "42vw", "55vh", scatterSvg({ highlight: hi, line: line }));
+    box("table-wrap small-grid", "53vw", "15vh", "44vw", "68vh", tableHtml(2, hi, 0));
+    if (segment.id === "inverse") textBlock("note", "This means they are probably two different types of cells, since they are using different genes.");
+    return;
+  }
+
+  if (segment.id === "three-cells" || segment.id === "plot12" || segment.id === "plot13" || segment.id === "plot23") {
+    let top = "Now let's imagine there are 3 cells.";
+    if (segment.id === "plot12") top = "We've already seen Cell1 vs Cell2.";
+    if (segment.id === "plot13") top = "Now we can also compare Cell1 to Cell3.";
+    if (segment.id === "plot23") top = "Lastly, we can compare Cell2 to Cell3.";
+    textBlock("top-text", top);
+    box("table-wrap small-grid", "61vw", "14vh", "37vw", "72vh", tableHtml(3, -1, 0));
+    box("svgbox", "6vw", "13vh", "27vw", "25vh", miniScatter("Cell2", "Cell1", "down"));
+    if (segment.id === "plot13" || segment.id === "plot23") {
+      box("svgbox", "6vw", "39vh", "27vw", "25vh", miniScatter("Cell3", "Cell1", "up"));
+      textBlock("label", "Cell1 and Cell3 are positively correlated.", "left:35vw;top:45vh;");
+    }
+    if (segment.id === "plot23") {
+      box("svgbox", "6vw", "65vh", "27vw", "25vh", miniScatter("Cell3", "Cell2", "down"));
+      textBlock("label", "Cell2 is doing something different from Cell3.", "left:35vw;top:71vh;");
+    }
+    return;
+  }
+
+  if (segment.id === "three-d" || segment.id === "axis1" || segment.id === "axis2" || segment.id === "axis3" || segment.id === "rotate") {
+    const rotating = segment.id === "rotate";
+    let top = "Alternatively, we could plot all three cells at once on a 3-dimensional graph.";
+    if (segment.id === "axis1") top = "Cell1 could be the vertical axis...";
+    if (segment.id === "axis2") top = "Cell2 could be the horizontal axis...";
+    if (segment.id === "axis3") top = "Cell3 could be depth.";
+    if (rotating) top = "We could rotate this graph to see how the cells are related.";
+    textBlock("top-text", top);
+    box("svgbox", "10vw", "18vh", "48vw", "60vh", graph3dSvg(rotating ? t * 0.8 : 0));
+    box("table-wrap small-grid", "61vw", "17vh", "37vw", "64vh", tableHtml(3, -1, 0));
+    if (segment.id === "axis1" || segment.id === "axis2" || segment.id === "axis3") {
+      textBlock("label", "Cell1: vertical axis", "left:6vw;top:31vh;max-width:18vw;");
+    }
+    if (segment.id === "axis2" || segment.id === "axis3") {
+      textBlock("label", "Cell2: horizontal axis", "left:25vw;top:79vh;max-width:21vw;");
+    }
+    if (segment.id === "axis3") {
+      textBlock("label", "Cell3: depth axis", "left:41vw;top:31vh;max-width:18vw;");
+    }
+    return;
+  }
+
+  if (segment.id === "four-cells" || segment.id === "many-plots" || segment.id === "crazy-plot" || segment.id === "silly") {
+    let top = "But what do we do when we have 4 or more cells?";
+    if (segment.id === "many-plots") top = "Draw tons and tons of 2-cell plots and try to make sense of them all?";
+    if (segment.id === "crazy-plot") top = "Or draw some crazy graph that has an axis for each cell?";
+    if (segment.id === "silly") top = "No, both of those options are just plain silly.";
+    textBlock("top-text", top);
+    box("table-wrap small-grid", "59vw", "16vh", "39vw", "66vh", tableHtml(4, -1, 0));
+    if (segment.id === "four-cells" || segment.id === "many-plots") box("svgbox", "6vw", "20vh", "45vw", "58vh", manyPlotsSvg());
+    else if (segment.id === "crazy-plot") box("svgbox", "6vw", "20vh", "45vw", "58vh", crazySvg());
+    else box("svgbox", "15vw", "26vh", "34vw", "44vh", '<svg viewBox="0 0 400 300"><text x="200" y="180" text-anchor="middle" font-size="126" fill="#ef4b4b">NO</text></svg>');
+    return;
+  }
+
+  if (segment.id === "pca-intro" || segment.id === "pca-converts" || segment.id === "cluster1" || segment.id === "cluster2" || segment.id === "cluster3" || segment.id === "color-code") {
+    let top = "Instead, we draw a Principal Component Analysis (PCA) plot...";
+    let opt = {};
+    if (segment.id === "pca-converts") top = "A PCA plot converts correlations among all cells into a 2-D graph.";
+    if (segment.id === "cluster1") { top = "Cells that are highly correlated cluster together..."; opt.ring = 1; }
+    if (segment.id === "cluster2") { top = "So are these..."; opt.ring = 2; }
+    if (segment.id === "cluster3") { top = "And so are these."; opt.ring = 3; }
+    if (segment.id === "color-code") { top = "To make the clusters easier to see, we can color code them..."; opt.color = true; }
+    textBlock("top-text", top);
+    box("svgbox", "22vw", "19vh", "56vw", "65vh", pcaSvg(opt));
+    return;
+  }
+
+  if (segment.id === "back-cells" || segment.id === "final-types") {
+    textBlock("top-text", segment.id === "final-types" ? "...and see 3 different types of cells doing 3 different things with their genes!!!" : "Once we've identified clusters in the PCA plot,\nwe can go back to the original cells...");
+    box("svgbox", "7vw", "22vh", "42vw", "56vh", pcaSvg({ color: true }));
+    box("svgbox", "58vw", "22vh", "34vw", "54vh", cellsSvg(segment.id === "back-cells" ? "green" : "typed-final", ""));
+    return;
+  }
+
+  if (segment.id === "axes-intro" || segment.id === "pc1-important") {
+    textBlock("top-text", segment.id === "pc1-important" ? "Differences along PC1 are more important than differences along PC2." : "Here's one last main idea:\nThe axes are ranked in order of importance.");
+    box("svgbox", "22vw", "20vh", "56vw", "66vh", pcaSvg({ color: true, axisHi: segment.id === "pc1-important" }));
+    return;
+  }
+
+  if (segment.id === "distance-start" || segment.id === "distance-both" || segment.id === "bottom-more" || segment.id === "left-less") {
+    let opt = { color: true, layout: "distance" };
+    let top = "If the plot looked like this...";
+    if (segment.id === "distance-both") { opt.distance = "both"; top = "These two distances are about the same..."; }
+    if (segment.id === "bottom-more") { opt.distance = "both"; opt.box = "bottom"; top = "Then the bottom pair is more different..."; }
+    if (segment.id === "left-less") { opt.distance = "both"; opt.box = "left"; top = "...than the two clusters on the left."; }
+    textBlock("top-text", top);
+    box("svgbox", "20vw", "19vh", "58vw", "66vh", pcaSvg(opt));
+    return;
+  }
+
+  if (segment.id === "methods-intro" || segment.id === "methods-heatmap" || segment.id === "methods-tsne" || segment.id === "methods-mds" || segment.id === "note") {
+    textBlock("top-text", "PCA is just one way to make sense of this type of data.\nOther dimension reduction methods include:");
+    if (segment.id !== "methods-intro") {
+      textBlock("label", "Heatmaps", "left:10vw;top:23vh;max-width:22vw;");
+      box("svgbox", "7vw", "35vh", "27vw", "35vh", methodsSvg("heatmap"));
+    }
+    if (segment.id === "methods-tsne" || segment.id === "methods-mds" || segment.id === "note") {
+      textBlock("label", "t-SNE Plots", "left:39vw;top:23vh;max-width:22vw;");
+      box("svgbox", "37vw", "35vh", "27vw", "35vh", methodsSvg("tsne"));
+    }
+    if (segment.id === "methods-mds" || segment.id === "note") {
+      textBlock("label", "Multi-Dimensional Scaling (MDS)", "left:67vw;top:23vh;max-width:25vw;");
+      box("svgbox", "67vw", "35vh", "27vw", "35vh", methodsSvg("mds"));
+    }
+    if (segment.id === "note") textBlock("note", "Key idea: PCA summarizes many measured variables with a smaller number of ranked principal components.");
+    return;
+  }
+  if (segment.id === "end") {
+    titleScreen("The End", "This concludes the overview of the main ideas behind PCA.");
+  }
+}
+
+window.__RENDER_SECTION__ = renderSection;
+renderSection(VIDEO_PLAN[0], 0, 0);
+</script>
+<style id="resolved-export-motion-guard">
+body.export-mode:not(.viewer-mode) *, body.export-mode:not(.viewer-mode) *::before, body.export-mode:not(.viewer-mode) *::after {
+  animation: none !important;
+  transition: none !important;
+}
+</style>
+<script id="resolved-metadata">
+window.__VIDEO_METADATA__ = { ...(window.__VIDEO_METADATA__ || {}), lastResolved: "2026-06-02T05:27:41.407Z" };
+</script>
+<script id="resolved-timeline">
+window.__RESOLVED_TIMELINE__ = {"duration":261.8999999999999,"videoTimeline":[{"start":0,"end":10.125,"duration":10.125,"sectionId":"main-title","item":{"id":"main-title","kind":"narration+visual","audio":"audio/main-title.wav","text":"Hello, today we're going to be talking about the main ideas behind principal component analysis, and we're going to cover those concepts in less than 5 minutes.","resolvedDuration":10.125}},{"start":10.125,"end":12.6,"duration":2.475,"sectionId":"cells-normal","item":{"id":"cells-normal","kind":"narration+visual","audio":"audio/cells-normal.wav","text":"Let's say we had some normal cells...","resolvedDuration":2.475}},{"start":12.6,"end":19.925,"duration":7.325,"sectionId":"cells-psst","item":{"id":"cells-psst","kind":"narration+visual","audio":"audio/cells-psst.wav","text":"If you're not a biologist, imagine that these could be people, or cars, or cities, or etc. They could be anything.","resolvedDuration":7.325}},{"start":19.925,"end":24.175,"duration":4.25,"sectionId":"cells-suspect","item":{"id":"cells-suspect","kind":"narration+visual","audio":"audio/cells-suspect.wav","text":"Even though they look the same, we suspect that there are differences...","resolvedDuration":4.25}},{"start":24.175,"end":29.875,"duration":5.7,"sectionId":"cells-type1","item":{"id":"cells-type1","kind":"narration+visual","audio":"audio/cells-type1.wav","text":"These might be one type of cell, or one type of person, or car, or city, etc.","resolvedDuration":5.7}},{"start":29.875,"end":32.35,"duration":2.475,"sectionId":"cells-type2","item":{"id":"cells-type2","kind":"narration+visual","audio":"audio/cells-type2.wav","text":"These might be another type of cell...","resolvedDuration":2.475}},{"start":32.35,"end":35.625,"duration":3.275,"sectionId":"cells-type3","item":{"id":"cells-type3","kind":"narration+visual","audio":"audio/cells-type3.wav","text":"And lastly, these might be a third type of cell.","resolvedDuration":3.275}},{"start":35.625,"end":39.8,"duration":4.175,"sectionId":"cells-outside","item":{"id":"cells-outside","kind":"narration+visual","audio":"audio/cells-outside.wav","text":"Unfortunately, we can't observe differences from the outside...","resolvedDuration":4.175}},{"start":39.8,"end":47.75,"duration":7.95,"sectionId":"seq-rna","item":{"id":"seq-rna","kind":"narration+visual","audio":"audio/seq-rna.wav","text":"So we sequence the messenger RNA in each cell to identify which genes are active. This tells us what the cell is doing.","resolvedDuration":7.95}},{"start":47.75,"end":53.1,"duration":5.35,"sectionId":"seq-people","item":{"id":"seq-people","kind":"narration+visual","audio":"audio/seq-people.wav","text":"If they were people, we could measure their weight, blood pressure, reading level, etc.","resolvedDuration":5.35}},{"start":53.1,"end":55.2,"duration":2.1,"sectionId":"data-intro","item":{"id":"data-intro","kind":"narration+visual","audio":"audio/data-intro.wav","text":"Okay, here's the data.","resolvedDuration":2.1}},{"start":55.2,"end":59.175000000000004,"duration":3.975,"sectionId":"data-columns","item":{"id":"data-columns","kind":"narration+visual","audio":"audio/data-columns.wav","text":"Each column shows how much each gene is transcribed in each cell.","resolvedDuration":3.975}},{"start":59.175000000000004,"end":62.45,"duration":3.275,"sectionId":"two-cells","item":{"id":"two-cells","kind":"narration+visual","audio":"audio/two-cells.wav","text":"For now, let's imagine there are only 2 cells.","resolvedDuration":3.275}},{"start":62.45,"end":66.875,"duration":4.425,"sectionId":"plot-two","item":{"id":"plot-two","kind":"narration+visual","audio":"audio/plot-two.wav","text":"If we just have two cells, then we can plot the measurements for each gene.","resolvedDuration":4.425}},{"start":66.875,"end":73.125,"duration":6.25,"sectionId":"gene1","item":{"id":"gene1","kind":"narration+visual","audio":"audio/gene1.wav","text":"This gene, Gene 1, is highly transcribed in Cell 1, and lowly transcribed in Cell 2.","resolvedDuration":6.25}},{"start":73.125,"end":79.675,"duration":6.55,"sectionId":"gene9","item":{"id":"gene9","kind":"narration+visual","audio":"audio/gene9.wav","text":"And this gene, Gene 9, is lowly transcribed in Cell 1, and highly transcribed in Cell 2.","resolvedDuration":6.55}},{"start":79.675,"end":89.75,"duration":10.075,"sectionId":"inverse","item":{"id":"inverse","kind":"narration+visual","audio":"audio/inverse.wav","text":"In general, Cell 1 and Cell 2 have an inverse correlation. This means that they are probably two different types of cells, since they are using different genes.","resolvedDuration":10.075}},{"start":89.75,"end":92.325,"duration":2.575,"sectionId":"three-cells","item":{"id":"three-cells","kind":"narration+visual","audio":"audio/three-cells.wav","text":"Now let's imagine there are 3 cells.","resolvedDuration":2.575}},{"start":92.325,"end":97.72500000000001,"duration":5.4,"sectionId":"plot12","item":{"id":"plot12","kind":"narration+visual","audio":"audio/plot12.wav","text":"We've already seen how we can plot the first two cells to see how closely they are related.","resolvedDuration":5.4}},{"start":97.72500000000001,"end":107.025,"duration":9.3,"sectionId":"plot13","item":{"id":"plot13","kind":"narration+visual","audio":"audio/plot13.wav","text":"Now we can also compare Cell 1 to Cell 3. Cell 1 and Cell 3 are positively correlated, suggesting they are doing similar things.","resolvedDuration":9.3}},{"start":107.025,"end":116.60000000000001,"duration":9.575,"sectionId":"plot23","item":{"id":"plot23","kind":"narration+visual","audio":"audio/plot23.wav","text":"Lastly, we can also compare Cell 2 to Cell 3. The negative correlation suggests that Cell 2 is doing something different from Cell 3.","resolvedDuration":9.575}},{"start":116.60000000000001,"end":122.075,"duration":5.475,"sectionId":"three-d","item":{"id":"three-d","kind":"narration+visual","audio":"audio/three-d.wav","text":"Alternatively, we could try to plot all three cells at once on a 3-dimensional graph.","resolvedDuration":5.475}},{"start":122.075,"end":124.775,"duration":2.7,"sectionId":"axis1","item":{"id":"axis1","kind":"narration+visual","audio":"audio/axis1.wav","text":"Cell 1 could be the vertical axis...","resolvedDuration":2.7}},{"start":124.775,"end":127.75,"duration":2.975,"sectionId":"axis2","item":{"id":"axis2","kind":"narration+visual","audio":"audio/axis2.wav","text":"Cell 2 could be the horizontal axis...","resolvedDuration":2.975}},{"start":127.75,"end":129.925,"duration":2.175,"sectionId":"axis3","item":{"id":"axis3","kind":"narration+visual","audio":"audio/axis3.wav","text":"And Cell 3 could be depth.","resolvedDuration":2.175}},{"start":129.925,"end":135.05,"duration":5.125,"sectionId":"rotate","item":{"id":"rotate","kind":"narration+visual","audio":"audio/rotate.wav","text":"We could then rotate this graph around to see how the cells are related to each other.","resolvedDuration":5.125}},{"start":135.05,"end":137.85000000000002,"duration":2.8,"sectionId":"four-cells","item":{"id":"four-cells","kind":"narration+visual","audio":"audio/four-cells.wav","text":"But what do we do when we have 4 or more cells?","resolvedDuration":2.8}},{"start":137.85000000000002,"end":142.55,"duration":4.7,"sectionId":"many-plots","item":{"id":"many-plots","kind":"narration+visual","audio":"audio/many-plots.wav","text":"Draw tons and tons of 2 cell plots and try to make sense of them all?","resolvedDuration":4.7}},{"start":142.55,"end":148.125,"duration":5.575,"sectionId":"crazy-plot","item":{"id":"crazy-plot","kind":"narration+visual","audio":"audio/crazy-plot.wav","text":"Or draw some crazy graph that has an axis for each cell and makes our brain explode?","resolvedDuration":5.575}},{"start":148.125,"end":151.325,"duration":3.2,"sectionId":"silly","item":{"id":"silly","kind":"narration+visual","audio":"audio/silly.wav","text":"No, both of those options are just plain silly.","resolvedDuration":3.2}},{"start":151.325,"end":156.14999999999998,"duration":4.825,"sectionId":"pca-intro","item":{"id":"pca-intro","kind":"narration+visual","audio":"audio/pca-intro.wav","text":"Instead, we draw a Principal Component Analysis (PCA) plot.","resolvedDuration":4.825}},{"start":156.14999999999998,"end":163.17499999999998,"duration":7.025,"sectionId":"pca-converts","item":{"id":"pca-converts","kind":"narration+visual","audio":"audio/pca-converts.wav","text":"A PCA plot converts the correlations, or lack thereof, among all of the cells into a 2-D graph.","resolvedDuration":7.025}},{"start":163.17499999999998,"end":170.075,"duration":6.9,"sectionId":"cluster1","item":{"id":"cluster1","kind":"narration+visual","audio":"audio/cluster1.wav","text":"Cells that are highly correlated cluster together. This cluster of cells are highly correlated with each other...","resolvedDuration":6.9}},{"start":170.075,"end":171.7,"duration":1.625,"sectionId":"cluster2","item":{"id":"cluster2","kind":"narration+visual","audio":"audio/cluster2.wav","text":"So are these...","resolvedDuration":1.625}},{"start":171.7,"end":173.39999999999998,"duration":1.7,"sectionId":"cluster3","item":{"id":"cluster3","kind":"narration+visual","audio":"audio/cluster3.wav","text":"And so are these.","resolvedDuration":1.7}},{"start":173.39999999999998,"end":177.34999999999997,"duration":3.95,"sectionId":"color-code","item":{"id":"color-code","kind":"narration+visual","audio":"audio/color-code.wav","text":"To make the clusters easier to see, we can color code them...","resolvedDuration":3.95}},{"start":177.34999999999997,"end":183.07499999999996,"duration":5.725,"sectionId":"back-cells","item":{"id":"back-cells","kind":"narration+visual","audio":"audio/back-cells.wav","text":"Once we've identified the clusters in the PCA plot, we can go back to the original cells...","resolvedDuration":5.725}},{"start":183.07499999999996,"end":189.27499999999995,"duration":6.2,"sectionId":"final-types","item":{"id":"final-types","kind":"narration+visual","audio":"audio/final-types.wav","text":"And see that they represent 3 different types of cells doing 3 different types of things with their genes!!!","resolvedDuration":6.2}},{"start":189.27499999999995,"end":196.74999999999994,"duration":7.475,"sectionId":"axes-intro","item":{"id":"axes-intro","kind":"narration+visual","audio":"audio/axes-intro.wav","text":"Here's one last main idea about how to interpret PCA plots: The axes are ranked in order of importance.","resolvedDuration":7.475}},{"start":196.74999999999994,"end":207.44999999999993,"duration":10.7,"sectionId":"pc1-important","item":{"id":"pc1-important","kind":"narration+visual","audio":"audio/pc1-important.wav","text":"Differences along the first principal component axis, PC1, are more important than differences along the second principal component axis, PC2.","resolvedDuration":10.7}},{"start":207.44999999999993,"end":209.52499999999992,"duration":2.075,"sectionId":"distance-start","item":{"id":"distance-start","kind":"narration+visual","audio":"audio/distance-start.wav","text":"If the plot looked like this...","resolvedDuration":2.075}},{"start":209.52499999999992,"end":215.79999999999993,"duration":6.275,"sectionId":"distance-both","item":{"id":"distance-both","kind":"narration+visual","audio":"audio/distance-both.wav","text":"Where the distance between these two clusters is about the same as the distance between these two clusters...","resolvedDuration":6.275}},{"start":215.79999999999993,"end":219.39999999999992,"duration":3.6,"sectionId":"bottom-more","item":{"id":"bottom-more","kind":"narration+visual","audio":"audio/bottom-more.wav","text":"Then these two clusters are more different from each other...","resolvedDuration":3.6}},{"start":219.39999999999992,"end":221.39999999999992,"duration":2,"sectionId":"left-less","item":{"id":"left-less","kind":"narration+visual","audio":"audio/left-less.wav","text":"Than these two clusters.","resolvedDuration":2}},{"start":221.39999999999992,"end":232.57499999999993,"duration":11.175,"sectionId":"methods-intro","item":{"id":"methods-intro","kind":"narration+visual","audio":"audio/methods-intro.wav","text":"Before we go, you should know that PCA is just one way to make sense of this type of data. There are lots of other methods that are variations on this theme of dimension reduction.","resolvedDuration":11.175}},{"start":232.57499999999993,"end":235.37499999999994,"duration":2.8,"sectionId":"methods-heatmap","item":{"id":"methods-heatmap","kind":"narration+visual","audio":"audio/methods-heatmap.wav","text":"These methods include heatmaps...","resolvedDuration":2.8}},{"start":235.37499999999994,"end":237.22499999999994,"duration":1.85,"sectionId":"methods-tsne","item":{"id":"methods-tsne","kind":"narration+visual","audio":"audio/methods-tsne.wav","text":"t-SNE plots...","resolvedDuration":1.85}},{"start":237.22499999999994,"end":240.82499999999993,"duration":3.6,"sectionId":"methods-mds","item":{"id":"methods-mds","kind":"narration+visual","audio":"audio/methods-mds.wav","text":"And Multi-Dimensional Scaling, MDS, plots.","resolvedDuration":3.6}},{"start":240.82499999999993,"end":257.4749999999999,"duration":16.65,"sectionId":"note","item":{"id":"note","kind":"narration+visual","audio":"audio/note.wav","text":"Together, these methods are used to reduce complex data into visual summaries that are easier to interpret. Key idea: PCA is a dimension reduction method that summarizes many measured variables with a smaller number of ranked principal components.","resolvedDuration":16.65}},{"start":257.4749999999999,"end":261.8999999999999,"duration":4.425,"sectionId":"end","item":{"id":"end","kind":"narration+visual","audio":"audio/end.wav","text":"This concludes the overview of the main ideas behind PCA.","resolvedDuration":4.425}}],"audioTimeline":[{"start":0,"duration":10.125,"src":"audio/main-title.wav","text":"Hello, today we're going to be talking about the main ideas behind principal component analysis, and we're going to cover those concepts in less than 5 minutes.","sectionId":"main-title"},{"start":10.125,"duration":2.475,"src":"audio/cells-normal.wav","text":"Let's say we had some normal cells...","sectionId":"cells-normal"},{"start":12.6,"duration":7.325,"src":"audio/cells-psst.wav","text":"If you're not a biologist, imagine that these could be people, or cars, or cities, or etc. They could be anything.","sectionId":"cells-psst"},{"start":19.925,"duration":4.25,"src":"audio/cells-suspect.wav","text":"Even though they look the same, we suspect that there are differences...","sectionId":"cells-suspect"},{"start":24.175,"duration":5.7,"src":"audio/cells-type1.wav","text":"These might be one type of cell, or one type of person, or car, or city, etc.","sectionId":"cells-type1"},{"start":29.875,"duration":2.475,"src":"audio/cells-type2.wav","text":"These might be another type of cell...","sectionId":"cells-type2"},{"start":32.35,"duration":3.275,"src":"audio/cells-type3.wav","text":"And lastly, these might be a third type of cell.","sectionId":"cells-type3"},{"start":35.625,"duration":4.175,"src":"audio/cells-outside.wav","text":"Unfortunately, we can't observe differences from the outside...","sectionId":"cells-outside"},{"start":39.8,"duration":7.95,"src":"audio/seq-rna.wav","text":"So we sequence the messenger RNA in each cell to identify which genes are active. This tells us what the cell is doing.","sectionId":"seq-rna"},{"start":47.75,"duration":5.35,"src":"audio/seq-people.wav","text":"If they were people, we could measure their weight, blood pressure, reading level, etc.","sectionId":"seq-people"},{"start":53.1,"duration":2.1,"src":"audio/data-intro.wav","text":"Okay, here's the data.","sectionId":"data-intro"},{"start":55.2,"duration":3.975,"src":"audio/data-columns.wav","text":"Each column shows how much each gene is transcribed in each cell.","sectionId":"data-columns"},{"start":59.175000000000004,"duration":3.275,"src":"audio/two-cells.wav","text":"For now, let's imagine there are only 2 cells.","sectionId":"two-cells"},{"start":62.45,"duration":4.425,"src":"audio/plot-two.wav","text":"If we just have two cells, then we can plot the measurements for each gene.","sectionId":"plot-two"},{"start":66.875,"duration":6.25,"src":"audio/gene1.wav","text":"This gene, Gene 1, is highly transcribed in Cell 1, and lowly transcribed in Cell 2.","sectionId":"gene1"},{"start":73.125,"duration":6.55,"src":"audio/gene9.wav","text":"And this gene, Gene 9, is lowly transcribed in Cell 1, and highly transcribed in Cell 2.","sectionId":"gene9"},{"start":79.675,"duration":10.075,"src":"audio/inverse.wav","text":"In general, Cell 1 and Cell 2 have an inverse correlation. This means that they are probably two different types of cells, since they are using different genes.","sectionId":"inverse"},{"start":89.75,"duration":2.575,"src":"audio/three-cells.wav","text":"Now let's imagine there are 3 cells.","sectionId":"three-cells"},{"start":92.325,"duration":5.4,"src":"audio/plot12.wav","text":"We've already seen how we can plot the first two cells to see how closely they are related.","sectionId":"plot12"},{"start":97.72500000000001,"duration":9.3,"src":"audio/plot13.wav","text":"Now we can also compare Cell 1 to Cell 3. Cell 1 and Cell 3 are positively correlated, suggesting they are doing similar things.","sectionId":"plot13"},{"start":107.025,"duration":9.575,"src":"audio/plot23.wav","text":"Lastly, we can also compare Cell 2 to Cell 3. The negative correlation suggests that Cell 2 is doing something different from Cell 3.","sectionId":"plot23"},{"start":116.60000000000001,"duration":5.475,"src":"audio/three-d.wav","text":"Alternatively, we could try to plot all three cells at once on a 3-dimensional graph.","sectionId":"three-d"},{"start":122.075,"duration":2.7,"src":"audio/axis1.wav","text":"Cell 1 could be the vertical axis...","sectionId":"axis1"},{"start":124.775,"duration":2.975,"src":"audio/axis2.wav","text":"Cell 2 could be the horizontal axis...","sectionId":"axis2"},{"start":127.75,"duration":2.175,"src":"audio/axis3.wav","text":"And Cell 3 could be depth.","sectionId":"axis3"},{"start":129.925,"duration":5.125,"src":"audio/rotate.wav","text":"We could then rotate this graph around to see how the cells are related to each other.","sectionId":"rotate"},{"start":135.05,"duration":2.8,"src":"audio/four-cells.wav","text":"But what do we do when we have 4 or more cells?","sectionId":"four-cells"},{"start":137.85000000000002,"duration":4.7,"src":"audio/many-plots.wav","text":"Draw tons and tons of 2 cell plots and try to make sense of them all?","sectionId":"many-plots"},{"start":142.55,"duration":5.575,"src":"audio/crazy-plot.wav","text":"Or draw some crazy graph that has an axis for each cell and makes our brain explode?","sectionId":"crazy-plot"},{"start":148.125,"duration":3.2,"src":"audio/silly.wav","text":"No, both of those options are just plain silly.","sectionId":"silly"},{"start":151.325,"duration":4.825,"src":"audio/pca-intro.wav","text":"Instead, we draw a Principal Component Analysis (PCA) plot.","sectionId":"pca-intro"},{"start":156.14999999999998,"duration":7.025,"src":"audio/pca-converts.wav","text":"A PCA plot converts the correlations, or lack thereof, among all of the cells into a 2-D graph.","sectionId":"pca-converts"},{"start":163.17499999999998,"duration":6.9,"src":"audio/cluster1.wav","text":"Cells that are highly correlated cluster together. This cluster of cells are highly correlated with each other...","sectionId":"cluster1"},{"start":170.075,"duration":1.625,"src":"audio/cluster2.wav","text":"So are these...","sectionId":"cluster2"},{"start":171.7,"duration":1.7,"src":"audio/cluster3.wav","text":"And so are these.","sectionId":"cluster3"},{"start":173.39999999999998,"duration":3.95,"src":"audio/color-code.wav","text":"To make the clusters easier to see, we can color code them...","sectionId":"color-code"},{"start":177.34999999999997,"duration":5.725,"src":"audio/back-cells.wav","text":"Once we've identified the clusters in the PCA plot, we can go back to the original cells...","sectionId":"back-cells"},{"start":183.07499999999996,"duration":6.2,"src":"audio/final-types.wav","text":"And see that they represent 3 different types of cells doing 3 different types of things with their genes!!!","sectionId":"final-types"},{"start":189.27499999999995,"duration":7.475,"src":"audio/axes-intro.wav","text":"Here's one last main idea about how to interpret PCA plots: The axes are ranked in order of importance.","sectionId":"axes-intro"},{"start":196.74999999999994,"duration":10.7,"src":"audio/pc1-important.wav","text":"Differences along the first principal component axis, PC1, are more important than differences along the second principal component axis, PC2.","sectionId":"pc1-important"},{"start":207.44999999999993,"duration":2.075,"src":"audio/distance-start.wav","text":"If the plot looked like this...","sectionId":"distance-start"},{"start":209.52499999999992,"duration":6.275,"src":"audio/distance-both.wav","text":"Where the distance between these two clusters is about the same as the distance between these two clusters...","sectionId":"distance-both"},{"start":215.79999999999993,"duration":3.6,"src":"audio/bottom-more.wav","text":"Then these two clusters are more different from each other...","sectionId":"bottom-more"},{"start":219.39999999999992,"duration":2,"src":"audio/left-less.wav","text":"Than these two clusters.","sectionId":"left-less"},{"start":221.39999999999992,"duration":11.175,"src":"audio/methods-intro.wav","text":"Before we go, you should know that PCA is just one way to make sense of this type of data. There are lots of other methods that are variations on this theme of dimension reduction.","sectionId":"methods-intro"},{"start":232.57499999999993,"duration":2.8,"src":"audio/methods-heatmap.wav","text":"These methods include heatmaps...","sectionId":"methods-heatmap"},{"start":235.37499999999994,"duration":1.85,"src":"audio/methods-tsne.wav","text":"t-SNE plots...","sectionId":"methods-tsne"},{"start":237.22499999999994,"duration":3.6,"src":"audio/methods-mds.wav","text":"And Multi-Dimensional Scaling, MDS, plots.","sectionId":"methods-mds"},{"start":240.82499999999993,"duration":16.65,"src":"audio/note.wav","text":"Together, these methods are used to reduce complex data into visual summaries that are easier to interpret. Key idea: PCA is a dimension reduction method that summarizes many measured variables with a smaller number of ranked principal components.","sectionId":"note"},{"start":257.4749999999999,"duration":4.425,"src":"audio/end.wav","text":"This concludes the overview of the main ideas behind PCA.","sectionId":"end"}],"interactiveTimeline":[],"gameTimeline":[]};
+</script>
+<script id="resolved-render-runtime">
+(() => {
+  const timeline = window.__RESOLVED_TIMELINE__;
+  if (!timeline) return;
+
+  const clamp = (value, min, max) => Math.max(min, Math.min(max, value));
+  const videoTimeline = Array.isArray(timeline.videoTimeline) ? timeline.videoTimeline : [];
+  const audioTimeline = Array.isArray(timeline.audioTimeline) ? timeline.audioTimeline : [];
+
+  window.__VIDEO_DURATION__ = Number(timeline.duration) || 0;
+  window.__VIDEO_TIMELINE__ = videoTimeline;
+  window.__AUDIO_TIMELINE__ = audioTimeline;
+  window.__INTERACTIVE_TIMELINE__ = Array.isArray(timeline.interactiveTimeline) ? timeline.interactiveTimeline : [];
+  window.__GAME_TIMELINE__ = Array.isArray(timeline.gameTimeline) ? timeline.gameTimeline : [];
+
+  function updateOptionalControls(time) {
+    const total = window.__VIDEO_DURATION__ || 0;
+    const scrubber = document.getElementById("scrubber");
+    if (scrubber) {
+      scrubber.max = total.toFixed(3);
+      scrubber.value = time.toFixed(3);
+    }
+
+    const readout = document.getElementById("readout") || document.getElementById("time-display");
+    if (readout) {
+      const mins = Math.floor(time / 60);
+      const secs = Math.floor(time % 60).toString().padStart(2, "0");
+      readout.textContent = readout.id === "time-display"
+        ? `${mins}:${secs}`
+        : `${time.toFixed(2)} / ${total.toFixed(2)}`;
+    }
+
+    const progress = document.getElementById("progress-fill");
+    if (progress && total > 0) {
+      progress.style.width = `${(time / total) * 100}%`;
+    }
+  }
+
+  window.renderAt = function renderAt(time) {
+    const total = window.__VIDEO_DURATION__ || 0;
+    const activeTime = clamp(Number(time) || 0, 0, total);
+    window.__CURRENT_RENDER_TIME__ = activeTime;
+
+    let cue = videoTimeline[0];
+    for (const candidate of videoTimeline) {
+      if (candidate.start <= activeTime) cue = candidate;
+      if (candidate.start > activeTime) break;
+    }
+
+    const renderSection = window.__RENDER_SECTION__ || window.__HTML_RENDER_SECTION__ || window.__AI_RENDER_SECTION__;
+    if (cue && typeof renderSection === "function") {
+      renderSection(cue.item, activeTime - cue.start, activeTime);
+    }
+
+    updateOptionalControls(activeTime);
+    return activeTime;
+  };
+
+  const renderInitial = () => window.renderAt(0);
+  if (document.readyState === "loading") {
+    document.addEventListener("DOMContentLoaded", renderInitial, { once: true });
+  } else {
+    renderInitial();
+  }
+})();
+</script>
+</body>
+</html>

@@ -1,0 +1,21 @@
+{
+  "name": "lecture-agent",
+  "version": "1.0.0",
+  "description": "TypeScript implementation of coding agent",
+  "type": "module",
+  "main": "src/coding_agent.ts",
+  "scripts": {
+    "agent": "tsx src/coding_agent.ts",
+    "test": "tsx src/llm_model.ts"
+  },
+  "dependencies": {
+    "@google/genai": "*",
+    "dotenv": "*",
+    "openai": "*"
+  },
+  "devDependencies": {
+    "@types/node": "*",
+    "tsx": "*",
+    "typescript": "*"
+  }
+}

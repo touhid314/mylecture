@@ -1,29 +1,39 @@
 {
-  "name": "edu-shorts-renderer",
+  "name": "mylecture-renderer",
   "version": "1.0.0",
   "description": "General HTML-to-video renderer with synchronized audio support.",
   "private": true,
+  "workspaces": [
+    "packages/*"
+  ],
   "type": "module",
   "scripts": {
-    "build:plan": "node scripts/build-plan.mjs",
-    "render:video": "node scripts/render-video.mjs",
-    "subtitle:burn": "node scripts/subtitle-burner.mjs",
-    "view": "node scripts/viewer-server.mjs",
+    "agent": "tsx packages/lecture-agent/src/coding_agent.ts",
+    "chat": "tsx packages/lecture-agent/src/coding_agent.ts --chat",
+    "build:plan": "node --import tsx src/build-plan.ts",
+    "render:video": "node --import tsx src/render-video.ts",
+    "subtitle:burn": "node --import tsx src/subtitle-burner.ts",
+    "build:viewer": "npm --prefix packages/lecture-viewer run build",
+    "version:sync": "node --import tsx src/sync-versions.ts",
+    "ide": "npm run version:sync && npm run build:viewer && node --import tsx src/ide-server.ts",
     "test": "npm run test:build && npm run test:render && npm run test:visual && npm run test:narration",
-    "test:build": "node scripts/build-plan.mjs --input tests/fixtures/input-contract-test/index.html --out .render/tests/input-contract-resolved.html",
-    "test:render": "node scripts/render-video.mjs --html tests/fixtures/input-contract-test/index.html --resolved-html .render/tests/input-contract-render-resolved.html --out .render/tests/input-contract-smoke.mp4 --max-frames 5 --skip-video",
-    "test:visual": "node scripts/render-video.mjs --html tests/fixtures/visual-only-3d-test/index.html --resolved-html .render/tests/visual-3d-resolved.html --out .render/tests/visual-3d-smoke.mp4 --max-frames 5 --skip-video",
-    "test:narration": "node scripts/render-video.mjs --html tests/fixtures/input-contract-test/index.html --resolved-html .render/tests/visual-narration-resolved.html --out .render/tests/visual-narration-480p15.mp4 --width 854 --height 480 --fps 15",
-    "benchmark:1080p": "node scripts/render-video.mjs --html tests/fixtures/input-contract-test/index.html --resolved-html .render/benchmarks/1080p-resolved.html --out .render/benchmarks/1080p-30fps.mp4 --width 1920 --height 1080 --fps 30 --max-frames 300",
+    "test:build": "node --import tsx src/build-plan.ts --input tests/fixtures/input-contract-test/index.html --out .render/tests/input-contract-resolved.html",
+    "test:render": "node --import tsx src/render-video.ts --html tests/fixtures/input-contract-test/index.html --resolved-html .render/tests/input-contract-render-resolved.html --out .render/tests/input-contract-smoke.mp4 --max-frames 5 --skip-video",
+    "test:visual": "node --import tsx src/render-video.ts --html tests/fixtures/visual-only-3d-test/index.html --resolved-html .render/tests/visual-3d-resolved.html --out .render/tests/visual-3d-smoke.mp4 --max-frames 5 --skip-video",
+    "test:narration": "node --import tsx src/render-video.ts --html tests/fixtures/input-contract-test/index.html --resolved-html .render/tests/visual-narration-resolved.html --out .render/tests/visual-narration-480p15.mp4 --width 854 --height 480 --fps 15",
+    "benchmark:1080p": "node --import tsx src/render-video.ts --html tests/fixtures/input-contract-test/index.html --resolved-html .render/benchmarks/1080p-resolved.html --out .render/benchmarks/1080p-30fps.mp4 --width 1920 --height 1080 --fps 30 --max-frames 300",
     "benchmark:480p": "npm run test:narration",
-    "render:contract-test": "node scripts/render-video.mjs --html tests/fixtures/input-contract-test/index.html --out tests/fixtures/input-contract-test/rendered.mp4",
-    "render:sync-4k-test": "node scripts/render-video.mjs --html tests/fixtures/input-contract-4k-sync-test/index.html --out tests/fixtures/input-contract-4k-sync-test/rendered-4k-60fps.mp4 --width 3840 --height 2160 --fps 60",
-    "render:visual-3d": "node scripts/render-video.mjs --html tests/fixtures/visual-only-3d-test/index.html --out tests/fixtures/visual-only-3d-test/rendered-1080p-60fps.mp4 --width 1920 --height 1080 --fps 60",
-    "build:fixture": "node scripts/build-plan.mjs --input tests/fixtures/plan-pipeline/source.html --out tests/fixtures/plan-pipeline/index.html",
-    "render:fixture": "node scripts/render-video.mjs --html tests/fixtures/plan-pipeline/source.html --out tests/fixtures/plan-pipeline/rendered.mp4"
+    "render:contract-test": "node --import tsx src/render-video.ts --html tests/fixtures/input-contract-test/index.html --out tests/fixtures/input-contract-test/rendered.mp4",
+    "render:sync-4k-test": "node --import tsx src/render-video.ts --html tests/fixtures/input-contract-4k-sync-test/index.html --out tests/fixtures/input-contract-4k-sync-test/rendered-4k-60fps.mp4 --width 3840 --height 2160 --fps 60",
+    "render:visual-3d": "node --import tsx src/render-video.ts --html tests/fixtures/visual-only-3d-test/index.html --out tests/fixtures/visual-only-3d-test/rendered-1080p-60fps.mp4 --width 1920 --height 1080 --fps 60",
+    "build:fixture": "node --import tsx src/build-plan.ts --input tests/fixtures/plan-pipeline/source.html --out tests/fixtures/plan-pipeline/index.html",
+    "render:fixture": "node --import tsx src/render-video.ts --html tests/fixtures/plan-pipeline/source.html --out tests/fixtures/plan-pipeline/rendered.mp4"
   },
   "devDependencies": {
-    "playwright": "^1.57.0"
+    "@types/node": "^20.19.43",
+    "playwright": "^1.57.0",
+    "tsx": "^4.22.4",
+    "typescript": "^5.9.3"
   },
   "dependencies": {
     "kokoro-js": "^1.2.1",
