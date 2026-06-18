@@ -26,6 +26,39 @@ function loadEnv() {
 }
 loadEnv();
 
+function _logTokenUsage(logger: Logger, response: any, apiType: 'openai' | 'google'): void {
+    if (!response) return;
+
+    let input: number | undefined;
+    let output: number | undefined;
+    let total: number | undefined;
+
+    if (apiType === 'openai') {
+        const usage = response.usage;
+        if (usage) {
+            input = usage.prompt_tokens ?? usage.promptTokens;
+            output = usage.completion_tokens ?? usage.completionTokens;
+            total = usage.total_tokens ?? usage.totalTokens;
+        }
+    } else if (apiType === 'google') {
+        const usage = response.usageMetadata ?? response.usage_metadata;
+        if (usage) {
+            input = usage.promptTokenCount ?? usage.prompt_token_count;
+            output = usage.candidatesTokenCount ?? usage.candidates_token_count;
+            total = usage.totalTokenCount ?? usage.total_token_count;
+        }
+    }
+
+    const parts: string[] = [];
+    if (input !== undefined && input !== null) parts.push(`input=${input}`);
+    if (output !== undefined && output !== null) parts.push(`output=${output}`);
+    if (total !== undefined && total !== null) parts.push(`total=${total}`);
+
+    if (parts.length > 0) {
+        logger.info(`tokens ${parts.join(' ')}`);
+    }
+}
+
 export class LLM_Model {
     private logger: Logger;
     public model_name: string;
@@ -714,6 +747,7 @@ export class LLM_Model {
 
                 this.logger.debug("Sending request to OpenAI Responses API...");
                 const response = await this._client.responses.create(response_kwargs);
+                _logTokenUsage(this.logger, response, 'openai');
                 response_content = response.output_text || JSON.stringify(response);
             } else {
                 const messages: any[] = [];
@@ -753,6 +787,7 @@ export class LLM_Model {
 
                 this.logger.debug("Sending request to OpenAI Chat Completions API...");
                 const response = await this._client.chat.completions.create(request_params);
+                _logTokenUsage(this.logger, response, 'openai');
                 response_content = response.choices[0].message.content || "";
             }
 
@@ -880,6 +915,7 @@ export class LLM_Model {
                 contents: contents,
                 config: generation_config
             });
+            _logTokenUsage(this.logger, response, 'google');
 
             let response_content = response.text || null;
             if (response_content === null && response.candidates && response.candidates.length > 0) {

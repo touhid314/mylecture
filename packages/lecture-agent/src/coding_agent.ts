@@ -870,6 +870,19 @@ class GeminiAgentSession {
                 contents: this.contents,
                 config: this.config
             });
+            const usage = response.usageMetadata ?? response.usage_metadata;
+            if (usage) {
+                const input = usage.promptTokenCount ?? usage.prompt_token_count;
+                const output = usage.candidatesTokenCount ?? usage.candidates_token_count;
+                const total = usage.totalTokenCount ?? usage.total_token_count;
+                const parts: string[] = [];
+                if (input !== undefined && input !== null) parts.push(`input=${input}`);
+                if (output !== undefined && output !== null) parts.push(`output=${output}`);
+                if (total !== undefined && total !== null) parts.push(`total=${total}`);
+                if (parts.length > 0) {
+                    print_detail("tokens", parts.join(" "), Color.DIM);
+                }
+            }
             const function_calls = extract_gemini_function_calls(response);
 
             if (function_calls.length === 0) {
