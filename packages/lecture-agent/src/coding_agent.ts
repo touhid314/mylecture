@@ -870,11 +870,11 @@ class GeminiAgentSession {
                 contents: this.contents,
                 config: this.config
             });
-            const usage = response.usageMetadata ?? response.usage_metadata;
+            const usage = response.usageMetadata;
             if (usage) {
-                const input = usage.promptTokenCount ?? usage.prompt_token_count;
-                const output = usage.candidatesTokenCount ?? usage.candidates_token_count;
-                const total = usage.totalTokenCount ?? usage.total_token_count;
+                const input = usage.promptTokenCount;
+                const output = usage.candidatesTokenCount;
+                const total = usage.totalTokenCount;
                 const parts: string[] = [];
                 if (input !== undefined && input !== null) parts.push(`input=${input}`);
                 if (output !== undefined && output !== null) parts.push(`output=${output}`);
