@@ -1,3 +1,9 @@
+/**
+ * Browser runtime for contract-compliant lecture HTML.
+ *
+ * This module owns playback state, timeline derivation, audio/subtitle sync,
+ * viewport detection, and the event API consumed by the IDE/website shells.
+ */
 export declare const lectureViewerVersion = "0.1";
 export declare function createLecturePlayer(options?: {}): LecturePlayer;
 export declare function estimateTextDuration(text: any): number;

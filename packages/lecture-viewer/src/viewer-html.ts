@@ -1,7 +1,15 @@
 // @ts-nocheck
+/**
+ * Builds the browser IDE shell used by the local ide-server.
+ *
+ * The returned HTML contains the complete three-panel interface: folder browser,
+ * preview/player surface, timeline controls, publish dialog, and agent sidebar.
+ */
 const viewerVersion = '0.2';
 
 export function createViewerHtml(openPath, initialWidth = 1920, initialHeight = 1080) {
+  // Normalize values before interpolation so the generated page can be served
+  // directly without another runtime configuration step.
   const normalizedOpenPath = openPath ? openPath.replaceAll('\\', '/') : '';
   const safeInitialWidth = Number.isInteger(initialWidth) && initialWidth > 0 ? initialWidth : 1920;
   const safeInitialHeight = Number.isInteger(initialHeight) && initialHeight > 0 ? initialHeight : 1080;
@@ -12,6 +20,7 @@ export function createViewerHtml(openPath, initialWidth = 1920, initialHeight = 
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Render HTML Viewer</title>
 <style>
+/* Local IDE shell styling. The generated page has no external CSS dependency. */
 :root {
   --bg: #050505;
   --panel: #111111;
@@ -1599,6 +1608,7 @@ body.file-kind-mp4 .timeline-ruler {
 </style>
 </head>
 <body>
+<!-- Left panel: local folder browser plus resolve/render/publish actions. -->
 <aside id="folder-sidebar">
   <div id="sidebar-header">
     <div>
@@ -1726,6 +1736,7 @@ body.file-kind-mp4 .timeline-ruler {
     <div id="sidebar-empty">Open an HTML file to scan its folder.</div>
   </div>
 </aside>
+<!-- Center preview: HTML/MP4 iframe playback or markdown/AVSL document preview. -->
 <main id="frame-wrap">
   <div id="preview-shell">
     <iframe id="preview" title="Render preview"></iframe>
@@ -1734,6 +1745,7 @@ body.file-kind-mp4 .timeline-ruler {
   </div>
   <article id="document-preview"></article>
 </main>
+<!-- Bottom controls: file actions, playback controls, viewport, and timeline scenes. -->
 <section id="controls">
   <div id="file-row">
     <div id="current-file">${escapeHtml(normalizedOpenPath || 'No file selected')}</div>
@@ -1788,6 +1800,7 @@ body.file-kind-mp4 .timeline-ruler {
     </div>
   </div>
 </section>
+<!-- Right panel: agent chat UI backed by ide-server HTTP endpoints. -->
 <aside id="agent-bar">
   <button id="agent-toggle-btn" class="agent-toggle-btn" type="button" aria-label="Toggle Agent Panel" title="Toggle Agent Panel">
     <svg class="control-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
@@ -1818,6 +1831,7 @@ body.file-kind-mp4 .timeline-ruler {
     </div>
   </div>
 </aside>
+<!-- Metadata modal for the currently loaded lecture or rendered video. -->
 <div id="info-dialog" role="dialog" aria-modal="true" aria-labelledby="info-title">
   <div id="info-panel">
     <div id="info-header">
@@ -1830,6 +1844,7 @@ body.file-kind-mp4 .timeline-ruler {
     </div>
   </div>
 </div>
+<!-- Publish modal for copying the current lecture into the website course structure. -->
 <div id="publish-dialog" role="dialog" aria-modal="true" aria-labelledby="publish-title">
   <div id="publish-panel">
     <div id="publish-header">
@@ -1909,6 +1924,8 @@ body.file-kind-mp4 .timeline-ruler {
 <script type="module">
 import { createLecturePlayer, lectureViewerVersion } from '/lecture-viewer/player/index.mjs';
 
+// DOM handles are grouped here because this generated page is intentionally
+// framework-free; each feature below mutates these nodes directly.
 const folderPathLabel = document.getElementById('folder-path');
 const copyFolderPathButton = document.getElementById('copy-folder-path');
 const openFolderButton = document.getElementById('open-folder');
@@ -1983,6 +2000,9 @@ const fullscreenButton = document.getElementById('fullscreen');
 const viewportText = document.getElementById('viewport');
 const statusText = document.getElementById('status');
 const VIEWER_VERSION = lectureViewerVersion;
+
+// Page-level state mirrors the current file, viewport, folder contents, scene
+// list, and active server job. The player keeps its own playback state.
 let currentFilePath = '${escapeJsString(normalizedOpenPath)}';
 let viewerCommandVersion = 0;
 let videoMetadata = {};
@@ -2081,6 +2101,8 @@ const sceneListContainer = document.getElementById('scene-list');
 const agentToggleBtn = document.getElementById('agent-toggle-btn');
 const timelineRuler = document.getElementById('timeline-ruler');
 
+// The reusable player owns iframe playback; this shell owns files, controls,
+// viewport sizing, timeline visualization, and server commands.
 const player = createLecturePlayer({
   iframe: frame,
   subtitleElement: subtitleOverlay,
@@ -2141,6 +2163,7 @@ function setPreviewViewport(width, height, reload = false) {
   if (state.loaded) player.seek(state.time, { resume: state.playing });
 }
 
+// Status helpers keep labels, busy state, and long-running job timers aligned.
 function setStatus(message) {
   statusText.textContent = message;
 }
@@ -2221,6 +2244,7 @@ function finishJobStatus(message, state = 'success') {
   setJobStatus(message, state);
 }
 
+// Inline SVG icons avoid extra assets in this self-contained generated page.
 const controlIcons = {
   play: '<svg class="control-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M8 5v14l11-7z" fill="currentColor"/></svg>',
   pause: '<svg class="control-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M7 5h4v14H7zM13 5h4v14h-4z" fill="currentColor"/></svg>',
@@ -2228,12 +2252,14 @@ const controlIcons = {
   fullscreenExit: '<svg class="control-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M9 5v4H5M19 9h-4V5M15 19v-4h4M5 15h4v4" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>'
 };
 
+// Icon buttons share accessible labels so compact controls remain inspectable.
 function setIconButton(button, icon, label) {
   button.innerHTML = controlIcons[icon] || '';
   button.setAttribute('aria-label', label);
   button.title = label;
 }
 
+// File-kind helpers centralize which UI actions are valid for the selected path.
 function fileBaseName(filePath) {
   return String(filePath || '').replaceAll('\\\\', '/').split('/').filter(Boolean).at(-1) || '';
 }
@@ -2280,6 +2306,8 @@ function escapeText(value) {
     .replaceAll('"', '&quot;');
 }
 
+// Lightweight markdown is enough for local docs; avoiding a parser keeps this
+// generated IDE page dependency-free.
 function renderMarkdown(markdown) {
   const lines = String(markdown || '').split(/\\r?\\n/);
   const html = [];
@@ -2356,6 +2384,7 @@ function renderMarkdown(markdown) {
   return html.join('');
 }
 
+// AVSL preview highlights {visual: ...} blocks while preserving narration text.
 function findAvslVisualEnd(text, startIndex) {
   let quote = '';
   let escaped = false;
@@ -2423,6 +2452,8 @@ function renderAvsl(avsl) {
   return fragment;
 }
 
+// Document files are displayed in the center panel instead of loaded into the
+// lecture player iframe.
 async function loadDocumentFile(filePath) {
   player.pause();
   setPreviewMode('document');
@@ -2490,6 +2521,8 @@ function setActionBusy(isBusy, message, action = '') {
   if (message) setStatus(message);
 }
 
+// Render the server-provided folder listing into the sidebar, then refresh the
+// scene timeline from the same entries.
 function renderFolderFiles(payload) {
   folderPathLabel.textContent = payload?.folder || 'No file selected';
   folderPathLabel.title = payload?.folder || '';
@@ -2558,6 +2591,8 @@ function renderFolderFiles(payload) {
   updateScenePanel(entries);
 }
 
+// Build the bottom scene strip for raw, resolved, or rendered files. Durations
+// come from server metadata when available and fall back to a preview estimate.
 function updateScenePanel(entries) {
   let filesOnly = entries;
   if (entries.length > 0 && (entries[0].type === 'directory' || !('timelineStart' in entries[0]))) {
@@ -2748,6 +2783,7 @@ function formatTimecode(seconds) {
 let isDraggingTimeline = false;
 let isLoadFilePending = false;
 
+// Timeline dragging maps a global lecture time back to the correct scene file.
 function handleTimelinePointerDown(event) {
   if (event.button !== 0) return;
   const isMp4 = fileExtension(currentFilePath) === 'mp4';
@@ -2782,8 +2818,9 @@ async function seekFromTimelineEvent(event) {
   await seekToGlobalTime(clickedTime);
 }
 
-
-
+// Convert one global lecture time into a scene file plus local time inside that
+// scene. If the target scene is already preloaded, swap iframes instead of
+// waiting for a fresh load.
 async function seekToGlobalTime(globalTime) {
   const isMp4 = fileExtension(currentFilePath) === 'mp4';
   if (isMp4) return;
@@ -2840,8 +2877,8 @@ async function seekGlobalBy(seconds) {
   await seekToGlobalTime(targetTime);
 }
 
-
-
+// Keep the visual playhead aligned with the active scene and update scene
+// duration metadata once the player knows the true duration.
 function updatePlayheadPosition(state = playerState()) {
   const playhead = document.getElementById('timeline-playhead');
   const container = document.getElementById('timeline-container');
@@ -2934,6 +2971,7 @@ function updatePlayheadPosition(state = playerState()) {
 let preloadedFilePath = '';
 let isPreloading = false;
 
+// Preload the next scene in a hidden iframe to reduce gaps during playback.
 function preloadNextScene() {
   if (currentScenesList.length === 0) return;
   const currentIndex = currentScenesList.findIndex(file => file.path === currentFilePath);
@@ -2959,6 +2997,7 @@ function preloadNextScene() {
   }
 }
 
+// Promote the hidden preload iframe to the active preview iframe.
 async function swapToPreloadedScene(nextPath, shouldPlay = true) {
   if (preloadedFilePath !== nextPath || isPreloading) {
     await loadFile(nextPath);
@@ -2989,6 +3028,8 @@ async function swapToPreloadedScene(nextPath, shouldPlay = true) {
   preloadNextScene();
 }
 
+// Folder browsing is delegated to ide-server because browser JavaScript cannot
+// directly list arbitrary local directories.
 async function browseFolder(folderPath = '') {
   try {
     const query = folderPath ? '?dir=' + encodeURIComponent(folderPath) : '';
@@ -3066,6 +3107,7 @@ function playNotificationSound(success = true) {
   }
 }
 
+// Resolve the current source HTML into deterministic timeline HTML.
 async function runResolve() {
   if (!isIndexHtmlKind(currentFileKind())) return;
   const sourceName = fileBaseName(currentFilePath);
@@ -3096,6 +3138,7 @@ async function runResolve() {
   }
 }
 
+// Render the current source/resolved HTML into an MP4 through ide-server.
 async function runRender() {
   const kind = currentFileKind();
   if (!isIndexHtmlKind(kind) && !isResolvedHtmlKind(kind)) return;
@@ -3173,6 +3216,8 @@ function formatMetadataValue(key, value) {
   return String(value);
 }
 
+// Info dialog is generated from viewer version plus whatever metadata the
+// loaded lecture exposes.
 function renderInfoDialog() {
   infoContent.textContent = '';
   const rows = [
@@ -3202,6 +3247,7 @@ function closeInfoDialog() {
   infoButton.focus();
 }
 
+// Publish flow sends the active lecture folder and course metadata to ide-server.
 function openPublishDialog() {
   if (currentBrowserFolder) {
     const folderName = fileBaseName(currentBrowserFolder);
@@ -3340,6 +3386,7 @@ function isFullscreenActive() {
   return Boolean(document.fullscreenElement);
 }
 
+// Fullscreen keeps the preview dominant while briefly revealing controls on input.
 function showFullscreenControls() {
   if (!isFullscreenActive()) return;
   document.body.classList.add('controls-visible');
@@ -3382,6 +3429,7 @@ function formatTime(seconds) {
   return minutes + ':' + secs.toFixed(2).padStart(5, '0');
 }
 
+// Pull player state into the surrounding IDE controls and timeline indicators.
 function updateControls(state = playerState()) {
   lastPlayerState = state;
   const activeScene = currentScenesList.find(file => file.path === currentFilePath);
@@ -3470,6 +3518,7 @@ async function openCurrentFolder() {
   }
 }
 
+// Loading can target HTML/MP4 player content or document files shown directly.
 async function loadFile(filePath = currentFilePath) {
   if (!filePath) {
     setStatus('Select a file first');
@@ -3517,6 +3566,8 @@ async function pickAndLoadFile() {
   }
 }
 
+// Polling lets the server-side file picker and viewport controls command this
+// already-open viewer tab.
 async function pollViewerCommands() {
   try {
     const response = await fetch('/viewer-state?since=' + viewerCommandVersion, { cache: 'no-store' });
@@ -3583,6 +3634,7 @@ function handleViewerShortcut(event) {
   }
 }
 
+// Bridge player events into the surrounding IDE controls.
 player.on('ready', state => {
   frame.contentWindow.addEventListener('keydown', handleViewerShortcut, true);
   videoMetadata = state.metadata || {};
@@ -3614,6 +3666,7 @@ player.on('statechange', updateControls);
 player.on('timeupdate', updateControls);
 player.on('error', error => setStatus(error.message));
 
+// When a scene ends, advance to the next scene file in the active tab.
 player.on('ended', async () => {
   const currentIndex = currentScenesList.findIndex(file => file.path === currentFilePath);
   if (currentIndex > -1 && currentIndex < currentScenesList.length - 1) {
@@ -3623,6 +3676,8 @@ player.on('ended', async () => {
   }
 });
 
+// DOM event wiring lives together so future UI changes can audit behavior from
+// one place instead of chasing listeners across helper functions.
 loadButton.addEventListener('click', pickAndLoadFile);
 openFolderButton.addEventListener('click', openCurrentFolder);
 refreshFolderButton.addEventListener('click', refreshFolderFiles);
@@ -3808,11 +3863,13 @@ if (agentToggleBtn) {
   });
 }
 
-// Right panel expanded by default
+// Right panel starts expanded by default.
 if (agentToggleBtn) {
   agentToggleBtn.innerHTML = '<svg class="control-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="11 18 17 12 11 6"></polyline></svg>';
 }
 
+// Agent chat is a thin client over ide-server; the server owns execution and log
+// persistence, while the browser polls for latest step text during a run.
 function appendChatMessage(text, sender = 'agent') {
   if (!agentBody) return;
   const bubble = document.createElement('div');
@@ -3996,9 +4053,7 @@ if (agentNewChat) {
   });
 }
 
-
-
-// Add a welcome message and clear placeholder card
+// Initial boot: hydrate state, load the requested file, and start server polling.
 if (agentBody) {
   agentBody.innerHTML = '';
   appendChatMessage("Hello! I am your Lecture Agent. I can make great lecture videos, interactive demonstrations, and games. What would you like to build today?", "agent");
@@ -4016,7 +4071,8 @@ setInterval(pollViewerCommands, 750);
 </html>`;
 }
 
-
+// Template escaping helpers protect the generated HTML/JS from file paths that
+// contain quotes, angle brackets, or backslashes.
 function escapeHtml(value) {
   return String(value)
     .replaceAll('&', '&amp;')

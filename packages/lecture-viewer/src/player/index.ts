@@ -1,21 +1,31 @@
 // @ts-nocheck
+/**
+ * Browser runtime for contract-compliant lecture HTML.
+ *
+ * This module owns playback state, timeline derivation, audio/subtitle sync,
+ * viewport detection, and the event API consumed by the IDE/website shells.
+ */
 export const lectureViewerVersion = '0.1';
 
+// Factory wrapper keeps the public API stable even if the backing class changes.
 export function createLecturePlayer(options = {}) {
   return new LecturePlayer(options);
 }
 
+// Used only for preview timelines when the source HTML has not been resolved yet.
 export function estimateTextDuration(text) {
   const words = String(text || '').trim().split(/\s+/).filter(Boolean).length;
   return Math.max(2.5, words / 2.65);
 }
 
+// Accept the current contract names and the older authoring shorthands.
 export function normalizeSectionKind(kind) {
   if (kind === 'visual-only' || kind === 'visual') return 'visual-only';
   if (kind === 'narration+visual' || kind === 'narration') return 'narration+visual';
   return kind;
 }
 
+// Translate metadata aspect ratios into concrete render dimensions.
 export function viewportFromAspectRatio(aspectRatio) {
   const normalized = String(aspectRatio || '').trim();
   const presets = {
@@ -49,6 +59,7 @@ export function viewportFromAspectRatio(aspectRatio) {
   };
 }
 
+// Infer viewport from common frame/canvas structures when metadata is absent.
 export function detectDocumentViewport(win) {
   const doc = win.document;
   const candidates = [
@@ -85,6 +96,7 @@ export function detectMetadataViewport(win) {
   return viewportFromAspectRatio(win.__VIDEO_METADATA__?.aspectRatio);
 }
 
+// Build the visual timeline from resolved data first, then raw contract data.
 export function buildPreviewTimeline(win) {
   if (win.__RESOLVED_TIMELINE__?.videoTimeline?.length) {
     return win.__RESOLVED_TIMELINE__.videoTimeline.map(cue => ({
@@ -121,6 +133,8 @@ export function buildPreviewTimeline(win) {
   });
 }
 
+// Plan-level interactive/game sections are no longer part of the active contract.
+// These functions remain exported so existing host code does not need branching.
 export function buildInteractiveTimeline(win) {
   return [];
 }
@@ -129,6 +143,7 @@ export function buildGameTimeline(win) {
   return [];
 }
 
+// Pair audio cues with section text so subtitles and status remain useful.
 export function buildAudioTimeline(win, videoTimeline) {
   if (Array.isArray(win.__AUDIO_TIMELINE__) && win.__AUDIO_TIMELINE__.length) {
     return win.__AUDIO_TIMELINE__.map(cue => {
@@ -161,6 +176,7 @@ export function buildAudioTimeline(win, videoTimeline) {
     }));
 }
 
+// Prefer audio cue text, then fill gaps from visual sections that have narration.
 export function buildSubtitleTimeline(audioTimeline, videoTimeline) {
   const audioSubtitleCues = audioTimeline
     .filter(cue => String(cue.text || '').trim())
@@ -187,6 +203,7 @@ export function buildSubtitleTimeline(audioTimeline, videoTimeline) {
   return [...audioSubtitleCues, ...videoSubtitleCues].sort((a, b) => a.start - b.start);
 }
 
+// Stateful controller for one preview iframe.
 class LecturePlayer {
   constructor(options = {}) {
     if (!options.iframe) throw new Error('createLecturePlayer requires an iframe option.');
@@ -206,6 +223,8 @@ class LecturePlayer {
   }
 
   createInitialState() {
+    // Keep every mutable playback field in one object so snapshots are cheap and
+    // resetForLoad can replace all per-file state at once.
     return {
       loaded: false,
       playing: false,
@@ -249,6 +268,7 @@ class LecturePlayer {
   }
 
   snapshot() {
+    // Hosts receive plain objects, not internal state references.
     return {
       loaded: this.state.loaded,
       playing: this.state.playing,
@@ -278,6 +298,8 @@ class LecturePlayer {
 
   async load(src) {
     if (!src) throw new Error('load requires a source.');
+    // Loading a new iframe source invalidates pending ready/error listeners from
+    // earlier loads; loadToken lets the finally block identify stale completions.
     this.pause();
     this.resetForLoad();
     this.state.src = src;
@@ -307,6 +329,8 @@ class LecturePlayer {
   }
 
   resetForLoad() {
+    // MP4 previews install native video handlers, while HTML previews use the
+    // custom requestAnimationFrame loop below. Reset both paths before loading.
     if (this.nativeVideo) {
       this.nativeVideo.ontimeupdate = null;
       this.nativeVideo.onended = null;
@@ -324,7 +348,8 @@ class LecturePlayer {
     try {
       const win = this.iframe.contentWindow;
 
-      // Check if loading an MP4 file
+      // Rendered MP4 files are played by the browser's native video element.
+      // Contract HTML files are handled by the custom timeline code below.
       const isMp4 = String(this.state.src || '').toLowerCase().endsWith('.mp4');
       if (isMp4) {
         const doc = win.document;
@@ -393,6 +418,8 @@ class LecturePlayer {
       const metadata = win.__VIDEO_METADATA__ && typeof win.__VIDEO_METADATA__ === 'object'
         ? { ...win.__VIDEO_METADATA__ }
         : {};
+      // Resolved files expose exact timelines; raw contract files fall back to
+      // estimated preview timing until build-plan.ts resolves audio durations.
       const timeline = buildPreviewTimeline(win);
       const audioTimeline = buildAudioTimeline(win, timeline);
       const subtitleTimeline = buildSubtitleTimeline(audioTimeline, timeline);
@@ -531,6 +558,8 @@ class LecturePlayer {
   }
 
   syncLiveTts() {
+    // Live TTS is a fallback for sections without usable audio files. It follows
+    // the active visual cue and restarts only when the section changes.
     if (!this.state.playing || !this.liveTtsEnabled || !('speechSynthesis' in window)) {
       this.stopLiveTts();
       return;
@@ -565,6 +594,7 @@ class LecturePlayer {
 
     const cue = this.activeAudioCue();
 
+    // Missing or failed audio cues fall back to browser speech synthesis.
     if (!cue) {
       this.stopAudio();
       this.syncLiveTts();
@@ -608,8 +638,10 @@ class LecturePlayer {
     }
 
     if (typeof win.renderAt === 'function') {
+      // Resolved HTML injects renderAt(time), which is the most deterministic path.
       win.renderAt(activeTime);
     } else {
+      // Raw contract HTML may only expose __RENDER_SECTION__; compute the cue here.
       let cue = this.state.timeline[0];
       for (const candidate of this.state.timeline) {
         if (candidate.start <= activeTime) cue = candidate;
@@ -649,6 +681,8 @@ class LecturePlayer {
 
   tick(now) {
     if (!this.state.playing) return;
+    // Playback time is derived from wall-clock elapsed time rather than adding
+    // frame deltas, which avoids drift when frames are delayed.
     const nextTime = this.state.startTime + ((now - this.state.startedAt) / 1000) * this.speed;
     this.renderAt(nextTime);
 
@@ -709,6 +743,8 @@ class LecturePlayer {
   }
 
   seek(time, options = {}) {
+    // Seek supports "pause, render, optionally resume" for both native MP4 and
+    // contract HTML playback paths.
     const shouldResume = Boolean((options.resume ?? this.state.playing) && this.state.loaded);
     if (this.nativeVideo) {
       this.state.playing = false;
@@ -750,6 +786,8 @@ class LecturePlayer {
   }
 
   startInteractiveSection() {
+    // Standalone interactive.html files still work as IDE previews, even though
+    // interactive sections are not valid inside window.__VIDEO_PLAN__ anymore.
     const win = this.iframe.contentWindow;
     const interactive = this.state.interactiveTimeline[0]?.item || { id: 'interactive' };
     if (this.state.gameActive) this.stopGameSection();
@@ -779,6 +817,8 @@ class LecturePlayer {
   }
 
   startGameSection() {
+    // Standalone game.html files still work as IDE previews, separate from the
+    // current video-plan contract.
     const win = this.iframe.contentWindow;
     const game = this.state.gameTimeline[0]?.item || { id: 'game' };
     if (this.state.interactiveActive) this.stopInteractiveSection();
@@ -833,6 +873,8 @@ class LecturePlayer {
   }
 
   destroy() {
+    // Hosts should call destroy before discarding the iframe to avoid stale
+    // animation frames, media playback, and event handlers.
     this.pause();
     this.iframe.removeEventListener('load', this.boundFrameLoad);
     this.listeners.clear();
