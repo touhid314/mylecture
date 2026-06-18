@@ -1087,9 +1087,22 @@ const server = createServer(async (request, response) => {
 
           let pythonCmd = 'python';
           const agentScript = path.resolve(rootDir, '../lecture-agent/coding_agent.py');
-          const venvPython = path.resolve(rootDir, '../lecture-agent/.venv/Scripts/python.exe');
-          if (existsSync(venvPython)) {
-            pythonCmd = venvPython;
+
+          const relativePaths = [
+            ['../.venv'],
+            ['../lecture-agent/.venv'],
+            ['.venv']
+          ];
+
+          for (const rel of relativePaths) {
+            const venvPython = process.platform === 'win32'
+              ? path.resolve(rootDir, ...rel, 'Scripts', 'python.exe')
+              : path.resolve(rootDir, ...rel, 'bin', 'python');
+
+            if (existsSync(venvPython)) {
+              pythonCmd = venvPython;
+              break;
+            }
           }
 
           if (!existsSync(agentScript)) {
