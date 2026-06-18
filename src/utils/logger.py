@@ -10,7 +10,7 @@ class Logger:
     A simple Logger wrapper to resolve the missing logger dependency 
     for llm_model.py and tts.py.
     """
-    def __init__(self, name: str = "EduShorts"):
+    def __init__(self, name: str = "MyLecture"):
         self.logger = logging.getLogger(name)
         if not self.logger.handlers:
             handler = logging.StreamHandler()

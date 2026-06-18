@@ -5,7 +5,7 @@
  * This module owns playback state, timeline derivation, audio/subtitle sync,
  * viewport detection, and the event API consumed by the IDE/website shells.
  */
-export const lectureViewerVersion = '0.1';
+export const lectureViewerVersion = '0.2';
 // Factory wrapper keeps the public API stable even if the backing class changes.
 export function createLecturePlayer(options = {}) {
     return new LecturePlayer(options);

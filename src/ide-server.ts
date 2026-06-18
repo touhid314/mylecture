@@ -5,7 +5,7 @@
  *
  * Local HTTP server for the MyLecture IDE. It serves the viewer UI, browses
  * lecture files, resolves source plans into renderable HTML, renders videos,
- * talks to the Python coding agent, and publishes rendered lecture folders to
+ * talks to the coding agent, and publishes rendered lecture folders to
  * the website package. This server is intentionally local-only on 127.0.0.1.
  */
 import { createReadStream, existsSync, mkdirSync, readdirSync, readFileSync, rmSync, statSync, unlinkSync, writeFileSync } from 'node:fs';
@@ -229,11 +229,15 @@ function listFolderFiles(filePath) {
   };
 }
 
-// Default file browser location prefers the Python agent output folder when present.
+// Default file browser location prefers the coding agent output folder when present.
 function defaultBrowserFolder() {
-  const targetPath = 'C:\\Users\\touhi\\OneDrive\\Desktop\\mylecture\\lecture-agent\\workspace\\outputs';
-  if (existsSync(targetPath) && statSync(targetPath).isDirectory()) {
-    return targetPath;
+  const workspaceTargetPath = path.join(rootDir, 'packages/lecture-agent/workspace/outputs');
+  if (existsSync(workspaceTargetPath) && statSync(workspaceTargetPath).isDirectory()) {
+    return workspaceTargetPath;
+  }
+  const siblingTargetPath = 'C:\\Users\\touhi\\OneDrive\\Desktop\\mylecture\\lecture-agent\\workspace\\outputs';
+  if (existsSync(siblingTargetPath) && statSync(siblingTargetPath).isDirectory()) {
+    return siblingTargetPath;
   }
   return rootDir;
 }
@@ -1130,7 +1134,7 @@ const server = createServer(async (request, response) => {
     return;
   }
 
-  // Send the user's message plus current IDE context to the Python coding agent.
+  // Send the user's message plus current IDE context to the coding agent.
   if (requestUrl.pathname === '/agent-chat') {
     try {
       let bodyData = '';
@@ -1147,15 +1151,33 @@ const server = createServer(async (request, response) => {
             return;
           }
 
-          let pythonCmd = 'python';
-          const agentScript = path.resolve(rootDir, '../lecture-agent/coding_agent.py');
-          const venvPython = path.resolve(rootDir, '../lecture-agent/.venv/Scripts/python.exe');
-          if (existsSync(venvPython)) {
-            pythonCmd = venvPython;
-          }
+          let execCmd = '';
+          let execArgs: string[] = [];
+          const workspaceTsAgentScript = path.resolve(rootDir, 'packages/lecture-agent/src/coding_agent.ts');
+          const siblingTsAgentScript = path.resolve(rootDir, '../lecture-agent/src/coding_agent.ts');
+          const pythonAgentScript = path.resolve(rootDir, '../lecture-agent/coding_agent.py');
 
-          if (!existsSync(agentScript)) {
-            sendJson(response, 500, { error: `Agent script not found at ${agentScript}` });
+          let activeAgentWorkspace = '';
+
+          if (existsSync(workspaceTsAgentScript)) {
+            execCmd = process.platform === 'win32' ? 'npx.cmd' : 'npx';
+            execArgs = ['tsx', workspaceTsAgentScript];
+            activeAgentWorkspace = path.resolve(rootDir, 'packages/lecture-agent/workspace');
+          } else if (existsSync(siblingTsAgentScript)) {
+            execCmd = process.platform === 'win32' ? 'npx.cmd' : 'npx';
+            execArgs = ['tsx', siblingTsAgentScript];
+            activeAgentWorkspace = path.resolve(rootDir, '../lecture-agent/workspace');
+          } else if (existsSync(pythonAgentScript)) {
+            let pythonCmd = 'python';
+            const venvPython = path.resolve(rootDir, '../lecture-agent/.venv/Scripts/python.exe');
+            if (existsSync(venvPython)) {
+              pythonCmd = venvPython;
+            }
+            execCmd = pythonCmd;
+            execArgs = [pythonAgentScript];
+            activeAgentWorkspace = path.resolve(rootDir, '../lecture-agent/workspace');
+          } else {
+            sendJson(response, 500, { error: `Agent script not found at ${workspaceTsAgentScript}, ${siblingTsAgentScript} or ${pythonAgentScript}` });
             return;
           }
 
@@ -1170,18 +1192,16 @@ const server = createServer(async (request, response) => {
           }
           task += message;
 
-          const args = [
-            agentScript,
-            task
-          ];
-
           const env = {
             ...process.env,
-            AGENT_WORKSPACE: path.resolve(rootDir, '../lecture-agent/workspace'),
-            NO_COLOR: '1'
+            AGENT_WORKSPACE: activeAgentWorkspace,
+            NO_COLOR: '1',
+            DOTENVX_LOG_LEVEL: 'error',
+            DOTENV_LOG_LEVEL: 'error',
+            DOTENV_CONFIG_QUIET: 'true'
           };
 
-          console.log(`Starting agent process: ${pythonCmd} ${args.map(a => `"${a}"`).join(' ')}`);
+          console.log(`Starting agent process (task sent via stdin): ${execCmd} ${execArgs.map(a => `"${a}"`).join(' ')}`);
 
           let stdout = '';
           let stderr = '';
@@ -1196,12 +1216,16 @@ const server = createServer(async (request, response) => {
             }
           };
 
-          const child = spawn(pythonCmd, args, {
-            stdio: ['ignore', 'pipe', 'pipe'],
+          const child = spawn(execCmd, execArgs, {
+            stdio: ['pipe', 'pipe', 'pipe'],
             windowsHide: true,
+            shell: true,
             env
           });
           childProc = child;
+
+          child.stdin.write(task);
+          child.stdin.end();
 
           child.stdout.on('data', chunk => {
             const str = chunk.toString();
@@ -1397,7 +1421,7 @@ const server = createServer(async (request, response) => {
     return;
   }
 
-  // Return the buffered stdout/stderr from the currently running Python agent job.
+  // Return the buffered stdout/stderr from the currently running coding agent job.
   if (requestUrl.pathname === '/agent-log') {
     sendJson(response, 200, { log: activeAgentLog });
     return;
