@@ -136,6 +136,30 @@ function resolveProjectPath(inputPath) {
   return path.resolve(rootDir, inputPath);
 }
 
+function resolveTtsPython() {
+  if (process.env.MYLECTURE_PYTHON) {
+    return process.env.MYLECTURE_PYTHON;
+  }
+
+  const relativePaths = [
+    ['..', '.venv'],
+    ['.venv'],
+    ['..', 'lecture-agent', '.venv']
+  ];
+
+  for (const rel of relativePaths) {
+    const venvPython = process.platform === 'win32'
+      ? path.resolve(rootDir, ...rel, 'Scripts', 'python.exe')
+      : path.resolve(rootDir, ...rel, 'bin', 'python');
+
+    if (existsSync(venvPython)) {
+      return venvPython;
+    }
+  }
+
+  return 'python';
+}
+
 // HTML references should be slash-separated even on Windows.
 function toPosixRelative(fromFile, targetFile) {
   return path.relative(path.dirname(fromFile), targetFile).split(path.sep).join('/');
@@ -219,7 +243,9 @@ async function generateAudio({ text, outputPath, provider, voice, speed }) {
     ')'
   ].join('\n');
 
-  await run('python', ['-c', code], {
+  const python = resolveTtsPython();
+  console.log(`TTS Python: ${python}`);
+  await run(python, ['-c', code], {
     cwd: rootDir,
     env: {
       ...process.env,
@@ -237,6 +263,8 @@ async function generateAudio({ text, outputPath, provider, voice, speed }) {
 async function runAudioJobs(audioJobs, maxWorkers) {
   if (audioJobs.length === 0) return;
 
+  const python = resolveTtsPython();
+  console.log(`TTS Python: ${python}`);
   console.log(`Generating ${audioJobs.length} audio file(s) in a single batch with ${maxWorkers} workers...`);
   const tempJobsFile = path.resolve(rootDir, '.tmp', `jobs_${Date.now()}.json`);
   mkdirSync(path.dirname(tempJobsFile), { recursive: true });
@@ -280,7 +308,7 @@ async function runAudioJobs(audioJobs, maxWorkers) {
   ].join('\n');
 
   try {
-    await run('python', ['-c', code], {
+    await run(python, ['-c', code], {
       cwd: rootDir,
       env: {
         ...process.env,

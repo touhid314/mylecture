@@ -52,6 +52,7 @@ from __future__ import annotations
 import os
 import json
 import re
+import site
 import subprocess
 import sys
 import tempfile
@@ -390,10 +391,55 @@ def _google_client() -> genai.Client:
     return genai.Client(api_key=api_key)
 
 
+def _hashable_provider_entry(provider):
+    if isinstance(provider, (tuple, list)):
+        name = provider[0]
+        if len(provider) > 1 and isinstance(provider[1], dict):
+            return (name, tuple(sorted(provider[1].items())))
+        return name
+    return provider
+
+
 _ONNX_SESSIONS = {}
 _TOKENIZERS = {}
 _VOICES = {}
 _G2P_OBJECTS = {}
+_DLL_DIRECTORY_HANDLES: list[object] = []
+_DLL_DIRECTORIES_ADDED: set[str] = set()
+
+
+def _add_windows_nvidia_dll_directories() -> None:
+    if sys.platform != "win32":
+        return
+
+    site_packages: list[str] = []
+    try:
+        site_packages.extend(site.getsitepackages())
+    except Exception:
+        pass
+    try:
+        user_site = site.getusersitepackages()
+        if user_site:
+            site_packages.append(user_site)
+    except Exception:
+        pass
+
+    for sp in site_packages:
+        nvidia_root = Path(sp) / "nvidia"
+        if not nvidia_root.is_dir():
+            continue
+        for bin_dir in nvidia_root.glob("**/bin"):
+            if not bin_dir.is_dir():
+                continue
+            resolved = str(bin_dir.resolve())
+            if resolved in _DLL_DIRECTORIES_ADDED:
+                continue
+            try:
+                handle = os.add_dll_directory(resolved)
+                _DLL_DIRECTORY_HANDLES.append(handle)
+                _DLL_DIRECTORIES_ADDED.add(resolved)
+            except Exception as exc:
+                log.warning(f"Failed to add NVIDIA DLL directory {resolved}: {exc}")
 
 
 def _run_kokoro_onnxruntime(text: str, output_path: Path, voice: str, speed: float) -> None:
@@ -408,6 +454,15 @@ def _run_kokoro_onnxruntime(text: str, output_path: Path, voice: str, speed: flo
             "Python Kokoro CUDA backend requires numpy, scipy, onnxruntime-gpu, "
             "huggingface_hub, and misaki[en]."
         ) from exc
+
+    _add_windows_nvidia_dll_directories()
+
+    preload_dlls = getattr(ort, "preload_dlls", None)
+    if callable(preload_dlls):
+        try:
+            preload_dlls(cuda=True, cudnn=True, msvc=True)
+        except Exception as exc:
+            log.warning(f"ONNX Runtime preload_dlls failed; continuing. {exc}")
 
     global _ONNX_SESSIONS, _TOKENIZERS, _VOICES, _G2P_OBJECTS
 
@@ -464,18 +519,29 @@ def _run_kokoro_onnxruntime(text: str, output_path: Path, voice: str, speed: flo
     if requested_device == "cpu":
         providers = ["CPUExecutionProvider"]
     elif requested_device == "cuda":
-        providers = ["CUDAExecutionProvider", "CPUExecutionProvider"]
+        providers = [
+            (
+                "CUDAExecutionProvider",
+                {
+                    "cudnn_conv_algo_search": "DEFAULT",
+                    "cudnn_conv_use_max_workspace": "1",
+                    "do_copy_in_default_stream": "1",
+                },
+            ),
+            "CPUExecutionProvider",
+        ]
     else:
         raise RuntimeError(
             f"Python Kokoro ONNX backend supports KOKORO_DEVICE=cuda or cpu, got {requested_device!r}."
         )
 
     available = ort.get_available_providers()
-    if providers[0] not in available:
-        raise RuntimeError(f"ONNX Runtime provider {providers[0]} is not available. Available: {available}")
+    primary_provider = providers[0][0] if isinstance(providers[0], (tuple, list)) else providers[0]
+    if primary_provider not in available:
+        raise RuntimeError(f"ONNX Runtime provider {primary_provider} is not available. Available: {available}")
 
     # Cache Inference Session
-    sess_key = (str(model_path), tuple(providers))
+    sess_key = (str(model_path), tuple(_hashable_provider_entry(p) for p in providers))
     if sess_key not in _ONNX_SESSIONS:
         _ONNX_SESSIONS[sess_key] = ort.InferenceSession(str(model_path), providers=providers)
     sess = _ONNX_SESSIONS[sess_key]
@@ -483,6 +549,11 @@ def _run_kokoro_onnxruntime(text: str, output_path: Path, voice: str, speed: flo
     active = sess.get_providers()
     if requested_device == "cuda" and (not active or active[0] != "CUDAExecutionProvider"):
         raise RuntimeError(f"CUDAExecutionProvider was requested but session providers are {active}")
+
+    if os.getenv("KOKORO_STRICT_GPU", "").strip() in {"1", "true", "yes"}:
+        disable_fallback = getattr(sess, "disable_fallback", None)
+        if callable(disable_fallback):
+            disable_fallback()
 
     audio = sess.run(None, {"input_ids": input_ids, "style": ref_s, "speed": speed_input})[0]
     output_path.parent.mkdir(parents=True, exist_ok=True)
