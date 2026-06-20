@@ -870,6 +870,7 @@ class GeminiAgentSession {
                 contents: this.contents,
                 config: this.config
             });
+
             const function_calls = extract_gemini_function_calls(response);
 
             if (function_calls.length === 0) {

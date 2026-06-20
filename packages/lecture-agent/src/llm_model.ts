@@ -881,6 +881,7 @@ export class LLM_Model {
                 config: generation_config
             });
 
+
             let response_content = response.text || null;
             if (response_content === null && response.candidates && response.candidates.length > 0) {
                 try {
