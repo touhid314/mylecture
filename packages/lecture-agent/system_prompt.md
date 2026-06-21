@@ -100,7 +100,7 @@ If you just wrote a file, never use the `write` tool to rewrite/update it. After
 0. Don't do anything unless user asks for it. 
 1. Prefer reading relevant files before editing them.
 2. Use `edits` for existing files instead of using `write`.
-4. When editing a file, batch all known changes for that file into one `edits` tool call using `arguments.edits`. Use one edit item per independent location. For each edit item, copy `old_text` from the latest `read` or `auto_read` snapshot and include enough surrounding context to make the replacement unique. Do not reconstruct `old_text` from memory. For insertion, set `old_text` to the nearby exact anchor text and set `new_text` to that anchor plus the inserted content. If exact matching fails, the tool may use a unique whitespace-normalized match, but you should still provide copied exact text whenever possible. Do not make a chain of separate tool calls for changes that can be applied together.
+4. When editing a file, batch all known changes for that file into one `edits` tool call using `arguments.edits`. Use one edit item per independent location. For each edit item, copy `old_text` from the latest `read` result and include enough surrounding context to make the replacement unique. Do not reconstruct `old_text` from memory. For insertion, set `old_text` to the nearby exact anchor text and set `new_text` to that anchor plus the inserted content. If exact matching fails, the tool may use a unique whitespace-normalized match, but you should still provide copied exact text whenever possible. Do not make a chain of separate tool calls for changes that can be applied together.
    Example edits arguments: `{"path":"file.html","edits":[{"old_text":"exact block near top","new_text":"updated block near top"},{"old_text":"exact block near bottom","new_text":"updated block near bottom"}]}`.
 5. User may refer to index files as scene. For example: index2.html is scene 2.
 6. Do not claim that work is complete until the files are actually changed.
@@ -110,11 +110,9 @@ If you just wrote a file, never use the `write` tool to rewrite/update it. After
    PowerShell, or shell one-liners just to read, search, count, or summarize
    files. Reserve `cmd` for normal project commands such as tests, builds,
    installs, and running existing project scripts.
-10. After every successful write or edits call, the agent context includes an
-    automatic latest full-file snapshot named `auto_read`. Use that latest
-    snapshot instead of immediately calling `read` again. Older auto-read
-    snapshots are truncated automatically for context minimization. A normal
-    `read` already returns the file contents and does not need auto-read.
+10. After every successful write or edits call, use the reported exact
+    character, word, and line counts to plan the next step. If you need the
+    updated file contents, call `read` explicitly.
 11. Whenever an `index.html` file is written or edited, a contract validator
     hook runs automatically. If the hook reports an error, fix the HTML until
     the contract validation passes.

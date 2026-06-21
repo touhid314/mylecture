@@ -44,7 +44,6 @@ const CONTRACT_VALIDATOR_JS = path.join(__dirname, 'validate_contract.cjs');
 
 const DEFAULT_MODEL = "gemini-3.5-flash";
 const USE_COLOR = process.stderr.isTTY && !process.env.NO_COLOR;
-const TRUNCATED_AUTO_READ = "truncated auto read result for context minimization, check the latest read";
 
 class Color {
     static RESET = USE_COLOR ? "\x1b[0m" : "";
@@ -102,7 +101,7 @@ const TOOLS: any[] = [
                         properties: {
                             old_text: {
                                 type: "string",
-                                description: "Exact text block to replace. Include enough surrounding context copied from the latest read or auto_read to make it unique. If exact matching fails, the tool can use a unique whitespace-normalized match as a fallback.",
+                                description: "Exact text block to replace. Include enough surrounding context copied from the latest read to make it unique. If exact matching fails, the tool can use a unique whitespace-normalized match as a fallback.",
                             },
                             new_text: {
                                 type: "string",
@@ -196,27 +195,6 @@ function line_count(content: string): number {
 function format_file_stats(prefix: string, filePath: string, content: string): string {
     const stats = text_stats(content);
     return `${prefix} for ${filePath}; file now contains ${stats.characters} characters exactly, ${stats.words} words exactly, and ${stats.lines} lines exactly`;
-}
-
-function build_auto_read(filePath: string): any {
-    const content = tool_read(filePath);
-    const stats = text_stats(content);
-    return {
-        path: filePath,
-        characters: stats.characters,
-        words: stats.words,
-        lines: stats.lines,
-        content: content,
-    };
-}
-
-function tool_supports_auto_read(name: string, argumentsObj: any): boolean {
-    return (
-        ["write", "edits"].includes(name) &&
-        argumentsObj &&
-        typeof argumentsObj === 'object' &&
-        typeof argumentsObj.path === 'string'
-    );
 }
 
 function should_validate_contract(name: string, argumentsObj: any): boolean {
@@ -726,20 +704,6 @@ function normalize_model_response(response: any): any {
     throw new Error(`unexpected model response type: ${typeof response}`);
 }
 
-function compact_previous_auto_reads(contents: any[]): void {
-    for (const content of contents) {
-        if (content && content.parts) {
-            for (const part of content.parts) {
-                const function_response = part.functionResponse;
-                const response = function_response?.response;
-                if (response && typeof response === 'object' && "auto_read" in response) {
-                    response["auto_read"] = TRUNCATED_AUTO_READ;
-                }
-            }
-        }
-    }
-}
-
 function build_function_response_payload(name: string, argumentsObj: any, result: string): any {
     const payload: any = { result };
     if (!result.startsWith("ERROR:") && should_validate_contract(name, argumentsObj)) {
@@ -748,15 +712,6 @@ function build_function_response_payload(name: string, argumentsObj: any, result
         payload["result"] = `${payload["result"]}\n${validation}`;
     }
 
-    if (result.startsWith("ERROR:") || !tool_supports_auto_read(name, argumentsObj)) {
-        return payload;
-    }
-
-    try {
-        payload["auto_read"] = build_auto_read(argumentsObj.path);
-    } catch (exc: any) {
-        payload["auto_read"] = `auto read failed: ${exc.name || 'Error'}: ${exc.message || exc}`;
-    }
     return payload;
 }
 
@@ -829,11 +784,47 @@ function extract_gemini_text(response: any): string {
     return chunks.join("\n").trim();
 }
 
+function numeric_token_count(value: any): number | null {
+    return typeof value === 'number' && Number.isFinite(value) ? value : null;
+}
+
+function format_token_totals(inputTokens: number, outputTokens: number): string {
+    return `ip=${inputTokens} op=${outputTokens}`;
+}
+
+function gemini_output_token_count(usage: any): number | null {
+    if (!usage) {
+        return null;
+    }
+
+    const candidates = numeric_token_count(usage.candidatesTokenCount);
+    const thoughts = numeric_token_count(usage.thoughtsTokenCount) || 0;
+    if (candidates === null && thoughts === 0) {
+        return null;
+    }
+    return (candidates || 0) + thoughts;
+}
+
+function gemini_input_token_count(usage: any): number | null {
+    if (!usage) {
+        return null;
+    }
+
+    const prompt = numeric_token_count(usage.promptTokenCount);
+    const toolUsePrompt = numeric_token_count(usage.toolUsePromptTokenCount) || 0;
+    if (prompt === null && toolUsePrompt === 0) {
+        return null;
+    }
+    return (prompt || 0) + toolUsePrompt;
+}
+
 class GeminiAgentSession {
     private model: string;
     private client: GoogleGenAI;
     private config: any;
     private contents: any[];
+    private totalInputTokens: number;
+    private totalOutputTokens: number;
 
     constructor(model: string, skills: string[] | null = null) {
         const apiKey = process.env.GOOGLE_API_KEY;
@@ -852,11 +843,34 @@ class GeminiAgentSession {
             }
         };
         this.contents = [];
+        this.totalInputTokens = 0;
+        this.totalOutputTokens = 0;
         print_detail("workspace", ROOT, Color.BLUE);
         print_detail("tool mode", "native Gemini function calling", Color.BLUE);
         if (skills && skills.length > 0) {
             print_detail("skills", skills, Color.BLUE);
         }
+    }
+
+    private record_token_usage(inputTokens: number | null, outputTokens: number | null): void {
+        const parts: string[] = [];
+
+        if (inputTokens !== null) {
+            this.totalInputTokens += inputTokens;
+            parts.push(`input=${inputTokens}`);
+        } else {
+            parts.push("input=unavailable");
+        }
+
+        if (outputTokens !== null) {
+            this.totalOutputTokens += outputTokens;
+            parts.push(`output=${outputTokens}`);
+        } else {
+            parts.push("output=unavailable");
+        }
+
+        print_detail("tokens", parts.join(" "), Color.DIM);
+        print_detail("token totals", format_token_totals(this.totalInputTokens, this.totalOutputTokens), Color.DIM);
     }
 
     async run(task: string, max_turns: number): Promise<string> {
@@ -871,18 +885,9 @@ class GeminiAgentSession {
                 config: this.config
             });
             const usage = response.usageMetadata;
-            if (usage) {
-                const input = usage.promptTokenCount;
-                const output = usage.candidatesTokenCount;
-                const total = usage.totalTokenCount;
-                const parts: string[] = [];
-                if (input !== undefined && input !== null) parts.push(`input=${input}`);
-                if (output !== undefined && output !== null) parts.push(`output=${output}`);
-                if (total !== undefined && total !== null) parts.push(`total=${total}`);
-                if (parts.length > 0) {
-                    print_detail("tokens", parts.join(" "), Color.DIM);
-                }
-            }
+            const input_tokens = gemini_input_token_count(usage);
+            const output_tokens = gemini_output_token_count(usage);
+            this.record_token_usage(input_tokens, output_tokens);
             const function_calls = extract_gemini_function_calls(response);
 
             if (function_calls.length === 0) {
@@ -916,18 +921,6 @@ class GeminiAgentSession {
                 if ("contract_validation" in payload) {
                     const validation_color = payload["contract_validation"].includes("validation passed") ? Color.GREEN : Color.RED;
                     print_detail("contract", payload["contract_validation"], validation_color, 1200);
-                }
-                if ("auto_read" in payload) {
-                    compact_previous_auto_reads(this.contents);
-                    const auto_read = payload["auto_read"];
-                    if (auto_read && typeof auto_read === 'object') {
-                        print_detail("auto-read", {
-                            path: auto_read.path,
-                            characters: auto_read.characters,
-                            words: auto_read.words,
-                            lines: auto_read.lines
-                        }, Color.CYAN, 500);
-                    }
                 }
 
                 response_parts.push({
@@ -1026,28 +1019,11 @@ class JsonFallbackAgentSession {
                 const validation_color = payload["contract_validation"].includes("validation passed") ? Color.GREEN : Color.RED;
                 print_detail("contract", payload["contract_validation"], validation_color, 1200);
             }
-            if ("auto_read" in payload) {
-                for (const item of this.transcript) {
-                    if (item && typeof item === 'object' && "auto_read" in item) {
-                        item["auto_read"] = TRUNCATED_AUTO_READ;
-                    }
-                }
-                const auto_read = payload["auto_read"];
-                if (auto_read && typeof auto_read === 'object') {
-                    print_detail("auto-read", {
-                        path: auto_read.path,
-                        characters: auto_read.characters,
-                        words: auto_read.words,
-                        lines: auto_read.lines
-                    }, Color.CYAN, 500);
-                }
-            }
 
             this.transcript.push({
                 tool: name,
                 arguments: argumentsObj,
-                result: payload.result,
-                ...("auto_read" in payload ? { auto_read: payload.auto_read } : {})
+                result: payload.result
             });
         }
 
@@ -1062,9 +1038,29 @@ function create_agent_session(model: string, skills: string[] | null = null): an
     return new JsonFallbackAgentSession(model, skills);
 }
 
+function now_ms(): number {
+    return typeof performance !== 'undefined' ? performance.now() : Date.now();
+}
+
+function format_duration(ms: number): string {
+    if (ms < 1000) {
+        return `${Math.round(ms)}ms`;
+    }
+    return `${(ms / 1000).toFixed(2)}s`;
+}
+
+async function run_session_with_timing(session: any, task: string, max_turns: number): Promise<string> {
+    const started_at = now_ms();
+    try {
+        return await session.run(task, max_turns);
+    } finally {
+        print_detail("run time", format_duration(now_ms() - started_at), Color.DIM);
+    }
+}
+
 export async function run_agent(task: string, model: string, max_turns: number, skills: string[] | null = null): Promise<string> {
     const session = create_agent_session(model, skills);
-    return await session.run(task, max_turns);
+    return await run_session_with_timing(session, task, max_turns);
 }
 
 function askQuestion(query: string): Promise<string> {
@@ -1090,7 +1086,7 @@ async function run_chat(model: string, max_turns: number, skills: string[] | nul
             if (message.toLowerCase() === "/exit" || message.toLowerCase() === "/quit") {
                 break;
             }
-            console.log(await session.run(message, max_turns));
+            console.log(await run_session_with_timing(session, message, max_turns));
         } catch {
             console.error("");
             break;
