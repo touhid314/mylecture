@@ -831,8 +831,8 @@ function numeric_token_count(value: any): number | null {
     return typeof value === 'number' && Number.isFinite(value) ? value : null;
 }
 
-function format_token_totals(inputTokens: number, outputTokens: number): string {
-    return `ip=${inputTokens} op=${outputTokens}`;
+function format_token_totals(inputTokens: number, outputTokens: number, cachedTokens: number): string {
+    return `ip=${inputTokens} op=${outputTokens} cache=${cachedTokens}`;
 }
 
 function gemini_output_token_count(usage: any): number | null {
@@ -861,6 +861,13 @@ function gemini_input_token_count(usage: any): number | null {
     return (prompt || 0) + toolUsePrompt;
 }
 
+function gemini_cached_token_count(usage: any): number | null {
+    if (!usage) {
+        return null;
+    }
+    return numeric_token_count(usage.cachedContentTokenCount);
+}
+
 class GeminiAgentSession {
     private model: string;
     private client: GoogleGenAI;
@@ -868,6 +875,7 @@ class GeminiAgentSession {
     private contents: any[];
     private totalInputTokens: number;
     private totalOutputTokens: number;
+    private totalCachedTokens: number;
 
     constructor(model: string, skills: string[] | null = null) {
         const apiKey = process.env.GOOGLE_API_KEY;
@@ -888,6 +896,7 @@ class GeminiAgentSession {
         this.contents = [];
         this.totalInputTokens = 0;
         this.totalOutputTokens = 0;
+        this.totalCachedTokens = 0;
         print_detail("workspace", ROOT, Color.BLUE);
         print_detail("tool mode", "native Gemini function calling", Color.BLUE);
         if (skills && skills.length > 0) {
@@ -895,7 +904,7 @@ class GeminiAgentSession {
         }
     }
 
-    private record_token_usage(inputTokens: number | null, outputTokens: number | null): void {
+    private record_token_usage(inputTokens: number | null, outputTokens: number | null, cachedTokens: number | null): void {
         const parts: string[] = [];
 
         if (inputTokens !== null) {
@@ -912,8 +921,15 @@ class GeminiAgentSession {
             parts.push("output=unavailable");
         }
 
+        if (cachedTokens !== null) {
+            this.totalCachedTokens += cachedTokens;
+            parts.push(`cached=${cachedTokens}`);
+        } else {
+            parts.push("cached=0");
+        }
+
         print_detail("tokens", parts.join(" "), Color.DIM);
-        print_detail("token totals", format_token_totals(this.totalInputTokens, this.totalOutputTokens), Color.DIM);
+        print_detail("token totals", format_token_totals(this.totalInputTokens, this.totalOutputTokens, this.totalCachedTokens), Color.DIM);
     }
 
     async run(task: string, max_turns: number): Promise<string> {
@@ -930,7 +946,8 @@ class GeminiAgentSession {
             const usage = response.usageMetadata;
             const input_tokens = gemini_input_token_count(usage);
             const output_tokens = gemini_output_token_count(usage);
-            this.record_token_usage(input_tokens, output_tokens);
+            const cached_tokens = gemini_cached_token_count(usage);
+            this.record_token_usage(input_tokens, output_tokens, cached_tokens);
             const function_calls = extract_gemini_function_calls(response);
 
             if (function_calls.length === 0) {

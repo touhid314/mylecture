@@ -434,6 +434,7 @@ async function resolveLectureFile(filePath, options = {}) {
   let finalResolvedPath = '';
 
   const filesToResolve = options.currentOnly ? [path.basename(inputPath)] : files;
+  const failures = [];
 
   for (const file of filesToResolve) {
     const fileInputPath = path.join(folderPath, file);
@@ -489,10 +490,24 @@ async function resolveLectureFile(filePath, options = {}) {
       if (activeJob && activeJob.aborted) {
         throw new Error('Process stopped by user');
       }
-      throw error;
+      // Don't nuke the whole batch for one scene; record and continue to the next scene.
+      console.error(`Scene resolve failed for ${file}: ${error.message}`);
+      failures.push({ file, message: error.message });
     } finally {
       activeJob = null;
     }
+  }
+
+  if (failures.length > 0) {
+    const detail = failures.map(f => `${f.file}: ${f.message}`).join('\n');
+    if (failures.length === filesToResolve.length) {
+      throw new Error(`Resolve failed for all scene(s):\n${detail}`);
+    }
+    const succeeded = filesToResolve.length - failures.length;
+    throw new Error(
+      `Resolved ${succeeded} of ${filesToResolve.length} scene(s); ` +
+      `failed: ${failures.map(f => f.file).join(', ')}.\n${detail}`
+    );
   }
 
   return finalResolvedPath || toViewerPath(resolvedSiblingPathForIndex(path.join(folderPath, files[0])));

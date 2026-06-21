@@ -169,9 +169,7 @@ if (device) initOpts.device = device;
 
 let tts;
 try {
-  console.error(`Kokoro loading model=${model} dtype=${dtype} device=${device ?? "default"}`);
   tts = await KokoroTTS.from_pretrained(model, initOpts);
-  console.error(`Kokoro ready device=${device ?? "default"}`);
 } catch (err) {
   if (device && device !== "cpu") {
     console.warn(`Kokoro device '${device}' failed; falling back to cpu. ${err?.message ?? err}`);
@@ -606,7 +604,7 @@ def _run_kokoro_js(text: str, output_path: Path, voice: str, speed: float) -> No
                 # Windows can briefly lock temp files after process exit.
                 pass
 
-    def _summarize_process_output(output: str) -> str:
+    def _summarize_process_output(output: str, fallback: bool = True) -> str:
         lines = []
         for line in output.splitlines():
             clean = re.sub(r"\x1b\[[0-9;]*m", "", line).strip()
@@ -618,13 +616,19 @@ def _run_kokoro_js(text: str, output_path: Path, voice: str, speed: float) -> No
                 lines.append(clean[:500])
             elif "failed" in clean.lower() or "unsupported device" in clean.lower():
                 lines.append(clean[:500])
-        return "\n".join(lines[-20:]) or output.strip()[:1000] or "Unknown error"
+        summary = "\n".join(lines[-20:])
+        if summary:
+            return summary
+        if fallback:
+            return output.strip()[:1000] or "Unknown error"
+        return ""
 
     if result.returncode != 0:
         detail = _summarize_process_output(result.stderr or result.stdout or "")
         raise RuntimeError(f"kokoro-js failed: {detail}")
+    # On success, stay silent unless the subprocess surfaced a real warning/error.
     if result.stderr.strip():
-        detail = _summarize_process_output(result.stderr)
+        detail = _summarize_process_output(result.stderr, fallback=False)
         if detail:
             print(detail)
 
@@ -732,7 +736,7 @@ def tts(
         raise ValueError("provider must be one of: openai, google, gemini, kokoro")
 
     out_path = _resolve_output_path(output_path, chosen_provider)
-    log.info(f"TTS provider={chosen_provider} -> {out_path}")
+    log.debug(f"TTS provider={chosen_provider} -> {out_path}")
 
     if chosen_provider == "openai":
         client = _openai_client()
@@ -779,7 +783,7 @@ def tts(
         chosen_speed = float(speed) if speed is not None else 1.0
         if chosen_speed <= 0:
             raise ValueError("speed must be greater than 0")
-        log.info(
+        log.debug(
             f"Kokoro config model={DEFAULT_KOKORO_MODEL} dtype={DEFAULT_KOKORO_DTYPE} "
             f"device={DEFAULT_KOKORO_DEVICE or 'default'} voice={chosen_voice} speed={chosen_speed}"
         )

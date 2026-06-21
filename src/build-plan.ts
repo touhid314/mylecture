@@ -12,11 +12,13 @@
 import { chromium } from 'playwright';
 import { spawn } from 'node:child_process';
 import os from 'node:os';
-import { existsSync, mkdirSync, readFileSync, statSync, writeFileSync, unlinkSync } from 'node:fs';
+import { createHash } from 'node:crypto';
+import { copyFileSync, existsSync, mkdirSync, readFileSync, statSync, writeFileSync, unlinkSync } from 'node:fs';
 import path from 'node:path';
 import { pathToFileURL } from 'node:url';
 
 const rootDir = process.cwd();
+const TTS_CACHE_DIR = path.resolve(process.cwd(), '.cache', 'tts');
 
 // Worker defaults are intentionally based on local machine capacity, except Kokoro
 // TTS is capped lower because concurrent model startup can be expensive.
@@ -193,6 +195,10 @@ function normalizeAudioRequest(requestedAudio, sectionId) {
   return path.join(parsed.dir, `${parsed.name}.wav`);
 }
 
+function ttsCacheKey(provider, voice, speed, text) {
+  return createHash('sha256').update(`${provider}\u0000${voice}\u0000${speed}\u0000${text}`).digest('hex');
+}
+
 // File existence checks are wrapped because statSync throws for missing paths.
 function isFile(pathName) {
   try {
@@ -264,8 +270,6 @@ async function runAudioJobs(audioJobs, maxWorkers) {
   if (audioJobs.length === 0) return;
 
   const python = resolveTtsPython();
-  console.log(`TTS Python: ${python}`);
-  console.log(`Generating ${audioJobs.length} audio file(s) in a single batch with ${maxWorkers} workers...`);
   const tempJobsFile = path.resolve(rootDir, '.tmp', `jobs_${Date.now()}.json`);
   mkdirSync(path.dirname(tempJobsFile), { recursive: true });
   writeFileSync(tempJobsFile, JSON.stringify(audioJobs, null, 2), 'utf8');
@@ -285,7 +289,6 @@ async function runAudioJobs(audioJobs, maxWorkers) {
     '    jobs = json.load(f)',
     '',
     'def run_job(job):',
-    '    print(f"Generating audio for {job[\'sectionId\']} -> {job[\'displayPath\']}", flush=True)',
     '    tts(',
     '        job["text"],',
     '        provider=job["provider"],',
@@ -378,7 +381,10 @@ async function resolveTimeline(plan, inputPath, outputPath, args) {
         console.log(`Normalized audio path for ${section.id}: ${section.audio} -> ${requestedAudio}`);
       }
 
-      if (args.forceAudio || !isFile(audioPath)) {
+      const cacheKey = ttsCacheKey(args.provider, args.voice, args.speed, section.text);
+      const cachePath = path.join(TTS_CACHE_DIR, `${cacheKey}.wav`);
+
+      if (args.forceAudio) {
         audioJobs.push({
           sectionId: section.id,
           text: section.text,
@@ -386,15 +392,41 @@ async function resolveTimeline(plan, inputPath, outputPath, args) {
           displayPath,
           provider: args.provider,
           voice: args.voice,
-          speed: args.speed
+          speed: args.speed,
+          cacheKey,
+          cachePath
         });
+      } else if (existsSync(cachePath)) {
+        copyFileSync(cachePath, audioPath);
+        console.log(`Using cached audio for ${section.id} -> ${displayPath}`);
       } else {
-        console.log(`Using existing audio for ${section.id} -> ${displayPath}`);
+        audioJobs.push({
+          sectionId: section.id,
+          text: section.text,
+          outputPath: audioPath,
+          displayPath,
+          provider: args.provider,
+          voice: args.voice,
+          speed: args.speed,
+          cacheKey,
+          cachePath
+        });
       }
     }
   }
 
   await runAudioJobs(audioJobs, args.audioWorkers);
+
+  mkdirSync(TTS_CACHE_DIR, { recursive: true });
+  for (const job of audioJobs) {
+    if (job.cachePath && isFile(job.outputPath)) {
+      try {
+        copyFileSync(job.outputPath, job.cachePath);
+      } catch (e) {
+        // non-fatal cache write
+      }
+    }
+  }
 
   // Second pass: construct the ordered timelines now that narration durations are known.
   for (const [index, section] of plan.entries()) {

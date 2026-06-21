@@ -34,7 +34,7 @@ function parseArgs(argv) {
   const args = {
     html: path.join('tests', 'fixtures', 'input-contract-test', 'index.html'),
     out: null,
-    fps: 60,
+    fps: 30,
     width: 1080,
     height: 1920,
     framesDir: path.join('.render', 'frames'),
@@ -134,7 +134,7 @@ function printHelp() {
 Options:
   --html <file>          HTML file to render. Default: tests/fixtures/input-contract-test/index.html
   --out <file>           Output MP4 path. Default: rendered.mp4, or rendered<suffix>.mp4 for index/resolved variants
-  --fps <number>         Frames per second. Default: 60
+  --fps <number>         Frames per second. Default: 30
   --width <pixels>       Viewport width. Default: 1080
   --height <pixels>      Viewport height. Default: 1920
   --frames-dir <dir>     Temporary frame directory. Default: .render/frames
@@ -388,15 +388,15 @@ async function videoCodecCandidates(requestedCodec) {
 // Encoder-specific ffmpeg arguments stay isolated so fallback behavior is simple.
 function videoCodecArgs(codec, args) {
   if (codec === 'h264_nvenc') {
-    return ['-c:v', 'h264_nvenc', '-preset', 'fast'];
+    return ['-c:v', 'h264_nvenc', '-preset', 'fast', '-rc', 'vbr', '-cq', '23', '-b:v', '0'];
   }
   if (codec === 'h264_qsv') {
-    return ['-c:v', 'h264_qsv', '-preset', 'veryfast'];
+    return ['-c:v', 'h264_qsv', '-preset', 'veryfast', '-global_quality', '23'];
   }
   if (codec === 'h264_amf') {
     return ['-c:v', 'h264_amf', '-quality', 'speed'];
   }
-  return ['-c:v', 'libx264', '-preset', args.x264Preset, '-threads', '0'];
+  return ['-c:v', 'libx264', '-preset', args.x264Preset, '-crf', '23', '-threads', '0'];
 }
 
 // Build the final image-sequence-to-MP4 ffmpeg command.
