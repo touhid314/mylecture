@@ -125,7 +125,7 @@ const TOOLS: any[] = [
     {
         type: "function",
         name: "cmd",
-        description: "Run a shell command in the workspace.",
+        description: "Run an ordinary project command in the workspace (e.g. npm test/build/install, running existing scripts). Do NOT use cmd to search the filesystem (no recursive dir/findstr/where/grep/find) or to read/copy files for inspection — use the read tool with known workspace-relative paths instead.",
         parameters: {
             type: "object",
             properties: {
@@ -467,6 +467,20 @@ function tool_cmd(command: string, timeout_seconds: number = 30): string {
         return "ERROR: Python one-liners are blocked in cmd. Use the read tool for file inspection, write/edits for file changes, and cmd only for ordinary project commands such as tests, builds, installs, or running existing scripts.";
     }
 
+    const blocked_fs_exploration_patterns = [
+        /\bdir\b.*(?:\/s|\s\/s)/,
+        /\bdir\b.*\.\./,
+        /\bdir\b\s+[a-z]:\s*(?:\\|$)/,
+        /\bfindstr\b.*\/s/,
+        /\bwhere\b.*\/r/,
+        /\bgrep\b.*\s-r\b/,
+        /\bfind\s+\S/,
+        /\bls\b.*\s-r\b/,
+    ];
+    if (blocked_fs_exploration_patterns.some(pattern => pattern.test(lowered_command))) {
+        return "ERROR: Filesystem search/exploration via cmd is disabled. Required files (HTML contract, theme) are already provided in your instructions. Use the read tool with known workspace-relative paths instead of searching. Reserve cmd for project commands like npm test/build/install or running existing scripts.";
+    }
+
     try {
         const completed = spawnSync(command, {
             cwd: ROOT,
@@ -486,6 +500,31 @@ function tool_cmd(command: string, timeout_seconds: number = 30): string {
             stderr: e.message || String(e)
         });
     }
+}
+
+const CMD_MODEL_STREAM_LIMIT = 3000;
+
+function truncate_cmd_result_for_model(result: string): string {
+    // result is the JSON string produced by tool_cmd: {returncode, stdout, stderr}
+    let parsed: any;
+    try {
+        parsed = JSON.parse(result);
+    } catch {
+        return result;
+    }
+    if (!parsed || typeof parsed !== 'object') {
+        return result;
+    }
+    const cap = (text: any): any => {
+        if (typeof text !== 'string' || text.length <= CMD_MODEL_STREAM_LIMIT) {
+            return text;
+        }
+        const tail = text.slice(-CMD_MODEL_STREAM_LIMIT);
+        return `... [truncated ${text.length - CMD_MODEL_STREAM_LIMIT} earlier character(s)]\n${tail}`;
+    };
+    if ('stdout' in parsed) parsed.stdout = cap(parsed.stdout);
+    if ('stderr' in parsed) parsed.stderr = cap(parsed.stderr);
+    return JSON.stringify(parsed);
 }
 
 const TOOL_HANDLERS: Record<string, Function> = {
@@ -705,7 +744,11 @@ function normalize_model_response(response: any): any {
 }
 
 function build_function_response_payload(name: string, argumentsObj: any, result: string): any {
-    const payload: any = { result };
+    let model_result = result;
+    if (name === "cmd" && !result.startsWith("ERROR:")) {
+        model_result = truncate_cmd_result_for_model(result);
+    }
+    const payload: any = { result: model_result };
     if (!result.startsWith("ERROR:") && should_validate_contract(name, argumentsObj)) {
         const validation = validate_index_html_contract(argumentsObj.path);
         payload["contract_validation"] = validation;

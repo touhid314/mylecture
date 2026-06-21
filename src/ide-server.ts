@@ -17,6 +17,30 @@ import { createViewerHtml } from '../packages/lecture-viewer/src/index.ts';
 const rootDir = process.cwd();
 const defaultPort = 4307;
 
+// Load repo-root .env so render/TTS settings configured there (e.g. KOKORO_ENGINE)
+// reach the build/render/TTS subprocesses we spawn. Existing process.env wins.
+function loadDotEnv(envPath) {
+  try {
+    const raw = readFileSync(envPath, 'utf8');
+    for (const line of raw.split(/\r?\n/)) {
+      const trimmed = line.trim();
+      if (!trimmed || trimmed.startsWith('#')) continue;
+      const eq = trimmed.indexOf('=');
+      if (eq === -1) continue;
+      const key = trimmed.slice(0, eq).trim();
+      if (!key || key in process.env) continue;
+      let value = trimmed.slice(eq + 1).trim();
+      if ((value.startsWith('"') && value.endsWith('"')) || (value.startsWith("'") && value.endsWith("'"))) {
+        value = value.slice(1, -1);
+      }
+      process.env[key] = value;
+    }
+  } catch {
+    // No .env present or unreadable; ignore.
+  }
+}
+loadDotEnv(path.join(rootDir, '.env'));
+
 // Source files without resolved timelines use this estimate for preview timing.
 function estimateTextDuration(text) {
   const words = String(text || '').trim().split(/\s+/).filter(Boolean).length;
