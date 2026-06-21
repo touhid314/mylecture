@@ -12,6 +12,7 @@
     "chat": "tsx packages/lecture-agent/src/coding_agent.ts --chat",
     "build:plan": "node --import tsx src/build-plan.ts",
     "render:video": "node --import tsx src/render-video.ts",
+    "render:server": "node --import tsx src/render-server.ts",
     "subtitle:burn": "node --import tsx src/subtitle-burner.ts",
     "build:viewer": "npm --prefix packages/lecture-viewer run build",
     "version:sync": "node --import tsx src/sync-versions.ts",
