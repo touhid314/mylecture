@@ -777,6 +777,8 @@ class LecturePlayer {
       this.emit('statechange', this.snapshot());
       this.syncAudio();
       this.state.raf = requestAnimationFrame(now => this.tick(now));
+    } else {
+      this.emit('statechange', this.snapshot());
     }
   }
 

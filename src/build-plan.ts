@@ -16,6 +16,7 @@ import { createHash } from 'node:crypto';
 import { copyFileSync, existsSync, mkdirSync, readFileSync, statSync, writeFileSync, unlinkSync } from 'node:fs';
 import path from 'node:path';
 import { pathToFileURL } from 'node:url';
+import { buildVtt } from './utils/vtt.ts';
 
 const rootDir = process.cwd();
 const TTS_CACHE_DIR = path.resolve(process.cwd(), '.cache', 'tts');
@@ -612,6 +613,10 @@ async function main() {
   const plan = await readPlanFromHtml(inputPath);
   const timeline = await resolveTimeline(plan, inputPath, outputPath, args);
   writeResolvedHtml(inputPath, outputPath, timeline);
+
+  const vttPath = path.join(path.dirname(outputPath), 'captions.vtt');
+  writeFileSync(vttPath, buildVtt(timeline.audioTimeline), 'utf8');
+  console.log(`Wrote ${vttPath}`);
 
   console.log(`Resolved duration: ${timeline.duration.toFixed(3)}s`);
   console.log(`Audio cues: ${timeline.audioTimeline.length}`);

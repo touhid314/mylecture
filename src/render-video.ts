@@ -54,7 +54,8 @@ function parseArgs(argv) {
     keepFrames: false,
     maxFrames: null,
     skipVideo: false,
-    colorRange: 'tv'
+    colorRange: 'tv',
+    maxShortEdge: null
   };
 
   for (let i = 0; i < argv.length; i++) {
@@ -75,6 +76,7 @@ function parseArgs(argv) {
     else if (arg === '--resolved-html') args.resolvedHtml = next, i++;
     else if (arg === '--premixed-audio') args.premixedAudio = next, i++;
     else if (arg === '--max-frames') args.maxFrames = Number(next), i++;
+    else if (arg === '--max-short-edge') args.maxShortEdge = Number(next), i++;
     else if (arg === '--tts-provider') args.ttsProvider = next, i++;
     else if (arg === '--tts-voice') args.ttsVoice = next, i++;
     else if (arg === '--tts-speed') args.ttsSpeed = Number(next), i++;
@@ -121,6 +123,9 @@ function parseArgs(argv) {
   if (args.maxFrames !== null && (!Number.isInteger(args.maxFrames) || args.maxFrames <= 0)) {
     throw new Error('--max-frames must be a positive integer');
   }
+  if (args.maxShortEdge !== null && (!Number.isInteger(args.maxShortEdge) || args.maxShortEdge <= 0)) {
+    throw new Error('--max-short-edge must be a positive integer');
+  }
   if (!args.out) args.out = defaultOutputPath(args.html);
 
   return args;
@@ -152,6 +157,7 @@ Options:
   --tts-speed <number>    TTS speed for auto-build. Default: 1
   --tts-audio-workers <n> Concurrent audio files for auto-build. Default: 6 for Kokoro
   --max-frames <number>  Render only the first N frames for a smoke test
+  --max-short-edge <px>  Cap viewport short edge to this many pixels (even dimensions)
   --keep-frames          Do not delete rendered PNG frames
   --skip-video           Render frames and audio only; do not mux final MP4
   --color-range <tv|pc>  Encoded video color range. Use pc for full-range browser colors. Default: tv
@@ -645,6 +651,17 @@ async function main() {
     console.log(`Auto-detected viewport from metadata: ${detectedViewport.width}x${detectedViewport.height} (originally: ${args.width}x${args.height})`);
     args.width = detectedViewport.width;
     args.height = detectedViewport.height;
+  }
+
+  if (args.maxShortEdge !== null) {
+    const shortEdge = Math.min(args.width, args.height);
+    if (shortEdge > args.maxShortEdge) {
+      const scale = args.maxShortEdge / shortEdge;
+      const roundEven = (n) => Math.round(n / 2) * 2;
+      args.width = roundEven(args.width * scale);
+      args.height = roundEven(args.height * scale);
+      console.log(`Capped viewport to short edge ${args.maxShortEdge}: ${args.width}x${args.height}`);
+    }
   }
 
   const timeline = await getTimelineFromPage(timelinePage);
