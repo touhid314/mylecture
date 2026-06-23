@@ -1,6 +1,7 @@
 import { readFile, writeFile, mkdir } from "node:fs/promises";
 import path from "node:path";
 import { createClient, type SupabaseClient } from "@supabase/supabase-js";
+import ws from "ws";
 import type { RenderStorageProvider } from "./types.ts";
 
 let client: SupabaseClient | null = null;
@@ -32,6 +33,8 @@ function getClient(): SupabaseClient {
 
   client = createClient(url, key, {
     auth: { persistSession: false, autoRefreshToken: false },
+    // Node 20 in Docker has no native WebSocket; `ws` is required for realtime-js init.
+    realtime: { transport: ws as unknown as typeof WebSocket },
   });
   return client;
 }
