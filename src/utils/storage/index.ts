@@ -5,6 +5,7 @@ import { createDualRenderStorage } from "./dual-provider.ts";
 
 export type { RenderStorageProvider } from "./types.ts";
 
+// STORAGE_BACKEND: supabase (default) | r2 (R2 primary + Supabase fallback) | r2-only (R2 only)
 function getStorageBackend(): string {
   return (process.env.STORAGE_BACKEND ?? "supabase").trim().toLowerCase();
 }
@@ -13,10 +14,14 @@ let cached: RenderStorageProvider | null = null;
 
 export function getRenderStorage(): RenderStorageProvider {
   if (cached) return cached;
-  cached =
-    getStorageBackend() === "r2"
-      ? createDualRenderStorage(getR2RenderStorage(), getSupabaseRenderStorage())
-      : getSupabaseRenderStorage();
+  const backend = getStorageBackend();
+  if (backend === "r2") {
+    cached = createDualRenderStorage(getR2RenderStorage(), getSupabaseRenderStorage());
+  } else if (backend === "r2-only") {
+    cached = getR2RenderStorage();
+  } else {
+    cached = getSupabaseRenderStorage();
+  }
   return cached;
 }
 
