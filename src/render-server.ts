@@ -22,6 +22,7 @@ const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), ".."
 const DEFAULT_PORT = 8787;
 const DEFAULT_MAX_BODY_BYTES = 5 * 1024 * 1024;
 const MAX_PROCESS_OUTPUT_TAIL = 65_536;
+const CALLBACK_FETCH_TIMEOUT_MS = 10_000;
 
 type RenderRequestBody = {
   sourceHtml?: string;
@@ -66,6 +67,10 @@ type JobParams = {
 type CallbackPayload = Record<string, unknown>;
 
 const maxConcurrency = readEnvInt("RENDER_WORKER_MAX_CONCURRENCY", 1);
+const subprocessTimeoutMs = readEnvInt(
+  "RENDER_WORKER_SUBPROCESS_TIMEOUT_MS",
+  1_800_000,
+);
 let activeJobs = 0;
 const pendingJobs: Array<() => Promise<void>> = [];
 
@@ -181,6 +186,22 @@ function runProcess(
 
     let stdout = "";
     let stderr = "";
+    let settled = false;
+    let timeoutHandle: NodeJS.Timeout | undefined;
+
+    const finish = (result: ProcessResult) => {
+      if (settled) return;
+      settled = true;
+      if (timeoutHandle) clearTimeout(timeoutHandle);
+      resolve(result);
+    };
+
+    const fail = (error: Error) => {
+      if (settled) return;
+      settled = true;
+      if (timeoutHandle) clearTimeout(timeoutHandle);
+      reject(error);
+    };
 
     const appendCapturedOutput = (current: string, chunk: string) => {
       const combined = current + chunk;
@@ -203,12 +224,23 @@ function runProcess(
     });
 
     child.on("error", (error) => {
-      reject(error);
+      fail(error);
     });
 
     child.on("close", (code) => {
-      resolve({ code, stdout, stderr });
+      finish({ code, stdout, stderr });
     });
+
+    if (subprocessTimeoutMs > 0) {
+      timeoutHandle = setTimeout(() => {
+        child.kill("SIGKILL");
+        fail(
+          new Error(
+            `Subprocess timed out after ${subprocessTimeoutMs}ms and was terminated.`,
+          ),
+        );
+      }, subprocessTimeoutMs);
+    }
   });
 }
 
@@ -269,8 +301,19 @@ async function postCallback(payload: CallbackPayload): Promise<void> {
       await sleep(backoffs[attempt]);
     }
 
+    const controller = new AbortController();
+    const timeoutId = setTimeout(
+      () => controller.abort(),
+      CALLBACK_FETCH_TIMEOUT_MS,
+    );
+
     try {
-      const response = await fetch(url, { method: "POST", headers, body });
+      const response = await fetch(url, {
+        method: "POST",
+        headers,
+        body,
+        signal: controller.signal,
+      });
       if (response.ok) {
         console.log(
           `Callback delivered for job ${payload.jobId} (${payload.status})`,
@@ -285,6 +328,8 @@ async function postCallback(payload: CallbackPayload): Promise<void> {
         `Callback attempt ${attempt + 1} failed for job ${payload.jobId}:`,
         error instanceof Error ? error.message : error,
       );
+    } finally {
+      clearTimeout(timeoutId);
     }
   }
 
@@ -415,6 +460,12 @@ async function processPreviewJob(params: JobParams): Promise<void> {
       console.error(formatProcessFailure("build:plan", buildResult));
       throw new Error("Build plan failed");
     }
+
+    await postCallback({
+      jobId,
+      phase,
+      status: "rendering_preview",
+    });
 
     const renderResult = await runProcess(
       [
