@@ -15,12 +15,7 @@ import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { buildRenderMultipart } from "./utils/render-multipart.ts";
-import {
-  downloadPrefixToDir,
-  downloadToFile,
-  isStorageConfigured,
-  uploadFile,
-} from "./utils/supabase-storage.ts";
+import { getRenderStorage, isStorageConfigured } from "./utils/storage/index.ts";
 
 const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 
@@ -400,7 +395,7 @@ async function processPreviewJob(params: JobParams): Promise<void> {
     const audioDir = path.join(workDir, "audio");
     const captionsPath = path.join(workDir, "captions.vtt");
 
-    await downloadToFile(`${storageBase}/raw.html`, sourceHtml);
+    await getRenderStorage().downloadToFile(`${storageBase}/raw.html`, sourceHtml);
 
     const buildResult = await runProcess(
       [
@@ -448,12 +443,12 @@ async function processPreviewJob(params: JobParams): Promise<void> {
     const captionsStoragePath = `${storageBase}/resolved/captions.vtt`;
     const previewVideoPath = `${storageBase}/preview.mp4`;
 
-    await uploadFile(resolvedHtmlPath, resolvedHtml, "text/html");
+    await getRenderStorage().uploadFile(resolvedHtmlPath, resolvedHtml, "text/html");
 
     if (await fileExists(audioDir)) {
       const audioFiles = await readdir(audioDir);
       for (const name of audioFiles) {
-        await uploadFile(
+        await getRenderStorage().uploadFile(
           `${resolvedAudioPrefix}/${name}`,
           path.join(audioDir, name),
           "audio/wav",
@@ -462,10 +457,10 @@ async function processPreviewJob(params: JobParams): Promise<void> {
     }
 
     if (await fileExists(captionsPath)) {
-      await uploadFile(captionsStoragePath, captionsPath, "text/vtt");
+      await getRenderStorage().uploadFile(captionsStoragePath, captionsPath, "text/vtt");
     }
 
-    await uploadFile(previewVideoPath, previewMp4, "video/mp4");
+    await getRenderStorage().uploadFile(previewVideoPath, previewMp4, "video/mp4");
 
     const durationSeconds = parseDurationSeconds(renderResult.stdout);
     const callbackPayload: CallbackPayload = {
@@ -511,11 +506,11 @@ async function processFinalJob(params: JobParams): Promise<void> {
     const captionsPath = path.join(workDir, "captions.vtt");
     const finalMp4 = path.join(workDir, "final.mp4");
 
-    await downloadToFile(`${storageBase}/resolved/resolved.html`, resolvedHtml);
-    await downloadPrefixToDir(`${storageBase}/resolved/audio`, audioDir);
+    await getRenderStorage().downloadToFile(`${storageBase}/resolved/resolved.html`, resolvedHtml);
+    await getRenderStorage().downloadPrefixToDir(`${storageBase}/resolved/audio`, audioDir);
 
     try {
-      await downloadToFile(
+      await getRenderStorage().downloadToFile(
         `${storageBase}/resolved/captions.vtt`,
         captionsPath,
       );
@@ -544,7 +539,7 @@ async function processFinalJob(params: JobParams): Promise<void> {
     }
 
     const finalVideoPath = `${storageBase}/final.mp4`;
-    await uploadFile(finalVideoPath, finalMp4, "video/mp4");
+    await getRenderStorage().uploadFile(finalVideoPath, finalMp4, "video/mp4");
 
     const durationSeconds = parseDurationSeconds(renderResult.stdout);
     const callbackPayload: CallbackPayload = {
