@@ -30,7 +30,10 @@ export function createDualRenderStorage(
     async downloadToFile(key: string, localFilePath: string): Promise<void> {
       try {
         await primary.downloadToFile(key, localFilePath);
-      } catch {
+      } catch (err) {
+        console.warn(
+          `[storage] downloadToFile fallback to Supabase for key: ${key} (${err instanceof Error ? err.message : String(err)})`,
+        );
         await fallback.downloadToFile(key, localFilePath);
       }
     },
@@ -38,15 +41,26 @@ export function createDualRenderStorage(
     async list(prefix: string): Promise<string[]> {
       let primaryKeys: string[] = [];
       let fallbackKeys: string[] = [];
+      let primaryFailed = false;
       try {
         primaryKeys = await primary.list(prefix);
-      } catch {
+      } catch (err) {
+        primaryFailed = true;
+        console.warn(
+          `[storage] primary list failed for prefix "${prefix}": ${err instanceof Error ? err.message : String(err)}`,
+        );
         primaryKeys = [];
       }
       try {
         fallbackKeys = await fallback.list(prefix);
-      } catch {
+      } catch (err) {
+        console.warn(
+          `[storage] fallback list failed for prefix "${prefix}": ${err instanceof Error ? err.message : String(err)}`,
+        );
         fallbackKeys = [];
+      }
+      if (primaryFailed && fallbackKeys.length > 0) {
+        console.warn(`[storage] list using Supabase results for prefix: ${prefix}`);
       }
       return [...new Set([...primaryKeys, ...fallbackKeys])];
     },
