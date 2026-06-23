@@ -10,13 +10,10 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     python3-pip \
     python-is-python3 \
     && rm -rf /var/lib/apt/lists/* \
-    && pip3 install --break-system-packages \
-      python-dotenv \
-      "misaki[en]" \
-      onnxruntime \
-      scipy \
-      numpy \
-      huggingface_hub
+    && pip3 install --break-system-packages python-dotenv
+
+# Kokoro via kokoro-js (npm). Set KOKORO_ENGINE=kokoro-js in .env — same as local dev.
+# Only install misaki/onnxruntime if you switch KOKORO_ENGINE to onnxruntime.
 
 WORKDIR /app
 
