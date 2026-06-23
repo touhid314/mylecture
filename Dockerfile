@@ -7,8 +7,16 @@ FROM node:20-bookworm
 RUN apt-get update && apt-get install -y --no-install-recommends \
     ffmpeg \
     python3 \
+    python3-pip \
     python-is-python3 \
-    && rm -rf /var/lib/apt/lists/*
+    && rm -rf /var/lib/apt/lists/* \
+    && pip3 install --break-system-packages \
+      python-dotenv \
+      "misaki[en]" \
+      onnxruntime \
+      scipy \
+      numpy \
+      huggingface_hub
 
 WORKDIR /app
 
