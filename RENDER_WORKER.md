@@ -27,6 +27,21 @@ The server listens on `PORT` (default `8787`).
 | `WEBSITE_CALLBACK_URL` | _(unset)_ | URL to POST job status callbacks (e.g. `https://site/api/video-agent/callback`) |
 | `RENDER_CALLBACK_TOKEN` | _(unset)_ | When set, callbacks include `Authorization: Bearer <token>` |
 | `GOOGLE_API_KEY` / `GEMINI_API_KEY` | _(unset)_ | Forwarded to child processes for cloud TTS if needed |
+| `DATABASE_URL` | _(unset)_ | Postgres connection for durable `RenderQueue` polling — use the Supabase **session** pooler (`pooler.supabase.com:5432`, not port `6543`) so `FOR UPDATE SKIP LOCKED` works |
+| `RENDER_QUEUE_WORKER_ENABLED` | auto | `1` forces the queue worker on; `0` disables it even when `DATABASE_URL` is set |
+| `RENDER_HTTP_JOBS` | auto | `1` runs `/jobs` in-process; `0` accepts HTTP jobs without scheduling (default `0` when queue worker is enabled) |
+| `RENDER_QUEUE_WORKER_ID` | `render-worker-<pid>` | Worker id stored on claimed queue rows |
+| `RENDER_QUEUE_POLL_MS` | `3000` | Queue poll interval |
+| `RENDER_QUEUE_HEARTBEAT_MS` | `60000` | Heartbeat interval for claimed jobs |
+| `RENDER_QUEUE_CLAIM_TIMEOUT_MS` | `1800000` | Reclaim jobs stuck in `claimed` |
+| `RENDER_QUEUE_REAP_INTERVAL_MS` | `300000` | How often to scan for stuck claimed jobs |
+| `RENDER_QUEUE_RETRY_BACKOFF_MS` | `30000` | Delay before retrying a failed queue row |
+
+When `DATABASE_URL` is set, the render server starts a background Postgres queue
+worker automatically. It claims rows from the website's `RenderQueue` table with
+`FOR UPDATE SKIP LOCKED`, runs the same preview/final pipeline, and marks rows
+`completed` or retries/`dead` on failure. HTTP `POST /jobs` remains accepted for
+compatibility but does not schedule work while the queue worker is active.
 
 ## Endpoints
 
@@ -114,8 +129,11 @@ Requires Supabase storage env vars (`SUPABASE_URL` + `SUPABASE_SERVICE_ROLE_KEY`
 - Status `202`
 - Body: `{ "accepted": true }`
 
-Processing continues in the background. Jobs beyond `RENDER_WORKER_MAX_CONCURRENCY`
-are queued in memory and started when a slot frees.
+Processing continues in the background. When the Postgres queue worker is
+disabled, jobs beyond `RENDER_WORKER_MAX_CONCURRENCY` are queued in memory and
+started when a slot frees. When the queue worker is enabled (`DATABASE_URL` set),
+`POST /jobs` returns `202` but the worker process picks up jobs from Postgres
+instead of the in-memory queue.
 
 #### Storage layout
 

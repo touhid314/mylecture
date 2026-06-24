@@ -5,6 +5,7 @@ import type { Readable } from "node:stream";
 import { pipeline } from "node:stream/promises";
 import {
   GetObjectCommand,
+  HeadObjectCommand,
   ListObjectsV2Command,
   PutObjectCommand,
   S3Client,
@@ -67,6 +68,32 @@ function createR2RenderStorage(): RenderStorageProvider {
           getSecretAccessKey() &&
           getPrivateBucket(),
       );
+    },
+
+    async objectHead(key: string) {
+      const bucket = getPrivateBucket();
+      if (!bucket) {
+        return { exists: false, lastModifiedMs: null };
+      }
+
+      try {
+        const res = await getClient().send(
+          new HeadObjectCommand({
+            Bucket: bucket,
+            Key: key,
+          }),
+        );
+        return {
+          exists: true,
+          lastModifiedMs: res.LastModified?.getTime() ?? null,
+        };
+      } catch {
+        return { exists: false, lastModifiedMs: null };
+      }
+    },
+
+    async objectExists(key: string): Promise<boolean> {
+      return (await this.objectHead(key)).exists;
     },
 
     async uploadFile(

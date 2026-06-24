@@ -11,6 +11,16 @@ export function createDualRenderStorage(
       return primary.isConfigured();
     },
 
+    async objectHead(key: string) {
+      const primaryHead = await primary.objectHead(key);
+      if (primaryHead.exists) return primaryHead;
+      return fallback.objectHead(key);
+    },
+
+    async objectExists(key: string): Promise<boolean> {
+      return (await this.objectHead(key)).exists;
+    },
+
     async uploadFile(
       key: string,
       localFilePath: string,

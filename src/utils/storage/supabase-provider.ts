@@ -45,6 +45,39 @@ function createSupabaseRenderStorage(): RenderStorageProvider {
       return Boolean(getSupabaseUrl() && getServiceRoleKey());
     },
 
+    async objectHead(key: string) {
+      const normalized = key.replace(/^\/+/, "");
+      const parts = normalized.split("/");
+      const name = parts.pop();
+      if (!name) {
+        return { exists: false, lastModifiedMs: null };
+      }
+
+      const parent = parts.join("/");
+      const { data, error } = await getClient()
+        .storage.from(getBucket())
+        .list(parent, { search: name, limit: 1 });
+
+      if (error || !data) {
+        return { exists: false, lastModifiedMs: null };
+      }
+
+      const entry = data.find((item) => item.name === name);
+      if (!entry) {
+        return { exists: false, lastModifiedMs: null };
+      }
+
+      const updatedAt = entry.updated_at ?? entry.created_at;
+      return {
+        exists: true,
+        lastModifiedMs: updatedAt ? new Date(updatedAt).getTime() : null,
+      };
+    },
+
+    async objectExists(key: string): Promise<boolean> {
+      return (await this.objectHead(key)).exists;
+    },
+
     async uploadFile(
       key: string,
       localFilePath: string,
