@@ -2,7 +2,7 @@
 # Kokoro model assets under models/ must be present at runtime (mounted volume
 # or downloaded into the image) for narration to work.
 
-FROM node:20-bookworm
+FROM node:22-bookworm
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
     ffmpeg \

@@ -226,6 +226,9 @@ jobs use `--max-short-edge 480`.
 
 ## Docker
 
+Requires **Node.js 22+** in the image (AWS SDK v3 will drop Node 20 support after
+January 2027). The Dockerfile uses `node:22-bookworm`.
+
 ```bash
 docker build -t mylecture-render-worker .
 docker run -p 8787:8787 \

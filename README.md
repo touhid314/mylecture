@@ -31,7 +31,7 @@ tests/                  Structured renderer fixtures and smoke tests
 
 ## Requirements & Setup
 
-1. **Install Node.js Dependencies**: Run `npm install` at the repository root directory.
+1. **Install Node.js 22+**: Run `npm install` at the repository root directory.
 2. **Configure API Keys**: Create or update `.env` in the repository root:
    ```env
    GOOGLE_API_KEY="your_google_api_key"
