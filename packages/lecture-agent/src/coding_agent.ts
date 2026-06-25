@@ -1,13 +1,24 @@
 import fs from 'fs';
 import path from 'path';
 import readline from 'readline';
-import { spawnSync } from 'child_process';
 import { fileURLToPath } from 'url';
 import dotenv from 'dotenv';
 import { GoogleGenAI } from '@google/genai';
 
 import { LLM_Model } from './llm_model.js';
 import { build_prompt } from './prompt_builder.js';
+import {
+    BASE_DIR,
+    WORKSPACE_DIR,
+    ROOT,
+    TOOLS,
+    TOOL_JSON_SCHEMA,
+    archive_agent_workspace,
+    build_function_response_payload,
+    clear_agent_workspace,
+    execute_tool,
+    line_count,
+} from './tools/index.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -26,21 +37,15 @@ function loadEnv() {
 }
 loadEnv();
 
-const BASE_DIR = path.resolve(__dirname, '..');
-const ROOT = path.resolve(process.env.AGENT_WORKSPACE || path.join(BASE_DIR, 'workspace'));
-if (!fs.existsSync(ROOT)) {
-    fs.mkdirSync(ROOT, { recursive: true });
-}
-
-const PROMPT_PATH = path.join(BASE_DIR, 'system_prompt.md');
+const PROMPT_PATH = path.join(__dirname, 'prompts', 'system_prompt.md');
 const SKILL_DIRS = [
     path.join(ROOT, '.agents', 'skills'),
     path.join(ROOT, '.agents', 'skill'),
+    path.join(WORKSPACE_DIR, '.agents', 'skills'),
+    path.join(WORKSPACE_DIR, '.agents', 'skill'),
     path.join(BASE_DIR, '.agents', 'skills'),
     path.join(BASE_DIR, '.agents', 'skill'),
 ];
-
-const CONTRACT_VALIDATOR_JS = path.join(__dirname, 'validate_contract.cjs');
 
 const DEFAULT_MODEL = "gemini-3.5-flash";
 const USE_COLOR = process.stderr.isTTY && !process.env.NO_COLOR;
@@ -57,464 +62,11 @@ class Color {
     static YELLOW = USE_COLOR ? "\x1b[33m" : "";
 }
 
-const TOOLS: any[] = [
-    {
-        type: "function",
-        name: "read",
-        description: "Read a UTF-8 text file from the workspace.",
-        parameters: {
-            type: "object",
-            properties: {
-                path: { type: "string", description: "Workspace-relative file path." }
-            },
-            required: ["path"],
-            additionalProperties: false,
-        },
-    },
-    {
-        type: "function",
-        name: "write",
-        description: "Write a complete UTF-8 text file in the workspace.",
-        parameters: {
-            type: "object",
-            properties: {
-                path: { type: "string", description: "Workspace-relative file path." },
-                content: { type: "string", description: "Complete file content." },
-            },
-            required: ["path", "content"],
-            additionalProperties: false,
-        },
-    },
-    {
-        type: "function",
-        name: "edits",
-        description: "Edit an existing file by applying one or more exact replacements atomically in one tool call. Use this for all changes to existing files, including single-location edits and multiple distant edits.",
-        parameters: {
-            type: "object",
-            properties: {
-                path: { type: "string", description: "Workspace-relative file path." },
-                edits: {
-                    type: "array",
-                    description: "Batch of independent exact replacements to apply atomically to the same file. Use this for edits at multiple distant locations, such as one change near line 5, another near line 60, and another near line 567.",
-                    items: {
-                        type: "object",
-                        properties: {
-                            old_text: {
-                                type: "string",
-                                description: "Exact text block to replace. Include enough surrounding context copied from the latest read to make it unique. If exact matching fails, the tool can use a unique whitespace-normalized match as a fallback.",
-                            },
-                            new_text: {
-                                type: "string",
-                                description: "Replacement text block.",
-                            },
-                            expected_replacements: {
-                                type: "integer",
-                                description: "Expected number of replacements for this edit. Defaults to 1.",
-                                minimum: 1,
-                            },
-                        },
-                        required: ["old_text", "new_text"],
-                        additionalProperties: false,
-                    },
-                },
-            },
-            required: ["path", "edits"],
-            additionalProperties: false,
-        },
-    },
-    {
-        type: "function",
-        name: "cmd",
-        description: "Run a shell command in the workspace.",
-        parameters: {
-            type: "object",
-            properties: {
-                command: { type: "string", description: "Command to run." },
-                timeout_seconds: {
-                    type: "integer",
-                    description: "Timeout in seconds. Defaults to 30.",
-                    minimum: 1,
-                    maximum: 300,
-                },
-            },
-            required: ["command"],
-            additionalProperties: false,
-        },
-    },
-];
-
-const TOOL_JSON_SCHEMA = {
-    note: "brief step summary for the CLI; do not include hidden chain-of-thought",
-    tool: "read | write | edits | cmd",
-    arguments: {
-        path: "workspace-relative path for read/write/edits",
-        content: "complete file content for write",
-        edits: [
-            {
-                old_text: "exact block to replace for one edit",
-                new_text: "replacement block for that edit",
-                expected_replacements: "optional integer for this edit",
-            }
-        ],
-        command: "shell command for cmd",
-        timeout_seconds: "optional integer for cmd",
-    },
-};
-
 const DONE_JSON_SCHEMA = {
     note: "brief completion summary for the CLI",
     done: true,
     output: "final response to the user",
 };
-
-function resolve_workspace_path(filePath: string): string {
-    const target = path.resolve(ROOT, filePath);
-    if (target !== ROOT && !target.startsWith(ROOT + path.sep)) {
-        throw new Error(`path escapes workspace: ${filePath}`);
-    }
-    return target;
-}
-
-function tool_read(filePath: string): string {
-    const target = resolve_workspace_path(filePath);
-    return fs.readFileSync(target, 'utf8');
-}
-
-function text_stats(content: string) {
-    return {
-        characters: content.length,
-        words: content.trim().split(/\s+/).filter(Boolean).length,
-        lines: content.split('\n').length
-    };
-}
-
-function line_count(content: string): number {
-    return content.split('\n').length;
-}
-
-function format_file_stats(prefix: string, filePath: string, content: string): string {
-    const stats = text_stats(content);
-    return `${prefix} for ${filePath}; file now contains ${stats.characters} characters exactly, ${stats.words} words exactly, and ${stats.lines} lines exactly`;
-}
-
-function should_validate_contract(name: string, argumentsObj: any): boolean {
-    if (!["write", "edits"].includes(name) || !argumentsObj || typeof argumentsObj !== 'object') {
-        return false;
-    }
-    const filePath = argumentsObj.path;
-    if (typeof filePath !== 'string') {
-        return false;
-    }
-
-    const filename = path.basename(filePath).toLowerCase();
-    if (!filename.startsWith("index") || !filename.endsWith(".html")) {
-        return false;
-    }
-
-    const suffix = filename.substring(5, filename.length - 5); // index[1,2...].html
-    return suffix === "" || /^\d+$/.test(suffix);
-}
-
-const PROTECTED_HTML_BLOCK_PATTERN = /(<(?:script|style)\b[^>]*>[\s\S]*?<\/(?:script|style)>)/gi;
-const HTML_TAG_PATTERN = /<[^<>]*>/g;
-
-function purify_html_markup_escapes(content: string): [string, number] {
-    let replacement_count = 0;
-
-    function purify_tag(tag: string): string {
-        const matches = tag.match(/\\"/g);
-        if (matches) {
-            replacement_count += matches.length;
-        }
-        return tag.replace(/\\"/g, '"');
-    }
-
-    const parts = content.split(PROTECTED_HTML_BLOCK_PATTERN);
-    const purified_parts: string[] = [];
-
-    for (let i = 0; i < parts.length; i++) {
-        const part = parts[i];
-        if (i % 2 === 1) {
-            purified_parts.push(part);
-        } else {
-            purified_parts.push(part.replace(HTML_TAG_PATTERN, purify_tag));
-        }
-    }
-
-    return [purified_parts.join(""), replacement_count];
-}
-
-function purify_content_for_path(filePath: string, content: string): [string, number] {
-    if (path.extname(filePath).toLowerCase() !== ".html") {
-        return [content, 0];
-    }
-    return purify_html_markup_escapes(content);
-}
-
-function validate_index_html_contract(filePath: string): string {
-    const target = resolve_workspace_path(filePath);
-    if (!fs.existsSync(CONTRACT_VALIDATOR_JS)) {
-        return `HTML contract validation skipped: validator not found at ${CONTRACT_VALIDATOR_JS}`;
-    }
-
-    let content: string;
-    try {
-        content = fs.readFileSync(target, 'utf8');
-    } catch (exc: any) {
-        return `HTML contract validation failed for ${filePath}: could not read file: ${exc.message || exc}`;
-    }
-
-    const [, escaped_markup_count] = purify_html_markup_escapes(content);
-    if (escaped_markup_count > 0) {
-        return `HTML contract validation failed for ${filePath}: found ${escaped_markup_count} literal escaped quote(s) in HTML markup. Use normal attributes like id="stage", not id=\\"stage\\".`;
-    }
-
-    try {
-        const completed = spawnSync('node', [CONTRACT_VALIDATOR_JS, target], {
-            cwd: ROOT,
-            encoding: 'utf8',
-            timeout: 10000
-        });
-
-        const stdout = (completed.stdout || "").trim();
-        const stderr = (completed.stderr || "").trim();
-        const combined = [stderr, stdout].filter(Boolean).join('\n').trim();
-
-        if (completed.status === 0) {
-            return `HTML contract validation passed for ${filePath}: ${stdout || 'OK'}`;
-        }
-        return `HTML contract validation failed for ${filePath} (exit ${completed.status}): ${combined || 'unknown validation error'}`;
-    } catch (exc: any) {
-        return `HTML contract validation skipped: ${exc.name || 'Error'}: ${exc.message || exc}`;
-    }
-}
-
-function tool_write(filePath: string, content: string): string {
-    const target = resolve_workspace_path(filePath);
-    fs.mkdirSync(path.dirname(target), { recursive: true });
-    const [purifiedContent, purifiedCount] = purify_content_for_path(filePath, content);
-    fs.writeFileSync(target, purifiedContent, 'utf8');
-    const stats = text_stats(purifiedContent);
-    const purified_note = purifiedCount ? `; purified ${purifiedCount} escaped quote(s) in HTML markup` : "";
-    return `write succeeded for ${filePath}; wrote ${stats.characters} characters, ${stats.words} words, and ${stats.lines} lines${purified_note}; file now contains ${stats.characters} characters, ${stats.words} words, and ${stats.lines} lines`;
-}
-
-function normalized_text_with_map(text: string): [string, number[]] {
-    const normalized_chars: string[] = [];
-    const original_indexes: number[] = [];
-    let in_whitespace = false;
-
-    for (let index = 0; index < text.length; index++) {
-        const char = text[index];
-        if (/\s/.test(char)) {
-            if (!in_whitespace) {
-                normalized_chars.push(" ");
-                original_indexes.push(index);
-                in_whitespace = true;
-            }
-            continue;
-        }
-
-        normalized_chars.push(char);
-        original_indexes.push(index);
-        in_whitespace = false;
-    }
-
-    let start = 0;
-    let end = normalized_chars.length;
-    while (start < end && normalized_chars[start] === " ") {
-        start++;
-    }
-    while (end > start && normalized_chars[end - 1] === " ") {
-        end--;
-    }
-
-    return [
-        normalized_chars.slice(start, end).join(""),
-        original_indexes.slice(start, end)
-    ];
-}
-
-function find_text_spans(content: string, old_text: string): [[number, number][], string] {
-    const exact_spans: [number, number][] = [];
-    let search_from = 0;
-    while (true) {
-        const start = content.indexOf(old_text, search_from);
-        if (start === -1) {
-            break;
-        }
-        exact_spans.push([start, start + old_text.length]);
-        search_from = start + old_text.length;
-    }
-
-    if (exact_spans.length > 0) {
-        return [exact_spans, "exact"];
-    }
-
-    const [normalized_content, content_map] = normalized_text_with_map(content);
-    const [normalized_old] = normalized_text_with_map(old_text);
-    if (!normalized_old) {
-        return [[], "exact"];
-    }
-
-    const normalized_spans: [number, number][] = [];
-    search_from = 0;
-    while (true) {
-        const normalized_start = normalized_content.indexOf(normalized_old, search_from);
-        if (normalized_start === -1) {
-            break;
-        }
-        const normalized_end = normalized_start + normalized_old.length - 1;
-        const original_start = content_map[normalized_start];
-        const original_end = content_map[normalized_end] + 1;
-        normalized_spans.push([original_start, original_end]);
-        search_from = normalized_start + normalized_old.length;
-    }
-
-    return [normalized_spans, "whitespace-normalized"];
-}
-
-function tool_edits(filePath: string, edits: any[]): string {
-    const target = resolve_workspace_path(filePath);
-    let content = fs.readFileSync(target, 'utf8');
-
-    if (!Array.isArray(edits) || edits.length === 0) {
-        throw new Error("edits must be a non-empty array");
-    }
-
-    const replacements: any[] = [];
-    for (let index = 0; index < edits.length; index++) {
-        const edit = edits[index];
-        if (!edit || typeof edit !== 'object') {
-            throw new Error(`edit ${index + 1} must be an object`);
-        }
-
-        const edit_old = edit.old_text;
-        const edit_new = edit.new_text;
-        const edit_expected = parseInt(edit.expected_replacements || "1", 10);
-
-        if (typeof edit_old !== 'string' || typeof edit_new !== 'string') {
-            throw new Error(`edit ${index + 1} must include string old_text and new_text`);
-        }
-        if (edit_old === "") {
-            throw new Error(`edit ${index + 1} old_text must not be empty`);
-        }
-        if (isNaN(edit_expected) || edit_expected < 1) {
-            throw new Error(`edit ${index + 1} expected_replacements must be at least 1`);
-        }
-
-        const [spans, match_type] = find_text_spans(content, edit_old);
-
-        if (spans.length !== edit_expected) {
-            throw new Error(`edit ${index + 1} expected ${edit_expected} replacement(s), found ${spans.length} using ${match_type} matching; edit not applied`);
-        }
-
-        for (const [start, end] of spans) {
-            replacements.push({
-                edit_index: index + 1,
-                start,
-                end,
-                old_text: content.substring(start, end),
-                new_text: edit_new,
-                match_type
-            });
-        }
-    }
-
-    replacements.sort((a, b) => a.start - b.start);
-    for (let i = 0; i < replacements.length - 1; i++) {
-        const previous = replacements[i];
-        const current = replacements[i + 1];
-        if (current.start < previous.end) {
-            throw new Error(`edits overlap in the original file; edit not applied (edit ${previous.edit_index} overlaps edit ${current.edit_index})`);
-        }
-    }
-
-    const pieces: string[] = [];
-    let cursor = 0;
-    for (const replacement of replacements) {
-        pieces.push(content.substring(cursor, replacement.start));
-        pieces.push(replacement.new_text);
-        cursor = replacement.end;
-    }
-    pieces.push(content.substring(cursor));
-    let updated = pieces.join("");
-    const [purifiedUpdated, purifiedCount] = purify_content_for_path(filePath, updated);
-    updated = purifiedUpdated;
-
-    fs.writeFileSync(target, updated, 'utf8');
-
-    const old_chars = replacements.reduce((sum, r) => sum + r.old_text.length, 0);
-    const new_chars = replacements.reduce((sum, r) => sum + r.new_text.length, 0);
-    const delta = updated.length - content.length;
-    const stats = text_stats(updated);
-    const normalized_count = replacements.filter(r => r.match_type === "whitespace-normalized").length;
-
-    const normalized_note = normalized_count ? `; used whitespace-normalized matching for ${normalized_count} replacement(s)` : "";
-    const purified_note = purifiedCount ? `; purified ${purifiedCount} escaped quote(s) in HTML markup` : "";
-
-    return `edits succeeded for ${filePath}; applied ${edits.length} edit operation(s), replaced ${old_chars} characters with ${new_chars} characters across ${replacements.length} replacement(s); net change ${delta >= 0 ? '+' : ''}${delta} characters${normalized_note}${purified_note}; file now contains ${stats.characters} characters, ${stats.words} words, and ${stats.lines} lines`;
-}
-
-function tool_cmd(command: string, timeout_seconds: number = 30): string {
-    const lowered_command = command.toLowerCase().trim();
-    const blocked_python_patterns = [
-        "python -c",
-        "python3 -c",
-        "py -c",
-    ];
-    if (blocked_python_patterns.some(pattern => lowered_command.includes(pattern))) {
-        return "ERROR: Python one-liners are blocked in cmd. Use the read tool for file inspection, write/edits for file changes, and cmd only for ordinary project commands such as tests, builds, installs, or running existing scripts.";
-    }
-
-    try {
-        const completed = spawnSync(command, {
-            cwd: ROOT,
-            shell: true,
-            encoding: 'utf8',
-            timeout: timeout_seconds * 1000
-        });
-        return JSON.stringify({
-            returncode: completed.status ?? -1,
-            stdout: (completed.stdout || "").slice(-12000),
-            stderr: (completed.stderr || "").slice(-12000),
-        });
-    } catch (e: any) {
-        return JSON.stringify({
-            returncode: -1,
-            stdout: "",
-            stderr: e.message || String(e)
-        });
-    }
-}
-
-const TOOL_HANDLERS: Record<string, Function> = {
-    "read": tool_read,
-    "write": tool_write,
-    "edits": tool_edits,
-    "cmd": tool_cmd,
-};
-
-function execute_tool(name: string, argumentsObj: any): string {
-    if (!(name in TOOL_HANDLERS)) {
-        return `ERROR: unknown tool ${name}`;
-    }
-    try {
-        const cleanedArgs: any = {};
-        const allowedParams = name === "read" ? ["path"] :
-                            name === "write" ? ["path", "content"] :
-                            name === "edits" ? ["path", "edits"] :
-                            name === "cmd" ? ["command", "timeout_seconds"] : [];
-        for (const k of allowedParams) {
-            if (k in argumentsObj) {
-                cleanedArgs[k] = argumentsObj[k];
-            }
-        }
-        return TOOL_HANDLERS[name](cleanedArgs.path || cleanedArgs.command, cleanedArgs.content || cleanedArgs.edits || cleanedArgs.timeout_seconds);
-    } catch (exc: any) {
-        return `ERROR: ${exc.name || 'Error'}: ${exc.message || exc}`;
-    }
-}
 
 function load_system_prompt(): string {
     return fs.readFileSync(PROMPT_PATH, 'utf8');
@@ -702,17 +254,6 @@ function normalize_model_response(response: any): any {
         return JSON.parse(response);
     }
     throw new Error(`unexpected model response type: ${typeof response}`);
-}
-
-function build_function_response_payload(name: string, argumentsObj: any, result: string): any {
-    const payload: any = { result };
-    if (!result.startsWith("ERROR:") && should_validate_contract(name, argumentsObj)) {
-        const validation = validate_index_html_contract(argumentsObj.path);
-        payload["contract_validation"] = validation;
-        payload["result"] = `${payload["result"]}\n${validation}`;
-    }
-
-    return payload;
 }
 
 function cleanSchema(value: any): any {
@@ -1032,6 +573,8 @@ class JsonFallbackAgentSession {
 }
 
 function create_agent_session(model: string, skills: string[] | null = null): any {
+    clear_agent_workspace();
+    print_detail("workspace cleanup", `cleared ${ROOT}`, Color.DIM);
     if (model.toLowerCase().includes("gemini")) {
         return new GeminiAgentSession(model, skills);
     }
@@ -1052,7 +595,14 @@ function format_duration(ms: number): string {
 async function run_session_with_timing(session: any, task: string, max_turns: number): Promise<string> {
     const started_at = now_ms();
     try {
-        return await session.run(task, max_turns);
+        const result = await session.run(task, max_turns);
+        const archivePath = archive_agent_workspace();
+        if (archivePath) {
+            print_detail("archived workspace", archivePath, Color.GREEN);
+        } else {
+            print_detail("archived workspace", "skipped; workspace is empty", Color.DIM);
+        }
+        return result;
     } finally {
         print_detail("run time", format_duration(now_ms() - started_at), Color.DIM);
     }

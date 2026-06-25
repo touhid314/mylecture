@@ -32,6 +32,7 @@ export function resolve_prompt_path(pathText: string, workspaceDir: string = "."
     const candidates = [
         path.resolve(workspace, normalized),
         path.resolve(repoRoot, normalized),
+        path.resolve(repoRoot, "workspace", normalized),
         path.resolve(process.cwd(), normalized),
         path.resolve(workspaceRoot, normalized),
         path.resolve(parentOfWorkspace, "mylecture-ide", normalized),

@@ -7,9 +7,11 @@ A TypeScript-based coding agent with four local workspace tools:
 - `edits` (atomic batch search-and-replace)
 - `cmd` (runs shell commands in the workspace)
 
-The system instructions are located in `system_prompt.md`. You can customize the agent's behavior by editing that file without changing the TS code.
+The system instructions are located in `src/prompts/system_prompt.md`. You can customize the agent's behavior by editing that file without changing the TS code.
 
-The agent's working directory is the `workspace/` folder. All file tools are restricted to that folder, and shell commands run from there.
+The agent's working directory is the `workspace/agent-workspace/` folder. All file tools are restricted to that folder, and shell commands run from there.
+
+Each new agent session starts by clearing `workspace/agent-workspace/`. After each completed agent response, the current contents of that folder are copied to `workspace/outputs/<title-slug>-<unique-id>/`. The working folder is not cleared after archiving, so the current session can keep working on those files. If no title can be extracted from `index.html` or `index1.html`, the archive folder uses only a generated unique id.
 
 ## Setup
 
@@ -41,7 +43,7 @@ Or for piped/longer inputs:
 ```
 
 ### Interactive Chat Mode
-Starts a conversational CLI session where the agent maintains context between your replies:
+Starts a conversational CLI session where the agent maintains context and files between your replies:
 ```powershell
 npm run chat
 ```

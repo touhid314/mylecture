@@ -28,7 +28,7 @@ And remember, don't fucking switch scene at every sentence. To teach the same to
 
 
 # Deliverables
-output folder: `outputs/<topic-slug>`
+Just write in the base dir, not inside any folder.
 0. `answer.md` - just the simple text only answer like a chatbot.
 1. `script.md`
 2. `index[1,2...].html` files
