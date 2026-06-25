@@ -157,7 +157,7 @@ Options:
   --tts-speed <number>    TTS speed for auto-build. Default: 1
   --tts-audio-workers <n> Concurrent audio files for auto-build. Default: 6 for Kokoro
   --max-frames <number>  Render only the first N frames for a smoke test
-  --max-short-edge <px>  Cap viewport short edge to this many pixels (even dimensions)
+  --max-short-edge <px>  Cap viewport short edge to this many pixels (even dimensions); scales fixed-layout pages to fit
   --keep-frames          Do not delete rendered PNG frames
   --skip-video           Render frames and audio only; do not mux final MP4
   --color-range <tv|pc>  Encoded video color range. Use pc for full-range browser colors. Default: tv
@@ -488,8 +488,24 @@ async function getTimelineFromPage(page) {
   });
 }
 
+// Fixed-pixel lecture HTML is authored for metadata viewport sizes. When preview
+// mode shrinks the capture viewport, scale the page so the full frame fits.
+async function pageHasOwnViewportScaling(page) {
+  return await page.evaluate(() => typeof window.scaleStage === 'function');
+}
+
+async function applyContentZoom(page, contentScale) {
+  if (!Number.isFinite(contentScale) || contentScale >= 1) return;
+  if (await pageHasOwnViewportScaling(page)) return;
+
+  await page.evaluate((scale) => {
+    document.documentElement.style.zoom = String(scale);
+  }, contentScale);
+  console.log(`Applied content zoom ${contentScale.toFixed(4)} for downscaled capture`);
+}
+
 // Prepare a Playwright page with export-mode timing and animation suppression.
-async function preparePage(browser, url, width, height) {
+async function preparePage(browser, url, width, height, contentScale = 1) {
   const page = await browser.newPage({
     viewport: { width, height },
     deviceScaleFactor: 1
@@ -512,6 +528,7 @@ async function preparePage(browser, url, width, height) {
     `
   });
   await page.waitForFunction(() => typeof window.renderAt === 'function' && Number.isFinite(window.__VIDEO_DURATION__));
+  await applyContentZoom(page, contentScale);
   return page;
 }
 
@@ -541,8 +558,9 @@ async function renderSingleFrame(page, framesDir, frame, fps, options, totalFram
 // Render frames in parallel across multiple Playwright pages.
 async function renderFrames(browser, url, framesDir, frameCount, fps, args) {
   const workerCount = Math.min(args.workers, frameCount);
+  const contentScale = args.contentScale ?? 1;
   const pages = await Promise.all(
-    Array.from({ length: workerCount }, () => preparePage(browser, url, args.width, args.height))
+    Array.from({ length: workerCount }, () => preparePage(browser, url, args.width, args.height, contentScale))
   );
 
   let nextFrame = 0;
@@ -647,6 +665,9 @@ async function main() {
   const timelinePage = await preparePage(browser, url, args.width, args.height);
 
   const detectedViewport = await detectPageViewport(timelinePage);
+  const designViewport = detectedViewport
+    ? { width: detectedViewport.width, height: detectedViewport.height }
+    : { width: args.width, height: args.height };
   if (detectedViewport) {
     console.log(`Auto-detected viewport from metadata: ${detectedViewport.width}x${detectedViewport.height} (originally: ${args.width}x${args.height})`);
     args.width = detectedViewport.width;
@@ -663,6 +684,10 @@ async function main() {
       console.log(`Capped viewport to short edge ${args.maxShortEdge}: ${args.width}x${args.height}`);
     }
   }
+
+  args.contentScale = detectedViewport && args.width < designViewport.width
+    ? args.width / designViewport.width
+    : 1;
 
   const timeline = await getTimelineFromPage(timelinePage);
   await timelinePage.close();
