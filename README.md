@@ -129,6 +129,12 @@ npm run render:video -- --html tests/fixtures/input-contract-test/index.html --o
 
 ---
 
+## Remote Render Worker
+
+For offloading renders from the website, run the HTTP worker documented in [RENDER_WORKER.md](RENDER_WORKER.md). In production—or when `RENDER_REQUIRE_AUTH=1`—you must set `RENDER_WORKER_TOKEN`; otherwise `/render` and `/jobs` return `503`. `/health` stays open for probes.
+
+---
+
 ## Benchmarks & Testing
 
 Verify renderer speeds and hardware capability with the built-in benchmarks:

@@ -16,7 +16,8 @@ The server listens on `PORT` (default `8787`).
 | Variable | Default | Description |
 | --- | --- | --- |
 | `PORT` | `8787` | HTTP listen port |
-| `RENDER_WORKER_TOKEN` | _(unset)_ | When set, `/render` and `/jobs` require `Authorization: Bearer <token>` |
+| `RENDER_WORKER_TOKEN` | _(unset)_ | Required when `NODE_ENV=production` or `RENDER_REQUIRE_AUTH=1`; when set, `/render` and `/jobs` require `Authorization: Bearer <token>`. If required but missing, those endpoints return `503`. |
+| `RENDER_REQUIRE_AUTH` | _(unset)_ | Set to `1` to require `RENDER_WORKER_TOKEN` even outside production (useful for staging) |
 | `KOKORO_DEVICE` | `cpu` | Default Kokoro device when the request omits `kokoroDevice` |
 | `KOKORO_CHUNK_WORKERS` | `1` | Default per-clip Kokoro chunk workers when the request omits `chunkWorkers` |
 | `RENDER_WORKER_MAX_BODY_BYTES` | `5242880` (5 MB) | Maximum JSON request body size |
@@ -54,7 +55,7 @@ Returns `200` with JSON `{ "ok": true }`. Does not require models or ffmpeg.
 **Headers**
 
 - `Content-Type: application/json`
-- `Authorization: Bearer <token>` when `RENDER_WORKER_TOKEN` is set
+- `Authorization: Bearer <token>` when `RENDER_WORKER_TOKEN` is set (required in production or when `RENDER_REQUIRE_AUTH=1`)
 
 **Request body**
 
@@ -96,7 +97,7 @@ Requires Supabase storage env vars (`SUPABASE_URL` + `SUPABASE_SERVICE_ROLE_KEY`
 **Headers**
 
 - `Content-Type: application/json`
-- `Authorization: Bearer <token>` when `RENDER_WORKER_TOKEN` is set
+- `Authorization: Bearer <token>` when `RENDER_WORKER_TOKEN` is set (required in production or when `RENDER_REQUIRE_AUTH=1`)
 
 **Request body**
 

@@ -16,6 +16,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { buildRenderMultipart } from "./utils/render-multipart.ts";
 import { isStorageConfigured } from "./utils/storage/index.ts";
+import { resolveRenderVoice } from "./voice-allowlist.ts";
 import {
   resolveJobParams,
   runJob,
@@ -86,7 +87,17 @@ const maxBodyBytes = readEnvInt(
   "RENDER_WORKER_MAX_BODY_BYTES",
   DEFAULT_MAX_BODY_BYTES,
 );
+const requireWorkerAuth =
+  process.env.NODE_ENV === "production" ||
+  process.env.RENDER_REQUIRE_AUTH === "1";
 const workerToken = process.env.RENDER_WORKER_TOKEN?.trim() || "";
+const workerAuthMisconfigured = requireWorkerAuth && !workerToken;
+
+if (workerAuthMisconfigured) {
+  console.error(
+    "RENDER_WORKER_TOKEN is required when NODE_ENV=production or RENDER_REQUIRE_AUTH=1 but is not set.",
+  );
+}
 
 function sendJson(
   res: ServerResponse,
@@ -102,6 +113,13 @@ function sendJson(
 }
 
 function checkAuth(req: IncomingMessage, res: ServerResponse): boolean {
+  if (workerAuthMisconfigured) {
+    sendJson(res, 503, {
+      error: "Render worker authentication is not configured.",
+    });
+    return false;
+  }
+
   if (!workerToken) return true;
 
   const header = req.headers.authorization?.trim() ?? "";
@@ -327,15 +345,12 @@ async function handleRender(
       return;
     }
 
-    const voice =
-      typeof body.voice === "string" && body.voice.trim()
-        ? body.voice.trim()
-        : "af_heart";
+    const voice = resolveRenderVoice(body.voice);
     const audioWorkers =
       typeof body.audioWorkers === "number" &&
       Number.isInteger(body.audioWorkers) &&
       body.audioWorkers > 0
-        ? body.audioWorkers
+        ? Math.min(body.audioWorkers, 8)
         : 1;
     const kokoroDevice =
       typeof body.kokoroDevice === "string" && body.kokoroDevice.trim()
@@ -345,7 +360,7 @@ async function handleRender(
       typeof body.chunkWorkers === "number" &&
       Number.isInteger(body.chunkWorkers) &&
       body.chunkWorkers > 0
-        ? body.chunkWorkers
+        ? Math.min(body.chunkWorkers, 16)
         : readEnvInt("KOKORO_CHUNK_WORKERS", 1);
 
     workDir = await mkdtemp(path.join(os.tmpdir(), "mylecture-render-"));

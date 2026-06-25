@@ -3,6 +3,7 @@ import { access, mkdtemp, readdir, rm } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import { resolveRenderVoice } from "./voice-allowlist.ts";
 import { getRenderStorage } from "./utils/storage/index.ts";
 
 const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
@@ -43,6 +44,15 @@ type ProcessResult = {
 };
 
 type CallbackPayload = Record<string, unknown>;
+
+const MAX_AUDIO_WORKERS = 8;
+const MAX_CHUNK_WORKERS = 16;
+const MAX_FPS = 60;
+
+function clampPositiveInt(value: number, max: number, fallback: number): number {
+  if (!Number.isInteger(value) || value <= 0) return fallback;
+  return Math.min(value, max);
+}
 
 const subprocessTimeoutMs = readEnvInt(
   "RENDER_WORKER_SUBPROCESS_TIMEOUT_MS",
@@ -265,31 +275,29 @@ export function resolveJobParams(body: JobRequestBody): JobParams {
     throw new Error('phase must be "preview" or "final"');
   }
 
-  const voice =
-    typeof body.voice === "string" && body.voice.trim()
-      ? body.voice.trim()
-      : "af_heart";
-  const audioWorkers =
-    typeof body.audioWorkers === "number" &&
-    Number.isInteger(body.audioWorkers) &&
-    body.audioWorkers > 0
-      ? body.audioWorkers
-      : 1;
+  const voice = resolveRenderVoice(body.voice);
+  const audioWorkers = clampPositiveInt(
+    typeof body.audioWorkers === "number" ? body.audioWorkers : 0,
+    MAX_AUDIO_WORKERS,
+    1,
+  );
   const kokoroDevice =
     typeof body.kokoroDevice === "string" && body.kokoroDevice.trim()
       ? body.kokoroDevice.trim()
       : process.env.KOKORO_DEVICE?.trim() || "cpu";
-  const chunkWorkers =
-    typeof body.chunkWorkers === "number" &&
-    Number.isInteger(body.chunkWorkers) &&
-    body.chunkWorkers > 0
+  const chunkWorkers = clampPositiveInt(
+    typeof body.chunkWorkers === "number"
       ? body.chunkWorkers
-      : readEnvInt("KOKORO_CHUNK_WORKERS", 1);
+      : readEnvInt("KOKORO_CHUNK_WORKERS", 1),
+    MAX_CHUNK_WORKERS,
+    readEnvInt("KOKORO_CHUNK_WORKERS", 1),
+  );
   const defaultFps = phase === "preview" ? 15 : 30;
-  const fps =
-    typeof body.fps === "number" && Number.isFinite(body.fps) && body.fps > 0
-      ? body.fps
-      : defaultFps;
+  const fps = clampPositiveInt(
+    typeof body.fps === "number" ? Math.floor(body.fps) : 0,
+    MAX_FPS,
+    defaultFps,
+  );
 
   return {
     jobId,
@@ -324,16 +332,19 @@ export function jobParamsFromQueueRow(row: {
     userId: null,
     phase,
     storageBase: row.storageBase,
-    voice: row.voice?.trim() || "af_heart",
-    audioWorkers: row.audioWorkers > 0 ? row.audioWorkers : 1,
+    voice: resolveRenderVoice(row.voice),
+    audioWorkers: clampPositiveInt(row.audioWorkers, MAX_AUDIO_WORKERS, 1),
     kokoroDevice: row.kokoroDevice.trim() || "cpu",
-    chunkWorkers: row.chunkWorkers > 0 ? row.chunkWorkers : 1,
-    fps:
-      row.fps && row.fps > 0
-        ? row.fps
-        : phase === "preview"
-          ? 15
-          : 30,
+    chunkWorkers: clampPositiveInt(
+      row.chunkWorkers,
+      MAX_CHUNK_WORKERS,
+      readEnvInt("KOKORO_CHUNK_WORKERS", 1),
+    ),
+    fps: clampPositiveInt(
+      row.fps ?? (phase === "preview" ? 15 : 30),
+      MAX_FPS,
+      phase === "preview" ? 15 : 30,
+    ),
   };
 }
 
