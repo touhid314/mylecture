@@ -11,7 +11,7 @@ The system instructions are located in `src/prompts/system_prompt.md`. You can c
 
 The agent's working directory is the `workspace/agent-workspace/` folder. All file tools are restricted to that folder, and shell commands run from there.
 
-Each new agent session starts by clearing `workspace/agent-workspace/`. After each completed agent response, the current contents of that folder are copied to `workspace/outputs/<title-slug>-<unique-id>/`. The working folder is not cleared after archiving, so the current session can keep working on those files. If no title can be extracted from `index.html` or `index1.html`, the archive folder uses only a generated unique id.
+`workspace/agent-workspace/` is cleared only by an explicit new-session reset. IDE integrations should call `reset_agent_session()` only when the user starts a new chat, or start the CLI with `--new-session` / `AGENT_NEW_SESSION=True` for that first request. Ordinary follow-up prompts must not reset the session. After each completed agent response, the current contents of `agent-workspace` are copied to `workspace/outputs/<title-slug>-<unique-id>/`; the working folder is not cleared after archiving, so the current session can keep working on those files.
 
 ## Setup
 

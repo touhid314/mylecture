@@ -4042,11 +4042,18 @@ if (agentChatStop) {
   });
 }
 if (agentNewChat) {
-  agentNewChat.addEventListener('click', () => {
+  agentNewChat.addEventListener('click', async () => {
     if (confirm('Are you sure you want to clear this conversation and start a new chat?')) {
-      if (agentBody) {
-        agentBody.innerHTML = '';
-        appendChatMessage("Hello! I am your Lecture Agent. I can make great lecture videos, interactive demonstrations, and games. What would you like to build today?", "agent");
+      try {
+        const response = await fetch('/agent-new-chat', { method: 'POST' });
+        const payload = await response.json();
+        if (!response.ok) throw new Error(payload.error || 'Failed to start new chat');
+        if (agentBody) {
+          agentBody.innerHTML = '';
+          appendChatMessage("Hello! I am your Lecture Agent. I can make great lecture videos, interactive demonstrations, and games. What would you like to build today?", "agent");
+        }
+      } catch (error) {
+        appendChatMessage('Error starting new chat: ' + error.message, 'error');
       }
     }
   });

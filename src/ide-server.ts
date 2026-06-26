@@ -317,6 +317,25 @@ function openFolder(filePath) {
   return openFolderPath(folderPath);
 }
 
+function agentWorkspaceRoot() {
+  const workspaceAgentRoot = path.resolve(rootDir, 'packages/lecture-agent/workspace/agent-workspace');
+  if (existsSync(path.resolve(rootDir, 'packages/lecture-agent/src/coding_agent.ts'))) {
+    return workspaceAgentRoot;
+  }
+  return path.resolve(rootDir, '../lecture-agent/workspace/agent-workspace');
+}
+
+function clearAgentWorkspace() {
+  const workspacePath = agentWorkspaceRoot();
+  if (workspacePath === path.parse(workspacePath).root) {
+    throw new Error(`Refusing to clear unsafe workspace path: ${workspacePath}`);
+  }
+  mkdirSync(workspacePath, { recursive: true });
+  for (const entry of readdirSync(workspacePath)) {
+    rmSync(path.join(workspacePath, entry), { recursive: true, force: true });
+  }
+}
+
 // Helpers for consistent output naming next to the selected source or resolved HTML.
 function siblingPath(filePath, name) {
   return path.join(path.dirname(resolveInputPath(filePath)), name);
@@ -940,6 +959,9 @@ async function pickHtmlFile() {
 const args = parseArgs(process.argv.slice(2));
 let activeJob = null;
 let activeAgentLog = '';
+// A server restart starts a new agent chat session. The first agent request
+// consumes this flag and runs the agent with --new-session.
+let pendingAgentNewSession = true;
 const viewerState = {
   version: 0,
   path: args.openPath,
@@ -1134,6 +1156,25 @@ const server = createServer(async (request, response) => {
     return;
   }
 
+  if (requestUrl.pathname === '/agent-new-chat') {
+    try {
+      if (request.method !== 'POST') {
+        sendJson(response, 405, { error: 'Method not allowed' });
+        return;
+      }
+      if (activeJob && activeJob.type === 'agent') {
+        activeJob.kill();
+      }
+      clearAgentWorkspace();
+      activeAgentLog = '';
+      pendingAgentNewSession = true;
+      sendJson(response, 200, { ok: true });
+    } catch (error) {
+      sendJson(response, 500, { error: error.message });
+    }
+    return;
+  }
+
   // Send the user's message plus current IDE context to the coding agent.
   if (requestUrl.pathname === '/agent-chat') {
     try {
@@ -1193,6 +1234,12 @@ const server = createServer(async (request, response) => {
             return;
           }
 
+          const useNewAgentSession = pendingAgentNewSession;
+          if (useNewAgentSession && execCmd.includes('npx')) {
+            execArgs.push('--new-session');
+          }
+          pendingAgentNewSession = false;
+
           let task = '';
           if (currentFile) {
             const relPath = path.relative(rootDir, resolveInputPath(currentFile)).replaceAll(path.sep, '/');
@@ -1210,7 +1257,8 @@ const server = createServer(async (request, response) => {
             NO_COLOR: '1',
             DOTENVX_LOG_LEVEL: 'error',
             DOTENV_LOG_LEVEL: 'error',
-            DOTENV_CONFIG_QUIET: 'true'
+            DOTENV_CONFIG_QUIET: 'true',
+            ...(useNewAgentSession ? { AGENT_NEW_SESSION: 'True' } : {})
           };
 
           console.log(`Starting agent process (task sent via stdin): ${execCmd} ${execArgs.map(a => `"${a}"`).join(' ')}`);

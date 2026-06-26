@@ -7,6 +7,7 @@ import dotenv from 'dotenv';
 import { GoogleGenAI } from '@google/genai';
 import OpenAI from 'openai';
 
+import { log_llm_request } from './llm_prompt_logger.js';
 import { Logger } from './logger.js';
 
 const __filename = fileURLToPath(import.meta.url);
@@ -746,6 +747,7 @@ export class LLM_Model {
                 }
 
                 this.logger.debug("Sending request to OpenAI Responses API...");
+                log_llm_request("llm-model-openai-responses", response_kwargs);
                 const response = await this._client.responses.create(response_kwargs);
                 _logTokenUsage(this.logger, response, 'openai');
                 response_content = response.output_text || JSON.stringify(response);
@@ -786,6 +788,7 @@ export class LLM_Model {
                 }
 
                 this.logger.debug("Sending request to OpenAI Chat Completions API...");
+                log_llm_request("llm-model-openai-chat", request_params);
                 const response = await this._client.chat.completions.create(request_params);
                 _logTokenUsage(this.logger, response, 'openai');
                 response_content = response.choices[0].message.content || "";
@@ -910,11 +913,13 @@ export class LLM_Model {
             }
 
             this.logger.debug("Sending request to Google Gemini API (Client models.generate_content)...");
-            const response = await this._client.models.generateContent({
+            const request = {
                 model: this.model_name,
                 contents: contents,
                 config: generation_config
-            });
+            };
+            log_llm_request("llm-model-google", request);
+            const response = await this._client.models.generateContent(request);
             _logTokenUsage(this.logger, response, 'google');
 
 

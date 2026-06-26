@@ -82,11 +82,22 @@ export const TOOLS: any[] = [
             additionalProperties: false,
         },
     },
+    {
+        type: "function",
+        name: "prepare_user_response",
+        description: "Signal that all work is complete and the runtime must switch to sanitized final-response mode. Use this as the only way to finish a task; do not include any file contents or implementation details.",
+        parameters: {
+            type: "object",
+            properties: {},
+            required: [],
+            additionalProperties: false,
+        },
+    },
 ];
 
 export const TOOL_JSON_SCHEMA = {
     note: "brief step summary for the CLI; do not include hidden chain-of-thought",
-    tool: "read | write | edits | cmd",
+    tool: "read | write | edits | cmd | prepare_user_response",
     arguments: {
         path: "workspace-relative path for read/write/edits",
         content: "complete file content for write",

@@ -11,3 +11,4 @@ build/
 *.egg-info/
 workspace/outputs/
 draft.txt
+.log/

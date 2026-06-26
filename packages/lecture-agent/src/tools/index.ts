@@ -38,6 +38,9 @@ export function execute_tool(name: string, argumentsObj: any): string {
         if (name === "cmd") {
             return tool_cmd(argumentsObj.command, argumentsObj.timeout_seconds);
         }
+        if (name === "prepare_user_response") {
+            return "pre-user-response signal accepted";
+        }
         return `ERROR: unknown tool ${name}`;
     } catch (exc: any) {
         return `ERROR: ${exc.name || 'Error'}: ${exc.message || exc}`;
