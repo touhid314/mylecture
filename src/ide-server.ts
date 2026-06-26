@@ -8,7 +8,7 @@
  * talks to the coding agent, and publishes rendered lecture folders to
  * the website package. This server is intentionally local-only on 127.0.0.1.
  */
-import { createReadStream, existsSync, mkdirSync, readdirSync, readFileSync, rmSync, statSync, unlinkSync, writeFileSync } from 'node:fs';
+import { createReadStream, existsSync, mkdirSync, readdirSync, readFileSync, rmSync, statSync, unlinkSync, writeFileSync, watch } from 'node:fs';
 import { createServer } from 'node:http';
 import { spawn } from 'node:child_process';
 import path from 'node:path';
@@ -333,6 +333,89 @@ function clearAgentWorkspace() {
   mkdirSync(workspacePath, { recursive: true });
   for (const entry of readdirSync(workspacePath)) {
     rmSync(path.join(workspacePath, entry), { recursive: true, force: true });
+  }
+}
+
+function activeFolderFilePath() {
+  const workspaceAgentRoot = path.resolve(rootDir, 'packages/lecture-agent/workspace');
+  if (existsSync(path.resolve(rootDir, 'packages/lecture-agent/src/coding_agent.ts'))) {
+    return path.join(workspaceAgentRoot, '.active-output-folder');
+  }
+  return path.resolve(rootDir, '../lecture-agent/workspace/.active-output-folder');
+}
+
+function getActiveOutputFolder() {
+  const filePath = activeFolderFilePath();
+  if (existsSync(filePath)) {
+    try {
+      return readFileSync(filePath, 'utf8').trim();
+    } catch {
+      return null;
+    }
+  }
+  return null;
+}
+
+function startWorkspaceSyncWatcher() {
+  const agentWorkspace = agentWorkspaceRoot();
+  if (!existsSync(agentWorkspace)) {
+    try {
+      mkdirSync(agentWorkspace, { recursive: true });
+    } catch {}
+  }
+
+  const syncQueue = new Map();
+
+  console.log(`[Watcher] Starting file watcher on: ${agentWorkspace}`);
+
+  try {
+    watch(agentWorkspace, { recursive: true }, (eventType, filename) => {
+      if (!filename) return;
+
+      const baseName = path.basename(filename);
+      if (baseName.startsWith('.') || baseName.startsWith('~') || baseName.endsWith('.tmp') || baseName.endsWith('.swp')) {
+        return;
+      }
+
+      if (syncQueue.has(filename)) {
+        clearTimeout(syncQueue.get(filename));
+      }
+
+      const timer = setTimeout(() => {
+        syncQueue.delete(filename);
+
+        const activeOut = getActiveOutputFolder();
+        if (!activeOut) return;
+
+        const srcPath = path.join(agentWorkspace, filename);
+        const destPath = path.join(activeOut, filename);
+
+        try {
+          if (existsSync(srcPath)) {
+            const stat = statSync(srcPath);
+            if (stat.isFile()) {
+              mkdirSync(path.dirname(destPath), { recursive: true });
+              // Copy file
+              const fileContent = readFileSync(srcPath);
+              writeFileSync(destPath, fileContent);
+              console.log(`[Sync] Immediate synced file: ${filename} -> ${destPath}`);
+            }
+          } else {
+            // File or directory deleted
+            if (existsSync(destPath)) {
+              rmSync(destPath, { recursive: true, force: true });
+              console.log(`[Sync] Immediate deleted: ${filename} from ${destPath}`);
+            }
+          }
+        } catch (err) {
+          // Ignore locks or temporary copy errors
+        }
+      }, 150);
+
+      syncQueue.set(filename, timer);
+    });
+  } catch (watchError) {
+    console.error(`[Watcher] Failed to initialize file watcher: ${watchError.message}`);
   }
 }
 
@@ -1537,6 +1620,7 @@ server.on('error', error => {
 
 // Bind only to localhost; this IDE server is not intended for network exposure.
 server.listen(args.port, '127.0.0.1', () => {
+  startWorkspaceSyncWatcher();
   const encodedFile = args.openPath ? `?file=${encodeURIComponent(args.openPath)}` : '';
   const url = `http://127.0.0.1:${args.port}/${encodedFile}`;
   console.log(`IDE server running at ${url}`);

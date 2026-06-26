@@ -9,7 +9,7 @@ const __dirname = path.dirname(__filename);
 export const BASE_DIR = path.resolve(__dirname, '..', '..', '..');
 export const WORKSPACE_DIR = path.join(BASE_DIR, 'workspace');
 export const ROOT = path.resolve(WORKSPACE_DIR, 'agent-workspace');
-export const OUTPUTS_DIR = path.resolve(BASE_DIR, 'outputs');
+export const OUTPUTS_DIR = path.join(WORKSPACE_DIR, 'outputs');
 
 export function ensure_workspace_dirs(): void {
     fs.mkdirSync(ROOT, { recursive: true });
@@ -96,6 +96,11 @@ export function get_active_output_folder(): string {
             activeOutputFolder = path.resolve(OUTPUTS_DIR, uniqueId);
         }
         fs.mkdirSync(activeOutputFolder, { recursive: true });
+
+        // Save pointer to the active output folder
+        try {
+            fs.writeFileSync(path.join(WORKSPACE_DIR, '.active-output-folder'), activeOutputFolder, 'utf8');
+        } catch {}
     } else if (!activeOutputFolderHasSlug) {
         const slug = archive_title_slug();
         if (slug) {
@@ -107,6 +112,11 @@ export function get_active_output_folder(): string {
                     fs.renameSync(activeOutputFolder, newPath);
                     activeOutputFolder = newPath;
                     activeOutputFolderHasSlug = true;
+
+                    // Update pointer with renamed path
+                    try {
+                        fs.writeFileSync(path.join(WORKSPACE_DIR, '.active-output-folder'), activeOutputFolder, 'utf8');
+                    } catch {}
                 } catch (err) {
                     // Ignore rename errors if something is locking the folder
                 }
@@ -119,6 +129,12 @@ export function get_active_output_folder(): string {
 export function reset_active_output_folder(): void {
     activeOutputFolder = null;
     activeOutputFolderHasSlug = false;
+    try {
+        const ptrFile = path.join(WORKSPACE_DIR, '.active-output-folder');
+        if (fs.existsSync(ptrFile)) {
+            fs.unlinkSync(ptrFile);
+        }
+    } catch {}
 }
 
 function sync_dir_recursive(srcDir: string, destDir: string): void {

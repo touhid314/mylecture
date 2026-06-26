@@ -25,7 +25,7 @@ And remember, don't fucking switch scene at every sentence. To teach the same to
 - Write the htmls, following this contract:
 `.agents\mylecture-contracts\html-input-contract.md`
 
-
+- Name the audio files inside the html as s1_1, s1_2, s2_1,s2_3. s1_1 means first audio segment of first scene. this way, the names have no possibility of collisions with other scenes audio file.
 
 # Deliverables
 Just write in the base dir, not inside any folder.

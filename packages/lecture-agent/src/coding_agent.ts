@@ -719,6 +719,7 @@ export function reset_agent_session(): void {
     activeAgentSession = null;
     start_new_llm_log_session();
     clear_agent_workspace();
+    reset_active_output_folder();
     print_detail("workspace cleanup", `cleared ${ROOT}`, Color.DIM);
 }
 
@@ -758,7 +759,6 @@ function archive_workspace_best_effort(reason: string): string | null {
 async function run_session_with_timing(session: any, task: string, max_turns: number): Promise<string> {
     const started_at = now_ms();
     archiveAttemptedForCurrentRun = false;
-    reset_active_output_folder();
     try {
         const result = await session.run(task, max_turns);
         archive_workspace_best_effort("completed");

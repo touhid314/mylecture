@@ -13,3 +13,4 @@ workspace/outputs/
 draft.txt
 .log/
 workspace/agent-workspace/
+workspace/.active-output-folder
