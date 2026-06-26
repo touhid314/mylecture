@@ -231,11 +231,11 @@ function listFolderFiles(filePath) {
 
 // Default file browser location prefers the coding agent output folder when present.
 function defaultBrowserFolder() {
-  const workspaceTargetPath = path.join(rootDir, 'packages/lecture-agent/workspace/outputs');
+  const workspaceTargetPath = path.join(rootDir, 'packages/lecture-agent/workspace/agent-workspace');
   if (existsSync(workspaceTargetPath) && statSync(workspaceTargetPath).isDirectory()) {
     return workspaceTargetPath;
   }
-  const siblingTargetPath = 'C:\\Users\\touhi\\OneDrive\\Desktop\\mylecture\\lecture-agent\\workspace\\outputs';
+  const siblingTargetPath = 'C:\\Users\\touhi\\OneDrive\\Desktop\\mylecture\\lecture-agent\\workspace\\agent-workspace';
   if (existsSync(siblingTargetPath) && statSync(siblingTargetPath).isDirectory()) {
     return siblingTargetPath;
   }
@@ -246,7 +246,7 @@ function defaultBrowserFolder() {
 function resolveDirectoryPath(inputPath = '') {
   const resolvedPath = inputPath ? resolveInputPath(inputPath) : defaultBrowserFolder();
   if (!existsSync(resolvedPath) || !statSync(resolvedPath).isDirectory()) {
-    throw new Error(`Folder does not exist: ${inputPath || 'outputs'}`);
+    throw new Error(`Folder does not exist: ${inputPath || 'agent-workspace'}`);
   }
   return resolvedPath;
 }

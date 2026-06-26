@@ -65,20 +65,44 @@ export const TOOLS: any[] = [
     },
     {
         type: "function",
-        name: "cmd",
-        description: "Run a shell command in the workspace.",
+        name: "mkdir",
+        description: "Create a new directory in the workspace (recursive by default).",
         parameters: {
             type: "object",
             properties: {
-                command: { type: "string", description: "Command to run." },
-                timeout_seconds: {
-                    type: "integer",
-                    description: "Timeout in seconds. Defaults to 30.",
-                    minimum: 1,
-                    maximum: 300,
-                },
+                path: { type: "string", description: "Workspace-relative directory path." }
             },
-            required: ["command"],
+            required: ["path"],
+            additionalProperties: false,
+        },
+    },
+    {
+        type: "function",
+        name: "list_dir",
+        description: "List the contents of a directory in the workspace, indicating files and folders.",
+        parameters: {
+            type: "object",
+            properties: {
+                path: { type: "string", description: "Workspace-relative directory path. Defaults to root if omitted." }
+            },
+            required: [],
+            additionalProperties: false,
+        },
+    },
+    {
+        type: "function",
+        name: "del",
+        description: "Delete files or directories in the workspace.",
+        parameters: {
+            type: "object",
+            properties: {
+                paths: {
+                    type: "array",
+                    description: "List of workspace-relative files or directories to delete.",
+                    items: { type: "string" }
+                }
+            },
+            required: ["paths"],
             additionalProperties: false,
         },
     },
@@ -97,9 +121,10 @@ export const TOOLS: any[] = [
 
 export const TOOL_JSON_SCHEMA = {
     note: "brief step summary for the CLI; do not include hidden chain-of-thought",
-    tool: "read | write | edits | cmd | prepare_user_response",
+    tool: "read | write | edits | mkdir | list_dir | del | prepare_user_response",
     arguments: {
-        path: "workspace-relative path for read/write/edits",
+        path: "workspace-relative path for read/write/edits/mkdir/list_dir",
+        paths: "array of workspace-relative paths to delete for del",
         content: "complete file content for write",
         edits: [
             {
@@ -108,7 +133,5 @@ export const TOOL_JSON_SCHEMA = {
                 expected_replacements: "optional integer for this edit",
             }
         ],
-        command: "shell command for cmd",
-        timeout_seconds: "optional integer for cmd",
     },
 };

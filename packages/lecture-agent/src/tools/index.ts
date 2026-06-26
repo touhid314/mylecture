@@ -3,6 +3,9 @@ export { tool_read } from './read.js';
 export { tool_write } from './write.js';
 export { tool_edits } from './edits.js';
 export { tool_cmd } from './cmd.js';
+export { tool_mkdir } from './mkdir.js';
+export { tool_list_dir } from './list_dir.js';
+export { tool_del } from './del.js';
 export { line_count } from './utils/text_stats.js';
 export {
     BASE_DIR,
@@ -18,6 +21,9 @@ import { tool_read } from './read.js';
 import { tool_write } from './write.js';
 import { tool_edits } from './edits.js';
 import { tool_cmd } from './cmd.js';
+import { tool_mkdir } from './mkdir.js';
+import { tool_list_dir } from './list_dir.js';
+import { tool_del } from './del.js';
 import { should_validate_contract, validate_index_html_contract } from './utils/html_contract.js';
 
 export function execute_tool(name: string, argumentsObj: any): string {
@@ -35,8 +41,14 @@ export function execute_tool(name: string, argumentsObj: any): string {
         if (name === "edits") {
             return tool_edits(argumentsObj.path, argumentsObj.edits);
         }
-        if (name === "cmd") {
-            return tool_cmd(argumentsObj.command, argumentsObj.timeout_seconds);
+        if (name === "mkdir") {
+            return tool_mkdir(argumentsObj.path);
+        }
+        if (name === "list_dir") {
+            return tool_list_dir(argumentsObj.path);
+        }
+        if (name === "del") {
+            return tool_del(argumentsObj.paths);
         }
         if (name === "prepare_user_response") {
             return "pre-user-response signal accepted";
