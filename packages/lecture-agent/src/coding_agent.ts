@@ -50,7 +50,7 @@ const SKILL_DIRS = [
 ];
 
 const DEFAULT_MODEL = "gemini-3.5-flash";
-const USE_COLOR = process.stderr.isTTY && !process.env.NO_COLOR;
+const USE_COLOR = !process.env.NO_COLOR;
 
 class Color {
     static RESET = USE_COLOR ? "\x1b[0m" : "";
@@ -253,7 +253,7 @@ function compact_tool_result(result: any): any {
 }
 
 function print_step(step: number, message: string, color: string = Color.CYAN): void {
-    process.stderr.write(`${color}${Color.BOLD}[step {step}]${Color.RESET} ${message}\n`.replace("{step}", String(step)));
+    process.stderr.write(`\n${color}${Color.BOLD}[step ${step}]${Color.RESET} ${Color.BOLD}${message}${Color.RESET}\n`);
 }
 
 function print_detail(label: string, value: any, color: string = Color.DIM, limit: number = 1200): void {

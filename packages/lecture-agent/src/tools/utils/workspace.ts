@@ -9,7 +9,7 @@ const __dirname = path.dirname(__filename);
 export const BASE_DIR = path.resolve(__dirname, '..', '..', '..');
 export const WORKSPACE_DIR = path.join(BASE_DIR, 'workspace');
 export const ROOT = path.resolve(WORKSPACE_DIR, 'agent-workspace');
-export const OUTPUTS_DIR = path.resolve(WORKSPACE_DIR, 'outputs');
+export const OUTPUTS_DIR = path.resolve(BASE_DIR, 'outputs');
 
 export function ensure_workspace_dirs(): void {
     fs.mkdirSync(ROOT, { recursive: true });

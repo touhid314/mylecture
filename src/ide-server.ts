@@ -1254,7 +1254,6 @@ const server = createServer(async (request, response) => {
           const env = {
             ...process.env,
             AGENT_WORKSPACE: activeAgentWorkspace,
-            NO_COLOR: '1',
             DOTENVX_LOG_LEVEL: 'error',
             DOTENV_LOG_LEVEL: 'error',
             DOTENV_CONFIG_QUIET: 'true',

@@ -15,7 +15,7 @@ Prompt files:
 
 The agent's working directory is the `workspace/agent-workspace/` folder. All file tools are restricted to that folder, and shell commands run from there.
 
-`workspace/agent-workspace/` is cleared only by an explicit new-session reset. Ordinary follow-up prompts must not reset the session. After each completed agent response, the current contents of `agent-workspace` are copied to `workspace/outputs/<title-slug>-<unique-id>/`; the working folder is not cleared after archiving, so the current session can keep working on those files.
+`workspace/agent-workspace/` is cleared only by an explicit new-session reset. Ordinary follow-up prompts must not reset the session. After each completed agent response, the current contents of `agent-workspace` are copied to `outputs/<title-slug>-<unique-id>/`; the working folder is not cleared after archiving, so the current session can keep working on those files.
 
 In the IDE server, clicking **New Chat** calls `/agent-new-chat`, clears `agent-workspace`, and marks the next agent process as a new session. Restarting the IDE server also marks the first agent message as a new session.
 
@@ -119,6 +119,6 @@ npm run agent -- --max-turns 150 "Check and refine index1.html"
 * **JSON Fallback:** Non-Gemini models (like OpenAI) fall back to the schema parsing implemented in [llm_model.ts](file:///c:/Users/touhi/OneDrive/Desktop/mylecture/mylecture-ide/packages/lecture-agent/src/llm_model.ts).
 * **Final Response Gate:** The working agent must call `prepare_user_response`. The runtime then creates the final reply using only `src/prompts/pre-user-response-prompt.md` and stripped raw user queries.
 * **Workspace Isolation:** Tools can only access `workspace/agent-workspace/`; shared `.agents` prompt resources may still be inlined by the prompt builder.
-* **Archiving:** Successful responses and best-effort interruption paths copy `agent-workspace` into `workspace/outputs/`.
+* **Archiving:** Successful responses and best-effort interruption paths copy `agent-workspace` into `outputs/`.
 * **LLM Request Logs:** With `LOG_FULL_LLM_PROMPT=True`, each LLM API request is logged sequentially under `.log/session-*`.
 * **Flushed Exit & Stdin:** Stdin is forcefully closed via `process.stdin.destroy()` immediately after parsing, and the process exits cleanly after a `100ms` stream-flushing delay to avoid libuv event loop assertions on Windows.
