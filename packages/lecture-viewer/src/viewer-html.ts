@@ -4175,6 +4175,35 @@ function addAgentAttachments(files) {
   }
 }
 
+function extensionForImageMimeType(mimeType) {
+  const type = String(mimeType || '').toLowerCase();
+  if (type === 'image/jpeg') return 'jpg';
+  if (type === 'image/webp') return 'webp';
+  if (type === 'image/bmp') return 'bmp';
+  return 'png';
+}
+
+function clipboardImageFiles(event) {
+  const items = Array.from(event.clipboardData?.items || []);
+  const files = [];
+  for (const item of items) {
+    if (item.kind !== 'file' || !String(item.type || '').startsWith('image/')) {
+      continue;
+    }
+    const clipboardFile = item.getAsFile();
+    if (!clipboardFile) continue;
+    const ext = extensionForImageMimeType(clipboardFile.type);
+    const name = clipboardFile.name && clipboardFile.name.includes('.')
+      ? clipboardFile.name
+      : 'pasted-image-' + Date.now() + '-' + (files.length + 1) + '.' + ext;
+    files.push(new File([clipboardFile], name, {
+      type: clipboardFile.type || 'image/png',
+      lastModified: Date.now()
+    }));
+  }
+  return files;
+}
+
 function removeAgentAttachment(index) {
   pendingAgentAttachments.splice(index, 1);
   renderAgentAttachments();
@@ -4451,6 +4480,12 @@ if (agentChatInput) {
   agentChatInput.addEventListener('input', () => {
     agentChatInput.style.height = 'auto';
     agentChatInput.style.height = Math.min(180, agentChatInput.scrollHeight) + 'px';
+  });
+  agentChatInput.addEventListener('paste', event => {
+    const imageFiles = clipboardImageFiles(event);
+    if (imageFiles.length === 0) return;
+    event.preventDefault();
+    addAgentAttachments(imageFiles);
   });
 }
 if (agentUploadButton && agentFileInput) {
