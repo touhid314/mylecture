@@ -13,7 +13,7 @@ Welcome! This guide outlines the purpose, architecture, workflow, and guidelines
 * **`src/tools/`**: Files implementing the tools available to the agent:
   * [read.ts](file:///c:/Users/touhi/OneDrive/Desktop/mylecture/mylecture-ide/packages/lecture-agent/src/tools/read.ts): Read files.
   * [write.ts](file:///c:/Users/touhi/OneDrive/Desktop/mylecture/mylecture-ide/packages/lecture-agent/src/tools/write.ts): Create files.
-  * [edits.ts](file:///c:/Users/touhi/OneDrive/Desktop/mylecture/mylecture-ide/packages/lecture-agent/src/tools/edits.ts): Apply atomic batch replacements.
+  * [edits.ts](file:///c:/Users/touhi/OneDrive/Desktop/mylecture/mylecture-ide/packages/lecture-agent/src/tools/edits.ts): Apply line-based diff patches.
   * [mkdir.ts](file:///c:/Users/touhi/OneDrive/Desktop/mylecture/mylecture-ide/packages/lecture-agent/src/tools/mkdir.ts): Create directories.
   * [list_dir.ts](file:///c:/Users/touhi/OneDrive/Desktop/mylecture/mylecture-ide/packages/lecture-agent/src/tools/list_dir.ts): List directories.
   * [del.ts](file:///c:/Users/touhi/OneDrive/Desktop/mylecture/mylecture-ide/packages/lecture-agent/src/tools/del.ts): Delete files or directories.
@@ -43,6 +43,7 @@ Every task follows a strict sequence:
 
 * **Do not use `write` to update files:** Use `write` only to create a file initially. For all subsequent updates, use the `edits` tool.
 * **Batch edits:** Batch all known changes to a file into a single `edits` call using `arguments.edits` with multiple replacement items.
+* **Read tool line numbers:** The `read` tool output prepends line numbers (e.g. `12: content`) for easy reference. These line numbers are NOT present in the actual file on disk. Do not write or edit files with these line numbers included.
 * **No `cmd` usage:** The `cmd` tool is deliberately removed from the agent's schemas. Use `read` to inspect files and folder-specific tools (`list_dir`, `mkdir`, `del`) for directory and file manipulation.
 * **Workspace Resolution:** All paths provided to file/directory tools must be workspace-relative. They are resolved using `resolve_workspace_path` to prevent escaping the workspace root.
 

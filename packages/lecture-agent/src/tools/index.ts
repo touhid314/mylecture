@@ -15,6 +15,8 @@ export {
     archive_agent_workspace,
     clear_agent_workspace,
     resolve_workspace_path,
+    reset_active_output_folder,
+    sync_workspace_to_outputs,
 } from './utils/workspace.js';
 
 import { tool_read } from './read.js';
@@ -25,6 +27,7 @@ import { tool_mkdir } from './mkdir.js';
 import { tool_list_dir } from './list_dir.js';
 import { tool_del } from './del.js';
 import { should_validate_contract, validate_index_html_contract } from './utils/html_contract.js';
+import { sync_workspace_to_outputs } from './utils/workspace.js';
 
 export function execute_tool(name: string, argumentsObj: any): string {
     if (!argumentsObj || typeof argumentsObj !== 'object') {
@@ -32,28 +35,30 @@ export function execute_tool(name: string, argumentsObj: any): string {
     }
 
     try {
+        let result: string;
         if (name === "read") {
-            return tool_read(argumentsObj.path);
+            result = tool_read(argumentsObj.path);
+        } else if (name === "write") {
+            result = tool_write(argumentsObj.path, argumentsObj.content);
+        } else if (name === "edits") {
+            result = tool_edits(argumentsObj.path, argumentsObj.edits);
+        } else if (name === "mkdir") {
+            result = tool_mkdir(argumentsObj.path);
+        } else if (name === "list_dir") {
+            result = tool_list_dir(argumentsObj.path);
+        } else if (name === "del") {
+            result = tool_del(argumentsObj.paths);
+        } else if (name === "prepare_user_response") {
+            result = "pre-user-response signal accepted";
+        } else {
+            return `ERROR: unknown tool ${name}`;
         }
-        if (name === "write") {
-            return tool_write(argumentsObj.path, argumentsObj.content);
+
+        if (["write", "edits", "mkdir", "del"].includes(name) && !result.startsWith("ERROR:")) {
+            sync_workspace_to_outputs();
         }
-        if (name === "edits") {
-            return tool_edits(argumentsObj.path, argumentsObj.edits);
-        }
-        if (name === "mkdir") {
-            return tool_mkdir(argumentsObj.path);
-        }
-        if (name === "list_dir") {
-            return tool_list_dir(argumentsObj.path);
-        }
-        if (name === "del") {
-            return tool_del(argumentsObj.paths);
-        }
-        if (name === "prepare_user_response") {
-            return "pre-user-response signal accepted";
-        }
-        return `ERROR: unknown tool ${name}`;
+
+        return result;
     } catch (exc: any) {
         return `ERROR: ${exc.name || 'Error'}: ${exc.message || exc}`;
     }

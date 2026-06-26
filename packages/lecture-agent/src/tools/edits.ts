@@ -1,162 +1,119 @@
 import fs from 'fs';
+import path from 'path';
 
 import { resolve_workspace_path } from './utils/workspace.js';
 import { purify_content_for_path } from './utils/html_contract.js';
 import { text_stats } from './utils/text_stats.js';
 
-function normalized_text_with_map(text: string): [string, number[]] {
-    const normalized_chars: string[] = [];
-    const original_indexes: number[] = [];
-    let in_whitespace = false;
-
-    for (let index = 0; index < text.length; index++) {
-        const char = text[index];
-        if (/\s/.test(char)) {
-            if (!in_whitespace) {
-                normalized_chars.push(" ");
-                original_indexes.push(index);
-                in_whitespace = true;
-            }
-            continue;
-        }
-
-        normalized_chars.push(char);
-        original_indexes.push(index);
-        in_whitespace = false;
-    }
-
-    let start = 0;
-    let end = normalized_chars.length;
-    while (start < end && normalized_chars[start] === " ") {
-        start++;
-    }
-    while (end > start && normalized_chars[end - 1] === " ") {
-        end--;
-    }
-
-    return [
-        normalized_chars.slice(start, end).join(""),
-        original_indexes.slice(start, end)
-    ];
+interface LineEdit {
+    start_line: number;
+    remove_lines: number;
+    new_text: string;
+    old_text?: string;
 }
 
-function find_text_spans(content: string, old_text: string): [[number, number][], string] {
-    const exact_spans: [number, number][] = [];
-    let search_from = 0;
-    while (true) {
-        const start = content.indexOf(old_text, search_from);
-        if (start === -1) {
-            break;
-        }
-        exact_spans.push([start, start + old_text.length]);
-        search_from = start + old_text.length;
-    }
-
-    if (exact_spans.length > 0) {
-        return [exact_spans, "exact"];
-    }
-
-    const [normalized_content, content_map] = normalized_text_with_map(content);
-    const [normalized_old] = normalized_text_with_map(old_text);
-    if (!normalized_old) {
-        return [[], "exact"];
-    }
-
-    const normalized_spans: [number, number][] = [];
-    search_from = 0;
-    while (true) {
-        const normalized_start = normalized_content.indexOf(normalized_old, search_from);
-        if (normalized_start === -1) {
-            break;
-        }
-        const normalized_end = normalized_start + normalized_old.length - 1;
-        const original_start = content_map[normalized_start];
-        const original_end = content_map[normalized_end] + 1;
-        normalized_spans.push([original_start, original_end]);
-        search_from = normalized_start + normalized_old.length;
-    }
-
-    return [normalized_spans, "whitespace-normalized"];
+function normalize_whitespace(str: string): string {
+    return str.replace(/\s+/g, ' ').trim();
 }
 
-export function tool_edits(filePath: string, edits: any[]): string {
+export function tool_edits(filePath: string, edits: LineEdit[]): string {
     const target = resolve_workspace_path(filePath);
-    let content = fs.readFileSync(target, 'utf8');
+    const content = fs.readFileSync(target, 'utf8');
 
     if (!Array.isArray(edits) || edits.length === 0) {
         throw new Error("edits must be a non-empty array");
     }
 
-    const replacements: any[] = [];
+    const hasCRLF = content.includes('\r\n');
+    const lines = content.split(/\r?\n/);
+
+    // 1. Parameter Validation
     for (let index = 0; index < edits.length; index++) {
         const edit = edits[index];
         if (!edit || typeof edit !== 'object') {
             throw new Error(`edit ${index + 1} must be an object`);
         }
 
-        const edit_old = edit.old_text;
-        const edit_new = edit.new_text;
-        const edit_expected = parseInt(edit.expected_replacements || "1", 10);
+        const { start_line, remove_lines, new_text, old_text } = edit;
 
-        if (typeof edit_old !== 'string' || typeof edit_new !== 'string') {
-            throw new Error(`edit ${index + 1} must include string old_text and new_text`);
+        if (typeof start_line !== 'number' || isNaN(start_line) || start_line < 1) {
+            throw new Error(`edit ${index + 1} must have a valid positive start_line`);
         }
-        if (edit_old === "") {
-            throw new Error(`edit ${index + 1} old_text must not be empty`);
+        if (typeof remove_lines !== 'number' || isNaN(remove_lines) || remove_lines < 0) {
+            throw new Error(`edit ${index + 1} must have a valid non-negative remove_lines`);
         }
-        if (isNaN(edit_expected) || edit_expected < 1) {
-            throw new Error(`edit ${index + 1} expected_replacements must be at least 1`);
+        if (typeof new_text !== 'string') {
+            throw new Error(`edit ${index + 1} must have a string new_text`);
         }
-
-        const [spans, match_type] = find_text_spans(content, edit_old);
-
-        if (spans.length !== edit_expected) {
-            throw new Error(`edit ${index + 1} expected ${edit_expected} replacement(s), found ${spans.length} using ${match_type} matching; edit not applied`);
+        if (old_text !== undefined && typeof old_text !== 'string') {
+            throw new Error(`edit ${index + 1} old_text must be a string if provided`);
         }
 
-        for (const [start, end] of spans) {
-            replacements.push({
-                edit_index: index + 1,
-                start,
-                end,
-                old_text: content.substring(start, end),
-                new_text: edit_new,
-                match_type
-            });
+        // Check if start_line is within boundaries
+        // Allowing start_line to be lines.length + 1 to append at the end of the file
+        if (start_line > lines.length + 1) {
+            throw new Error(`edit ${index + 1} start_line (${start_line}) exceeds file line count (${lines.length})`);
+        }
+
+        // Check if start_line + remove_lines exceeds line boundaries
+        if (start_line - 1 + remove_lines > lines.length) {
+            throw new Error(`edit ${index + 1} remove range exceeds file boundaries (start: ${start_line}, remove: ${remove_lines}, file lines: ${lines.length})`);
         }
     }
 
-    replacements.sort((a, b) => a.start - b.start);
-    for (let i = 0; i < replacements.length - 1; i++) {
-        const previous = replacements[i];
-        const current = replacements[i + 1];
-        if (current.start < previous.end) {
-            throw new Error(`edits overlap in the original file; edit not applied (edit ${previous.edit_index} overlaps edit ${current.edit_index})`);
+    // 2. Overlap & Identity Collision Checking
+    const sortedEdits = [...edits].sort((a, b) => a.start_line - b.start_line);
+    for (let i = 0; i < sortedEdits.length - 1; i++) {
+        const current = sortedEdits[i];
+        const next = sortedEdits[i + 1];
+        
+        // The end line of the current edit (1-indexed, inclusive)
+        const currentEndLine = current.start_line + current.remove_lines - 1;
+
+        if (next.start_line <= currentEndLine || current.start_line === next.start_line) {
+            throw new Error(`edits overlap or collide in the original file: edit at start_line ${next.start_line} collides with edit at start_line ${current.start_line}`);
         }
     }
 
-    const pieces: string[] = [];
-    let cursor = 0;
-    for (const replacement of replacements) {
-        pieces.push(content.substring(cursor, replacement.start));
-        pieces.push(replacement.new_text);
-        cursor = replacement.end;
+    // 3. Safety Verification (old_text checks)
+    let safetyCheckNotes = "";
+    for (let index = 0; index < edits.length; index++) {
+        const edit = edits[index];
+        if (edit.old_text !== undefined) {
+            const originalSlice = lines.slice(edit.start_line - 1, edit.start_line - 1 + edit.remove_lines).join(hasCRLF ? '\r\n' : '\n');
+            
+            if (originalSlice !== edit.old_text) {
+                // Try whitespace-normalized matching
+                if (normalize_whitespace(originalSlice) !== normalize_whitespace(edit.old_text)) {
+                    throw new Error(`edit ${index + 1} safety check failed: original text at lines ${edit.start_line}-${edit.start_line - 1 + edit.remove_lines} did not match expected old_text`);
+                }
+                safetyCheckNotes += ` (verified edit ${index + 1} using whitespace-normalized matching)`;
+            }
+        }
     }
-    pieces.push(content.substring(cursor));
-    let updated = pieces.join("");
-    const [purifiedUpdated, purifiedCount] = purify_content_for_path(filePath, updated);
-    updated = purifiedUpdated;
 
-    fs.writeFileSync(target, updated, 'utf8');
+    // 4. Apply Edits in reverse order (bottom-to-top) to maintain original index alignment
+    const reverseEdits = [...edits].sort((a, b) => b.start_line - a.start_line);
+    let totalRemovedLines = 0;
+    let totalAddedLines = 0;
 
-    const old_chars = replacements.reduce((sum, r) => sum + r.old_text.length, 0);
-    const new_chars = replacements.reduce((sum, r) => sum + r.new_text.length, 0);
-    const delta = updated.length - content.length;
-    const stats = text_stats(updated);
-    const normalized_count = replacements.filter(r => r.match_type === "whitespace-normalized").length;
+    for (const edit of reverseEdits) {
+        const replacementLines = edit.new_text === "" ? [] : edit.new_text.split(/\r?\n/);
+        lines.splice(edit.start_line - 1, edit.remove_lines, ...replacementLines);
+        
+        totalRemovedLines += edit.remove_lines;
+        totalAddedLines += replacementLines.length;
+    }
 
-    const normalized_note = normalized_count ? `; used whitespace-normalized matching for ${normalized_count} replacement(s)` : "";
+    let updatedContent = lines.join(hasCRLF ? '\r\n' : '\n');
+    const [purifiedUpdated, purifiedCount] = purify_content_for_path(filePath, updatedContent);
+    updatedContent = purifiedUpdated;
+
+    fs.writeFileSync(target, updatedContent, 'utf8');
+
+    const stats = text_stats(updatedContent);
     const purified_note = purifiedCount ? `; purified ${purifiedCount} escaped quote(s) in HTML markup` : "";
+    const lineDelta = totalAddedLines - totalRemovedLines;
 
-    return `edits succeeded for ${filePath}; applied ${edits.length} edit operation(s), replaced ${old_chars} characters with ${new_chars} characters across ${replacements.length} replacement(s); net change ${delta >= 0 ? '+' : ''}${delta} characters${normalized_note}${purified_note}; file now contains ${stats.characters} characters, ${stats.words} words, and ${stats.lines} lines`;
+    return `edits succeeded for ${filePath}; applied ${edits.length} edit operation(s), removed ${totalRemovedLines} line(s), added ${totalAddedLines} line(s) (net line change: ${lineDelta >= 0 ? '+' : ''}${lineDelta})${safetyCheckNotes}${purified_note}; file now contains ${stats.characters} characters, ${stats.words} words, and ${stats.lines} lines`;
 }

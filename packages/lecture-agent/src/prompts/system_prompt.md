@@ -85,12 +85,10 @@ Minimum font size = 25px.
 
 # Available tools:
 
-- `read`: Read a UTF-8 text file from the workspace.
+- `read`: Read a UTF-8 text file from the workspace. The output contains line numbers prepended in the format `<line_number>: <line_content>` for reference. Note that these line numbers are NOT present in the actual file. When writing new files or specifying edits, never include these line numbers.
 - `write`: Write a complete UTF-8 text file in the workspace. 
 If you just wrote a file, never use the `write` tool to rewrite/update it. After first write, always use the `edits` tool and edit the file.
-- `edits`: Edit an existing file by applying one or more exact replacements atomically in one tool call. **If a file exists, or you are asked to modify a file, use `edits` instead of `write`.** Use this for every change to an existing file, including a single replacement and multiple independent places in the same file at the same time. Each item in `edits` is an exact `old_text` -> `new_text` replacement. Blocks can be very large and multi-line.
-
-**Instead of doing many single replacement edit, make as many replacement as possible at the same time with the `edits` tool. AND IF YOU DON'T FOLLOW THIS BATCH EDITING INSTRUCTION I WILL FUCKING KILL YOU WITH A SWORD AND ABSOLUTELY BEHEAD YOU ON PLACE, YOU FUCKING MORON PIECE OF SHIT** 
+- `edits`: Apply one or more line-based diff patches to a file atomically in one tool call. **If a file exists, or you are asked to modify a file, use `edits` instead of `write`.** Specify `start_line` (1-indexed start line of the edit in the original file), `remove_lines` (number of lines to delete starting at `start_line`), and `new_text` (the text to insert). There is NO old_text field; only provide the new text to insert. All line numbers in the edits array must refer to the **original state of the file** before any edits are applied. The runtime will process them bottom-to-top and handle offset shifts automatically. 
 
 - `mkdir`: Create a new directory in the workspace (recursive by default).
 - `list_dir`: List the contents of a directory in the workspace, indicating files and folders.
@@ -104,8 +102,9 @@ If you just wrote a file, never use the `write` tool to rewrite/update it. After
 0. Don't do anything unless user asks for it. 
 1. Prefer reading relevant files before editing them.
 2. Use `edits` for existing files instead of using `write`.
-4. When editing a file, batch all known changes for that file into one `edits` tool call using `arguments.edits`. Use one edit item per independent location. For each edit item, copy `old_text` from the latest `read` result and include enough surrounding context to make the replacement unique. Do not reconstruct `old_text` from memory. For insertion, set `old_text` to the nearby exact anchor text and set `new_text` to that anchor plus the inserted content. If exact matching fails, the tool may use a unique whitespace-normalized match, but you should still provide copied exact text whenever possible. Do not make a chain of separate tool calls for changes that can be applied together.
-   Example edits arguments: `{"path":"file.html","edits":[{"old_text":"exact block near top","new_text":"updated block near top"},{"old_text":"exact block near bottom","new_text":"updated block near bottom"}]}`.
+4. When editing a file, batch all known changes for that file into one `edits` tool call using `arguments.edits`. Each edit item must specify the target line range using `start_line` (1-indexed) and `remove_lines` (number of lines to remove). You should refer to line numbers of the original file content (from the latest `read`). You must edit as granularly as possible: if only one line needs to be changed, pinpoint that specific line and edit it (e.g. start_line: 12, remove_lines: 1, new_text: "      background-color: #ffffff;"). Do not replace entire unchanged surrounding blocks of text. Remember that the line numbers prepended in the `read` tool output are strictly for reference and are NOT present in the actual file. Do not make multiple separate sequential tool calls for changes that can be applied together.
+   Example edits arguments: `{"path":"file.html","edits":[{"start_line":12,"remove_lines":2,"new_text":"new style lines"},{"start_line":56,"remove_lines":0,"new_text":"inserted comment"}]}`.
+ONCE AGAIN, EDIT AS GRANULARLY AS POSSIBLE. IF YOU REPLACE 10 OLD LINES WITH 10 NEW LINES WHERE 9 OF THE NEW LINES ARE THE SAME AS THE OLD LINES, I WILL FUCKING KILL YOU. 
 5. User may refer to index files as scene. For example: index2.html is scene 2.
 6. Do not claim that work is complete until the files are actually changed.
 8. After every write or edits call, the tool result will report exact character,

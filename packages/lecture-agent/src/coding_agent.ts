@@ -19,6 +19,7 @@ import {
     clear_agent_workspace,
     execute_tool,
     line_count,
+    reset_active_output_folder,
 } from './tools/index.js';
 
 const __filename = fileURLToPath(import.meta.url);
@@ -757,6 +758,7 @@ function archive_workspace_best_effort(reason: string): string | null {
 async function run_session_with_timing(session: any, task: string, max_turns: number): Promise<string> {
     const started_at = now_ms();
     archiveAttemptedForCurrentRun = false;
+    reset_active_output_folder();
     try {
         const result = await session.run(task, max_turns);
         archive_workspace_best_effort("completed");

@@ -2,7 +2,7 @@ export const TOOLS: any[] = [
     {
         type: "function",
         name: "read",
-        description: "Read a UTF-8 text file from the workspace.",
+        description: "Read a UTF-8 text file from the workspace. The output contains line numbers prepended in the format '<line_number>: <line_content>' for reference. Note that these line numbers are NOT present in the actual file.",
         parameters: {
             type: "object",
             properties: {
@@ -29,32 +29,33 @@ export const TOOLS: any[] = [
     {
         type: "function",
         name: "edits",
-        description: "Edit an existing file by applying one or more exact replacements atomically in one tool call. Use this for all changes to existing files, including single-location edits and multiple distant edits.",
+        description: "Apply one or more line-based diff patches to a file. Line numbers refer to the original state of the file before any edits are applied.",
         parameters: {
             type: "object",
             properties: {
                 path: { type: "string", description: "Workspace-relative file path." },
                 edits: {
                     type: "array",
-                    description: "Batch of independent exact replacements to apply atomically to the same file. Use this for edits at multiple distant locations, such as one change near line 5, another near line 60, and another near line 567.",
+                    description: "List of edits to apply atomically to the file.",
                     items: {
                         type: "object",
                         properties: {
-                            old_text: {
-                                type: "string",
-                                description: "Exact text block to replace. Include enough surrounding context copied from the latest read to make it unique. If exact matching fails, the tool can use a unique whitespace-normalized match as a fallback.",
+                            start_line: {
+                                type: "integer",
+                                description: "1-indexed starting line number of the edit in the original file.",
+                                minimum: 1
+                            },
+                            remove_lines: {
+                                type: "integer",
+                                description: "Number of lines to remove from the original file starting from start_line.",
+                                minimum: 0
                             },
                             new_text: {
                                 type: "string",
-                                description: "Replacement text block.",
-                            },
-                            expected_replacements: {
-                                type: "integer",
-                                description: "Expected number of replacements for this edit. Defaults to 1.",
-                                minimum: 1,
-                            },
+                                description: "The text to insert at start_line (use empty string to delete without inserting)."
+                            }
                         },
-                        required: ["old_text", "new_text"],
+                        required: ["start_line", "remove_lines", "new_text"],
                         additionalProperties: false,
                     },
                 },
@@ -128,9 +129,9 @@ export const TOOL_JSON_SCHEMA = {
         content: "complete file content for write",
         edits: [
             {
-                old_text: "exact block to replace for one edit",
-                new_text: "replacement block for that edit",
-                expected_replacements: "optional integer for this edit",
+                start_line: "1-indexed starting line number of the edit in the original file",
+                remove_lines: "number of lines to remove (0 for pure insertion)",
+                new_text: "text to insert",
             }
         ],
     },

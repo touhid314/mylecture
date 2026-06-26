@@ -80,6 +80,90 @@ function archive_title_slug(): string | null {
     return null;
 }
 
+let activeOutputFolder: string | null = null;
+let activeOutputFolderHasSlug = false;
+
+export function get_active_output_folder(): string {
+    if (!activeOutputFolder) {
+        const uniqueId = `${Date.now().toString(36)}-${randomUUID().slice(0, 8)}`;
+        const slug = archive_title_slug();
+        if (slug) {
+            activeOutputFolderHasSlug = true;
+            const archiveName = `${slug}-${uniqueId}`;
+            activeOutputFolder = path.resolve(OUTPUTS_DIR, archiveName);
+        } else {
+            activeOutputFolderHasSlug = false;
+            activeOutputFolder = path.resolve(OUTPUTS_DIR, uniqueId);
+        }
+        fs.mkdirSync(activeOutputFolder, { recursive: true });
+    } else if (!activeOutputFolderHasSlug) {
+        const slug = archive_title_slug();
+        if (slug) {
+            const uniqueId = path.basename(activeOutputFolder);
+            const archiveName = `${slug}-${uniqueId}`;
+            const newPath = path.resolve(OUTPUTS_DIR, archiveName);
+            if (fs.existsSync(activeOutputFolder)) {
+                try {
+                    fs.renameSync(activeOutputFolder, newPath);
+                    activeOutputFolder = newPath;
+                    activeOutputFolderHasSlug = true;
+                } catch (err) {
+                    // Ignore rename errors if something is locking the folder
+                }
+            }
+        }
+    }
+    return activeOutputFolder;
+}
+
+export function reset_active_output_folder(): void {
+    activeOutputFolder = null;
+    activeOutputFolderHasSlug = false;
+}
+
+function sync_dir_recursive(srcDir: string, destDir: string): void {
+    if (!fs.existsSync(destDir)) {
+        fs.mkdirSync(destDir, { recursive: true });
+    }
+
+    // 1. Copy/update from src to dest
+    const srcEntries = fs.readdirSync(srcDir, { withFileTypes: true });
+    for (const entry of srcEntries) {
+        const srcPath = path.join(srcDir, entry.name);
+        const destPath = path.join(destDir, entry.name);
+
+        if (entry.isDirectory()) {
+            sync_dir_recursive(srcPath, destPath);
+        } else if (entry.isFile()) {
+            fs.copyFileSync(srcPath, destPath);
+        }
+    }
+
+    // 2. Remove extra files/folders in dest that are not in src
+    if (fs.existsSync(destDir)) {
+        const destEntries = fs.readdirSync(destDir, { withFileTypes: true });
+        for (const entry of destEntries) {
+            const srcPath = path.join(srcDir, entry.name);
+            const destPath = path.join(destDir, entry.name);
+
+            if (!fs.existsSync(srcPath)) {
+                try {
+                    fs.rmSync(destPath, { recursive: true, force: true });
+                } catch (err) {
+                    console.error(`Warning: failed to remove ${destPath}:`, err);
+                }
+            }
+        }
+    }
+}
+
+export function sync_workspace_to_outputs(): void {
+    fs.mkdirSync(OUTPUTS_DIR, { recursive: true });
+    fs.mkdirSync(ROOT, { recursive: true });
+    const dest = get_active_output_folder();
+    sync_dir_recursive(ROOT, dest);
+}
+
 export function archive_agent_workspace(): string | null {
     fs.mkdirSync(OUTPUTS_DIR, { recursive: true });
     fs.mkdirSync(ROOT, { recursive: true });
@@ -89,14 +173,6 @@ export function archive_agent_workspace(): string | null {
         return null;
     }
 
-    const uniqueId = `${Date.now().toString(36)}-${randomUUID().slice(0, 8)}`;
-    const slug = archive_title_slug();
-    const archiveName = slug ? `${slug}-${uniqueId}` : uniqueId;
-    const archivePath = path.resolve(OUTPUTS_DIR, archiveName);
-    if (archivePath !== OUTPUTS_DIR && !archivePath.startsWith(OUTPUTS_DIR + path.sep)) {
-        throw new Error(`refusing to archive outside outputs: ${archivePath}`);
-    }
-
-    fs.cpSync(ROOT, archivePath, { recursive: true });
-    return archivePath;
+    sync_workspace_to_outputs();
+    return get_active_output_folder();
 }
