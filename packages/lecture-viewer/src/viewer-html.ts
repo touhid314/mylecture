@@ -1279,7 +1279,60 @@ body.fullscreen-active #agent-bar {
   border-top: 1px solid var(--line);
   background: #111;
   display: flex;
+  flex-direction: column;
   gap: 8px;
+}
+.agent-input-area.drag-active {
+  background: #151515;
+  box-shadow: inset 0 0 0 1px var(--accent);
+}
+.agent-attachment-list {
+  display: none;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+.agent-attachment-list.has-files {
+  display: flex;
+}
+.agent-attachment-chip {
+  max-width: 100%;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 6px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: #080808;
+  color: var(--muted-strong);
+  font-size: 11px;
+  line-height: 1.2;
+}
+.agent-attachment-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: 210px;
+}
+.agent-attachment-remove {
+  width: 16px;
+  height: 16px;
+  border: 0;
+  border-radius: 4px;
+  background: transparent;
+  color: var(--muted);
+  cursor: pointer;
+  font-size: 14px;
+  line-height: 16px;
+  padding: 0;
+}
+.agent-attachment-remove:hover {
+  color: var(--text);
+  background: rgba(255, 255, 255, 0.06);
+}
+.agent-composer-row {
+  display: flex;
+  gap: 8px;
+  align-items: flex-end;
 }
 .agent-input {
   flex: 1;
@@ -1296,6 +1349,28 @@ body.fullscreen-active #agent-bar {
   font-family: inherit;
   overflow-y: auto;
   box-sizing: border-box;
+}
+.agent-upload-btn {
+  width: 32px;
+  height: 32px;
+  min-width: 32px;
+  background: #080808;
+  color: var(--muted-strong);
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+.agent-upload-btn:hover {
+  color: var(--text);
+  border-color: var(--line-strong);
+  background: rgba(255, 255, 255, 0.03);
+}
+.agent-upload-btn:disabled {
+  cursor: not-allowed;
+  opacity: 0.6;
 }
 .agent-send-btn {
   height: 32px;
@@ -1825,9 +1900,18 @@ body.file-kind-mp4 .timeline-ruler {
     </div>
 
     <div class="agent-input-area">
-      <textarea id="agent-chat-input" class="agent-input" placeholder="Ask agent to build/edit..."></textarea>
-      <button id="agent-chat-send" class="agent-send-btn" type="button">Send</button>
-      <button id="agent-chat-stop" class="agent-stop-btn" type="button" style="display: none;">Stop</button>
+      <div id="agent-attachment-list" class="agent-attachment-list"></div>
+      <div class="agent-composer-row">
+        <input id="agent-file-input" type="file" multiple hidden accept=".png,.jpg,.jpeg,.webp,.bmp,.pdf,.mp4,.mpeg,.mpg,.mov,.avi,.webm,.wmv,.3gp,.3gpp,.flv">
+        <button id="agent-upload-btn" class="agent-upload-btn" type="button" aria-label="Attach files" title="Attach image, PDF, or video files">
+          <svg class="control-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M21.44 11.05 12 20.49a6 6 0 0 1-8.49-8.49l9.9-9.9a4 4 0 0 1 5.66 5.66l-9.9 9.9a2 2 0 1 1-2.83-2.83l8.49-8.49"></path>
+          </svg>
+        </button>
+        <textarea id="agent-chat-input" class="agent-input" placeholder="Ask agent to build/edit..."></textarea>
+        <button id="agent-chat-send" class="agent-send-btn" type="button">Send</button>
+        <button id="agent-chat-stop" class="agent-stop-btn" type="button" style="display: none;">Stop</button>
+      </div>
     </div>
   </div>
 </aside>
@@ -1941,6 +2025,10 @@ const agentChatStop = document.getElementById('agent-chat-stop');
 const agentNewChat = document.getElementById('agent-new-chat');
 const agentBody = document.querySelector('.agent-body');
 const agentStatusTag = document.querySelector('.agent-status-tag');
+const agentInputArea = document.querySelector('.agent-input-area');
+const agentUploadButton = document.getElementById('agent-upload-btn');
+const agentFileInput = document.getElementById('agent-file-input');
+const agentAttachmentList = document.getElementById('agent-attachment-list');
 
 const resolveOptions = document.getElementById('resolve-options');
 const resolveTtsVoice = document.getElementById('resolve-tts-voice');
@@ -3934,16 +4022,115 @@ function removeThinking() {
   if (el) el.remove();
 }
 
+const agentSupportedAttachmentExts = new Set([
+  'png', 'jpg', 'jpeg', 'webp', 'bmp',
+  'pdf',
+  'mp4', 'mpeg', 'mpg', 'mov', 'avi', 'webm', 'wmv', '3gp', '3gpp', 'flv'
+]);
+let pendingAgentAttachments = [];
+
+function getFileExtension(fileName) {
+  const match = String(fileName || '').toLowerCase().match(/\\.([^.]+)$/);
+  return match ? match[1] : '';
+}
+
+function formatFileSize(bytes) {
+  const size = Number(bytes) || 0;
+  if (size < 1024) return size + ' B';
+  if (size < 1024 * 1024) return (size / 1024).toFixed(1) + ' KB';
+  return (size / (1024 * 1024)).toFixed(1) + ' MB';
+}
+
+function addAgentAttachments(files) {
+  const rejected = [];
+  for (const file of Array.from(files || [])) {
+    const ext = getFileExtension(file.name);
+    if (!agentSupportedAttachmentExts.has(ext)) {
+      rejected.push(file.name);
+      continue;
+    }
+    const duplicate = pendingAgentAttachments.some(item =>
+      item.name === file.name && item.size === file.size && item.lastModified === file.lastModified
+    );
+    if (!duplicate) pendingAgentAttachments.push(file);
+  }
+  renderAgentAttachments();
+  if (rejected.length > 0) {
+    appendChatMessage('Unsupported attachment type: ' + rejected.join(', '), 'error');
+  }
+}
+
+function removeAgentAttachment(index) {
+  pendingAgentAttachments.splice(index, 1);
+  renderAgentAttachments();
+}
+
+function renderAgentAttachments() {
+  if (!agentAttachmentList) return;
+  agentAttachmentList.innerHTML = '';
+  agentAttachmentList.classList.toggle('has-files', pendingAgentAttachments.length > 0);
+  pendingAgentAttachments.forEach((file, index) => {
+    const chip = document.createElement('div');
+    chip.className = 'agent-attachment-chip';
+    chip.innerHTML = '<span class="agent-attachment-name" title="' + escapeText(file.name) + '">' + escapeText(file.name) + '</span><span>' + formatFileSize(file.size) + '</span>';
+    const remove = document.createElement('button');
+    remove.className = 'agent-attachment-remove';
+    remove.type = 'button';
+    remove.title = 'Remove attachment';
+    remove.setAttribute('aria-label', 'Remove ' + file.name);
+    remove.textContent = 'x';
+    remove.addEventListener('click', () => removeAgentAttachment(index));
+    chip.appendChild(remove);
+    agentAttachmentList.appendChild(chip);
+  });
+}
+
+async function uploadAgentAttachments(files) {
+  if (!files.length) return [];
+  const form = new FormData();
+  files.forEach(file => form.append('files', file, file.name));
+  const response = await fetch('/agent-upload', {
+    method: 'POST',
+    body: form
+  });
+  const payload = await response.json();
+  if (!response.ok) {
+    throw new Error(payload.error || 'Attachment upload failed');
+  }
+  return payload.files || [];
+}
+
+function buildAttachmentPrompt(message, uploadedFiles) {
+  let task = message.trim();
+  if (!task && uploadedFiles.length > 0) {
+    task = 'Please use the attached file(s).';
+  }
+  for (const file of uploadedFiles) {
+    task += '\\n[(attachment: ' + file.path + ')]';
+  }
+  return task;
+}
+
+function buildUserAttachmentDisplay(message, files) {
+  const names = files.map(file => file.name).join(', ');
+  const base = message.trim() || 'Attached file(s).';
+  return files.length > 0 ? base + '\\n\\nAttachments: ' + names : base;
+}
+
 async function sendChat() {
   if (!agentChatInput || !agentChatSend) return;
   const msg = agentChatInput.value.trim();
-  if (!msg) return;
+  const filesToSend = pendingAgentAttachments.slice();
+  if (!msg && filesToSend.length === 0) return;
 
   agentChatInput.value = '';
   agentChatInput.style.height = '32px';
-  appendChatMessage(msg, 'user');
+  pendingAgentAttachments = [];
+  renderAgentAttachments();
+  appendChatMessage(buildUserAttachmentDisplay(msg, filesToSend), 'user');
   
   agentChatInput.disabled = true;
+  if (agentUploadButton) agentUploadButton.disabled = true;
   agentChatSend.style.display = 'none';
   if (agentChatStop) agentChatStop.style.display = 'block';
   if (agentStatusTag) {
@@ -3953,6 +4140,7 @@ async function sendChat() {
   }
   
   showThinking();
+  let uploadCompleted = filesToSend.length === 0;
 
   let logPollInterval = setInterval(async () => {
     try {
@@ -3966,13 +4154,17 @@ async function sendChat() {
   }, 800);
 
   try {
+    updateThinkingStatus(filesToSend.length > 0 ? 'Uploading attachments...' : 'Agent is starting...');
+    const uploadedFiles = await uploadAgentAttachments(filesToSend);
+    uploadCompleted = true;
+    const taskMessage = buildAttachmentPrompt(msg, uploadedFiles);
     const response = await fetch('/agent-chat', {
       method: 'POST',
       headers: {
         'content-type': 'application/json'
       },
       body: JSON.stringify({
-        message: msg,
+        message: taskMessage,
         currentFile: currentFilePath,
         currentDir: currentBrowserFolder
       })
@@ -3988,10 +4180,15 @@ async function sendChat() {
     appendChatMessage(payload.output || 'Done.', 'agent');
   } catch (error) {
     removeThinking();
+    if (!uploadCompleted) {
+      pendingAgentAttachments = filesToSend.concat(pendingAgentAttachments);
+      renderAgentAttachments();
+    }
     appendChatMessage(error.message, 'error');
   } finally {
     clearInterval(logPollInterval);
     agentChatInput.disabled = false;
+    if (agentUploadButton) agentUploadButton.disabled = false;
     agentChatSend.style.display = 'block';
     if (agentChatStop) agentChatStop.style.display = 'none';
     agentChatInput.style.height = '32px';
@@ -4020,6 +4217,36 @@ if (agentChatInput) {
   agentChatInput.addEventListener('input', () => {
     agentChatInput.style.height = 'auto';
     agentChatInput.style.height = Math.min(180, agentChatInput.scrollHeight) + 'px';
+  });
+}
+if (agentUploadButton && agentFileInput) {
+  agentUploadButton.addEventListener('click', () => {
+    agentFileInput.click();
+  });
+  agentFileInput.addEventListener('change', () => {
+    addAgentAttachments(agentFileInput.files);
+    agentFileInput.value = '';
+  });
+}
+if (agentInputArea) {
+  ['dragenter', 'dragover'].forEach(type => {
+    agentInputArea.addEventListener(type, event => {
+      event.preventDefault();
+      event.stopPropagation();
+      agentInputArea.classList.add('drag-active');
+    });
+  });
+  ['dragleave', 'dragend', 'drop'].forEach(type => {
+    agentInputArea.addEventListener(type, event => {
+      event.preventDefault();
+      event.stopPropagation();
+      if (type !== 'dragenter' && type !== 'dragover') {
+        agentInputArea.classList.remove('drag-active');
+      }
+    });
+  });
+  agentInputArea.addEventListener('drop', event => {
+    addAgentAttachments(event.dataTransfer ? event.dataTransfer.files : []);
   });
 }
 if (agentChatSend) {

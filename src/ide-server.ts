@@ -159,6 +159,12 @@ const mimeTypes = new Map([
   ['.mp4', 'video/mp4']
 ]);
 
+const agentUploadExtensions = new Set([
+  '.png', '.jpg', '.jpeg', '.webp', '.bmp',
+  '.pdf',
+  '.mp4', '.mpeg', '.mpg', '.mov', '.avi', '.webm', '.wmv', '.3gp', '.3gpp', '.flv'
+]);
+
 // Small response helpers keep route handlers readable.
 function sendText(response, status, body, contentType = 'text/plain; charset=utf-8') {
   response.writeHead(status, { 'content-type': contentType });
@@ -342,6 +348,94 @@ function activeFolderFilePath() {
     return path.join(workspaceAgentRoot, '.active-output-folder');
   }
   return path.resolve(rootDir, '../lecture-agent/workspace/.active-output-folder');
+}
+
+function agentUploadRoot() {
+  return path.resolve(rootDir, 'packages/lecture-agent/.tmp/uploads');
+}
+
+function sanitizeUploadName(name) {
+  const base = path.basename(String(name || 'attachment'));
+  return base.replace(/[<>:"/\\|?*\x00-\x1F]/g, '_').replace(/\s+/g, ' ').trim() || 'attachment';
+}
+
+function isSupportedAgentUpload(fileName) {
+  return agentUploadExtensions.has(path.extname(String(fileName || '')).toLowerCase());
+}
+
+function parseMultipartFormData(contentType, body) {
+  const match = String(contentType || '').match(/boundary=(?:"([^"]+)"|([^;]+))/i);
+  if (!match) throw new Error('Missing multipart boundary.');
+  const boundary = Buffer.from(`--${match[1] || match[2]}`);
+  const parts = [];
+  let cursor = body.indexOf(boundary);
+  while (cursor !== -1) {
+    cursor += boundary.length;
+    if (body.slice(cursor, cursor + 2).toString() === '--') break;
+    if (body.slice(cursor, cursor + 2).toString() === '\r\n') cursor += 2;
+
+    const headerEnd = body.indexOf(Buffer.from('\r\n\r\n'), cursor);
+    if (headerEnd === -1) break;
+    const headersText = body.slice(cursor, headerEnd).toString('utf8');
+    const dataStart = headerEnd + 4;
+    let next = body.indexOf(boundary, dataStart);
+    if (next === -1) break;
+    let dataEnd = next;
+    if (body.slice(dataEnd - 2, dataEnd).toString() === '\r\n') dataEnd -= 2;
+
+    const disposition = headersText.match(/content-disposition:\s*form-data;([^\r\n]+)/i)?.[1] || '';
+    const name = disposition.match(/name="([^"]+)"/i)?.[1] || '';
+    const filename = disposition.match(/filename="([^"]*)"/i)?.[1] || '';
+    if (name) {
+      parts.push({ name, filename, data: body.slice(dataStart, dataEnd) });
+    }
+    cursor = next;
+  }
+  return parts;
+}
+
+function receiveRequestBody(request) {
+  return new Promise((resolve, reject) => {
+    const chunks = [];
+    request.on('data', chunk => chunks.push(Buffer.from(chunk)));
+    request.on('error', reject);
+    request.on('end', () => resolve(Buffer.concat(chunks)));
+  });
+}
+
+async function saveAgentUploads(request) {
+  const contentType = request.headers['content-type'] || '';
+  if (!String(contentType).toLowerCase().startsWith('multipart/form-data')) {
+    throw new Error('Upload must use multipart/form-data.');
+  }
+
+  const body = await receiveRequestBody(request);
+  const parts = parseMultipartFormData(contentType, body);
+  const files = parts.filter(part => part.name === 'files' && part.filename);
+  if (files.length === 0) throw new Error('No files were uploaded.');
+
+  const uploadDir = agentUploadRoot();
+  mkdirSync(uploadDir, { recursive: true });
+  const saved = [];
+
+  for (const file of files) {
+    const originalName = sanitizeUploadName(file.filename);
+    if (!isSupportedAgentUpload(originalName)) {
+      throw new Error(`Unsupported attachment type: ${originalName}`);
+    }
+    const ext = path.extname(originalName);
+    const stem = path.basename(originalName, ext).slice(0, 80) || 'attachment';
+    const targetName = `${Date.now()}-${Math.random().toString(16).slice(2)}-${stem}${ext}`;
+    const targetPath = path.join(uploadDir, targetName);
+    writeFileSync(targetPath, file.data);
+    saved.push({
+      name: originalName,
+      path: toViewerPath(targetPath),
+      size: file.data.length
+    });
+  }
+
+  return saved;
 }
 
 function getActiveOutputFolder() {
@@ -1254,6 +1348,22 @@ const server = createServer(async (request, response) => {
       sendJson(response, 200, { ok: true });
     } catch (error) {
       sendJson(response, 500, { error: error.message });
+    }
+    return;
+  }
+
+  // Save browser-selected attachments so the CLI agent can receive them through
+  // its explicit [(attachment: ...)] prompt directives.
+  if (requestUrl.pathname === '/agent-upload') {
+    try {
+      if (request.method !== 'POST') {
+        sendJson(response, 405, { error: 'Method not allowed' });
+        return;
+      }
+      const files = await saveAgentUploads(request);
+      sendJson(response, 200, { ok: true, files });
+    } catch (error) {
+      sendJson(response, 400, { error: error.message });
     }
     return;
   }

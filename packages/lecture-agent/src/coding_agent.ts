@@ -7,7 +7,7 @@ import { GoogleGenAI } from '@google/genai';
 
 import { LLM_Model } from './llm_model.js';
 import { log_llm_request, start_new_llm_log_session } from './llm_prompt_logger.js';
-import { build_prompt } from './prompt_builder.js';
+import { build_prompt, extract_upload_attachments, type UploadAttachment } from './prompt_builder.js';
 import {
     BASE_DIR,
     WORKSPACE_DIR,
@@ -73,6 +73,11 @@ const DONE_JSON_SCHEMA = {
 
 const PRE_USER_RESPONSE_TOOL = "prepare_user_response";
 const USER_RESPONSE_VALIDATION_FAILURE = "Something went wrong, please try again.";
+const UNSIGNALED_FINAL_RESPONSE_CORRECTION = [
+    "Runtime correction: your previous response looked like a final user-facing answer, but final answers are not allowed from the working context.",
+    `Call the \`${PRE_USER_RESPONSE_TOOL}\` tool now. Do not write the final answer directly.`,
+    "The runtime will generate the final user-facing reply from sanitized user-request context after that signal."
+].join("\n");
 const WORKING_RESPONSE_SECURITY_INSTRUCTIONS = [
     "# Final Response Security",
     `When all requested work is complete, call the \`${PRE_USER_RESPONSE_TOOL}\` tool instead of writing a final answer yourself.`,
@@ -190,6 +195,10 @@ function build_system_instructions(skills: string[] | null): string {
 
 function prepare_user_task(task: string): string {
     return build_prompt(task, ROOT);
+}
+
+function format_attachment_summary(attachments: UploadAttachment[]): string {
+    return attachments.map(att => `${att.kind}:${path.basename(att.path)}`).join(", ");
 }
 
 function truncate(value: any, limit: number = 1200): string {
@@ -400,7 +409,7 @@ function gemini_input_token_count(usage: any): number | null {
     return (prompt || 0) + toolUsePrompt;
 }
 
-class GeminiAgentSession {
+export class GeminiAgentSession {
     private model: string;
     private client: GoogleGenAI;
     private config: any;
@@ -408,6 +417,7 @@ class GeminiAgentSession {
     private userTasks: string[];
     private totalInputTokens: number;
     private totalOutputTokens: number;
+    private uploadedFiles: any[];
 
     constructor(model: string, skills: string[] | null = null) {
         const apiKey = process.env.GOOGLE_API_KEY;
@@ -429,10 +439,64 @@ class GeminiAgentSession {
         this.userTasks = [];
         this.totalInputTokens = 0;
         this.totalOutputTokens = 0;
+        this.uploadedFiles = [];
         print_detail("workspace", ROOT, Color.BLUE);
         print_detail("tool mode", "native Gemini function calling", Color.BLUE);
         if (skills && skills.length > 0) {
             print_detail("skills", skills, Color.BLUE);
+        }
+    }
+
+    private async upload_attachment_part(attachment: UploadAttachment): Promise<any> {
+        print_detail("upload", `${attachment.kind}:${attachment.path}`, Color.BLUE);
+        const filesClient = this.client.files as any;
+        let fileRef = await filesClient.upload({
+            file: attachment.path,
+            mimeType: attachment.mimeType
+        });
+
+        while (fileRef.state && fileRef.state !== "ACTIVE") {
+            if (fileRef.state === "FAILED") {
+                throw new Error(`Gemini file processing failed for ${attachment.path}`);
+            }
+            if (!fileRef.name) {
+                throw new Error(`Gemini file upload did not return a file name for ${attachment.path}`);
+            }
+            await new Promise(resolve => setTimeout(resolve, 2000));
+            fileRef = await filesClient.get({ name: fileRef.name });
+        }
+
+        this.uploadedFiles.push(fileRef);
+        return {
+            fileData: {
+                mimeType: fileRef.mimeType || attachment.mimeType,
+                fileUri: fileRef.uri || fileRef.name
+            }
+        };
+    }
+
+    private async cleanup_uploaded_files(): Promise<void> {
+        for (const fileRef of this.uploadedFiles) {
+            try {
+                if (fileRef.name) {
+                    await this.client.files.delete({ name: fileRef.name });
+                }
+            } catch {
+                // Best effort cleanup only.
+            }
+        }
+        this.uploadedFiles = [];
+    }
+
+    private strip_file_parts_from_history(): void {
+        for (const content of this.contents) {
+            if (!content || !Array.isArray(content.parts)) {
+                continue;
+            }
+            content.parts = content.parts.filter((part: any) => !part.fileData && !part.inlineData);
+            if (content.parts.length === 0) {
+                content.parts.push({ text: "[Attached file omitted from retained chat history]" });
+            }
         }
     }
 
@@ -474,8 +538,18 @@ class GeminiAgentSession {
     async run(task: string, max_turns: number): Promise<string> {
         this.userTasks.push(strip_ide_context_from_user_query(task));
         const prepared_task = prepare_user_task(task);
-        this.contents.push({ role: "user", parts: [{ text: prepared_task }] });
+        const attachments = extract_upload_attachments(task, ROOT);
+        if (attachments.length > 0) {
+            print_detail("attachments", format_attachment_summary(attachments), Color.BLUE);
+        }
 
+        const userParts: any[] = [{ text: prepared_task }];
+        for (const attachment of attachments) {
+            userParts.push(await this.upload_attachment_part(attachment));
+        }
+        this.contents.push({ role: "user", parts: userParts });
+
+        try {
         for (let step = 1; step <= max_turns; step++) {
             print_step(step, "asking model for next action", Color.MAGENTA);
             const request = {
@@ -497,7 +571,12 @@ class GeminiAgentSession {
                 }
                 if (!validate_pre_user_response(false, false)) {
                     print_step(step, "blocked unsignaled final response", Color.RED);
-                    return USER_RESPONSE_VALIDATION_FAILURE;
+                    print_detail("correction", `asking model to call \`${PRE_USER_RESPONSE_TOOL}\``, Color.YELLOW);
+                    this.contents.push({
+                        role: "user",
+                        parts: [{ text: UNSIGNALED_FINAL_RESPONSE_CORRECTION }]
+                    });
+                    continue;
                 }
                 return USER_RESPONSE_VALIDATION_FAILURE;
             }
@@ -551,6 +630,10 @@ class GeminiAgentSession {
         }
 
         return `Stopped after ${max_turns} tool loop(s). Ask me to continue if needed.`;
+        } finally {
+            await this.cleanup_uploaded_files();
+            this.strip_file_parts_from_history();
+        }
     }
 }
 
@@ -600,6 +683,10 @@ class JsonFallbackAgentSession {
     async run(task: string, max_turns: number): Promise<string> {
         this.userTasks.push(strip_ide_context_from_user_query(task));
         const prepared_task = prepare_user_task(task);
+        const attachments = extract_upload_attachments(task, ROOT);
+        if (attachments.length > 0) {
+            print_detail("attachments", format_attachment_summary(attachments), Color.BLUE);
+        }
         this.transcript.push({ role: "user", content: prepared_task });
 
         for (let step = 1; step <= max_turns; step++) {
@@ -609,7 +696,7 @@ class JsonFallbackAgentSession {
                 null,
                 null,
                 null,
-                null,
+                attachments,
                 true,
                 false
             );
@@ -639,7 +726,12 @@ class JsonFallbackAgentSession {
             if (action.done === true) {
                 if (!validate_pre_user_response(false, false)) {
                     print_step(step, "blocked unsignaled final response", Color.RED);
-                    return USER_RESPONSE_VALIDATION_FAILURE;
+                    print_detail("correction", `asking model to call \`${PRE_USER_RESPONSE_TOOL}\``, Color.YELLOW);
+                    this.transcript.push({
+                        role: "user",
+                        content: UNSIGNALED_FINAL_RESPONSE_CORRECTION
+                    });
+                    continue;
                 }
                 return USER_RESPONSE_VALIDATION_FAILURE;
             }

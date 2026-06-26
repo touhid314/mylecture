@@ -64,50 +64,214 @@ LOG_FULL_LLM_PROMPT="True"
 ```
 When enabled, raw SDK request objects are written to `.log/session-*/call-*.llm-request.json`.
 
-## Running the Agent via CLI
+## CLI Guide
 
-You can execute the agent using commands from the repository root:
+Run these commands from `packages/lecture-agent`:
 
-### Single Task Run
 ```powershell
-npm run agent -- "Inspect this repo and create a hello world script"
-```
-Start a new clean session explicitly:
-```powershell
-npm run agent -- --new-session "Make a short lecture about binary search"
-```
-Or for piped/longer inputs:
-```powershell
-"Read the code, find the bug, fix it" | npm run agent
+cd C:\Users\touhi\OneDrive\Desktop\mylecture\mylecture-ide\packages\lecture-agent
 ```
 
-### Interactive Chat Mode
-Starts a conversational CLI session where the agent maintains context and files between your replies:
-```powershell
-npm run chat
-```
-Type `/exit` or `/quit` to stop the session.
+Or, from the monorepo root, target this workspace with npm workspace flags if your root setup supports them.
 
-### Load Skills
-Skills can be loaded by name (resolved from `.agents/skills/<name>/SKILL.md` inside either the workspace or the package directory) or by direct path:
+### Requirements
+
+Install dependencies first:
+
 ```powershell
-npm run agent -- --skill mylecture-make-long "Make a video about PCA"
-npm run chat -- --skill mylecture-make-reels
-# Loading a specific markdown file as a skill
-npm run agent -- --skill workspace/.agents/mylecture-contracts/avsl-syntax.md "Task here"
+npm install
 ```
 
-### List Skills
-List all available skill names:
+Set a model and the matching API key in the root `.env` file or in your shell:
+
+```env
+AGENT_MODEL="gemini-3.5-flash"
+GOOGLE_API_KEY="your_google_api_key"
+OPENAI_API_KEY="your_openai_api_key"
+```
+
+Gemini models use native Gemini function calling. Non-Gemini models use the JSON fallback path through `LLM_Model`.
+
+### Basic Run
+
+Pass a task as command-line text:
+
+```powershell
+npm run agent -- "Create a short lecture about binary search"
+```
+
+For longer prompts, pipe text through stdin:
+
+```powershell
+@"
+Read the current workspace.
+Fix any broken HTML contract issues.
+Then prepare the final response.
+"@ | npm run agent
+```
+
+### New Session
+
+By default, the agent can keep session state. Start with a clean workspace/session explicitly:
+
+```powershell
+npm run agent -- --new-session "Make a short lecture about Bayes theorem"
+```
+
+You can also force this via env:
+
+```powershell
+$env:AGENT_NEW_SESSION="true"
+npm run agent -- "Start fresh and build a lesson about PCA"
+```
+
+### Chat Mode
+
+Start an interactive CLI chat:
+
+```powershell
+npm run agent -- --chat
+```
+
+Use a specific model in chat:
+
+```powershell
+npm run agent -- --chat --model gemini-3.5-flash
+```
+
+Type `/exit` or `/quit` to stop.
+
+### Model Selection
+
+Use `AGENT_MODEL` or pass `--model`:
+
+```powershell
+npm run agent -- --model gemini-3.5-flash "Create a video outline"
+```
+
+```powershell
+npm run agent -- --model gpt-4.1 "Inspect the workspace and summarize it"
+```
+
+The model name determines provider routing:
+
+- names containing `gemini` use Gemini
+- names starting with `gpt-` use OpenAI through the JSON fallback path
+
+### Max Turns
+
+The agent loops through model/tool steps until it completes or reaches the turn limit. Default is `500`.
+
+```powershell
+npm run agent -- --max-turns 150 "Check and refine index1.html"
+```
+
+### Skills
+
+List available skills:
+
 ```powershell
 npm run agent -- --list-skills
 ```
 
-### Custom Model & Max Turns
-Override the default model or maximum conversational turns via CLI flags:
+Load one or more skills by name:
+
 ```powershell
-npm run agent -- --model gemini-2.5-pro "Create a video outline"
-npm run agent -- --max-turns 150 "Check and refine index1.html"
+npm run agent -- --skill mylecture-make-long "Make a video about PCA"
+```
+
+```powershell
+npm run agent -- --skill mylecture-make-long --skill another-skill "Task here"
+```
+
+Load a skill by direct markdown path:
+
+```powershell
+npm run agent -- --skill workspace/.agents/mylecture-contracts/avsl-syntax.md "Task here"
+```
+
+Use skills in chat mode:
+
+```powershell
+npm run agent -- --chat --skill mylecture-make-reels
+```
+
+### File References In Text
+
+Backticked text/code files are read as UTF-8 and inlined into the prompt:
+
+```powershell
+npm run agent -- 'Review this file: `src\coding_agent.ts`'
+```
+
+This is for text files only. Image, PDF, and video upload uses the explicit attachment syntax below.
+
+### Image, PDF, And Video Attachments
+
+Attach files with explicit attachment directives:
+
+```text
+[(attachment: C:\path\to\file.png)]
+```
+
+The directive is removed from the text prompt and the file is attached to the LLM separately.
+
+Example with one PDF:
+
+```powershell
+npm run agent -- "Summarize this document and make lecture notes. [(attachment: C:\Users\touhi\Desktop\chapter1.pdf)]"
+```
+
+Example with multiple attachments:
+
+```powershell
+npm run agent -- "Build a lesson from these materials.
+[(attachment: C:\Users\touhi\Desktop\lecture.pdf)]
+[(attachment: C:\Users\touhi\Desktop\diagram.png)]
+[(attachment: C:\Users\touhi\Desktop\demo.mp4)]"
+```
+
+Supported upload extensions:
+
+- images: `.png`, `.jpg`, `.jpeg`, `.webp`, `.bmp`
+- documents: `.pdf`
+- videos: `.mp4`, `.mpeg`, `.mpg`, `.mov`, `.avi`, `.webm`, `.wmv`, `.3gp`, `.3gpp`, `.flv`
+
+Backticks, quotes, and plain paths do not trigger upload. Use `[(attachment: ...)]`.
+
+### Output And Logs
+
+After each completed agent response, the workspace is archived under:
+
+```text
+outputs/<title-slug>-<unique-id>/
+```
+
+Enable full LLM request logging:
+
+```powershell
+$env:LOG_FULL_LLM_PROMPT="True"
+npm run agent -- "Task here"
+```
+
+Logs are written under:
+
+```text
+.log/session-*/call-*.llm-request.json
+```
+
+### Testing
+
+Run the smoke test:
+
+```powershell
+npm test
+```
+
+Run TypeScript checking:
+
+```powershell
+npx tsc --noEmit
 ```
 
 ---

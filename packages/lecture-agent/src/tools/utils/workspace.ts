@@ -83,8 +83,43 @@ function archive_title_slug(): string | null {
 let activeOutputFolder: string | null = null;
 let activeOutputFolderHasSlug = false;
 
+function active_output_pointer_path(): string {
+    return path.join(WORKSPACE_DIR, '.active-output-folder');
+}
+
+function is_path_inside(parentDir: string, childPath: string): boolean {
+    const relative = path.relative(path.resolve(parentDir), path.resolve(childPath));
+    return relative === "" || (!!relative && !relative.startsWith("..") && !path.isAbsolute(relative));
+}
+
+function load_active_output_folder_from_pointer(): boolean {
+    const ptrFile = active_output_pointer_path();
+    if (!fs.existsSync(ptrFile)) {
+        return false;
+    }
+
+    const pointedPath = fs.readFileSync(ptrFile, 'utf8').trim();
+    if (!pointedPath) {
+        return false;
+    }
+
+    const resolvedPath = path.resolve(pointedPath);
+    if (!is_path_inside(OUTPUTS_DIR, resolvedPath)) {
+        return false;
+    }
+
+    fs.mkdirSync(resolvedPath, { recursive: true });
+    activeOutputFolder = resolvedPath;
+    activeOutputFolderHasSlug = !/^[a-z0-9]+-[a-f0-9]{8}$/i.test(path.basename(resolvedPath));
+    return true;
+}
+
 export function get_active_output_folder(): string {
     if (!activeOutputFolder) {
+        if (load_active_output_folder_from_pointer()) {
+            return activeOutputFolder as string;
+        }
+
         const uniqueId = `${Date.now().toString(36)}-${randomUUID().slice(0, 8)}`;
         const slug = archive_title_slug();
         if (slug) {
@@ -99,7 +134,7 @@ export function get_active_output_folder(): string {
 
         // Save pointer to the active output folder
         try {
-            fs.writeFileSync(path.join(WORKSPACE_DIR, '.active-output-folder'), activeOutputFolder, 'utf8');
+            fs.writeFileSync(active_output_pointer_path(), activeOutputFolder, 'utf8');
         } catch {}
     } else if (!activeOutputFolderHasSlug) {
         const slug = archive_title_slug();
@@ -115,7 +150,7 @@ export function get_active_output_folder(): string {
 
                     // Update pointer with renamed path
                     try {
-                        fs.writeFileSync(path.join(WORKSPACE_DIR, '.active-output-folder'), activeOutputFolder, 'utf8');
+                        fs.writeFileSync(active_output_pointer_path(), activeOutputFolder, 'utf8');
                     } catch {}
                 } catch (err) {
                     // Ignore rename errors if something is locking the folder
@@ -130,7 +165,7 @@ export function reset_active_output_folder(): void {
     activeOutputFolder = null;
     activeOutputFolderHasSlug = false;
     try {
-        const ptrFile = path.join(WORKSPACE_DIR, '.active-output-folder');
+        const ptrFile = active_output_pointer_path();
         if (fs.existsSync(ptrFile)) {
             fs.unlinkSync(ptrFile);
         }

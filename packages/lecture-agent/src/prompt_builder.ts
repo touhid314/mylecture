@@ -6,10 +6,57 @@ const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
 const BACKTICK_PATH_PATTERN = /(`+)([^`\n\r]+?)\1/g;
+const ATTACHMENT_PATTERN = /\[\(\s*attachment\s*:\s*([^)]+?)\s*\)\]/gi;
+
+export type UploadAttachment = {
+    path: string;
+    kind: "image" | "pdf" | "video";
+    mimeType: string;
+};
+
+const UPLOAD_MIME_BY_EXT: Record<string, string> = {
+    ".png": "image/png",
+    ".jpg": "image/jpeg",
+    ".jpeg": "image/jpeg",
+    ".webp": "image/webp",
+    ".bmp": "image/bmp",
+    ".pdf": "application/pdf",
+    ".mp4": "video/mp4",
+    ".mpeg": "video/mpeg",
+    ".mpg": "video/mpeg",
+    ".mov": "video/quicktime",
+    ".avi": "video/avi",
+    ".webm": "video/webm",
+    ".wmv": "video/wmv",
+    ".3gp": "video/3gpp",
+    ".3gpp": "video/3gpp",
+    ".flv": "video/x-flv",
+};
 
 export function language_for_path(filePath: string): string {
     const ext = path.extname(filePath).replace(/^\./, '').toLowerCase();
     return ext || "txt";
+}
+
+export function upload_mime_type_for_path(filePath: string): string | null {
+    return UPLOAD_MIME_BY_EXT[path.extname(filePath).toLowerCase()] || null;
+}
+
+export function upload_kind_for_path(filePath: string): "image" | "pdf" | "video" | null {
+    const mimeType = upload_mime_type_for_path(filePath);
+    if (!mimeType) return null;
+    if (mimeType.startsWith("image/")) return "image";
+    if (mimeType === "application/pdf") return "pdf";
+    if (mimeType.startsWith("video/")) return "video";
+    return null;
+}
+
+export function is_upload_supported_path(filePath: string): boolean {
+    return upload_mime_type_for_path(filePath) !== null;
+}
+
+export function strip_attachment_directives(promptText: string): string {
+    return promptText.replace(ATTACHMENT_PATTERN, "").replace(/[ \t]+\n/g, "\n").trim();
 }
 
 export function resolve_prompt_path(pathText: string, workspaceDir: string = "."): string | null {
@@ -48,10 +95,14 @@ export function resolve_prompt_path(pathText: string, workspaceDir: string = "."
 }
 
 export function build_prompt(promptText: string, workspaceDir: string = "."): string {
-    return promptText.replace(BACKTICK_PATH_PATTERN, (match, backticks, filePath) => {
+    return strip_attachment_directives(promptText).replace(BACKTICK_PATH_PATTERN, (match, backticks, filePath) => {
         const trimmedFilePath = filePath.trim();
         const resolvedPath = resolve_prompt_path(trimmedFilePath, workspaceDir);
         if (resolvedPath === null) {
+            return match;
+        }
+
+        if (is_upload_supported_path(resolvedPath)) {
             return match;
         }
 
@@ -63,4 +114,36 @@ export function build_prompt(promptText: string, workspaceDir: string = "."): st
             return `\n\n[Error reading file ${trimmedFilePath}: ${exc}]\n\n`;
         }
     });
+}
+
+export function extract_upload_attachments(promptText: string, workspaceDir: string = "."): UploadAttachment[] {
+    const rawCandidates: string[] = [];
+
+    for (const match of promptText.matchAll(ATTACHMENT_PATTERN)) {
+        rawCandidates.push(match[1]);
+    }
+
+    const attachments: UploadAttachment[] = [];
+    const seen = new Set<string>();
+    for (const candidate of rawCandidates) {
+        const trimmed = candidate.trim().replace(/[),.;:!?]+$/g, "");
+        const resolvedPath = resolve_prompt_path(trimmed, workspaceDir);
+        if (!resolvedPath || !is_upload_supported_path(resolvedPath)) {
+            continue;
+        }
+
+        const mimeType = upload_mime_type_for_path(resolvedPath);
+        const kind = upload_kind_for_path(resolvedPath);
+        if (!mimeType || !kind) {
+            continue;
+        }
+
+        const key = path.resolve(resolvedPath).toLowerCase();
+        if (seen.has(key)) {
+            continue;
+        }
+        seen.add(key);
+        attachments.push({ path: resolvedPath, kind, mimeType });
+    }
+    return attachments;
 }

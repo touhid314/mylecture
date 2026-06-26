@@ -485,6 +485,7 @@ export class LLM_Model {
             if (ext === ".png") mimeType = "image/png";
             else if (ext === ".webp") mimeType = "image/webp";
             else if (ext === ".gif") mimeType = "image/gif";
+            else if (ext === ".bmp") mimeType = "image/bmp";
 
             const base64_image = fs.readFileSync(image_path).toString('base64');
             this.logger.info(`Successfully converted static image: ${image_path}`);
@@ -515,7 +516,7 @@ export class LLM_Model {
         if (ext === ".pdf") {
             return "pdf";
         }
-        if ([".mp4", ".mov", ".avi", ".mkv", ".webm", ".m4v"].includes(ext)) {
+        if ([".mp4", ".mpeg", ".mpg", ".mov", ".avi", ".webm", ".wmv", ".3gp", ".3gpp", ".flv", ".mkv", ".m4v"].includes(ext)) {
             return "video";
         }
         return "file";
@@ -852,8 +853,17 @@ export class LLM_Model {
             let mimeType = undefined;
             if (ext === ".png") mimeType = "image/png";
             else if (ext === ".jpg" || ext === ".jpeg") mimeType = "image/jpeg";
+            else if (ext === ".webp") mimeType = "image/webp";
+            else if (ext === ".bmp") mimeType = "image/bmp";
             else if (ext === ".pdf") mimeType = "application/pdf";
             else if (ext === ".mp4") mimeType = "video/mp4";
+            else if (ext === ".mpeg" || ext === ".mpg") mimeType = "video/mpeg";
+            else if (ext === ".mov") mimeType = "video/quicktime";
+            else if (ext === ".avi") mimeType = "video/avi";
+            else if (ext === ".webm") mimeType = "video/webm";
+            else if (ext === ".wmv") mimeType = "video/wmv";
+            else if (ext === ".3gp" || ext === ".3gpp") mimeType = "video/3gpp";
+            else if (ext === ".flv") mimeType = "video/x-flv";
 
             this.logger.info(`Uploading file to Gemini: ${upload_path}`);
             let file_ref = await this._client.files.upload({
