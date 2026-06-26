@@ -354,6 +354,34 @@ function agentUploadRoot() {
   return path.resolve(rootDir, 'packages/lecture-agent/.tmp/uploads');
 }
 
+function agentProfilesRoot() {
+  const workspaceProfilesRoot = path.resolve(rootDir, 'packages/lecture-agent/workspace/.agents/mylecture-profiles');
+  if (existsSync(path.resolve(rootDir, 'packages/lecture-agent/src/coding_agent.ts'))) {
+    return workspaceProfilesRoot;
+  }
+  return path.resolve(rootDir, '../lecture-agent/workspace/.agents/mylecture-profiles');
+}
+
+function listAgentProfiles() {
+  const profilesRoot = agentProfilesRoot();
+  if (!existsSync(profilesRoot) || !statSync(profilesRoot).isDirectory()) {
+    return [];
+  }
+
+  return readdirSync(profilesRoot, { withFileTypes: true })
+    .filter(entry => entry.isFile() && entry.name.toLowerCase().endsWith('.md'))
+    .map(entry => {
+      const fullPath = path.join(profilesRoot, entry.name);
+      return {
+        id: entry.name,
+        name: path.basename(entry.name, path.extname(entry.name)),
+        fileName: entry.name,
+        content: readFileSync(fullPath, 'utf8').trim()
+      };
+    })
+    .sort((a, b) => a.name.localeCompare(b.name, undefined, { sensitivity: 'base' }));
+}
+
 function sanitizeUploadName(name) {
   const base = path.basename(String(name || 'attachment'));
   return base.replace(/[<>:"/\\|?*\x00-\x1F]/g, '_').replace(/\s+/g, ' ').trim() || 'attachment';
@@ -1364,6 +1392,16 @@ const server = createServer(async (request, response) => {
       sendJson(response, 200, { ok: true, files });
     } catch (error) {
       sendJson(response, 400, { error: error.message });
+    }
+    return;
+  }
+
+  // Return optional prompt profiles loaded from the lecture-agent workspace.
+  if (requestUrl.pathname === '/agent-profiles') {
+    try {
+      sendJson(response, 200, { ok: true, profiles: listAgentProfiles() });
+    } catch (error) {
+      sendJson(response, 500, { error: error.message });
     }
     return;
   }

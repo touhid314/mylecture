@@ -1333,6 +1333,85 @@ body.fullscreen-active #agent-bar {
   gap: 8px;
   align-items: flex-end;
 }
+.agent-generation-controls {
+  display: grid;
+  grid-template-columns: minmax(0, 120px) minmax(0, 1fr);
+  gap: 6px 8px;
+  align-items: center;
+}
+.agent-length-field {
+  grid-column: 1 / -1;
+}
+.agent-field {
+  min-width: 0;
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  gap: 6px;
+}
+.agent-field-label,
+.agent-check-label {
+  color: var(--muted);
+  font-size: 10px;
+  font-weight: 650;
+  text-transform: uppercase;
+  letter-spacing: 0.4px;
+  white-space: nowrap;
+}
+.agent-select {
+  height: 28px;
+  width: 100%;
+  padding: 0 6px;
+  background: #080808;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  color: var(--text);
+  font: inherit;
+  font-size: 12px;
+}
+.agent-range-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex: 1;
+  min-width: 0;
+}
+.agent-range {
+  flex: 1;
+  min-width: 0;
+  accent-color: var(--accent);
+}
+.agent-range-value {
+  width: 8ch;
+  min-width: 7.5ch;
+  max-width: 11ch;
+  height: 24px;
+  padding: 0 5px;
+  text-align: center;
+  background: #080808;
+  border: 1px solid var(--line);
+  border-radius: 5px;
+  color: var(--muted-strong);
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+  box-sizing: border-box;
+}
+.agent-subtitle-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 28px;
+  justify-self: end;
+}
+.agent-profile-field {
+  grid-column: 1 / -1;
+}
+.agent-checkbox {
+  width: 14px;
+  height: 14px;
+  margin: 0;
+  accent-color: var(--accent);
+}
 .agent-input {
   flex: 1;
   height: 32px;
@@ -1900,6 +1979,36 @@ body.file-kind-mp4 .timeline-ruler {
 
     <div class="agent-input-area">
       <div id="agent-attachment-list" class="agent-attachment-list"></div>
+      <div class="agent-generation-controls">
+        <div class="agent-field agent-length-field">
+          <label class="agent-field-label" for="agent-generation-length">Len</label>
+          <div class="agent-range-row">
+            <input id="agent-generation-length" class="agent-range" type="range" min="0" max="1000" step="1" value="479">
+            <input id="agent-generation-length-value" class="agent-range-value" type="text" value="1:00" aria-label="Generation length">
+          </div>
+        </div>
+        <label class="agent-field" for="agent-aspect-ratio">
+          <span class="agent-field-label">AR</span>
+          <select id="agent-aspect-ratio" class="agent-select">
+            <option value="1:1">1:1</option>
+            <option value="4:3">4:3</option>
+            <option value="3:4">3:4</option>
+            <option value="16:9" selected>16:9</option>
+            <option value="9:16">9:16</option>
+            <option value="custom">Custom</option>
+          </select>
+        </label>
+        <label class="agent-subtitle-row">
+          <input id="agent-embed-subtitle" class="agent-checkbox" type="checkbox">
+          <span class="agent-check-label">AI embed sub</span>
+        </label>
+        <label class="agent-field agent-profile-field" for="agent-profile">
+          <span class="agent-field-label">Profile</span>
+          <select id="agent-profile" class="agent-select">
+            <option value="">None</option>
+          </select>
+        </label>
+      </div>
       <div class="agent-composer-row">
         <input id="agent-file-input" type="file" multiple hidden accept=".png,.jpg,.jpeg,.webp,.bmp,.pdf,.mp4,.mpeg,.mpg,.mov,.avi,.webm,.wmv,.3gp,.3gpp,.flv">
         <button id="agent-upload-btn" class="agent-upload-btn" type="button" aria-label="Attach files" title="Attach image, PDF, or video files">
@@ -2028,6 +2137,11 @@ const agentInputArea = document.querySelector('.agent-input-area');
 const agentUploadButton = document.getElementById('agent-upload-btn');
 const agentFileInput = document.getElementById('agent-file-input');
 const agentAttachmentList = document.getElementById('agent-attachment-list');
+const agentAspectRatio = document.getElementById('agent-aspect-ratio');
+const agentGenerationLength = document.getElementById('agent-generation-length');
+const agentGenerationLengthValue = document.getElementById('agent-generation-length-value');
+const agentEmbedSubtitle = document.getElementById('agent-embed-subtitle');
+const agentProfile = document.getElementById('agent-profile');
 
 const resolveOptions = document.getElementById('resolve-options');
 const resolveTtsVoice = document.getElementById('resolve-tts-voice');
@@ -4027,6 +4141,7 @@ const agentSupportedAttachmentExts = new Set([
   'mp4', 'mpeg', 'mpg', 'mov', 'avi', 'webm', 'wmv', '3gp', '3gpp', 'flv'
 ]);
 let pendingAgentAttachments = [];
+let agentProfiles = [];
 
 function getFileExtension(fileName) {
   const match = String(fileName || '').toLowerCase().match(/\\.([^.]+)$/);
@@ -4104,6 +4219,7 @@ function buildAttachmentPrompt(message, uploadedFiles) {
   if (!task && uploadedFiles.length > 0) {
     task = 'Please use the attached file(s).';
   }
+  task = appendGenerationSettingsPrompt(task);
   for (const file of uploadedFiles) {
     task += '\\n[(attachment: ' + file.path + ')]';
   }
@@ -4114,6 +4230,124 @@ function buildUserAttachmentDisplay(message, files) {
   const names = files.map(file => file.name).join(', ');
   const base = message.trim() || 'Attached file(s).';
   return files.length > 0 ? base + '\\n\\nAttachments: ' + names : base;
+}
+
+const generationLengthMinSeconds = 5;
+const generationLengthMaxSeconds = 900;
+const generationLengthSliderMax = 1000;
+
+function formatGenerationLength(seconds) {
+  const total = clampGenerationSeconds(seconds);
+  if (total < 60) return total + 's';
+  const minutes = Math.floor(total / 60);
+  const remainder = total % 60;
+  return minutes + ':' + String(remainder).padStart(2, '0');
+}
+
+function clampGenerationSeconds(seconds) {
+  const raw = Number(seconds);
+  if (!Number.isFinite(raw)) return 60;
+  const clamped = Math.max(generationLengthMinSeconds, Math.min(generationLengthMaxSeconds, raw));
+  return Math.round(clamped / 5) * 5;
+}
+
+function sliderToGenerationSeconds(value) {
+  const slider = Math.max(0, Math.min(generationLengthSliderMax, Number(value) || 0));
+  const progress = slider / generationLengthSliderMax;
+  const ratio = generationLengthMaxSeconds / generationLengthMinSeconds;
+  return clampGenerationSeconds(generationLengthMinSeconds * Math.pow(ratio, progress));
+}
+
+function generationSecondsToSlider(seconds) {
+  const clamped = clampGenerationSeconds(seconds);
+  const ratio = generationLengthMaxSeconds / generationLengthMinSeconds;
+  const progress = Math.log(clamped / generationLengthMinSeconds) / Math.log(ratio);
+  return Math.round(Math.max(0, Math.min(1, progress)) * generationLengthSliderMax);
+}
+
+function parseGenerationLength(value) {
+  const text = String(value || '').trim().toLowerCase();
+  if (!text) return null;
+  const clockMatch = text.match(/^(\\d{1,2}):(\\d{1,2})$/);
+  if (clockMatch) {
+    return clampGenerationSeconds((Number(clockMatch[1]) * 60) + Number(clockMatch[2]));
+  }
+  const minuteMatch = text.match(/^(\\d+(?:\\.\\d+)?)\\s*m(?:in)?s?$/);
+  if (minuteMatch) {
+    return clampGenerationSeconds(Number(minuteMatch[1]) * 60);
+  }
+  const secondMatch = text.match(/^(\\d+(?:\\.\\d+)?)\\s*s(?:ec)?s?$/);
+  if (secondMatch) {
+    return clampGenerationSeconds(Number(secondMatch[1]));
+  }
+  const number = Number(text);
+  return Number.isFinite(number) ? clampGenerationSeconds(number) : null;
+}
+
+function updateGenerationLengthDisplay() {
+  if (!agentGenerationLength || !agentGenerationLengthValue) return;
+  const value = formatGenerationLength(sliderToGenerationSeconds(agentGenerationLength.value));
+  agentGenerationLengthValue.value = value;
+  agentGenerationLengthValue.style.width = Math.max(7.5, value.length + 1.5) + 'ch';
+}
+
+function commitGenerationLengthInput() {
+  if (!agentGenerationLength || !agentGenerationLengthValue) return;
+  const parsed = parseGenerationLength(agentGenerationLengthValue.value);
+  if (parsed !== null) {
+    agentGenerationLength.value = String(generationSecondsToSlider(parsed));
+  }
+  updateGenerationLengthDisplay();
+}
+
+function getGenerationSettingsPrompt() {
+  const aspectRatio = agentAspectRatio ? agentAspectRatio.value : '16:9';
+  const generationLength = agentGenerationLength ? formatGenerationLength(sliderToGenerationSeconds(agentGenerationLength.value)) : '1:00';
+  const embedSubtitle = agentEmbedSubtitle && agentEmbedSubtitle.checked ? 'yes' : 'no';
+  const lines = [
+    'if the user query is for video generation then follow this:',
+    'aspect ratio: ' + aspectRatio,
+    'generation length: ' + generationLength,
+    'embed subtitle in video: ' + embedSubtitle
+  ];
+  const profileContent = getSelectedAgentProfileContent();
+  if (profileContent) {
+    lines.push('profile: ' + profileContent);
+  }
+  return lines.join('\\n');
+}
+
+function appendGenerationSettingsPrompt(message) {
+  const base = message.trim();
+  const settings = getGenerationSettingsPrompt();
+  return base ? base + '\\n\\n' + settings : settings;
+}
+
+function getSelectedAgentProfileContent() {
+  if (!agentProfile || !agentProfile.value) return '';
+  const selected = agentProfiles.find(profile => profile.id === agentProfile.value);
+  return selected && selected.content ? selected.content.trim() : '';
+}
+
+async function loadAgentProfiles() {
+  if (!agentProfile) return;
+  try {
+    const response = await fetch('/agent-profiles');
+    const payload = await response.json();
+    if (!response.ok) throw new Error(payload.error || 'Failed to load profiles');
+    agentProfiles = Array.isArray(payload.profiles) ? payload.profiles : [];
+    agentProfile.innerHTML = '<option value="">None</option>';
+    for (const profile of agentProfiles) {
+      const option = document.createElement('option');
+      option.value = profile.id;
+      option.textContent = profile.name || profile.fileName || profile.id;
+      agentProfile.appendChild(option);
+    }
+  } catch (error) {
+    agentProfiles = [];
+    agentProfile.innerHTML = '<option value="">None</option>';
+    appendChatMessage('Could not load profiles: ' + error.message, 'error');
+  }
 }
 
 async function sendChat() {
@@ -4248,6 +4482,25 @@ if (agentInputArea) {
     addAgentAttachments(event.dataTransfer ? event.dataTransfer.files : []);
   });
 }
+if (agentGenerationLength) {
+  updateGenerationLengthDisplay();
+  agentGenerationLength.addEventListener('input', updateGenerationLengthDisplay);
+}
+if (agentGenerationLengthValue) {
+  agentGenerationLengthValue.addEventListener('blur', commitGenerationLengthInput);
+  agentGenerationLengthValue.addEventListener('keydown', event => {
+    if (event.key === 'Enter') {
+      event.preventDefault();
+      commitGenerationLengthInput();
+      agentGenerationLengthValue.blur();
+    } else if (event.key === 'Escape') {
+      event.preventDefault();
+      updateGenerationLengthDisplay();
+      agentGenerationLengthValue.blur();
+    }
+  });
+}
+loadAgentProfiles();
 if (agentChatSend) {
   agentChatSend.addEventListener('click', sendChat);
 }
