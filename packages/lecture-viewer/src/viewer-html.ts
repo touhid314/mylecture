@@ -2117,6 +2117,32 @@ body.file-kind-mp4 .timeline-ruler {
 <script type="module">
 import { createLecturePlayer, lectureViewerVersion } from '/lecture-viewer/player/index.mjs';
 
+function createAgentClientId() {
+  if (crypto && typeof crypto.randomUUID === 'function') {
+    return crypto.randomUUID().replace(/-/g, '');
+  }
+  return Date.now().toString(36) + Math.random().toString(36).slice(2, 14);
+}
+
+function getAgentClientId() {
+  const key = 'mylecture.agentClientId';
+  let id = '';
+  try {
+    const nav = performance && performance.getEntriesByType ? performance.getEntriesByType('navigation')[0] : null;
+    const isReload = nav && nav.type === 'reload';
+    id = isReload ? sessionStorage.getItem(key) || '' : '';
+    if (!id) {
+      id = createAgentClientId();
+      sessionStorage.setItem(key, id);
+    }
+  } catch {
+    id = createAgentClientId();
+  }
+  return id;
+}
+
+const agentClientId = getAgentClientId();
+
 // DOM handles are grouped here because this generated page is intentionally
 // framework-free; each feature below mutates these nodes directly.
 const folderPathLabel = document.getElementById('folder-path');
@@ -3309,6 +3335,38 @@ function playNotificationSound(success = true) {
   }
 }
 
+function playAgentResponseRing() {
+  try {
+    const ctx = new (window.AudioContext || window.webkitAudioContext)();
+    const now = ctx.currentTime;
+    const gain = ctx.createGain();
+    gain.connect(ctx.destination);
+    gain.gain.setValueAtTime(0.0001, now);
+    gain.gain.exponentialRampToValueAtTime(0.055, now + 0.035);
+    gain.gain.exponentialRampToValueAtTime(0.0001, now + 0.58);
+
+    const first = ctx.createOscillator();
+    first.type = 'sine';
+    first.frequency.setValueAtTime(659.25, now);
+    first.connect(gain);
+    first.start(now);
+    first.stop(now + 0.34);
+
+    const second = ctx.createOscillator();
+    second.type = 'sine';
+    second.frequency.setValueAtTime(987.77, now + 0.11);
+    second.connect(gain);
+    second.start(now + 0.11);
+    second.stop(now + 0.58);
+
+    second.addEventListener('ended', () => {
+      ctx.close().catch(() => {});
+    });
+  } catch (err) {
+    // Browsers may block audio if the page has not received a user gesture.
+  }
+}
+
 // Resolve the current source HTML into deterministic timeline HTML.
 async function runResolve() {
   if (!isIndexHtmlKind(currentFileKind())) return;
@@ -4233,7 +4291,7 @@ async function uploadAgentAttachments(files) {
   if (!files.length) return [];
   const form = new FormData();
   files.forEach(file => form.append('files', file, file.name));
-  const response = await fetch('/agent-upload', {
+  const response = await fetch('/agent-upload?agentClientId=' + encodeURIComponent(agentClientId), {
     method: 'POST',
     body: form
   });
@@ -4407,7 +4465,7 @@ async function sendChat() {
 
   let logPollInterval = setInterval(async () => {
     try {
-      const logRes = await fetch('/agent-log');
+      const logRes = await fetch('/agent-log?agentClientId=' + encodeURIComponent(agentClientId));
       const logData = await logRes.json();
       const latestStep = getLatestStepFromLog(logData.log);
       if (latestStep) {
@@ -4427,6 +4485,7 @@ async function sendChat() {
         'content-type': 'application/json'
       },
       body: JSON.stringify({
+        agentClientId,
         message: taskMessage,
         currentFile: currentFilePath,
         currentDir: currentBrowserFolder
@@ -4440,7 +4499,11 @@ async function sendChat() {
       throw new Error(payload.error || 'Agent execution failed');
     }
     
+    if (payload.workspace) {
+      currentBrowserFolder = payload.workspace;
+    }
     appendChatMessage(payload.output || 'Done.', 'agent');
+    playAgentResponseRing();
   } catch (error) {
     removeThinking();
     if (!uploadCompleted) {
@@ -4462,7 +4525,11 @@ async function sendChat() {
       agentStatusTag.style.color = '';
     }
     
-    refreshFolderFiles();
+    if (currentBrowserFolder) {
+      browseFolder(currentBrowserFolder);
+    } else {
+      refreshFolderFiles();
+    }
   }
 }
 
@@ -4545,7 +4612,7 @@ if (agentChatStop) {
     agentChatStop.disabled = true;
     agentChatStop.textContent = 'Stopping...';
     try {
-      const response = await fetch('/stop-job', { method: 'POST' });
+      const response = await fetch('/stop-job?agentClientId=' + encodeURIComponent(agentClientId), { method: 'POST' });
       const payload = await response.json();
       if (!response.ok) throw new Error(payload.error || 'Failed to stop agent');
       appendChatMessage('Stopping agent...', 'error');
@@ -4561,7 +4628,7 @@ if (agentNewChat) {
   agentNewChat.addEventListener('click', async () => {
     if (confirm('Are you sure you want to clear this conversation and start a new chat?')) {
       try {
-        const response = await fetch('/agent-new-chat', { method: 'POST' });
+        const response = await fetch('/agent-new-chat?agentClientId=' + encodeURIComponent(agentClientId), { method: 'POST' });
         const payload = await response.json();
         if (!response.ok) throw new Error(payload.error || 'Failed to start new chat');
         if (agentBody) {

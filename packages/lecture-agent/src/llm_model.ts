@@ -885,13 +885,18 @@ export class LLM_Model {
         };
 
         try {
+            const systemParts: any[] = [];
             if (this.system_content) {
-                contents.push({ role: "system", parts: [{ text: this.system_content }] });
+                systemParts.push({ text: this.system_content });
             }
-
             for (const att of this.system_attachments) {
                 const file_ref = await _upload_google_attachment(att);
-                contents.push(file_ref);
+                systemParts.push({
+                    fileData: {
+                        fileUri: file_ref.uri,
+                        mimeType: file_ref.mimeType
+                    }
+                });
             }
 
             const history_to_send = keep_history ? this._get_trimmed_history() : [];
@@ -900,26 +905,42 @@ export class LLM_Model {
                 if (role === "assistant") {
                     role = "model";
                 }
-                contents.push({ role, parts: [{ text: msg.content }] });
-
+                const parts: any[] = [{ text: msg.content }];
                 const hist_att = this._normalize_attachments(msg.attachments || [], true);
                 for (const att of hist_att) {
                     const file_ref = await _upload_google_attachment(att);
-                    contents.push(file_ref);
+                    parts.push({
+                        fileData: {
+                            fileUri: file_ref.uri,
+                            mimeType: file_ref.mimeType
+                        }
+                    });
                 }
+                contents.push({ role, parts });
             }
 
             // User prompt
-            contents.push({ role: "user", parts: [{ text: prompt }] });
-
+            const userParts: any[] = [{ text: prompt }];
             for (const att of current_attachments) {
                 const file_ref = await _upload_google_attachment(att);
-                contents.push(file_ref);
+                userParts.push({
+                    fileData: {
+                        fileUri: file_ref.uri,
+                        mimeType: file_ref.mimeType
+                    }
+                });
             }
+            contents.push({ role: "user", parts: userParts });
 
             const generation_config: any = {};
             if (return_json) {
                 generation_config.responseMimeType = "application/json";
+            }
+            if (systemParts.length > 0) {
+                generation_config.systemInstruction = {
+                    role: "system",
+                    parts: systemParts
+                };
             }
 
             this.logger.debug("Sending request to Google Gemini API (Client models.generate_content)...");

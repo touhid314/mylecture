@@ -1,101 +1,469 @@
-# MyLecture IDE - Agent Navigation & Architecture Guide
+# MyLecture IDE - Repository Guide
 
-Welcome, Agent! This guide is designed to help you quickly understand the repository structure, data flows, and build pipelines of the MyLecture IDE.
+This repository is an npm workspaces monorepo for creating, previewing, editing, resolving, rendering, and publishing browser-authored lecture videos. Lectures are not authored as video timelines directly. They are authored as contract-compliant HTML files, then resolved into timed HTML with audio metadata, then rendered to MP4 through Playwright and ffmpeg.
 
----
+Use this file as the first orientation document before changing code.
 
-## 1. High-Level Architecture Flow
+## Mental Model
 
-```mermaid
-graph TD
-    A[User Prompt / Input] --> B[AI Coding Agent]
-    B -->|Generates index.html| C[Source HTML]
-    C -->|Processed by build-plan.ts| D[Resolved HTML]
-    D -->|Previews in| E[Interactive IDE Server]
-    D -->|Rendered by render-video.ts| F[Final MP4 Video]
-    
-    %% Audio generation during Resolve
-    D -.->|Generates narration via local ONNX/Cloud TTS| G[Audio Files .wav]
-    G -.->|Injected into| D
+The core loop is:
+
+```text
+user prompt or manual edit
+  -> lecture-agent writes/edits files in packages/lecture-agent/workspace/agent-workspace
+  -> IDE previews source/resolved HTML through lecture-viewer
+  -> build-plan resolves narration/audio/timeline into resolved*.html
+  -> render-video captures deterministic browser frames and muxes MP4
+  -> outputs are archived or published
 ```
 
----
+The browser IDE is a local control surface over those pieces. It does not run the agent in the browser. The IDE server receives chat messages, adds current file/folder context, starts the agent as a child process, streams logs, and refreshes files.
 
-## 2. Directory Structure & Key Files
+## Top-Level Layout
 
-* **`packages/`** - Monorepo workspaces
-  * **`packages/lecture-agent/`** - The AI Coding Agent
-    * `src/coding_agent.ts` - Main entry point for CLI and IDE chat sessions.
-    * `src/llm_model.ts` - LLM clients for Gemini and OpenAI (fallback mode).
-    * `src/validate_contract.cjs` - Fast VM & Playwright validator for checking the HTML contract.
-    * `system_prompt.md` - Core instructions defining how the agent writes HTML/visuals/scripts.
-    * `workspace/` - Workspace root for file operations when the agent runs.
-  * **`packages/lecture-viewer/`** - Frontend playback viewer
-    * `src/player/index.ts` - Core playback engine that controls scrubbing, timelines, and iframe messaging.
-* **`models/`** - Model assets directory
-  * `models/kokoro-onnx/` - Local ONNX weights, voices, and tokenizer JSON for the Kokoro TTS engine.
-* **`src/`** - Main pipeline scripts & CLIs
-  * `src/ide-server.ts` - Local HTTP server for the IDE. Serves the viewer UI, file browser, and proxies prompts to the coding agent.
-  * `src/build-plan.ts` - Reads source plans (`window.__VIDEO_PLAN__`), generates missing audio clips, measures duration via `ffprobe`, and outputs timeline-ready resolved HTML.
-  * `src/render-video.ts` - Uses Playwright in headless mode to capture frames deterministically, mixes audio cues using ffmpeg, and muxes them into a final MP4.
-  * `src/sync-versions.ts` - Version synchronizer script.
-* **`tests/`** - Fixtures and validation tests
-  * `tests/fixtures/` - Smoke test suites for Visual 3D animations, rendering, and contract synchronization.
-* **`outputs/`** - Generated outputs (ignored by git, located inside packages/workspace)
+```text
+src/
+  ide-server.ts          Local HTTP server for the IDE and agent bridge.
+  build-plan.ts          Resolves source HTML plans into timeline-ready HTML.
+  render-video.ts        Deterministic browser-frame renderer and MP4 muxer.
+  subtitle-burner.ts     Burns subtitles into video outputs.
+  sync-versions.ts       Keeps version constants/contracts synchronized.
+  utils/tts.py           Python TTS helper used by the resolve/render pipeline.
+  social/                Upload/token helper scripts.
 
----
+packages/
+  lecture-agent/         TypeScript coding agent and its workspace.
+  lecture-viewer/        Browser viewer/player UI packaged as generated HTML.
 
-## 3. Core Workflows & Commands
+tests/
+  fixtures/              Contract, render, visual, and plan-pipeline fixtures.
 
-### A. Setup & Environment
-Ensure you run `npm install` at the root directory to hoist all monorepo dependencies.
-Your root `.env` must contain:
-```env
-GOOGLE_API_KEY="your_gemini_key"
-OPENAI_API_KEY="your_openai_key"
-AGENT_MODEL="gemini-3.5-flash"  # Required for the Coding Agent
+docs/
+  research-demos/        Example outputs and experiments.
+  social-logo/           Branding images.
+
+.render/                 Temporary render/test artifacts. Ignored.
+outputs/                 Generated output archives. Ignored.
+models/                  Optional local model assets, such as Kokoro ONNX. Ignored.
 ```
 
-### B. Spawning the IDE
-```bash
+## Main Commands
+
+Run commands from the repository root unless noted.
+
+```powershell
+npm install
 npm run ide
+npm run agent -- "Create a short lecture about binary search"
+npm run chat
+npm run build:plan -- --input path\to\index.html --out path\to\resolved.html
+npm run render:video -- --html path\to\index.html --out output.mp4
+npm test
+npx tsc --noEmit
 ```
-Runs the IDE on `http://127.0.0.1:4307/`. The IDE server compiles the viewer, synchronizes versions, and communicates with the agent script using standard input (`stdin`) to avoid Windows CLI quoting issues.
 
-### C. Resolution Phase (Source HTML -> Resolved HTML)
-* **Goal**: Measure narration text lengths and link real audio.
-* **Triggered by**: `build-plan.ts` (automatically called by `render-video.ts` or run manually via `npm run build:plan`).
-* **Audio Gen**: Calls Python `src/utils/tts.py` to create WAV files. Uses the local Kokoro ONNX model at `models/kokoro-onnx/` by default.
+`npm run ide` runs:
 
-### D. Rendering Phase (Resolved HTML -> MP4)
-* **Goal**: Capture frame-by-frame screenshots and mux video.
-* **Triggered by**: `render-video.ts` (run manually via `npm run render:video`).
-* **Frame Capturing**: Spawns multiple parallel Playwright pages to call `window.renderAt(time)` deterministically.
-* **Muxing**: Invokes `ffmpeg` to stitch screenshots and mix delays/delays of narration clips.
+```text
+npm run version:sync
+npm run build:viewer
+node --import tsx src/ide-server.ts
+```
 
----
+The default IDE URL is `http://127.0.0.1:4307/`. If that port is busy, pass `-- --port <port>`.
 
-## 4. HTML Input Contract
+## Environment
 
-Any HTML file generated by the agent must comply with **Version 0.2** of the HTML input contract.
+Root `.env` is loaded by the agent by walking upward from `packages/lecture-agent/src/coding_agent.ts`.
 
-### Required Global Objects:
-1. **`window.__VIDEO_METADATA__`**:
-   ```javascript
-   window.__VIDEO_METADATA__ = {
-     contractVersion: "0.2",
-     title: "Topic Name",
-     aspectRatio: "16:9" // or "9:16"
-   };
+Common variables:
+
+```env
+GOOGLE_API_KEY="..."
+OPENAI_API_KEY="..."
+AGENT_MODEL="gemini-3.5-flash"
+LOG_FULL_LLM_PROMPT="True"
+```
+
+Gemini models use native Gemini function calling. Model names starting with `gpt-` use the OpenAI/JSON fallback path through `packages/lecture-agent/src/llm_model.ts`.
+
+## IDE Server
+
+[src/ide-server.ts](src/ide-server.ts) is the local-only HTTP server bound to `127.0.0.1`.
+
+Primary responsibilities:
+
+- Serves the main viewer HTML from `packages/lecture-viewer/src/index.ts`.
+- Serves selected local files under `/files/...`.
+- Serves package viewer assets under `/lecture-viewer/...`.
+- Maintains current viewer state: selected file, viewport width, viewport height, version.
+- Browses folders and sibling files for the left/sidebar file browser.
+- Opens folders and files through native OS affordances.
+- Runs `build-plan.ts` for resolve jobs.
+- Runs `render-video.ts` for render jobs.
+- Runs publish commands against the sibling website repo.
+- Starts/stops the coding agent as a child process.
+- Buffers agent stdout/stderr for `/agent-log`.
+- Watches the agent workspace and live-syncs generated file changes to the active output folder.
+
+Important routes:
+
+```text
+/ or /viewer              Serve IDE shell.
+/viewer-state             Poll selected-file state.
+/open-file                Change selected preview file.
+/folder-files             List files next to the selected file.
+/browse-folder            Browse arbitrary local directories.
+/open-folder              Open a folder in the native file explorer.
+/resolve-file             Resolve index*.html to resolved*.html.
+/render-file              Render current lecture HTML to MP4.
+/stop-job                 Stop active resolve/render/agent/publish job.
+/agent-new-chat           Kill active agent, clear agent workspace, mark next agent run new-session.
+/agent-upload             Save browser-selected attachments for the agent.
+/agent-profiles           Return prompt profile markdown files.
+/agent-chat               Send IDE context plus user message to the coding agent.
+/agent-log                Return buffered agent process logs.
+/pick                     Windows-native file picker.
+/list-courses             Ask website admin script for courses.
+/publish-lecture          Publish rendered lecture folder to website repo.
+```
+
+Long-running jobs share one `activeJob` slot. `killProcessTree` is used on Windows so child processes do not remain orphaned.
+
+## Lecture Viewer Package
+
+`packages/lecture-viewer/` contains the browser player and generated IDE HTML.
+
+Key files:
+
+```text
+packages/lecture-viewer/src/viewer-html.ts       Main IDE/viewer HTML template.
+packages/lecture-viewer/src/player/index.ts      Player runtime and timeline control.
+packages/lecture-viewer/src/index.ts             Export entry.
+packages/lecture-viewer/dist/                    Built package output.
+```
+
+When editing `packages/lecture-viewer/src/*`, run:
+
+```powershell
+npm --prefix packages/lecture-viewer run build
+```
+
+The server imports source directly, but `dist/` is part of the package output and should be kept in sync when viewer source changes.
+
+### Viewer UI
+
+The IDE has:
+
+- Preview frame for HTML/MP4/document files.
+- Timeline and playback controls.
+- File/folder browser.
+- Resolve/render/publish controls.
+- Agent chat sidebar.
+
+The agent chat sidebar supports:
+
+- Text prompts.
+- Drag/drop image/PDF/video attachments.
+- File-picker attachments.
+- Clipboard image paste into the prompt box.
+- Aspect ratio selection.
+- Logarithmic generation length slider from `5s` to `15:00`.
+- Editable length text input; accepted examples include `90`, `90s`, `1:30`, `2m`.
+- `AI embed sub` checkbox.
+- Prompt profile dropdown loaded from markdown files.
+
+The generation controls are appended to the prompt sent to the agent, not displayed in the visible chat bubble:
+
+```text
+if the user query is for video generation then follow this:
+aspect ratio: <selected>
+generation length: <selected>
+embed subtitle in video: <yes/no>
+profile: <profile markdown content, only when selected>
+```
+
+If profile is `None`, no `profile:` line is appended.
+
+## Agent Profiles
+
+Profiles are markdown files stored under:
+
+```text
+packages/lecture-agent/workspace/.agents/mylecture-profiles/*.md
+```
+
+The IDE server exposes them through `/agent-profiles`. The viewer loads the list at startup and stores each profile's content in browser memory. Selecting a profile appends its file content to the agent prompt under `profile: ...`.
+
+The default profile is `None`.
+
+## Agent Attachments
+
+The lecture agent itself understands explicit attachment directives:
+
+```text
+[(attachment: C:\absolute\path\to\file.png)]
+```
+
+The IDE chat hides that syntax from the user:
+
+1. Browser receives files from drag/drop, picker, or clipboard image paste.
+2. Browser calls `/agent-upload` with multipart form data.
+3. `src/ide-server.ts` saves files under:
+
+   ```text
+   packages/lecture-agent/.tmp/uploads/
    ```
-2. **`window.__VIDEO_PLAN__`**: Array of segments. Allowed `kind`s:
-   - `narration+visual`: Needs `text` and `audio` (e.g., `"audio/clip1.wav"`).
-   - `visual-only`: Needs `duration` (in seconds).
-3. **`window.__RENDER_SECTION__`**:
-   ```javascript
-   window.__RENDER_SECTION__ = function renderSection(segment, localTime, globalTime) {
-     // Compute visual positions, update elements, or draw on canvas.
-     // CSS animations/transitions are prohibited. All motion must derive from localTime/globalTime.
-   };
-   ```
 
+4. Server returns absolute file paths.
+5. Viewer appends directives to the message sent to `/agent-chat`.
+6. `packages/lecture-agent/src/prompt_builder.ts` extracts those directives.
+7. `packages/lecture-agent/src/coding_agent.ts` uploads files to the model provider separately from prompt text.
+
+Supported upload extensions:
+
+```text
+images: .png, .jpg, .jpeg, .webp, .bmp
+documents: .pdf
+videos: .mp4, .mpeg, .mpg, .mov, .avi, .webm, .wmv, .3gp, .3gpp, .flv
+```
+
+Backticked paths, quoted paths, and plain paths do not trigger binary upload. They are only text.
+
+## Lecture Agent Package
+
+`packages/lecture-agent/` is a TypeScript coding agent with local workspace tools.
+
+Key files:
+
+```text
+packages/lecture-agent/src/coding_agent.ts
+packages/lecture-agent/src/llm_model.ts
+packages/lecture-agent/src/prompt_builder.ts
+packages/lecture-agent/src/llm_prompt_logger.ts
+packages/lecture-agent/src/prompts/system_prompt.md
+packages/lecture-agent/src/prompts/pre-user-response-prompt.md
+packages/lecture-agent/src/tools/
+packages/lecture-agent/src/tools/utils/workspace.ts
+```
+
+Main tools:
+
+```text
+read
+write
+edits
+mkdir
+list_dir
+del
+prepare_user_response
+```
+
+`cmd` exists in source but is intentionally not part of the normal registered schema in the current agent behavior. Check current schemas before assuming it is available to the model.
+
+### Agent Workspace
+
+The agent's editable workspace is:
+
+```text
+packages/lecture-agent/workspace/agent-workspace/
+```
+
+Tool file operations are restricted to that folder. The shared prompt/resources area under `packages/lecture-agent/workspace/.agents/` may be read and inlined by prompt-building code, but normal generated lecture files go in `agent-workspace`.
+
+New chat behavior:
+
+- IDE `New Chat` calls `/agent-new-chat`.
+- The server clears `agent-workspace`.
+- The next agent process receives `--new-session`/`AGENT_NEW_SESSION=True`.
+- Restarting the IDE also marks the first agent request as a new session.
+
+Follow-up prompts do not clear `agent-workspace`.
+
+### Archiving And Live Sync
+
+After a completed agent response, the current `agent-workspace` is archived under:
+
+```text
+outputs/<title-slug>-<unique-id>/
+```
+
+The workspace is not cleared after archiving. It remains the active working directory for follow-ups.
+
+The IDE server also watches `agent-workspace`. If there is an active output folder, changed files are copied there quickly so the viewer can update while the agent works.
+
+### Final Response Isolation
+
+The working agent sees sensitive operational context: system instructions, tool results, file contents, generated code, command output, workspace paths, and logs.
+
+The final user-facing answer is isolated:
+
+1. Working agent must call `prepare_user_response`.
+2. Runtime treats that tool as a boundary.
+3. A separate LLM call is made with:
+   - `src/prompts/pre-user-response-prompt.md`
+   - raw user queries with IDE `[Context: ...]` blocks stripped
+4. The final response call does not receive tool outputs, generated files, hidden prompts, paths, or working transcript.
+
+If the model tries to answer directly without `prepare_user_response`, the runtime does not return the direct answer. It injects a correction telling the model to call `prepare_user_response` and continues the tool loop.
+
+## Prompt Builder
+
+`packages/lecture-agent/src/prompt_builder.ts` handles:
+
+- Inlining backticked text/code files as UTF-8 into prompts.
+- Stripping `[(attachment: ...)]` directives from prompt text.
+- Validating supported image/PDF/video attachments.
+- Returning attachment metadata for provider-specific upload.
+
+Binary uploads are attached to the model separately. They are not pasted into the text prompt.
+
+## HTML Lecture Contract
+
+Generated lecture HTML must follow the MyLecture HTML input contract, currently v0.2. The canonical contract lives under the agent workspace resources:
+
+```text
+packages/lecture-agent/workspace/.agents/mylecture-contracts/html-input-contract.md
+```
+
+Typical globals:
+
+```js
+window.__VIDEO_METADATA__ = {
+  contractVersion: "0.2",
+  title: "Lecture Title",
+  aspectRatio: "16:9"
+};
+
+window.__VIDEO_PLAN__ = [
+  // narration+visual, visual-only, interactive, or game segments
+];
+
+window.__RENDER_SECTION__ = function renderSection(segment, localTime, globalTime) {
+  // Deterministic visual state based on time.
+};
+```
+
+Rendering expects deterministic visuals. Do not rely on wall-clock time, CSS animations, random state, or unbounded async behavior for frame output. Motion should be computed from `localTime`/`globalTime`.
+
+## Resolve Pipeline
+
+[src/build-plan.ts](src/build-plan.ts) reads a source HTML file, extracts the video plan, generates or reuses narration audio, measures durations, and writes resolved HTML.
+
+Common inputs:
+
+```text
+index.html      Source file.
+resolved.html   Timeline-ready output.
+audio/*.wav     Generated narration clips.
+```
+
+Resolve can be called from the IDE or manually:
+
+```powershell
+npm run build:plan -- --input path\to\index.html --out path\to\resolved.html
+```
+
+TTS provider/voice/speed are normalized in `ide-server.ts` before invoking `build-plan.ts`. Kokoro-style voices use local Kokoro; OpenAI and Google voice names route to cloud providers.
+
+## Render Pipeline
+
+[src/render-video.ts](src/render-video.ts) uses Playwright to load HTML, evaluate deterministic frame states, capture frames, and mux audio/video with ffmpeg.
+
+Common command:
+
+```powershell
+npm run render:video -- --html path\to\index.html --out output.mp4
+```
+
+Useful options include:
+
+```text
+--width <pixels>
+--height <pixels>
+--fps <number>
+--max-frames <number>
+--skip-video
+--workers <number>
+--tts-voice <voice>
+--tts-speed <number>
+```
+
+The root test scripts exercise build, render, visual-only, and narration paths.
+
+## Publishing
+
+The IDE publish flow is in `src/ide-server.ts`.
+
+It assumes a sibling website repository:
+
+```text
+../mylecture-website
+```
+
+The IDE calls website admin scripts such as:
+
+```text
+scripts/admin.mjs list
+scripts/admin.mjs upload-lecture ...
+```
+
+The server sends metadata such as course, slug, title, description, module, order, thumbnail, published state, and source directory.
+
+## Testing And Validation
+
+Common checks:
+
+```powershell
+npx tsc --noEmit
+npm --prefix packages/lecture-viewer run build
+npm test
+```
+
+Package-specific agent tests are controlled by `packages/lecture-agent/package.json`. If a package test references a missing smoke file, inspect current uncommitted changes before recreating or deleting files.
+
+Renderer smoke scripts:
+
+```powershell
+npm run test:build
+npm run test:render
+npm run test:visual
+npm run test:narration
+```
+
+When changing viewer source, always rebuild `packages/lecture-viewer/dist/`.
+
+When changing agent prompt/runtime behavior, test both:
+
+- Gemini native function-calling path.
+- JSON fallback path if the changed code touches generic model parsing or prompt schemas.
+
+## Git And Generated Files
+
+Be careful with this repo because agent output and test output can produce many files.
+
+Ignored or generated areas include:
+
+```text
+node_modules/
+.render/
+.tmp/
+outputs/
+models/kokoro-onnx/
+packages/lecture-agent/.tmp/
+packages/lecture-agent/workspace/agent-workspace/
+```
+
+Do not revert unrelated local changes. This repo is often used interactively through the IDE and agent, so uncommitted changes may belong to the user or an active generation.
+
+## Development Notes For Future Agents
+
+- Prefer existing patterns in `src/ide-server.ts` and `packages/lecture-viewer/src/viewer-html.ts`; the viewer is a single generated HTML template, not a component app.
+- Use `rg` for search and `apply_patch` for manual edits.
+- After viewer UI edits, run `npm --prefix packages/lecture-viewer run build`.
+- After TypeScript edits, run `npx tsc --noEmit`.
+- For local IDE behavior, inspect both server route code and browser template code.
+- Keep browser-visible chat text separate from hidden prompt augmentation.
+- Keep profile `None` behavior silent; do not append `profile:none`.
+- Keep binary attachments as files/directives; do not inline them into prompt text.
+- Keep final response isolation intact. The working agent should signal completion with `prepare_user_response`; the runtime generates the user-facing answer separately.

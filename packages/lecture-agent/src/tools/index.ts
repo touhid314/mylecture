@@ -11,12 +11,8 @@ export {
     BASE_DIR,
     WORKSPACE_DIR,
     ROOT,
-    OUTPUTS_DIR,
-    archive_agent_workspace,
-    clear_agent_workspace,
+    create_new_session_workspace,
     resolve_workspace_path,
-    reset_active_output_folder,
-    sync_workspace_to_outputs,
 } from './utils/workspace.js';
 
 import { tool_read } from './read.js';
@@ -27,7 +23,6 @@ import { tool_mkdir } from './mkdir.js';
 import { tool_list_dir } from './list_dir.js';
 import { tool_del } from './del.js';
 import { should_validate_contract, validate_index_html_contract } from './utils/html_contract.js';
-import { sync_workspace_to_outputs } from './utils/workspace.js';
 
 export function execute_tool(name: string, argumentsObj: any): string {
     if (!argumentsObj || typeof argumentsObj !== 'object') {
@@ -48,14 +43,8 @@ export function execute_tool(name: string, argumentsObj: any): string {
             result = tool_list_dir(argumentsObj.path);
         } else if (name === "del") {
             result = tool_del(argumentsObj.paths);
-        } else if (name === "prepare_user_response") {
-            result = "pre-user-response signal accepted";
         } else {
             return `ERROR: unknown tool ${name}`;
-        }
-
-        if (["write", "edits", "mkdir", "del"].includes(name) && !result.startsWith("ERROR:")) {
-            sync_workspace_to_outputs();
         }
 
         return result;

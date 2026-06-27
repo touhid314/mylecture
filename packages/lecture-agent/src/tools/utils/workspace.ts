@@ -1,19 +1,113 @@
 import fs from 'fs';
 import path from 'path';
-import { randomUUID } from 'crypto';
 import { fileURLToPath } from 'url';
+import dotenv from 'dotenv';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
+// Load env
+function loadEnv() {
+    let dir = __dirname;
+    while (dir && dir !== path.parse(dir).root) {
+        const envPath = path.join(dir, '.env');
+        if (fs.existsSync(envPath)) {
+            dotenv.config({ path: envPath, quiet: true });
+            return;
+        }
+        dir = path.dirname(dir);
+    }
+    dotenv.config({ quiet: true });
+}
+loadEnv();
+
 export const BASE_DIR = path.resolve(__dirname, '..', '..', '..');
 export const WORKSPACE_DIR = path.join(BASE_DIR, 'workspace');
-export const ROOT = path.resolve(WORKSPACE_DIR, 'agent-workspace');
-export const OUTPUTS_DIR = path.join(WORKSPACE_DIR, 'outputs');
+export let ROOT: string;
+
+function clean_env_path(value: string | undefined): string {
+    let cleaned = value || "";
+    cleaned = cleaned.split('#')[0].trim();
+    if ((cleaned.startsWith('"') && cleaned.endsWith('"')) || (cleaned.startsWith("'") && cleaned.endsWith("'"))) {
+        cleaned = cleaned.slice(1, -1).trim();
+    }
+    return cleaned;
+}
+
+function explicit_agent_workspace(): string {
+    const explicitWorkspace = clean_env_path(process.env.AGENT_WORKSPACE);
+    if (explicitWorkspace) {
+        return path.resolve(explicitWorkspace);
+    }
+    return "";
+}
+
+export function get_agent_workspace_dir(): string {
+    const explicitWorkspace = explicit_agent_workspace();
+    if (explicitWorkspace) {
+        return explicitWorkspace;
+    }
+    const dir = clean_env_path(process.env.AGENT_WORKSPACE_DIR);
+    if (dir) {
+        return path.resolve(dir);
+    }
+    return path.join(WORKSPACE_DIR, 'agent-workspace');
+}
+
+export function create_new_session_workspace(): string {
+    const explicitWorkspace = explicit_agent_workspace();
+    let folderPath = explicitWorkspace;
+    if (!folderPath) {
+        const baseDir = get_agent_workspace_dir();
+        fs.mkdirSync(baseDir, { recursive: true });
+
+        const now = new Date();
+        const pad = (num: number) => String(num).padStart(2, '0');
+        const hh = pad(now.getHours());
+        const min = pad(now.getMinutes());
+        const ss = pad(now.getSeconds());
+        const dd = pad(now.getDate());
+        const mm = pad(now.getMonth() + 1);
+        const yyyy = now.getFullYear();
+        const randomSuffix = Math.random().toString(36).substring(2, 8);
+        const folderName = `${hh}-${min}-${ss}-${dd}-${mm}-${yyyy}-${randomSuffix}`;
+        folderPath = path.resolve(baseDir, folderName);
+    }
+    fs.mkdirSync(folderPath, { recursive: true });
+
+    console.log(`[Workspace] Created new session folder: ${folderPath}`);
+
+    ROOT = folderPath;
+    if (process.cwd() !== ROOT) {
+        try {
+            process.chdir(ROOT);
+        } catch (err) {
+            console.error(`Failed to change directory to ${ROOT}:`, err);
+        }
+    }
+
+    return folderPath;
+}
+
+export function get_active_workspace(): string {
+    const workspace = get_agent_workspace_dir();
+    fs.mkdirSync(workspace, { recursive: true });
+    return workspace;
+}
+
+ROOT = get_active_workspace();
+
+// Change CWD to ROOT to ensure agent runs in the active workspace
+if (process.cwd() !== ROOT) {
+    try {
+        process.chdir(ROOT);
+    } catch (err) {
+        console.error(`Failed to change directory to ${ROOT}:`, err);
+    }
+}
 
 export function ensure_workspace_dirs(): void {
     fs.mkdirSync(ROOT, { recursive: true });
-    fs.mkdirSync(OUTPUTS_DIR, { recursive: true });
 }
 
 ensure_workspace_dirs();
@@ -24,206 +118,4 @@ export function resolve_workspace_path(filePath: string): string {
         throw new Error(`path escapes workspace: ${filePath}`);
     }
     return target;
-}
-
-export function clear_agent_workspace(): void {
-    const resolvedRoot = path.resolve(ROOT);
-    if (resolvedRoot !== ROOT || resolvedRoot === path.parse(resolvedRoot).root) {
-        throw new Error(`refusing to clear unsafe workspace path: ${ROOT}`);
-    }
-
-    fs.mkdirSync(ROOT, { recursive: true });
-    for (const entry of fs.readdirSync(ROOT)) {
-        fs.rmSync(path.join(ROOT, entry), { recursive: true, force: true });
-    }
-}
-
-function slugify_title(title: string): string {
-    return title
-        .normalize("NFKD")
-        .replace(/[\u0300-\u036f]/g, "")
-        .toLowerCase()
-        .replace(/[^a-z0-9]+/g, "-")
-        .replace(/^-+|-+$/g, "")
-        .substring(0, 80);
-}
-
-function extract_title_from_html(content: string): string | null {
-    const metadataTitleMatch = content.match(/__VIDEO_METADATA__\s*=\s*\{[\s\S]*?\btitle\s*:\s*(['"`])([\s\S]*?)\1/);
-    if (metadataTitleMatch && metadataTitleMatch[2].trim()) {
-        return metadataTitleMatch[2].trim();
-    }
-
-    const documentTitleMatch = content.match(/<title[^>]*>([\s\S]*?)<\/title>/i);
-    if (documentTitleMatch && documentTitleMatch[1].trim()) {
-        return documentTitleMatch[1].replace(/<[^>]+>/g, "").trim();
-    }
-
-    return null;
-}
-
-function archive_title_slug(): string | null {
-    for (const htmlName of ["index.html", "index1.html"]) {
-        const htmlPath = path.join(ROOT, htmlName);
-        if (!fs.existsSync(htmlPath) || !fs.statSync(htmlPath).isFile()) {
-            continue;
-        }
-        const title = extract_title_from_html(fs.readFileSync(htmlPath, 'utf8'));
-        if (!title) {
-            continue;
-        }
-        const slug = slugify_title(title);
-        if (slug) {
-            return slug;
-        }
-    }
-    return null;
-}
-
-let activeOutputFolder: string | null = null;
-let activeOutputFolderHasSlug = false;
-
-function active_output_pointer_path(): string {
-    return path.join(WORKSPACE_DIR, '.active-output-folder');
-}
-
-function is_path_inside(parentDir: string, childPath: string): boolean {
-    const relative = path.relative(path.resolve(parentDir), path.resolve(childPath));
-    return relative === "" || (!!relative && !relative.startsWith("..") && !path.isAbsolute(relative));
-}
-
-function load_active_output_folder_from_pointer(): boolean {
-    const ptrFile = active_output_pointer_path();
-    if (!fs.existsSync(ptrFile)) {
-        return false;
-    }
-
-    const pointedPath = fs.readFileSync(ptrFile, 'utf8').trim();
-    if (!pointedPath) {
-        return false;
-    }
-
-    const resolvedPath = path.resolve(pointedPath);
-    if (!is_path_inside(OUTPUTS_DIR, resolvedPath)) {
-        return false;
-    }
-
-    fs.mkdirSync(resolvedPath, { recursive: true });
-    activeOutputFolder = resolvedPath;
-    activeOutputFolderHasSlug = !/^[a-z0-9]+-[a-f0-9]{8}$/i.test(path.basename(resolvedPath));
-    return true;
-}
-
-export function get_active_output_folder(): string {
-    if (!activeOutputFolder) {
-        if (load_active_output_folder_from_pointer()) {
-            return activeOutputFolder as string;
-        }
-
-        const uniqueId = `${Date.now().toString(36)}-${randomUUID().slice(0, 8)}`;
-        const slug = archive_title_slug();
-        if (slug) {
-            activeOutputFolderHasSlug = true;
-            const archiveName = `${slug}-${uniqueId}`;
-            activeOutputFolder = path.resolve(OUTPUTS_DIR, archiveName);
-        } else {
-            activeOutputFolderHasSlug = false;
-            activeOutputFolder = path.resolve(OUTPUTS_DIR, uniqueId);
-        }
-        fs.mkdirSync(activeOutputFolder, { recursive: true });
-
-        // Save pointer to the active output folder
-        try {
-            fs.writeFileSync(active_output_pointer_path(), activeOutputFolder, 'utf8');
-        } catch {}
-    } else if (!activeOutputFolderHasSlug) {
-        const slug = archive_title_slug();
-        if (slug) {
-            const uniqueId = path.basename(activeOutputFolder);
-            const archiveName = `${slug}-${uniqueId}`;
-            const newPath = path.resolve(OUTPUTS_DIR, archiveName);
-            if (fs.existsSync(activeOutputFolder)) {
-                try {
-                    fs.renameSync(activeOutputFolder, newPath);
-                    activeOutputFolder = newPath;
-                    activeOutputFolderHasSlug = true;
-
-                    // Update pointer with renamed path
-                    try {
-                        fs.writeFileSync(active_output_pointer_path(), activeOutputFolder, 'utf8');
-                    } catch {}
-                } catch (err) {
-                    // Ignore rename errors if something is locking the folder
-                }
-            }
-        }
-    }
-    return activeOutputFolder;
-}
-
-export function reset_active_output_folder(): void {
-    activeOutputFolder = null;
-    activeOutputFolderHasSlug = false;
-    try {
-        const ptrFile = active_output_pointer_path();
-        if (fs.existsSync(ptrFile)) {
-            fs.unlinkSync(ptrFile);
-        }
-    } catch {}
-}
-
-function sync_dir_recursive(srcDir: string, destDir: string): void {
-    if (!fs.existsSync(destDir)) {
-        fs.mkdirSync(destDir, { recursive: true });
-    }
-
-    // 1. Copy/update from src to dest
-    const srcEntries = fs.readdirSync(srcDir, { withFileTypes: true });
-    for (const entry of srcEntries) {
-        const srcPath = path.join(srcDir, entry.name);
-        const destPath = path.join(destDir, entry.name);
-
-        if (entry.isDirectory()) {
-            sync_dir_recursive(srcPath, destPath);
-        } else if (entry.isFile()) {
-            fs.copyFileSync(srcPath, destPath);
-        }
-    }
-
-    // 2. Remove extra files/folders in dest that are not in src
-    if (fs.existsSync(destDir)) {
-        const destEntries = fs.readdirSync(destDir, { withFileTypes: true });
-        for (const entry of destEntries) {
-            const srcPath = path.join(srcDir, entry.name);
-            const destPath = path.join(destDir, entry.name);
-
-            if (!fs.existsSync(srcPath)) {
-                try {
-                    fs.rmSync(destPath, { recursive: true, force: true });
-                } catch (err) {
-                    console.error(`Warning: failed to remove ${destPath}:`, err);
-                }
-            }
-        }
-    }
-}
-
-export function sync_workspace_to_outputs(): void {
-    fs.mkdirSync(OUTPUTS_DIR, { recursive: true });
-    fs.mkdirSync(ROOT, { recursive: true });
-    const dest = get_active_output_folder();
-    sync_dir_recursive(ROOT, dest);
-}
-
-export function archive_agent_workspace(): string | null {
-    fs.mkdirSync(OUTPUTS_DIR, { recursive: true });
-    fs.mkdirSync(ROOT, { recursive: true });
-
-    const entries = fs.readdirSync(ROOT);
-    if (entries.length === 0) {
-        return null;
-    }
-
-    sync_workspace_to_outputs();
-    return get_active_output_folder();
 }

@@ -15,4 +15,6 @@ models/kokoro-onnx/
 trash/
 .logs/
 task_plan.md
-*.wav
+*.
+gens/
+docs/research-demos/

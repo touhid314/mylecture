@@ -15,6 +15,96 @@ import path from 'node:path';
 import { createViewerHtml } from '../packages/lecture-viewer/src/index.ts';
 
 const rootDir = process.cwd();
+
+// Load .env
+function loadEnv() {
+  const envPath = path.resolve(rootDir, '.env');
+  if (existsSync(envPath)) {
+    const content = readFileSync(envPath, 'utf8');
+    for (const line of content.split(/\r?\n/)) {
+      const trimmed = line.trim();
+      if (!trimmed || trimmed.startsWith('#')) continue;
+      const match = trimmed.match(/^([^=]+)=(.*)$/);
+      if (match) {
+        const key = match[1].trim();
+        let val = match[2].split('#')[0].trim();
+        if ((val.startsWith('"') && val.endsWith('"')) || (val.startsWith("'") && val.endsWith("'"))) {
+          val = val.slice(1, -1).trim();
+        }
+        process.env[key] = val;
+      }
+    }
+  }
+}
+loadEnv();
+
+const agentClientStates = new Map();
+
+function normalizeAgentClientId(value) {
+  const id = String(value || '').trim();
+  return /^[a-zA-Z0-9_-]{8,80}$/.test(id) ? id : 'default';
+}
+
+function getAgentState(agentClientId) {
+  const id = normalizeAgentClientId(agentClientId);
+  let state = agentClientStates.get(id);
+  if (!state) {
+    state = {
+      id,
+      currentWorkspace: '',
+      activeJob: null,
+      log: '',
+      pendingNewSession: true
+    };
+    agentClientStates.set(id, state);
+  }
+  return state;
+}
+
+function getAgentWorkspaceDir() {
+  let dir = process.env.AGENT_WORKSPACE_DIR;
+  if (dir) {
+    dir = dir.split('#')[0].trim();
+    if ((dir.startsWith('"') && dir.endsWith('"')) || (dir.startsWith("'") && dir.endsWith("'"))) {
+      dir = dir.slice(1, -1).trim();
+    }
+    return path.resolve(dir);
+  }
+  return path.resolve(rootDir, 'packages/lecture-agent/workspace');
+}
+
+function createNewSessionWorkspace(agentClientId = 'default') {
+  const state = getAgentState(agentClientId);
+  const baseDir = getAgentWorkspaceDir();
+  mkdirSync(baseDir, { recursive: true });
+
+  const now = new Date();
+  const pad = (num) => String(num).padStart(2, '0');
+  const hh = pad(now.getHours());
+  const min = pad(now.getMinutes());
+  const ss = pad(now.getSeconds());
+  const dd = pad(now.getDate());
+  const mm = pad(now.getMonth() + 1);
+  const yyyy = now.getFullYear();
+  const randomSuffix = Math.random().toString(36).substring(2, 8);
+  const folderName = `${hh}-${min}-${ss}-${dd}-${mm}-${yyyy}-${randomSuffix}`;
+  const folderPath = path.resolve(baseDir, folderName);
+
+  mkdirSync(folderPath, { recursive: true });
+
+  state.currentWorkspace = folderPath;
+  console.log(`[Session] Created new session folder: ${folderPath}`);
+  return folderPath;
+}
+
+function agentWorkspaceRoot(agentClientId = 'default') {
+  const state = getAgentState(agentClientId);
+  if (state.currentWorkspace) {
+    return state.currentWorkspace;
+  }
+  return createNewSessionWorkspace(agentClientId);
+}
+
 const defaultPort = 4307;
 
 // Source files without resolved timelines use this estimate for preview timing.
@@ -237,13 +327,9 @@ function listFolderFiles(filePath) {
 
 // Default file browser location prefers the coding agent output folder when present.
 function defaultBrowserFolder() {
-  const workspaceTargetPath = path.join(rootDir, 'packages/lecture-agent/workspace/agent-workspace');
+  const workspaceTargetPath = getAgentWorkspaceDir();
   if (existsSync(workspaceTargetPath) && statSync(workspaceTargetPath).isDirectory()) {
     return workspaceTargetPath;
-  }
-  const siblingTargetPath = 'C:\\Users\\touhi\\OneDrive\\Desktop\\mylecture\\lecture-agent\\workspace\\agent-workspace';
-  if (existsSync(siblingTargetPath) && statSync(siblingTargetPath).isDirectory()) {
-    return siblingTargetPath;
   }
   return rootDir;
 }
@@ -323,32 +409,7 @@ function openFolder(filePath) {
   return openFolderPath(folderPath);
 }
 
-function agentWorkspaceRoot() {
-  const workspaceAgentRoot = path.resolve(rootDir, 'packages/lecture-agent/workspace/agent-workspace');
-  if (existsSync(path.resolve(rootDir, 'packages/lecture-agent/src/coding_agent.ts'))) {
-    return workspaceAgentRoot;
-  }
-  return path.resolve(rootDir, '../lecture-agent/workspace/agent-workspace');
-}
-
-function clearAgentWorkspace() {
-  const workspacePath = agentWorkspaceRoot();
-  if (workspacePath === path.parse(workspacePath).root) {
-    throw new Error(`Refusing to clear unsafe workspace path: ${workspacePath}`);
-  }
-  mkdirSync(workspacePath, { recursive: true });
-  for (const entry of readdirSync(workspacePath)) {
-    rmSync(path.join(workspacePath, entry), { recursive: true, force: true });
-  }
-}
-
-function activeFolderFilePath() {
-  const workspaceAgentRoot = path.resolve(rootDir, 'packages/lecture-agent/workspace');
-  if (existsSync(path.resolve(rootDir, 'packages/lecture-agent/src/coding_agent.ts'))) {
-    return path.join(workspaceAgentRoot, '.active-output-folder');
-  }
-  return path.resolve(rootDir, '../lecture-agent/workspace/.active-output-folder');
-}
+// Workspace directories are dynamically set and managed via active pointers at the top of the file
 
 function agentUploadRoot() {
   return path.resolve(rootDir, 'packages/lecture-agent/.tmp/uploads');
@@ -466,80 +527,7 @@ async function saveAgentUploads(request) {
   return saved;
 }
 
-function getActiveOutputFolder() {
-  const filePath = activeFolderFilePath();
-  if (existsSync(filePath)) {
-    try {
-      return readFileSync(filePath, 'utf8').trim();
-    } catch {
-      return null;
-    }
-  }
-  return null;
-}
-
-function startWorkspaceSyncWatcher() {
-  const agentWorkspace = agentWorkspaceRoot();
-  if (!existsSync(agentWorkspace)) {
-    try {
-      mkdirSync(agentWorkspace, { recursive: true });
-    } catch {}
-  }
-
-  const syncQueue = new Map();
-
-  console.log(`[Watcher] Starting file watcher on: ${agentWorkspace}`);
-
-  try {
-    watch(agentWorkspace, { recursive: true }, (eventType, filename) => {
-      if (!filename) return;
-
-      const baseName = path.basename(filename);
-      if (baseName.startsWith('.') || baseName.startsWith('~') || baseName.endsWith('.tmp') || baseName.endsWith('.swp')) {
-        return;
-      }
-
-      if (syncQueue.has(filename)) {
-        clearTimeout(syncQueue.get(filename));
-      }
-
-      const timer = setTimeout(() => {
-        syncQueue.delete(filename);
-
-        const activeOut = getActiveOutputFolder();
-        if (!activeOut) return;
-
-        const srcPath = path.join(agentWorkspace, filename);
-        const destPath = path.join(activeOut, filename);
-
-        try {
-          if (existsSync(srcPath)) {
-            const stat = statSync(srcPath);
-            if (stat.isFile()) {
-              mkdirSync(path.dirname(destPath), { recursive: true });
-              // Copy file
-              const fileContent = readFileSync(srcPath);
-              writeFileSync(destPath, fileContent);
-              console.log(`[Sync] Immediate synced file: ${filename} -> ${destPath}`);
-            }
-          } else {
-            // File or directory deleted
-            if (existsSync(destPath)) {
-              rmSync(destPath, { recursive: true, force: true });
-              console.log(`[Sync] Immediate deleted: ${filename} from ${destPath}`);
-            }
-          }
-        } catch (err) {
-          // Ignore locks or temporary copy errors
-        }
-      }, 150);
-
-      syncQueue.set(filename, timer);
-    });
-  } catch (watchError) {
-    console.error(`[Watcher] Failed to initialize file watcher: ${watchError.message}`);
-  }
-}
+// Synchronizer setup completely removed
 
 // Helpers for consistent output naming next to the selected source or resolved HTML.
 function siblingPath(filePath, name) {
@@ -1163,10 +1151,8 @@ async function pickHtmlFile() {
 // Server-wide state tracks the selected file, preview size, and active background job.
 const args = parseArgs(process.argv.slice(2));
 let activeJob = null;
-let activeAgentLog = '';
 // A server restart starts a new agent chat session. The first agent request
 // consumes this flag and runs the agent with --new-session.
-let pendingAgentNewSession = true;
 const viewerState = {
   version: 0,
   path: args.openPath,
@@ -1347,6 +1333,13 @@ const server = createServer(async (request, response) => {
   // Stop the active long-running resolve, render, agent, or publish job.
   if (requestUrl.pathname === '/stop-job') {
     try {
+      const agentState = getAgentState(requestUrl.searchParams.get('agentClientId'));
+      if (agentState.activeJob) {
+        const type = agentState.activeJob.type;
+        agentState.activeJob.kill();
+        sendJson(response, 200, { ok: true, stopped: true, type, message: `Stopped ${type} job successfully` });
+        return;
+      }
       if (!activeJob) {
         sendJson(response, 200, { ok: true, stopped: false, message: 'No active job' });
         return;
@@ -1367,12 +1360,13 @@ const server = createServer(async (request, response) => {
         sendJson(response, 405, { error: 'Method not allowed' });
         return;
       }
-      if (activeJob && activeJob.type === 'agent') {
-        activeJob.kill();
+      const agentState = getAgentState(requestUrl.searchParams.get('agentClientId'));
+      if (agentState.activeJob) {
+        agentState.activeJob.kill();
       }
-      clearAgentWorkspace();
-      activeAgentLog = '';
-      pendingAgentNewSession = true;
+      agentState.log = '';
+      agentState.currentWorkspace = '';
+      agentState.pendingNewSession = true;
       sendJson(response, 200, { ok: true });
     } catch (error) {
       sendJson(response, 500, { error: error.message });
@@ -1388,6 +1382,7 @@ const server = createServer(async (request, response) => {
         sendJson(response, 405, { error: 'Method not allowed' });
         return;
       }
+      getAgentState(requestUrl.searchParams.get('agentClientId'));
       const files = await saveAgentUploads(request);
       sendJson(response, 200, { ok: true, files });
     } catch (error) {
@@ -1417,6 +1412,7 @@ const server = createServer(async (request, response) => {
           const message = payload.message || '';
           const currentFile = payload.currentFile || '';
           const currentDir = payload.currentDir || '';
+          const agentState = getAgentState(payload.agentClientId || requestUrl.searchParams.get('agentClientId'));
 
           if (!message) {
             sendJson(response, 400, { error: 'Missing message parameter.' });
@@ -1429,16 +1425,12 @@ const server = createServer(async (request, response) => {
           const siblingTsAgentScript = path.resolve(rootDir, '../lecture-agent/src/coding_agent.ts');
           const pythonAgentScript = path.resolve(rootDir, '../lecture-agent/coding_agent.py');
 
-          let activeAgentWorkspace = '';
-
           if (existsSync(workspaceTsAgentScript)) {
             execCmd = process.platform === 'win32' ? 'npx.cmd' : 'npx';
             execArgs = ['tsx', workspaceTsAgentScript];
-            activeAgentWorkspace = path.resolve(rootDir, 'packages/lecture-agent/workspace');
           } else if (existsSync(siblingTsAgentScript)) {
             execCmd = process.platform === 'win32' ? 'npx.cmd' : 'npx';
             execArgs = ['tsx', siblingTsAgentScript];
-            activeAgentWorkspace = path.resolve(rootDir, '../lecture-agent/workspace');
           } else if (existsSync(pythonAgentScript)) {
             let pythonCmd = 'python';
             const relativePaths = [
@@ -1459,17 +1451,15 @@ const server = createServer(async (request, response) => {
             }
             execCmd = pythonCmd;
             execArgs = [pythonAgentScript];
-            activeAgentWorkspace = path.resolve(rootDir, '../lecture-agent/workspace');
           } else {
             sendJson(response, 500, { error: `Agent script not found at ${workspaceTsAgentScript}, ${siblingTsAgentScript} or ${pythonAgentScript}` });
             return;
           }
 
-          const useNewAgentSession = pendingAgentNewSession;
-          if (useNewAgentSession && execCmd.includes('npx')) {
-            execArgs.push('--new-session');
+          if (agentState.pendingNewSession || !agentState.currentWorkspace) {
+            createNewSessionWorkspace(agentState.id);
+            agentState.pendingNewSession = false;
           }
-          pendingAgentNewSession = false;
 
           let task = '';
           if (currentFile) {
@@ -1484,29 +1474,29 @@ const server = createServer(async (request, response) => {
 
           const env = {
             ...process.env,
-            AGENT_WORKSPACE: activeAgentWorkspace,
+            AGENT_WORKSPACE: agentWorkspaceRoot(agentState.id),
             DOTENVX_LOG_LEVEL: 'error',
             DOTENV_LOG_LEVEL: 'error',
-            DOTENV_CONFIG_QUIET: 'true',
-            ...(useNewAgentSession ? { AGENT_NEW_SESSION: 'True' } : {})
+            DOTENV_CONFIG_QUIET: 'true'
           };
 
           console.log(`Starting agent process (task sent via stdin): ${execCmd} ${execArgs.map(a => `"${a}"`).join(' ')}`);
 
           let stdout = '';
           let stderr = '';
-          activeAgentLog = ''; // Reset log buffer
+          agentState.log = ''; // Reset log buffer
 
           let childProc = null;
-          activeJob = {
+          agentState.activeJob = {
             type: 'agent',
             kill: () => {
-              activeJob.aborted = true;
+              agentState.activeJob.aborted = true;
               if (childProc) killProcessTree(childProc);
             }
           };
 
           const child = spawn(execCmd, execArgs, {
+            cwd: agentWorkspaceRoot(agentState.id),
             stdio: ['pipe', 'pipe', 'pipe'],
             windowsHide: true,
             shell: true,
@@ -1520,26 +1510,26 @@ const server = createServer(async (request, response) => {
           child.stdout.on('data', chunk => {
             const str = chunk.toString();
             stdout += str;
-            activeAgentLog += str;
+            agentState.log += str;
             process.stdout.write(chunk);
           });
 
           child.stderr.on('data', chunk => {
             const str = chunk.toString();
             stderr += str;
-            activeAgentLog += str;
+            agentState.log += str;
             process.stderr.write(chunk);
           });
 
           child.on('error', err => {
-            activeJob = null;
+            agentState.activeJob = null;
             sendJson(response, 500, { error: err.message });
           });
 
           child.on('close', code => {
-            activeJob = null;
+            agentState.activeJob = null;
             if (code === 0) {
-              sendJson(response, 200, { ok: true, output: stdout.trim() });
+              sendJson(response, 200, { ok: true, output: stdout.trim(), workspace: agentWorkspaceRoot(agentState.id) });
             } else {
               const output = `${stdout}\n${stderr}`
                 .split(/\r?\n/)
@@ -1713,7 +1703,8 @@ const server = createServer(async (request, response) => {
 
   // Return the buffered stdout/stderr from the currently running coding agent job.
   if (requestUrl.pathname === '/agent-log') {
-    sendJson(response, 200, { log: activeAgentLog });
+    const agentState = getAgentState(requestUrl.searchParams.get('agentClientId'));
+    sendJson(response, 200, { log: agentState.log });
     return;
   }
 
@@ -1768,7 +1759,6 @@ server.on('error', error => {
 
 // Bind only to localhost; this IDE server is not intended for network exposure.
 server.listen(args.port, '127.0.0.1', () => {
-  startWorkspaceSyncWatcher();
   const encodedFile = args.openPath ? `?file=${encodeURIComponent(args.openPath)}` : '';
   const url = `http://127.0.0.1:${args.port}/${encodedFile}`;
   console.log(`IDE server running at ${url}`);

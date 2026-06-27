@@ -14,12 +14,10 @@ import {
     ROOT,
     TOOLS,
     TOOL_JSON_SCHEMA,
-    archive_agent_workspace,
     build_function_response_payload,
-    clear_agent_workspace,
+    create_new_session_workspace,
     execute_tool,
     line_count,
-    reset_active_output_folder,
 } from './tools/index.js';
 
 const __filename = fileURLToPath(import.meta.url);
@@ -164,7 +162,7 @@ function resolve_skill_path(skill: string): string {
     }
 
     const known = available_skills().join(", ") || "none found";
-    throw new Error(`skill not found: ${skill}. Available skills: ${known}`);
+    throw new Error(`skill not found: ${skill}. Available skills: {known}`);
 }
 
 function load_skill(skill: string): string {
@@ -186,7 +184,7 @@ function build_skill_context(skills: string[] | null): string {
 function build_system_instructions(skills: string[] | null): string {
     const system_prompt = build_prompt(load_system_prompt(), ROOT);
     const skill_context = build_skill_context(skills);
-    const base_prompt = system_prompt ? `${system_prompt}\n\n${WORKING_RESPONSE_SECURITY_INSTRUCTIONS}` : WORKING_RESPONSE_SECURITY_INSTRUCTIONS;
+    const base_prompt = system_prompt;
     if (!skill_context) {
         return base_prompt;
     }
@@ -284,10 +282,9 @@ function build_agent_prompt(task: string, transcript: any[]): string {
         "Choose exactly one next step.",
         "Include a short `note` field describing the next visible step.",
         "The `note` must be a concise summary, not hidden chain-of-thought.",
-        `When the work is complete and you are ready to answer the user, use the \`${PRE_USER_RESPONSE_TOOL}\` tool. Do not directly provide a final user-facing answer from this working context.`,
         "To use a tool, return only JSON shaped like:",
         JSON.stringify(TOOL_JSON_SCHEMA, null, 2),
-        "The runtime will generate the final user-facing response after the pre-user-response signal. If you return this done shape without first using the signal, the response will be rejected:",
+        "When the work is complete and you are ready to answer the user, return this done shape:",
         JSON.stringify(DONE_JSON_SCHEMA, null, 2),
         "Do not wrap the JSON in Markdown.",
     ].join("\n\n");
@@ -558,7 +555,15 @@ export class GeminiAgentSession {
                 config: this.config
             };
             log_llm_request("coding-agent-gemini-working", request);
-            const response = await this.client.models.generateContent(request);
+            let response;
+            try {
+                response = await this.client.models.generateContent(request);
+            } catch (err: any) {
+                console.error("GEMINI API ERROR DETAIL:", err);
+                if (err.status) console.error("API ERROR STATUS:", err.status);
+                if (err.error) console.error("API ERROR BODY:", JSON.stringify(err.error, null, 2));
+                throw err;
+            }
             const usage = response.usageMetadata;
             const input_tokens = gemini_input_token_count(usage);
             const output_tokens = gemini_output_token_count(usage);
@@ -569,16 +574,8 @@ export class GeminiAgentSession {
                 if (response.candidates && response.candidates.length > 0) {
                     this.contents.push(response.candidates[0].content);
                 }
-                if (!validate_pre_user_response(false, false)) {
-                    print_step(step, "blocked unsignaled final response", Color.RED);
-                    print_detail("correction", `asking model to call \`${PRE_USER_RESPONSE_TOOL}\``, Color.YELLOW);
-                    this.contents.push({
-                        role: "user",
-                        parts: [{ text: UNSIGNALED_FINAL_RESPONSE_CORRECTION }]
-                    });
-                    continue;
-                }
-                return USER_RESPONSE_VALIDATION_FAILURE;
+                print_step(step, "done", Color.GREEN);
+                return extract_gemini_text(response) || "Done.";
             }
 
             const model_content = response.candidates?.[0]?.content;
@@ -592,18 +589,6 @@ export class GeminiAgentSession {
             for (const call of function_calls) {
                 const name = call.name;
                 const argumentsObj = call.args || {};
-                if (name === PRE_USER_RESPONSE_TOOL) {
-                    print_step(step, "pre-user-response signal received", Color.GREEN);
-                    print_detail("final response context", "sanitized to user requests only", Color.DIM);
-                    const final_text = await this.generate_sanitized_final_response();
-                    if (!validate_pre_user_response(true, true)) {
-                        print_step(step, "blocked invalid pre-user-response state", Color.RED);
-                        return USER_RESPONSE_VALIDATION_FAILURE;
-                    }
-                    print_step(step, "done", Color.GREEN);
-                    return final_text;
-                }
-
                 print_step(step, `running tool \`${name}\``, Color.BLUE);
                 print_detail("arguments", compact_tool_arguments(argumentsObj), Color.DIM, 700);
 
@@ -724,32 +709,14 @@ class JsonFallbackAgentSession {
             }
 
             if (action.done === true) {
-                if (!validate_pre_user_response(false, false)) {
-                    print_step(step, "blocked unsignaled final response", Color.RED);
-                    print_detail("correction", `asking model to call \`${PRE_USER_RESPONSE_TOOL}\``, Color.YELLOW);
-                    this.transcript.push({
-                        role: "user",
-                        content: UNSIGNALED_FINAL_RESPONSE_CORRECTION
-                    });
-                    continue;
-                }
-                return USER_RESPONSE_VALIDATION_FAILURE;
-            }
-
-            const name = action.tool;
-            const argumentsObj = action.arguments || {};
-            if (name === PRE_USER_RESPONSE_TOOL) {
-                print_step(step, "pre-user-response signal received", Color.GREEN);
-                print_detail("final response context", "sanitized to user requests only", Color.DIM);
-                const output = await this.generate_sanitized_final_response();
-                if (!validate_pre_user_response(true, true)) {
-                    print_step(step, "blocked invalid pre-user-response state", Color.RED);
-                    return USER_RESPONSE_VALIDATION_FAILURE;
-                }
+                const output = String(action.output || "Done.");
                 this.transcript.push({ role: "assistant", content: output });
                 print_step(step, "done", Color.GREEN);
                 return output;
             }
+
+            const name = action.tool;
+            const argumentsObj = action.arguments || {};
 
             print_step(step, `running tool \`${name}\``, Color.BLUE);
             print_detail("arguments", compact_tool_arguments(argumentsObj), Color.DIM, 700);
@@ -810,9 +777,8 @@ function get_or_create_agent_session(model: string, skills: string[] | null = nu
 export function reset_agent_session(): void {
     activeAgentSession = null;
     start_new_llm_log_session();
-    clear_agent_workspace();
-    reset_active_output_folder();
-    print_detail("workspace cleanup", `cleared ${ROOT}`, Color.DIM);
+    create_new_session_workspace();
+    print_detail("workspace cleanup", `created new session workspace at ${ROOT}`, Color.DIM);
 }
 
 function now_ms(): number {
@@ -826,37 +792,12 @@ function format_duration(ms: number): string {
     return `${(ms / 1000).toFixed(2)}s`;
 }
 
-let archiveAttemptedForCurrentRun = false;
-
-function archive_workspace_best_effort(reason: string): string | null {
-    if (archiveAttemptedForCurrentRun) {
-        return null;
-    }
-    archiveAttemptedForCurrentRun = true;
-
-    try {
-        const archivePath = archive_agent_workspace();
-        if (archivePath) {
-            print_detail(`archived workspace (${reason})`, archivePath, Color.GREEN);
-        } else {
-            print_detail(`archived workspace (${reason})`, "skipped; workspace is empty", Color.DIM);
-        }
-        return archivePath;
-    } catch (exc: any) {
-        print_detail(`archive failed (${reason})`, exc.message || exc, Color.RED);
-        return null;
-    }
-}
-
 async function run_session_with_timing(session: any, task: string, max_turns: number): Promise<string> {
     const started_at = now_ms();
-    archiveAttemptedForCurrentRun = false;
     try {
         const result = await session.run(task, max_turns);
-        archive_workspace_best_effort("completed");
         return result;
     } finally {
-        archive_workspace_best_effort("interrupted");
         print_detail("run time", format_duration(now_ms() - started_at), Color.DIM);
     }
 }
@@ -1007,20 +948,18 @@ async function run() {
 }
 
 if (process.argv[1] === fileURLToPath(import.meta.url)) {
-    const archiveBeforeExit = (reason: string, exitCode: number) => {
-        archive_workspace_best_effort(reason);
+    const exitWithError = (reason: string, detail: any, exitCode: number) => {
+        print_detail(reason, detail, Color.RED);
         process.exit(exitCode);
     };
 
-    process.once('SIGINT', () => archiveBeforeExit('SIGINT', 130));
-    process.once('SIGTERM', () => archiveBeforeExit('SIGTERM', 143));
+    process.once('SIGINT', () => process.exit(130));
+    process.once('SIGTERM', () => process.exit(143));
     process.once('uncaughtException', (error) => {
-        print_detail("uncaught exception", error?.message || error, Color.RED);
-        archiveBeforeExit('uncaughtException', 1);
+        exitWithError("uncaught exception", error?.message || error, 1);
     });
     process.once('unhandledRejection', (reason) => {
-        print_detail("unhandled rejection", reason, Color.RED);
-        archiveBeforeExit('unhandledRejection', 1);
+        exitWithError("unhandled rejection", reason, 1);
     });
 
     run();
