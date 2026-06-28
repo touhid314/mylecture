@@ -1294,9 +1294,6 @@ const server = createServer(async (request, response) => {
         currentOnly: requestUrl.searchParams.get('currentOnly') === '1'
       });
 
-      viewerState.version++;
-      viewerState.path = resolvedPath;
-
       sendJson(response, 200, {
         ok: true,
         path: resolvedPath,

@@ -2124,20 +2124,7 @@ function createAgentClientId() {
 }
 
 function getAgentClientId() {
-  const key = 'mylecture.agentClientId';
-  let id = '';
-  try {
-    const nav = performance && performance.getEntriesByType ? performance.getEntriesByType('navigation')[0] : null;
-    const isReload = nav && nav.type === 'reload';
-    id = isReload ? sessionStorage.getItem(key) || '' : '';
-    if (!id) {
-      id = createAgentClientId();
-      sessionStorage.setItem(key, id);
-    }
-  } catch {
-    id = createAgentClientId();
-  }
-  return id;
+  return createAgentClientId();
 }
 
 const agentClientId = getAgentClientId();
