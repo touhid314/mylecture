@@ -1,3 +1,9 @@
+/**
+ * write.ts
+ *
+ * Implements the write tool to write new files to the workspace. Creates parent directories
+ * automatically, sanitizes quote escaping in HTML files, and outputs written file stats.
+ */
 import fs from 'fs';
 import path from 'path';
 

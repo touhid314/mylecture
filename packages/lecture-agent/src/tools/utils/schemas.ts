@@ -1,3 +1,10 @@
+/**
+ * schemas.ts
+ *
+ * Defines the formal JSON Schemas and metadata parameters for all tools exposed to
+ * the lecture-agent. These are used for native Gemini function calling definitions
+ * and OpenAI fallback parsing structures.
+ */
 export const TOOLS: any[] = [
     {
         type: "function",

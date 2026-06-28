@@ -1,3 +1,10 @@
+/**
+ * coding_agent.ts
+ *
+ * The main orchestrator and entry point for the lecture-agent. It manages the agent
+ * runtime environment, loads prompts and active skills, handles conversation loops with LLM,
+ * resolves tool calls (e.g., read, write, edits), and performs final response validation.
+ */
 import fs from 'fs';
 import path from 'path';
 import readline from 'readline';
@@ -42,8 +49,6 @@ const PRE_USER_RESPONSE_PROMPT_PATH = path.join(__dirname, 'prompts', 'pre-user-
 const SKILL_DIRS = [
     path.join(ROOT, '.agents', 'skills'),
     path.join(ROOT, '.agents', 'skill'),
-    path.join(WORKSPACE_DIR, '.agents', 'skills'),
-    path.join(WORKSPACE_DIR, '.agents', 'skill'),
     path.join(BASE_DIR, '.agents', 'skills'),
     path.join(BASE_DIR, '.agents', 'skill'),
 ];

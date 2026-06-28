@@ -1,3 +1,9 @@
+/**
+ * mkdir.ts
+ *
+ * Implements the mkdir tool to create directories recursively within the active workspace.
+ * Prevents creation of directories outside workspace boundaries.
+ */
 import fs from 'fs';
 import { resolve_workspace_path } from './utils/workspace.js';
 

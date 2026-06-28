@@ -1,3 +1,9 @@
+/**
+ * del.ts
+ *
+ * Implements the del tool to safely delete files and directories within the active workspace.
+ * Resolves paths and validates targets to prevent deleting the workspace root.
+ */
 import fs from 'fs';
 import path from 'path';
 import { resolve_workspace_path, ROOT } from './utils/workspace.js';

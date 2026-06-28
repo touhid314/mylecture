@@ -1,3 +1,10 @@
+/**
+ * validate_contract.cjs
+ *
+ * Validates a resolved or source HTML lecture file against the contract specification.
+ * It checks globals, video metadata, segment properties, timing parameters, and ensures
+ * all variables match standard schemas required by the preview player and renderer.
+ */
 const fs = require('fs');
 const path = require('path');
 const vm = require('vm');

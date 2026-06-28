@@ -1,3 +1,10 @@
+/**
+ * llm_prompt_logger.ts
+ *
+ * Handles persistent file logging of the exact prompts, system instructions,
+ * and responses sent to and from LLM providers. Sessions are mapped to local files
+ * under `.log/` for inspectability and debugging.
+ */
 import fs from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';

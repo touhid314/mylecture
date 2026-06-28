@@ -187,7 +187,7 @@ npm run agent -- --skill mylecture-make-long --skill another-skill "Task here"
 Load a skill by direct markdown path:
 
 ```powershell
-npm run agent -- --skill workspace/.agents/mylecture-contracts/avsl-syntax.md "Task here"
+npm run agent -- --skill .agents/mylecture-contracts/avsl-syntax.md "Task here"
 ```
 
 Use skills in chat mode:

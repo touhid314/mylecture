@@ -1,3 +1,10 @@
+/**
+ * index.ts
+ *
+ * Central export registry and tool execution dispatcher. Exports workspace paths,
+ * parameters, schemas, and maps incoming tool invocation payloads to their respective
+ * implementation functions.
+ */
 export { TOOLS, TOOL_JSON_SCHEMA } from './utils/schemas.js';
 export { tool_read } from './read.js';
 export { tool_write } from './write.js';

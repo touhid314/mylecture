@@ -1,3 +1,10 @@
+/**
+ * cmd.ts
+ *
+ * Implements the cmd tool for executing shell commands synchronously within the active
+ * workspace. Includes checks to block Python one-liners, enforcing usage of read/write/edits
+ * tools for file operations.
+ */
 import { spawnSync } from 'child_process';
 
 import { ROOT } from './utils/workspace.js';

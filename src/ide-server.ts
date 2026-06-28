@@ -416,11 +416,11 @@ function agentUploadRoot() {
 }
 
 function agentProfilesRoot() {
-  const workspaceProfilesRoot = path.resolve(rootDir, 'packages/lecture-agent/workspace/.agents/mylecture-profiles');
+  const workspaceProfilesRoot = path.resolve(rootDir, 'packages/lecture-agent/.agents/mylecture-profiles');
   if (existsSync(path.resolve(rootDir, 'packages/lecture-agent/src/coding_agent.ts'))) {
     return workspaceProfilesRoot;
   }
-  return path.resolve(rootDir, '../lecture-agent/workspace/.agents/mylecture-profiles');
+  return path.resolve(rootDir, '../lecture-agent/.agents/mylecture-profiles');
 }
 
 function listAgentProfiles() {

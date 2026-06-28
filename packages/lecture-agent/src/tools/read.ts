@@ -1,3 +1,9 @@
+/**
+ * read.ts
+ *
+ * Implements the read tool to read the contents of a file in the workspace.
+ * Resolves paths safely and returns the content with prepended 1-based line numbers.
+ */
 import fs from 'fs';
 
 import { resolve_workspace_path } from './utils/workspace.js';

@@ -1,3 +1,11 @@
+/**
+ * llm_model.ts
+ *
+ * Provides the LLM_Model class, a unified interface wrapper for different LLM backends
+ * (supporting Google Gemini and OpenAI). It manages conversation history, token counts,
+ * system instructions, file/multimedia uploads, and coordinates both native function
+ * calling and JSON-based fallback tool execution.
+ */
 import fs from 'fs';
 import path from 'path';
 import os from 'os';

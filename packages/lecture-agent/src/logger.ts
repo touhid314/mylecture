@@ -1,3 +1,10 @@
+/**
+ * logger.ts
+ *
+ * Implements a customizable logging utility for the lecture-agent codebase.
+ * Provides levels from DEBUG to CRITICAL and logs colorized outputs directly
+ * to the terminal based on the environment configuration.
+ */
 import dotenv from 'dotenv';
 dotenv.config();
 

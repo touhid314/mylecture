@@ -1,3 +1,10 @@
+/**
+ * edits.ts
+ *
+ * Implements the edits tool to apply structured, line-based modifications to files.
+ * Validates input ranges, compares expected old text (if provided) to actual content,
+ * applies the changes, and logs statistics.
+ */
 import fs from 'fs';
 import path from 'path';
 

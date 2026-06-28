@@ -1,3 +1,9 @@
+/**
+ * list_dir.ts
+ *
+ * Implements the list_dir tool to list contents of directories safely within the workspace.
+ * Resolves paths and formats output with entry types (FILE, DIR, OTHER).
+ */
 import fs from 'fs';
 import { resolve_workspace_path } from './utils/workspace.js';
 

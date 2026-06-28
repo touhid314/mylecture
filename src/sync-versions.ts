@@ -1,3 +1,12 @@
+/**
+ * sync-versions.ts
+ * Summer 2026, Touhidul Islam
+ *
+ * Keeps version constants/contracts synchronized across the repository.
+ * Reads the latest configuration from versions.json and propagates the
+ * correct contract and IDE version numbers to all downstream codebases
+ * and contract documentation.
+ */
 import fs from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
@@ -54,8 +63,8 @@ updateFile('packages/lecture-agent/src/validate_contract.cjs', content => {
   );
 });
 
-// 5. Update packages/lecture-agent/workspace/.agents/mylecture-contracts/html-input-contract.md
-updateFile('packages/lecture-agent/workspace/.agents/mylecture-contracts/html-input-contract.md', content => {
+// 5. Update packages/lecture-agent/.agents/mylecture-contracts/html-input-contract.md
+updateFile('packages/lecture-agent/.agents/mylecture-contracts/html-input-contract.md', content => {
   return content.replace(
     /^# HTML Input Contract - v\d+\.\d+/m,
     `# HTML Input Contract - v${contractVersion}`

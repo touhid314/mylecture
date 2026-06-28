@@ -79,7 +79,7 @@ tests/                  Structured renderer fixtures and smoke tests
 
 ## HTML Input Contract
 
-Source HTML files must follow the [HTML input contract](file:///c:/Users/touhi/OneDrive/Desktop/mylecture/mylecture-ide/packages/lecture-agent/workspace/.agents/mylecture-contracts/html-input-contract.md) (v0.2):
+Source HTML files must follow the [HTML input contract](file:///c:/Users/touhi/OneDrive/Desktop/mylecture/mylecture-ide/packages/lecture-agent/.agents/mylecture-contracts/html-input-contract.md) (v0.2):
 
 ```js
 window.__VIDEO_METADATA__ = {

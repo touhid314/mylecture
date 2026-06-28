@@ -1,3 +1,10 @@
+/**
+ * prompt_builder.ts
+ *
+ * Provides utilities to parse and build system/user prompts. Handles automatic
+ * inlining of backticked local files, extracts attachment directives (like images,
+ * PDFs, and videos), and prepares attachment metadata for the LLM upload pipeline.
+ */
 import fs from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';

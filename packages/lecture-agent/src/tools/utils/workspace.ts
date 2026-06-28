@@ -1,3 +1,10 @@
+/**
+ * workspace.ts
+ *
+ * Configures and resolves the active directories (BASE_DIR, WORKSPACE_DIR, ROOT)
+ * for the agent. Handles loading configuration environment variables, managing
+ * workspace-relative path resolution, and validating boundary constraints.
+ */
 import fs from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';

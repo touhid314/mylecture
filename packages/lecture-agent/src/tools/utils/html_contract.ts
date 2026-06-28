@@ -1,3 +1,10 @@
+/**
+ * html_contract.ts
+ *
+ * Provides functions to ensure written files conform to the project's HTML lecture contract.
+ * Includes methods to clean up escaped double quotes in HTML markup and to invoke the
+ * validator utility programmatically on write/edit events.
+ */
 import fs from 'fs';
 import path from 'path';
 import { spawnSync } from 'child_process';

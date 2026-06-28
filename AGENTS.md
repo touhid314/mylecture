@@ -190,7 +190,7 @@ If profile is `None`, no `profile:` line is appended.
 Profiles are markdown files stored under:
 
 ```text
-packages/lecture-agent/workspace/.agents/mylecture-profiles/*.md
+packages/lecture-agent/.agents/mylecture-profiles/*.md
 ```
 
 The IDE server exposes them through `/agent-profiles`. The viewer loads the list at startup and stores each profile's content in browser memory. Selecting a profile appends its file content to the agent prompt under `profile: ...`.
@@ -269,7 +269,7 @@ The agent's editable workspace is:
 packages/lecture-agent/workspace/agent-workspace/
 ```
 
-Tool file operations are restricted to that folder. The shared prompt/resources area under `packages/lecture-agent/workspace/.agents/` may be read and inlined by prompt-building code, but normal generated lecture files go in `agent-workspace`.
+Tool file operations are restricted to that folder. The shared prompt/resources area under `packages/lecture-agent/.agents/` may be read and inlined by prompt-building code, but normal generated lecture files go in `agent-workspace`.
 
 New chat behavior:
 
@@ -323,7 +323,7 @@ Binary uploads are attached to the model separately. They are not pasted into th
 Generated lecture HTML must follow the MyLecture HTML input contract, currently v0.2. The canonical contract lives under the agent workspace resources:
 
 ```text
-packages/lecture-agent/workspace/.agents/mylecture-contracts/html-input-contract.md
+packages/lecture-agent/.agents/mylecture-contracts/html-input-contract.md
 ```
 
 Typical globals:
