@@ -448,7 +448,6 @@ export class GeminiAgentSession {
     private userTasks: string[];
     private totalInputTokens: number;
     private totalOutputTokens: number;
-    private uploadedFiles: any[];
     private workspaceDir: string;
 
     constructor(model: string, workspaceDir: string, skills: string[] | null = null, initialHistory: any[] = []) {
@@ -481,7 +480,6 @@ export class GeminiAgentSession {
         }
         this.totalInputTokens = 0;
         this.totalOutputTokens = 0;
-        this.uploadedFiles = [];
         print_detail("workspace", workspaceDir, Color.BLUE);
         print_detail("tool mode", "native Gemini function calling", Color.BLUE);
         if (skills && skills.length > 0) {
@@ -508,38 +506,12 @@ export class GeminiAgentSession {
             fileRef = await filesClient.get({ name: fileRef.name });
         }
 
-        this.uploadedFiles.push(fileRef);
         return {
             fileData: {
                 mimeType: fileRef.mimeType || attachment.mimeType,
                 fileUri: fileRef.uri || fileRef.name
             }
         };
-    }
-
-    private async cleanup_uploaded_files(): Promise<void> {
-        for (const fileRef of this.uploadedFiles) {
-            try {
-                if (fileRef.name) {
-                    await this.client.files.delete({ name: fileRef.name });
-                }
-            } catch {
-                // Best effort cleanup only.
-            }
-        }
-        this.uploadedFiles = [];
-    }
-
-    private strip_file_parts_from_history(): void {
-        for (const content of this.contents) {
-            if (!content || !Array.isArray(content.parts)) {
-                continue;
-            }
-            content.parts = content.parts.filter((part: any) => !part.fileData && !part.inlineData);
-            if (content.parts.length === 0) {
-                content.parts.push({ text: "[Attached file omitted from retained chat history]" });
-            }
-        }
     }
 
     private record_token_usage(inputTokens: number | null, outputTokens: number | null): void {
@@ -662,8 +634,6 @@ export class GeminiAgentSession {
             return `Stopped after ${max_turns} tool loop(s). Ask me to continue if needed.`;
         } finally {
             compact_gemini_turn(this.contents);
-            await this.cleanup_uploaded_files();
-            this.strip_file_parts_from_history();
         }
     }
 }
