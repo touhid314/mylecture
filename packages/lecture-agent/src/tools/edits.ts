@@ -8,7 +8,7 @@
 import fs from 'fs';
 import path from 'path';
 
-import { resolve_workspace_path } from './utils/workspace.js';
+import { resolve_workspace_path } from '../workspace.js';
 import { purify_content_for_path } from './utils/html_contract.js';
 import { text_stats } from './utils/text_stats.js';
 
@@ -23,8 +23,8 @@ function normalize_whitespace(str: string): string {
     return str.replace(/\s+/g, ' ').trim();
 }
 
-export function tool_edits(filePath: string, edits: LineEdit[]): string {
-    const target = resolve_workspace_path(filePath);
+export function tool_edits(filePath: string, edits: LineEdit[], workspaceDir?: string): string {
+    const target = resolve_workspace_path(filePath, workspaceDir);
     const content = fs.readFileSync(target, 'utf8');
 
     if (!Array.isArray(edits) || edits.length === 0) {
@@ -123,4 +123,17 @@ export function tool_edits(filePath: string, edits: LineEdit[]): string {
     const lineDelta = totalAddedLines - totalRemovedLines;
 
     return `edits succeeded for ${filePath}; applied ${edits.length} edit operation(s), removed ${totalRemovedLines} line(s), added ${totalAddedLines} line(s) (net line change: ${lineDelta >= 0 ? '+' : ''}${lineDelta})${safetyCheckNotes}${purified_note}; file now contains ${stats.characters} characters, ${stats.words} words, and ${stats.lines} lines`;
+}
+
+export function compact_edits(args: { path: string; edits: LineEdit[] }, result: string): { compactedArgs: any; compactedResult: string } {
+    const editSummaries = (args.edits || []).map(edit => {
+        return `[Line ${edit.start_line}, remove ${edit.remove_lines} line(s), insert ${edit.new_text.split('\n').length} line(s)]`;
+    });
+    return {
+        compactedArgs: {
+            path: args.path,
+            edits: editSummaries
+        },
+        compactedResult: result
+    };
 }

@@ -8,8 +8,8 @@
   ],
   "type": "module",
   "scripts": {
-    "agent": "tsx packages/lecture-agent/src/coding_agent.ts",
-    "chat": "tsx packages/lecture-agent/src/coding_agent.ts --chat",
+    "agent": "tsx packages/lecture-agent/src/cli.ts",
+    "chat": "tsx packages/lecture-agent/src/cli.ts --chat",
     "build:plan": "node --import tsx src/build-plan.ts",
     "render:video": "node --import tsx src/render-video.ts",
     "subtitle:burn": "node --import tsx src/subtitle-burner.ts",

@@ -5,7 +5,7 @@
   "type": "module",
   "main": "src/coding_agent.ts",
   "scripts": {
-    "agent": "tsx src/coding_agent.ts",
+    "agent": "tsx src/cli.ts",
     "test": "tsx src/upload_smoke_test.ts && tsx src/workspace_sync_smoke_test.ts"
   },
   "dependencies": {

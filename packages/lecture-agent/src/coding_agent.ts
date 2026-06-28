@@ -1,16 +1,38 @@
 /**
  * coding_agent.ts
  *
- * The main orchestrator and entry point for the lecture-agent. It manages the agent
- * runtime environment, loads prompts and active skills, handles conversation loops with LLM,
- * resolves tool calls (e.g., read, write, edits), and performs final response validation.
+ * The main orchestrator and core library interface for the lecture-agent.
+ * Exposes a clean, thread-safe Programmatic API for running one-off tasks
+ * or persistent multi-turn chat sessions with automated history compaction.
+ *
+ * ### Programmatic API:
+ *
+ * 1. **LectureAgent** (Class)
+ *    The core entry point. Configured with LLM models, sandbox workspaces, and skills.
+ *    - `constructor(config: AgentConfig)`
+ *    - `startChat(initialHistory?: ChatMessage[]): ChatSession` - Starts a multi-turn chat.
+ *    - `run(options: { prompt: string, history?: ChatMessage[], maxTurns?: number })` - Runs a stateless turn.
+ *
+ * 2. **ChatSession** (Class)
+ *    Represents an active multi-turn chat session with stateful, in-memory conversation history.
+ *    - `sendMessage(prompt: string, maxTurns?: number): Promise<string>` - Sends a user message.
+ *    - `getHistory(): ChatMessage[]` - Returns the active compacted history list.
+ *    - `getTokenUsage(): { input: number, output: number }` - Returns token usage statistics.
+ *
+ * 3. **run_agent** (Function)
+ *    Utility wrapper to run a single task in a stateless manner (backwards compatible).
+ *
+ * 4. **reset_agent_session** (Function)
+ *    Cleans up the active global agent session and workspace directory.
  */
 import fs from 'fs';
 import path from 'path';
-import readline from 'readline';
 import { fileURLToPath } from 'url';
 import dotenv from 'dotenv';
+import { AsyncLocalStorage } from 'node:async_hooks';
 import { GoogleGenAI } from '@google/genai';
+
+export const loggerStorage = new AsyncLocalStorage<(text: string) => void>();
 
 import { LLM_Model } from './llm_model.js';
 import { log_llm_request, start_new_llm_log_session } from './llm_prompt_logger.js';
@@ -18,11 +40,14 @@ import { build_prompt, extract_upload_attachments, type UploadAttachment } from 
 import {
     BASE_DIR,
     WORKSPACE_DIR,
-    ROOT,
+    DEFAULT_WORKSPACE_DIR,
+    resolve_workspace_path,
+} from './workspace.js';
+import {
     TOOLS,
     TOOL_JSON_SCHEMA,
     build_function_response_payload,
-    create_new_session_workspace,
+    compact_tool_history,
     execute_tool,
     line_count,
 } from './tools/index.js';
@@ -30,33 +55,12 @@ import {
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
-function loadEnv() {
-    let dir = __dirname;
-    while (dir && dir !== path.parse(dir).root) {
-        const envPath = path.join(dir, '.env');
-        if (fs.existsSync(envPath)) {
-            dotenv.config({ path: envPath, quiet: true });
-            return;
-        }
-        dir = path.dirname(dir);
-    }
-    dotenv.config({ quiet: true });
-}
-loadEnv();
-
 const PROMPT_PATH = path.join(__dirname, 'prompts', 'system_prompt.md');
 const PRE_USER_RESPONSE_PROMPT_PATH = path.join(__dirname, 'prompts', 'pre-user-response-prompt.md');
-const SKILL_DIRS = [
-    path.join(ROOT, '.agents', 'skills'),
-    path.join(ROOT, '.agents', 'skill'),
-    path.join(BASE_DIR, '.agents', 'skills'),
-    path.join(BASE_DIR, '.agents', 'skill'),
-];
 
-const DEFAULT_MODEL = "gemini-3.5-flash";
 const USE_COLOR = !process.env.NO_COLOR;
 
-class Color {
+export class Color {
     static RESET = USE_COLOR ? "\x1b[0m" : "";
     static DIM = USE_COLOR ? "\x1b[2m" : "";
     static BOLD = USE_COLOR ? "\x1b[1m" : "";
@@ -119,9 +123,15 @@ function load_pre_user_response_prompt(): string {
     return fs.readFileSync(PRE_USER_RESPONSE_PROMPT_PATH, 'utf8');
 }
 
-export function available_skills(): string[] {
+export function available_skills(workspaceDir: string = DEFAULT_WORKSPACE_DIR): string[] {
     const names: string[] = [];
-    for (const skills_dir of SKILL_DIRS) {
+    const current_skill_dirs = [
+        path.join(workspaceDir, '.agents', 'skills'),
+        path.join(workspaceDir, '.agents', 'skill'),
+        path.join(BASE_DIR, '.agents', 'skills'),
+        path.join(BASE_DIR, '.agents', 'skill'),
+    ];
+    for (const skills_dir of current_skill_dirs) {
         if (!fs.existsSync(skills_dir)) {
             continue;
         }
@@ -139,7 +149,7 @@ export function available_skills(): string[] {
     return Array.from(new Set(names)).sort();
 }
 
-function resolve_skill_path(skill: string): string {
+function resolve_skill_path(skill: string, workspaceDir: string = DEFAULT_WORKSPACE_DIR): string {
     const candidate = path.normalize(skill);
     if (path.isAbsolute(candidate) && fs.existsSync(candidate)) {
         return candidate;
@@ -155,7 +165,14 @@ function resolve_skill_path(skill: string): string {
         }
     }
 
-    for (const skills_dir of SKILL_DIRS) {
+    const current_skill_dirs = [
+        path.join(workspaceDir, '.agents', 'skills'),
+        path.join(workspaceDir, '.agents', 'skill'),
+        path.join(BASE_DIR, '.agents', 'skills'),
+        path.join(BASE_DIR, '.agents', 'skill'),
+    ];
+
+    for (const skills_dir of current_skill_dirs) {
         const direct_dir = path.join(skills_dir, skill);
         const direct_file = path.join(skills_dir, `${skill}.md`);
         if (fs.existsSync(path.join(direct_dir, "SKILL.md"))) {
@@ -166,29 +183,29 @@ function resolve_skill_path(skill: string): string {
         }
     }
 
-    const known = available_skills().join(", ") || "none found";
-    throw new Error(`skill not found: ${skill}. Available skills: {known}`);
+    const known = available_skills(workspaceDir).join(", ") || "none found";
+    throw new Error(`skill not found: ${skill}. Available skills: ${known}`);
 }
 
-function load_skill(skill: string): string {
-    const skillPath = resolve_skill_path(skill);
+function load_skill(skill: string, workspaceDir: string = DEFAULT_WORKSPACE_DIR): string {
+    const skillPath = resolve_skill_path(skill, workspaceDir);
     const content = fs.readFileSync(skillPath, 'utf8');
-    const expanded = build_prompt(content, ROOT);
+    const expanded = build_prompt(content, workspaceDir);
     const skillName = path.basename(skillPath) === "SKILL.md" ? path.basename(path.dirname(skillPath)) : path.basename(skillPath, ".md");
     return `# Skill: ${skillName}\n\n${expanded}`;
 }
 
-function build_skill_context(skills: string[] | null): string {
+function build_skill_context(skills: string[] | null, workspaceDir: string = DEFAULT_WORKSPACE_DIR): string {
     if (!skills || skills.length === 0) {
         return "";
     }
-    const loaded = skills.map(skill => load_skill(skill));
+    const loaded = skills.map(skill => load_skill(skill, workspaceDir));
     return loaded.join("\n\n---\n\n");
 }
 
-function build_system_instructions(skills: string[] | null): string {
-    const system_prompt = build_prompt(load_system_prompt(), ROOT);
-    const skill_context = build_skill_context(skills);
+function build_system_instructions(skills: string[] | null, workspaceDir: string = DEFAULT_WORKSPACE_DIR): string {
+    const system_prompt = build_prompt(load_system_prompt(), workspaceDir);
+    const skill_context = build_skill_context(skills, workspaceDir);
     const base_prompt = system_prompt;
     if (!skill_context) {
         return base_prompt;
@@ -196,8 +213,8 @@ function build_system_instructions(skills: string[] | null): string {
     return base_prompt + "\n\n# Active Skills\n\n" + skill_context;
 }
 
-function prepare_user_task(task: string): string {
-    return build_prompt(task, ROOT);
+function prepare_user_task(task: string, workspaceDir: string = DEFAULT_WORKSPACE_DIR): string {
+    return build_prompt(task, workspaceDir);
 }
 
 function format_attachment_summary(attachments: UploadAttachment[]): string {
@@ -265,13 +282,25 @@ function compact_tool_result(result: any): any {
     return `${first_line.substring(0, 160)} ... [${result.length} characters, ${result.split(/\s+/).filter(Boolean).length} words, ${line_count(result)} lines]`;
 }
 
-function print_step(step: number, message: string, color: string = Color.CYAN): void {
-    process.stderr.write(`\n${color}${Color.BOLD}[step ${step}]${Color.RESET} ${Color.BOLD}${message}${Color.RESET}\n`);
+export function print_step(step: number, message: string, color: string = Color.CYAN): void {
+    const text = `\n${color}${Color.BOLD}[step ${step}]${Color.RESET} ${Color.BOLD}${message}${Color.RESET}\n`;
+    const logger = loggerStorage.getStore();
+    if (logger) {
+        logger(text);
+    } else {
+        process.stderr.write(text);
+    }
 }
 
-function print_detail(label: string, value: any, color: string = Color.DIM, limit: number = 1200): void {
-    const text = truncate(value, limit);
-    process.stderr.write(`${color}${label}:${Color.RESET} ${text}\n`);
+export function print_detail(label: string, value: any, color: string = Color.DIM, limit: number = 1200): void {
+    const truncatedText = truncate(value, limit);
+    const text = `${color}${label}:${Color.RESET} ${truncatedText}\n`;
+    const logger = loggerStorage.getStore();
+    if (logger) {
+        logger(text);
+    } else {
+        process.stderr.write(text);
+    }
 }
 
 function chat_prompt(): string {
@@ -420,29 +449,40 @@ export class GeminiAgentSession {
     private totalInputTokens: number;
     private totalOutputTokens: number;
     private uploadedFiles: any[];
+    private workspaceDir: string;
 
-    constructor(model: string, skills: string[] | null = null) {
+    constructor(model: string, workspaceDir: string, skills: string[] | null = null, initialHistory: any[] = []) {
         const apiKey = process.env.GOOGLE_API_KEY;
         if (!apiKey) {
             throw new Error("GOOGLE_API_KEY is not set.");
         }
 
         this.model = model;
+        this.workspaceDir = workspaceDir;
         this.client = new GoogleGenAI({ apiKey });
         this.config = {
-            systemInstruction: build_system_instructions(skills),
+            systemInstruction: build_system_instructions(skills, workspaceDir),
             tools: [{ functionDeclarations: gemini_function_declarations() }],
             automaticFunctionCalling: { disable: true },
             toolConfig: {
                 functionCallingConfig: { mode: "AUTO" }
             }
         };
-        this.contents = [];
+        this.contents = [...initialHistory];
         this.userTasks = [];
+        for (const msg of initialHistory) {
+            if (msg.role === "user" && msg.parts) {
+                for (const part of msg.parts) {
+                    if (part.text) {
+                        this.userTasks.push(strip_ide_context_from_user_query(part.text));
+                    }
+                }
+            }
+        }
         this.totalInputTokens = 0;
         this.totalOutputTokens = 0;
         this.uploadedFiles = [];
-        print_detail("workspace", ROOT, Color.BLUE);
+        print_detail("workspace", workspaceDir, Color.BLUE);
         print_detail("tool mode", "native Gemini function calling", Color.BLUE);
         if (skills && skills.length > 0) {
             print_detail("skills", skills, Color.BLUE);
@@ -539,8 +579,8 @@ export class GeminiAgentSession {
 
     async run(task: string, max_turns: number): Promise<string> {
         this.userTasks.push(strip_ide_context_from_user_query(task));
-        const prepared_task = prepare_user_task(task);
-        const attachments = extract_upload_attachments(task, ROOT);
+        const prepared_task = prepare_user_task(task, this.workspaceDir);
+        const attachments = extract_upload_attachments(task, this.workspaceDir);
         if (attachments.length > 0) {
             print_detail("attachments", format_attachment_summary(attachments), Color.BLUE);
         }
@@ -552,75 +592,76 @@ export class GeminiAgentSession {
         this.contents.push({ role: "user", parts: userParts });
 
         try {
-        for (let step = 1; step <= max_turns; step++) {
-            print_step(step, "asking model for next action", Color.MAGENTA);
-            const request = {
-                model: this.model,
-                contents: this.contents,
-                config: this.config
-            };
-            log_llm_request("coding-agent-gemini-working", request);
-            let response;
-            try {
-                response = await this.client.models.generateContent(request);
-            } catch (err: any) {
-                console.error("GEMINI API ERROR DETAIL:", err);
-                if (err.status) console.error("API ERROR STATUS:", err.status);
-                if (err.error) console.error("API ERROR BODY:", JSON.stringify(err.error, null, 2));
-                throw err;
-            }
-            const usage = response.usageMetadata;
-            const input_tokens = gemini_input_token_count(usage);
-            const output_tokens = gemini_output_token_count(usage);
-            this.record_token_usage(input_tokens, output_tokens);
-            const function_calls = extract_gemini_function_calls(response);
-
-            if (function_calls.length === 0) {
-                if (response.candidates && response.candidates.length > 0) {
-                    this.contents.push(response.candidates[0].content);
+            for (let step = 1; step <= max_turns; step++) {
+                print_step(step, "asking model for next action", Color.MAGENTA);
+                const request = {
+                    model: this.model,
+                    contents: this.contents,
+                    config: this.config
+                };
+                log_llm_request("coding-agent-gemini-working", request);
+                let response;
+                try {
+                    response = await this.client.models.generateContent(request);
+                } catch (err: any) {
+                    console.error("GEMINI API ERROR DETAIL:", err);
+                    if (err.status) console.error("API ERROR STATUS:", err.status);
+                    if (err.error) console.error("API ERROR BODY:", JSON.stringify(err.error, null, 2));
+                    throw err;
                 }
-                print_step(step, "done", Color.GREEN);
-                return extract_gemini_text(response) || "Done.";
-            }
+                const usage = response.usageMetadata;
+                const input_tokens = gemini_input_token_count(usage);
+                const output_tokens = gemini_output_token_count(usage);
+                this.record_token_usage(input_tokens, output_tokens);
+                const function_calls = extract_gemini_function_calls(response);
 
-            const model_content = response.candidates?.[0]?.content;
-            if (!model_content) {
-                print_step(step, "blocked invalid final response state", Color.RED);
-                return USER_RESPONSE_VALIDATION_FAILURE;
-            }
-            this.contents.push(model_content);
-
-            const response_parts: any[] = [];
-            for (const call of function_calls) {
-                const name = call.name;
-                const argumentsObj = call.args || {};
-                print_step(step, `running tool \`${name}\``, Color.BLUE);
-                print_detail("arguments", compact_tool_arguments(argumentsObj), Color.DIM, 700);
-
-                const result = execute_tool(name, argumentsObj);
-                const result_color = result.startsWith("ERROR:") ? Color.RED : Color.GREEN;
-                print_detail(`tool:${name} result`, compact_tool_result(result), result_color);
-
-                const payload = build_function_response_payload(name, argumentsObj, result);
-                if ("contract_validation" in payload) {
-                    const validation_color = payload["contract_validation"].includes("validation passed") ? Color.GREEN : Color.RED;
-                    print_detail("contract", payload["contract_validation"], validation_color, 1200);
-                }
-
-                response_parts.push({
-                    functionResponse: {
-                        id: call.id || undefined,
-                        name: name,
-                        response: payload
+                if (function_calls.length === 0) {
+                    if (response.candidates && response.candidates.length > 0) {
+                        this.contents.push(response.candidates[0].content);
                     }
-                });
+                    print_step(step, "done", Color.GREEN);
+                    return extract_gemini_text(response) || "Done.";
+                }
+
+                const model_content = response.candidates?.[0]?.content;
+                if (!model_content) {
+                    print_step(step, "blocked invalid final response state", Color.RED);
+                    return USER_RESPONSE_VALIDATION_FAILURE;
+                }
+                this.contents.push(model_content);
+
+                const response_parts: any[] = [];
+                for (const call of function_calls) {
+                    const name = call.name;
+                    const argumentsObj = call.args || {};
+                    print_step(step, `running tool \`${name}\``, Color.BLUE);
+                    print_detail("arguments", compact_tool_arguments(argumentsObj), Color.DIM, 700);
+
+                    const result = execute_tool(name, argumentsObj, this.workspaceDir);
+                    const result_color = result.startsWith("ERROR:") ? Color.RED : Color.GREEN;
+                    print_detail(`tool:${name} result`, compact_tool_result(result), result_color);
+
+                    const payload = build_function_response_payload(name, argumentsObj, result, this.workspaceDir);
+                    if ("contract_validation" in payload) {
+                        const validation_color = payload["contract_validation"].includes("validation passed") ? Color.GREEN : Color.RED;
+                        print_detail("contract", payload["contract_validation"], validation_color, 1200);
+                    }
+
+                    response_parts.push({
+                        functionResponse: {
+                            id: call.id || undefined,
+                            name: name,
+                            response: payload
+                        }
+                    });
+                }
+
+                this.contents.push({ role: "user", parts: response_parts });
             }
 
-            this.contents.push({ role: "user", parts: response_parts });
-        }
-
-        return `Stopped after ${max_turns} tool loop(s). Ask me to continue if needed.`;
+            return `Stopped after ${max_turns} tool loop(s). Ask me to continue if needed.`;
         } finally {
+            compact_gemini_turn(this.contents);
             await this.cleanup_uploaded_files();
             this.strip_file_parts_from_history();
         }
@@ -632,18 +673,25 @@ class JsonFallbackAgentSession {
     private transcript: any[];
     private userTasks: string[];
     private model: string;
+    private workspaceDir: string;
 
-    constructor(model: string, skills: string[] | null = null) {
+    constructor(model: string, workspaceDir: string, skills: string[] | null = null, initialHistory: any[] = []) {
         this.model = model;
+        this.workspaceDir = workspaceDir;
         this.llm = new LLM_Model(
             model,
-            build_system_instructions(skills),
+            build_system_instructions(skills, workspaceDir),
             null,
             true
         );
-        this.transcript = [];
+        this.transcript = [...initialHistory];
         this.userTasks = [];
-        print_detail("workspace", ROOT, Color.BLUE);
+        for (const msg of initialHistory) {
+            if (msg.role === "user" && msg.content) {
+                this.userTasks.push(strip_ide_context_from_user_query(msg.content));
+            }
+        }
+        print_detail("workspace", workspaceDir, Color.BLUE);
         print_detail("tool mode", "JSON fallback", Color.BLUE);
         if (skills && skills.length > 0) {
             print_detail("skills", skills, Color.BLUE);
@@ -672,86 +720,90 @@ class JsonFallbackAgentSession {
 
     async run(task: string, max_turns: number): Promise<string> {
         this.userTasks.push(strip_ide_context_from_user_query(task));
-        const prepared_task = prepare_user_task(task);
-        const attachments = extract_upload_attachments(task, ROOT);
+        const prepared_task = prepare_user_task(task, this.workspaceDir);
+        const attachments = extract_upload_attachments(task, this.workspaceDir);
         if (attachments.length > 0) {
             print_detail("attachments", format_attachment_summary(attachments), Color.BLUE);
         }
         this.transcript.push({ role: "user", content: prepared_task });
 
-        for (let step = 1; step <= max_turns; step++) {
-            print_step(step, "asking model for next action", Color.MAGENTA);
-            const response = await this.llm.generate(
-                build_agent_prompt(prepared_task, this.transcript),
-                null,
-                null,
-                null,
-                attachments,
-                true,
-                false
-            );
+        try {
+            for (let step = 1; step <= max_turns; step++) {
+                print_step(step, "asking model for next action", Color.MAGENTA);
+                const response = await this.llm.generate(
+                    build_agent_prompt(prepared_task, this.transcript),
+                    null,
+                    null,
+                    null,
+                    attachments,
+                    true,
+                    false
+                );
 
-            if (response === null) {
-                print_step(step, "LLM call failed", Color.RED);
-                return "The LLM call failed. Check the logs and API key settings.";
+                if (response === null) {
+                    print_step(step, "LLM call failed", Color.RED);
+                    return "The LLM call failed. Check the logs and API key settings.";
+                }
+
+                let action: any;
+                try {
+                    action = normalize_model_response(response);
+                } catch (exc: any) {
+                    print_step(step, "model returned invalid JSON; retrying", Color.YELLOW);
+                    print_detail("raw response", response, Color.YELLOW);
+                    print_detail("parse error", exc.message || exc, Color.YELLOW);
+                    this.transcript.push({ model_response: response, error: String(exc) });
+                    continue;
+                }
+
+                this.transcript.push({ model_response: action });
+                const note = (action.note || "").trim();
+                if (note) {
+                    print_detail("note", note, Color.CYAN, 500);
+                }
+
+                if (action.done === true) {
+                    const output = String(action.output || "Done.");
+                    this.transcript.push({ role: "assistant", content: output });
+                    print_step(step, "done", Color.GREEN);
+                    return output;
+                }
+
+                const name = action.tool;
+                const argumentsObj = action.arguments || {};
+
+                print_step(step, `running tool \`${name}\``, Color.BLUE);
+                print_detail("arguments", compact_tool_arguments(argumentsObj), Color.DIM, 700);
+
+                const result = execute_tool(name, argumentsObj, this.workspaceDir);
+                const result_color = result.startsWith("ERROR:") ? Color.RED : Color.GREEN;
+                print_detail(`tool:${name} result`, compact_tool_result(result), result_color);
+
+                const payload = build_function_response_payload(name, argumentsObj, result, this.workspaceDir);
+                if ("contract_validation" in payload) {
+                    const validation_color = payload["contract_validation"].includes("validation passed") ? Color.GREEN : Color.RED;
+                    print_detail("contract", payload["contract_validation"], validation_color, 1200);
+                }
+
+                this.transcript.push({
+                    tool: name,
+                    arguments: argumentsObj,
+                    result: payload.result
+                });
             }
 
-            let action: any;
-            try {
-                action = normalize_model_response(response);
-            } catch (exc: any) {
-                print_step(step, "model returned invalid JSON; retrying", Color.YELLOW);
-                print_detail("raw response", response, Color.YELLOW);
-                print_detail("parse error", exc.message || exc, Color.YELLOW);
-                this.transcript.push({ model_response: response, error: String(exc) });
-                continue;
-            }
-
-            this.transcript.push({ model_response: action });
-            const note = (action.note || "").trim();
-            if (note) {
-                print_detail("note", note, Color.CYAN, 500);
-            }
-
-            if (action.done === true) {
-                const output = String(action.output || "Done.");
-                this.transcript.push({ role: "assistant", content: output });
-                print_step(step, "done", Color.GREEN);
-                return output;
-            }
-
-            const name = action.tool;
-            const argumentsObj = action.arguments || {};
-
-            print_step(step, `running tool \`${name}\``, Color.BLUE);
-            print_detail("arguments", compact_tool_arguments(argumentsObj), Color.DIM, 700);
-
-            const result = execute_tool(name, argumentsObj);
-            const result_color = result.startsWith("ERROR:") ? Color.RED : Color.GREEN;
-            print_detail(`tool:${name} result`, compact_tool_result(result), result_color);
-
-            const payload = build_function_response_payload(name, argumentsObj, result);
-            if ("contract_validation" in payload) {
-                const validation_color = payload["contract_validation"].includes("validation passed") ? Color.GREEN : Color.RED;
-                print_detail("contract", payload["contract_validation"], validation_color, 1200);
-            }
-
-            this.transcript.push({
-                tool: name,
-                arguments: argumentsObj,
-                result: payload.result
-            });
+            return `Stopped after ${max_turns} tool loop(s). Ask me to continue if needed.`;
+        } finally {
+            compact_fallback_turn(this.transcript);
         }
-
-        return `Stopped after ${max_turns} tool loop(s). Ask me to continue if needed.`;
     }
 }
 
-function create_agent_session(model: string, skills: string[] | null = null): any {
+function create_agent_session(model: string, workspaceDir: string, skills: string[] | null = null, initialHistory: any[] = []): any {
     if (model.toLowerCase().includes("gemini")) {
-        return new GeminiAgentSession(model, skills);
+        return new GeminiAgentSession(model, workspaceDir, skills, initialHistory);
     }
-    return new JsonFallbackAgentSession(model, skills);
+    return new JsonFallbackAgentSession(model, workspaceDir, skills, initialHistory);
 }
 
 type ActiveAgentSession = {
@@ -773,17 +825,188 @@ function get_or_create_agent_session(model: string, skills: string[] | null = nu
     if (!activeAgentSession || activeAgentSession.key !== key) {
         activeAgentSession = {
             key,
-            session: create_agent_session(model, skills)
+            session: create_agent_session(model, DEFAULT_WORKSPACE_DIR, skills)
         };
     }
     return activeAgentSession.session;
 }
 
+function compact_gemini_turn(contents: any[]): void {
+    const callArgsMap = new Map<string, any>();
+    for (const msg of contents) {
+        if (!msg || !msg.parts) continue;
+        for (const part of msg.parts) {
+            if (part.functionCall) {
+                const name = part.functionCall.name;
+                const id = part.functionCall.id || "";
+                const key = `${name}:${id}`;
+                callArgsMap.set(key, part.functionCall.args || {});
+            }
+        }
+    }
+    for (const msg of contents) {
+        if (!msg || !msg.parts) continue;
+        for (const part of msg.parts) {
+            if (part.functionCall) {
+                const name = part.functionCall.name;
+                const id = part.functionCall.id || "";
+                const key = `${name}:${id}`;
+                const args = callArgsMap.get(key) || part.functionCall.args || {};
+                const { compactedArgs } = compact_tool_history(name, args, "");
+                part.functionCall.args = compactedArgs;
+            } else if (part.functionResponse) {
+                const name = part.functionResponse.name;
+                const id = part.functionResponse.id || "";
+                const key = `${name}:${id}`;
+                const args = callArgsMap.get(key) || {};
+                const responseObj = part.functionResponse.response || {};
+                const rawResult = responseObj.result || "";
+                const { compactedResult } = compact_tool_history(name, args, rawResult);
+                responseObj.result = compactedResult;
+            }
+        }
+    }
+}
+
+function compact_fallback_turn(transcript: any[]): void {
+    for (const entry of transcript) {
+        if (entry.model_response && entry.model_response.tool) {
+            const name = entry.model_response.tool;
+            const args = entry.model_response.arguments || {};
+            const { compactedArgs } = compact_tool_history(name, args, "");
+            entry.model_response.arguments = compactedArgs;
+        } else if (entry.tool) {
+            const name = entry.tool;
+            const args = entry.arguments || {};
+            const rawResult = entry.result || "";
+            const { compactedResult } = compact_tool_history(name, args, rawResult);
+            entry.result = compactedResult;
+        }
+    }
+}
+
+export interface ChatMessage {
+    role: "user" | "model" | "assistant" | "tool";
+    parts?: any[];
+    content?: string;
+    model_response?: any;
+    tool?: string;
+    arguments?: any;
+    result?: any;
+}
+
+export interface AgentConfig {
+    model: string;
+    workspaceDir: string;
+    skills?: string[] | null;
+    maxTurns?: number;
+    onLog?: (text: string) => void;
+}
+
+export class ChatSession {
+    private model: string;
+    private workspaceDir: string;
+    private skills: string[] | null;
+    private maxTurns: number;
+    private history: ChatMessage[];
+    private totalInputTokens: number = 0;
+    private totalOutputTokens: number = 0;
+    private onLog?: (text: string) => void;
+
+    constructor(
+        model: string,
+        workspaceDir: string,
+        skills: string[] | null = null,
+        initialHistory: ChatMessage[] = [],
+        maxTurns: number = 500,
+        onLog?: (text: string) => void
+    ) {
+        this.model = model;
+        this.workspaceDir = path.resolve(workspaceDir);
+        this.skills = skills;
+        this.history = [...initialHistory];
+        this.maxTurns = maxTurns;
+        this.onLog = onLog;
+        fs.mkdirSync(this.workspaceDir, { recursive: true });
+    }
+
+    getHistory(): ChatMessage[] {
+        return this.history;
+    }
+
+    getTokenUsage() {
+        return { input: this.totalInputTokens, output: this.totalOutputTokens };
+    }
+
+    async sendMessage(prompt: string, maxTurns?: number): Promise<string> {
+        const turnsLimit = maxTurns !== undefined ? maxTurns : this.maxTurns;
+        const session = create_agent_session(this.model, this.workspaceDir, this.skills, this.history);
+
+        let result: string;
+        if (this.onLog) {
+            result = await loggerStorage.run(this.onLog, () => run_session_with_timing(session, prompt, turnsLimit));
+        } else {
+            result = await run_session_with_timing(session, prompt, turnsLimit);
+        }
+
+        if (session.contents) {
+            this.history = session.contents;
+        } else if (session.transcript) {
+            this.history = session.transcript;
+        }
+
+        if (session.totalInputTokens !== undefined) {
+            this.totalInputTokens += session.totalInputTokens;
+        }
+        if (session.totalOutputTokens !== undefined) {
+            this.totalOutputTokens += session.totalOutputTokens;
+        }
+
+        return result;
+    }
+}
+
+export class LectureAgent {
+    private config: AgentConfig;
+
+    constructor(config: AgentConfig) {
+        this.config = {
+            maxTurns: 500,
+            skills: null,
+            ...config
+        };
+    }
+
+    startChat(initialHistory?: ChatMessage[]): ChatSession {
+        return new ChatSession(
+            this.config.model,
+            this.config.workspaceDir,
+            this.config.skills,
+            initialHistory || [],
+            this.config.maxTurns,
+            this.config.onLog
+        );
+    }
+
+    async run(options: {
+        prompt: string;
+        history?: ChatMessage[];
+        maxTurns?: number;
+    }): Promise<{ output: string; history: ChatMessage[]; tokens: { input: number; output: number } }> {
+        const session = this.startChat(options.history || []);
+        const output = await session.sendMessage(options.prompt, options.maxTurns);
+        return {
+            output,
+            history: session.getHistory(),
+            tokens: session.getTokenUsage()
+        };
+    }
+}
+
 export function reset_agent_session(): void {
     activeAgentSession = null;
     start_new_llm_log_session();
-    create_new_session_workspace();
-    print_detail("workspace cleanup", `created new session workspace at ${ROOT}`, Color.DIM);
+    print_detail("workspace cleanup", "in-memory session state cleared", Color.DIM);
 }
 
 function now_ms(): number {
@@ -810,162 +1033,4 @@ async function run_session_with_timing(session: any, task: string, max_turns: nu
 export async function run_agent(task: string, model: string, max_turns: number, skills: string[] | null = null): Promise<string> {
     const session = get_or_create_agent_session(model, skills);
     return await run_session_with_timing(session, task, max_turns);
-}
-
-function askQuestion(query: string): Promise<string> {
-    const rl = readline.createInterface({
-        input: process.stdin,
-        output: process.stdout,
-    });
-    return new Promise(resolve => rl.question(query, ans => {
-        rl.close();
-        resolve(ans);
-    }));
-}
-
-async function run_chat(model: string, max_turns: number, skills: string[] | null = null): Promise<void> {
-    reset_agent_session();
-    const session = create_agent_session(model, skills);
-    console.error("Chat mode. Type /exit or /quit to stop.");
-    while (true) {
-        try {
-            const message = (await askQuestion(chat_prompt())).trim();
-            if (!message) {
-                continue;
-            }
-            if (message.toLowerCase() === "/exit" || message.toLowerCase() === "/quit") {
-                break;
-            }
-            console.log(await run_session_with_timing(session, message, max_turns));
-        } catch {
-            console.error("");
-            break;
-        }
-    }
-}
-
-function parseCommandLineArgs() {
-    const args = process.argv.slice(2);
-    const result = {
-        task: [] as string[],
-        chat: false,
-        skill: [] as string[],
-        listSkills: false,
-        model: process.env.AGENT_MODEL || "",
-        maxTurns: 500,
-        newSession: (process.env.AGENT_NEW_SESSION || "").replace(/['"]/g, "").trim().toLowerCase() === "true"
-    };
-
-    let i = 0;
-    while (i < args.length) {
-        const arg = args[i];
-        if (arg === '--chat') {
-            result.chat = true;
-            i++;
-        } else if (arg === '--new-session') {
-            result.newSession = true;
-            i++;
-        } else if (arg === '--list-skills') {
-            result.listSkills = true;
-            i++;
-        } else if (arg === '--skill') {
-            if (i + 1 < args.length) {
-                result.skill.push(args[i + 1]);
-                i += 2;
-            } else {
-                throw new Error("Missing value for --skill");
-            }
-        } else if (arg === '--model') {
-            if (i + 1 < args.length) {
-                result.model = args[i + 1];
-                i += 2;
-            } else {
-                throw new Error("Missing value for --model");
-            }
-        } else if (arg === '--max-turns') {
-            if (i + 1 < args.length) {
-                result.maxTurns = parseInt(args[i + 1], 10);
-                i += 2;
-            } else {
-                throw new Error("Missing value for --max-turns");
-            }
-        } else if (arg.startsWith('--')) {
-            throw new Error(`Unknown argument: ${arg}`);
-        } else {
-            result.task.push(arg);
-            i++;
-        }
-    }
-
-    if (!result.model && !result.listSkills) {
-        throw new Error("AGENT_MODEL environment variable or --model flag must be specified.");
-    }
-
-    return result;
-}
-
-
-async function run() {
-    let parsed;
-    try {
-        parsed = parseCommandLineArgs();
-    } catch (e: any) {
-        console.error(`Error: ${e.message}`);
-        process.exit(1);
-    }
-
-    if (parsed.listSkills) {
-        for (const skill of available_skills()) {
-            console.log(skill);
-        }
-        process.exit(0);
-    }
-
-    if (parsed.newSession) {
-        reset_agent_session();
-    }
-
-    if (parsed.chat) {
-        await run_chat(parsed.model, parsed.maxTurns, parsed.skill);
-        process.exit(0);
-    }
-
-    let task = parsed.task.join(" ").trim();
-    if (!task) {
-        // Read from stdin
-        task = fs.readFileSync(0, 'utf8').trim();
-        try {
-            process.stdin.destroy();
-        } catch {}
-    }
-
-    if (!task) {
-        console.error("Error: provide a task argument or stdin");
-        process.exit(1);
-    }
-
-    const result = await run_agent(task, parsed.model, parsed.maxTurns, parsed.skill);
-    process.stdout.write(result + '\n', () => {
-        setTimeout(() => {
-            process.exit(0);
-        }, 100);
-    });
-}
-
-if (process.argv[1] === fileURLToPath(import.meta.url)) {
-    const exitWithError = (reason: string, detail: any, exitCode: number) => {
-        print_detail(reason, detail, Color.RED);
-        process.exit(exitCode);
-    };
-
-    process.once('SIGINT', () => process.exit(130));
-    process.once('SIGTERM', () => process.exit(143));
-    process.once('uncaughtException', (error) => {
-        exitWithError("uncaught exception", error?.message || error, 1);
-    });
-    process.once('unhandledRejection', (reason) => {
-        exitWithError("unhandled rejection", reason, 1);
-    });
-
-    run();
 }

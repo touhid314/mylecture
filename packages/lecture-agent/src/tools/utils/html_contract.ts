@@ -10,7 +10,7 @@ import path from 'path';
 import { spawnSync } from 'child_process';
 import { fileURLToPath } from 'url';
 
-import { ROOT, resolve_workspace_path } from './workspace.js';
+import { DEFAULT_WORKSPACE_DIR, resolve_workspace_path } from '../../workspace.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -70,8 +70,8 @@ export function purify_content_for_path(filePath: string, content: string): [str
     return purify_html_markup_escapes(content);
 }
 
-export function validate_index_html_contract(filePath: string): string {
-    const target = resolve_workspace_path(filePath);
+export function validate_index_html_contract(filePath: string, workspaceDir: string = DEFAULT_WORKSPACE_DIR): string {
+    const target = resolve_workspace_path(filePath, workspaceDir);
     if (!fs.existsSync(CONTRACT_VALIDATOR_JS)) {
         return `HTML contract validation skipped: validator not found at ${CONTRACT_VALIDATOR_JS}`;
     }
@@ -90,7 +90,7 @@ export function validate_index_html_contract(filePath: string): string {
 
     try {
         const completed = spawnSync('node', [CONTRACT_VALIDATOR_JS, target], {
-            cwd: ROOT,
+            cwd: workspaceDir,
             encoding: 'utf8',
             timeout: 10000
         });

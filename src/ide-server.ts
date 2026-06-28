@@ -13,6 +13,7 @@ import { createServer } from 'node:http';
 import { spawn } from 'node:child_process';
 import path from 'node:path';
 import { createViewerHtml } from '../packages/lecture-viewer/src/index.ts';
+import { LectureAgent } from '../packages/lecture-agent/src/coding_agent.ts';
 
 const rootDir = process.cwd();
 
@@ -54,7 +55,8 @@ function getAgentState(agentClientId) {
       currentWorkspace: '',
       activeJob: null,
       log: '',
-      pendingNewSession: true
+      pendingNewSession: true,
+      session: null
     };
     agentClientStates.set(id, state);
   }
@@ -1367,6 +1369,7 @@ const server = createServer(async (request, response) => {
       agentState.log = '';
       agentState.currentWorkspace = '';
       agentState.pendingNewSession = true;
+      agentState.session = null;
       sendJson(response, 200, { ok: true });
     } catch (error) {
       sendJson(response, 500, { error: error.message });
@@ -1419,43 +1422,6 @@ const server = createServer(async (request, response) => {
             return;
           }
 
-          let execCmd = '';
-          let execArgs: string[] = [];
-          const workspaceTsAgentScript = path.resolve(rootDir, 'packages/lecture-agent/src/coding_agent.ts');
-          const siblingTsAgentScript = path.resolve(rootDir, '../lecture-agent/src/coding_agent.ts');
-          const pythonAgentScript = path.resolve(rootDir, '../lecture-agent/coding_agent.py');
-
-          if (existsSync(workspaceTsAgentScript)) {
-            execCmd = process.platform === 'win32' ? 'npx.cmd' : 'npx';
-            execArgs = ['tsx', workspaceTsAgentScript];
-          } else if (existsSync(siblingTsAgentScript)) {
-            execCmd = process.platform === 'win32' ? 'npx.cmd' : 'npx';
-            execArgs = ['tsx', siblingTsAgentScript];
-          } else if (existsSync(pythonAgentScript)) {
-            let pythonCmd = 'python';
-            const relativePaths = [
-              ['../.venv'],
-              ['../lecture-agent/.venv'],
-              ['.venv']
-            ];
-
-            for (const rel of relativePaths) {
-              const venvPython = process.platform === 'win32'
-                ? path.resolve(rootDir, ...rel, 'Scripts', 'python.exe')
-                : path.resolve(rootDir, ...rel, 'bin', 'python');
-
-              if (existsSync(venvPython)) {
-                pythonCmd = venvPython;
-                break;
-              }
-            }
-            execCmd = pythonCmd;
-            execArgs = [pythonAgentScript];
-          } else {
-            sendJson(response, 500, { error: `Agent script not found at ${workspaceTsAgentScript}, ${siblingTsAgentScript} or ${pythonAgentScript}` });
-            return;
-          }
-
           if (agentState.pendingNewSession || !agentState.currentWorkspace) {
             createNewSessionWorkspace(agentState.id);
             agentState.pendingNewSession = false;
@@ -1472,75 +1438,48 @@ const server = createServer(async (request, response) => {
           }
           task += message;
 
-          const env = {
-            ...process.env,
-            AGENT_WORKSPACE: agentWorkspaceRoot(agentState.id),
-            DOTENVX_LOG_LEVEL: 'error',
-            DOTENV_LOG_LEVEL: 'error',
-            DOTENV_CONFIG_QUIET: 'true'
-          };
+          if (!agentState.session) {
+            const agent = new LectureAgent({
+              model: payload.model || process.env.AGENT_MODEL || "gemini-3.5-flash",
+              workspaceDir: agentWorkspaceRoot(agentState.id),
+              onLog: (text) => {
+                agentState.log += text;
+                process.stderr.write(text);
+              }
+            });
+            agentState.session = agent.startChat();
+          }
 
-          console.log(`Starting agent process (task sent via stdin): ${execCmd} ${execArgs.map(a => `"${a}"`).join(' ')}`);
+          agentState.log = ''; // Reset log buffer for this turn
 
-          let stdout = '';
-          let stderr = '';
-          agentState.log = ''; // Reset log buffer
-
-          let childProc = null;
+          let isAborted = false;
           agentState.activeJob = {
             type: 'agent',
             kill: () => {
+              isAborted = true;
               agentState.activeJob.aborted = true;
-              if (childProc) killProcessTree(childProc);
             }
           };
 
-          const child = spawn(execCmd, execArgs, {
-            cwd: agentWorkspaceRoot(agentState.id),
-            stdio: ['pipe', 'pipe', 'pipe'],
-            windowsHide: true,
-            shell: true,
-            env
-          });
-          childProc = child;
+          console.log(`Starting in-process agent execution in: ${agentWorkspaceRoot(agentState.id)}`);
 
-          child.stdin.write(task);
-          child.stdin.end();
-
-          child.stdout.on('data', chunk => {
-            const str = chunk.toString();
-            stdout += str;
-            agentState.log += str;
-            process.stdout.write(chunk);
-          });
-
-          child.stderr.on('data', chunk => {
-            const str = chunk.toString();
-            stderr += str;
-            agentState.log += str;
-            process.stderr.write(chunk);
-          });
-
-          child.on('error', err => {
-            agentState.activeJob = null;
-            sendJson(response, 500, { error: err.message });
-          });
-
-          child.on('close', code => {
-            agentState.activeJob = null;
-            if (code === 0) {
-              sendJson(response, 200, { ok: true, output: stdout.trim(), workspace: agentWorkspaceRoot(agentState.id) });
-            } else {
-              const output = `${stdout}\n${stderr}`
-                .split(/\r?\n/)
-                .map(line => line.trim())
-                .filter(Boolean)
-                .slice(-80)
-                .join('\n');
-              sendJson(response, 500, { error: output || `Agent exited with code ${code}` });
+          (async () => {
+            try {
+              const responseText = await agentState.session.sendMessage(task);
+              agentState.activeJob = null;
+              if (isAborted) {
+                return;
+              }
+              sendJson(response, 200, { ok: true, output: responseText.trim(), workspace: agentWorkspaceRoot(agentState.id) });
+            } catch (err: any) {
+              agentState.activeJob = null;
+              if (isAborted) {
+                return;
+              }
+              sendJson(response, 500, { error: err.message || `Agent execution failed: ${err}` });
             }
-          });
-        } catch (error) {
+          })();
+        } catch (error: any) {
           sendJson(response, 500, { error: error.message });
         }
       });

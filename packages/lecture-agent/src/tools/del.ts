@@ -6,9 +6,9 @@
  */
 import fs from 'fs';
 import path from 'path';
-import { resolve_workspace_path, ROOT } from './utils/workspace.js';
+import { resolve_workspace_path, DEFAULT_WORKSPACE_DIR } from '../workspace.js';
 
-export function tool_del(paths: string[]): string {
+export function tool_del(paths: string[], workspaceDir: string = DEFAULT_WORKSPACE_DIR): string {
     if (!Array.isArray(paths)) {
         return "ERROR: paths must be an array of strings.";
     }
@@ -21,30 +21,39 @@ export function tool_del(paths: string[]): string {
             if (typeof targetPath !== 'string') {
                 return "ERROR: all paths must be strings.";
             }
-            const target = resolve_workspace_path(targetPath);
-            if (path.resolve(target) === path.resolve(ROOT)) {
+            const target = resolve_workspace_path(targetPath, workspaceDir);
+            if (path.resolve(target) === path.resolve(workspaceDir)) {
                 return `ERROR: cannot delete the workspace root directory: ${targetPath}`;
             }
             resolvedTargets.push({ original: targetPath, resolved: target });
         }
     } catch (e: any) {
-        return `ERROR: boundary validation failed: ${e.message || String(e)}`;
+        return `ERROR: ${e.message || String(e)}`;
     }
 
-    const results: string[] = [];
-
-    for (const item of resolvedTargets) {
-        try {
-            if (!fs.existsSync(item.resolved)) {
-                results.push(`path does not exist: ${item.original}`);
-                continue;
+    // Execute deletion
+    const deletedList: string[] = [];
+    try {
+        for (const target of resolvedTargets) {
+            if (fs.existsSync(target.resolved)) {
+                const stat = fs.statSync(target.resolved);
+                if (stat.isDirectory()) {
+                    fs.rmSync(target.resolved, { recursive: true, force: true });
+                } else {
+                    fs.unlinkSync(target.resolved);
+                }
+                deletedList.push(target.original);
             }
-            fs.rmSync(item.resolved, { recursive: true, force: true });
-            results.push(`deleted: ${item.original}`);
-        } catch (e: any) {
-            results.push(`failed to delete ${item.original}: ${e.message || String(e)}`);
         }
+        return `del succeeded: deleted ${deletedList.length} item(s): ${deletedList.join(', ') || 'none (files did not exist)'}`;
+    } catch (e: any) {
+        return `ERROR: ${e.message || String(e)}`;
     }
+}
 
-    return `del processed ${paths.length} target(s):\n${results.map(r => `- ${r}`).join('\n')}`;
+export function compact_del(args: { paths: string[] }, result: string): { compactedArgs: any; compactedResult: string } {
+    return {
+        compactedArgs: args,
+        compactedResult: result
+    };
 }
