@@ -53,6 +53,10 @@ export const TOOLS: any[] = [
                             new_text: {
                                 type: "string",
                                 description: "The text to insert at start_line (use empty string to delete without inserting)."
+                            },
+                            old_text: {
+                                type: "string",
+                                description: "Optional safety check: exact text expected in the removed range before the edit is applied."
                             }
                         },
                         required: ["start_line", "remove_lines", "new_text"],
@@ -121,6 +125,7 @@ export const TOOL_JSON_SCHEMA = {
                 start_line: "1-indexed starting line number of the edit in the original file",
                 remove_lines: "number of lines to remove (0 for pure insertion)",
                 new_text: "text to insert",
+                old_text: "optional exact text expected in the removed range before applying the edit",
             }
         ],
     },

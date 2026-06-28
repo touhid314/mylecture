@@ -272,11 +272,26 @@ function validateWithVM(htmlPath) {
         timeout: 500
       });
     } catch (err) {
-      // Keep going, some scripts might rely on external variables
+      if (!sandbox.__SCRIPT_ERRORS__) {
+        sandbox.__SCRIPT_ERRORS__ = [];
+      }
+      sandbox.__SCRIPT_ERRORS__.push(`${script.origin}: ${err.name || 'Error'}: ${err.message || err}`);
     }
   }
 
-  return runChecks(sandbox);
+  const errors = runChecks(sandbox);
+  if (
+    errors.some((err) => err.startsWith('Missing window.__')) &&
+    Array.isArray(sandbox.__SCRIPT_ERRORS__) &&
+    sandbox.__SCRIPT_ERRORS__.length > 0
+  ) {
+    return [
+      ...sandbox.__SCRIPT_ERRORS__.slice(0, 5).map((err) => `Script execution error before contract globals: ${err}`),
+      ...errors,
+    ];
+  }
+
+  return errors;
 }
 
 async function validateWithPlaywright(htmlPath) {
@@ -288,6 +303,10 @@ async function validateWithPlaywright(htmlPath) {
   });
   try {
     const page = await browser.newPage();
+    const scriptErrors = [];
+    page.on('pageerror', (err) => {
+      scriptErrors.push(`${err.name || 'Error'}: ${err.message || err}`);
+    });
     await page.goto(pathToFileURL(htmlPath).href, { waitUntil: 'load', timeout: 5000 });
 
     const result = await page.evaluate(() => {
@@ -310,7 +329,15 @@ async function validateWithPlaywright(htmlPath) {
       __STOP_GAME__: result.__STOP_GAME_TYPE__ === 'function' ? (() => {}) : undefined,
     };
 
-    return runChecks(windowObj);
+    const errors = runChecks(windowObj);
+    if (errors.some((err) => err.startsWith('Missing window.__')) && scriptErrors.length > 0) {
+      return [
+        ...scriptErrors.slice(0, 5).map((err) => `Browser script error before contract globals: ${err}`),
+        ...errors,
+      ];
+    }
+
+    return errors;
   } finally {
     await browser.close();
   }
