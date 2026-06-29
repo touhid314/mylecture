@@ -7,7 +7,7 @@ Single public API:
 Providers available via this module:
 1) openai
    - Provider key: "openai"
-   - Default model: gpt-4o-mini-tts-2025-12-15
+   - Model is required via OPENAI_TTS_MODEL.
    - Available voices:
      alloy, ash, ballad, coral, cedar, echo, fable, marin, nova,
      onyx, sage, shimmer, verse
@@ -31,8 +31,7 @@ Providers available via this module:
 
 3) kokoro (local via ONNX Runtime CUDA, with kokoro-js fallback)
    - Provider key: "kokoro"
-   - Default model: onnx-community/Kokoro-82M-ONNX
-   - Default engine: Python ONNX Runtime with CUDAExecutionProvider.
+   - Model and engine are required via KOKORO_MODEL and KOKORO_ENGINE.
    - Set KOKORO_ENGINE=kokoro-js to force the old Node.js path.
    - Available voices (from installed kokoro-js package):
      af_heart, af_alloy, af_aoede, af_bella, af_jessica, af_kore,
@@ -101,11 +100,27 @@ log = Logger()
 DEFAULT_OUTPUT_DIR = PROJECT_ROOT / "outputs/tts"
 DEFAULT_KOKORO_OUTPUT_DIR = PROJECT_ROOT / "outputs/tts_kokoro"
 
-DEFAULT_OPENAI_MODEL = os.getenv("OPENAI_TTS_MODEL") or "gpt-4o-mini-tts-2025-12-15"
-DEFAULT_OPENAI_VOICE = os.getenv("OPENAI_TTS_VOICE") or "cedar"
+def _require_env(name: str) -> str:
+    value = os.getenv(name)
+    if value is None or not value.strip():
+        raise RuntimeError(f"Set {name} in .env")
+    return value.strip()
 
-DEFAULT_GEMINI_MODEL = os.getenv("GOOGLE_TTS_MODEL") or "gemini-2.5-flash-preview-tts"
-DEFAULT_GEMINI_VOICE = os.getenv("GOOGLE_TTS_VOICE") or "Vindemiatrix"
+
+def _required_bool_env(name: str) -> bool:
+    value = _require_env(name).lower()
+    if value in {"1", "true", "yes"}:
+        return True
+    if value in {"0", "false", "no"}:
+        return False
+    raise RuntimeError(f"{name} must be one of: true, false, 1, 0, yes, no")
+
+
+DEFAULT_OPENAI_MODEL = _require_env("OPENAI_TTS_MODEL")
+DEFAULT_OPENAI_VOICE = _require_env("OPENAI_TTS_VOICE")
+
+DEFAULT_GEMINI_MODEL = _require_env("GOOGLE_TTS_MODEL")
+DEFAULT_GEMINI_VOICE = _require_env("GOOGLE_TTS_VOICE")
 _ALLOWED_GEMINI_MODELS = {
     "gemini-3-flash-preview-tts",
     "gemini-3-flash-lite-preview-tts",
@@ -113,49 +128,40 @@ _ALLOWED_GEMINI_MODELS = {
     "gemini-2.5-flash-preview-tts",
 }
 
-DEFAULT_KOKORO_MODEL = os.getenv("KOKORO_MODEL") or "onnx-community/Kokoro-82M-ONNX"
-DEFAULT_KOKORO_VOICE = os.getenv("KOKORO_VOICE") or "am_puck"
-DEFAULT_KOKORO_ENGINE = (os.getenv("KOKORO_ENGINE") or "onnxruntime").strip().lower()
-DEFAULT_KOKORO_ONNX_MODEL = os.getenv("KOKORO_ONNX_MODEL") or "model.onnx"
-DEFAULT_KOKORO_ONNX_MODEL_DIR = Path(
-    os.getenv("KOKORO_ONNX_MODEL_DIR") or PROJECT_ROOT / "models" / "kokoro-onnx"
-)
-
-
-def _default_kokoro_device() -> str:
-    explicit = os.getenv("KOKORO_DEVICE")
-    if explicit is not None:
-        return explicit.strip()
-    if sys.platform in {"win32"} or sys.platform.startswith("linux"):
-        return "cuda"
-    return "cpu"
-
-
-DEFAULT_KOKORO_DEVICE = _default_kokoro_device()
-
-
-def _default_kokoro_dtype() -> str:
-    explicit = os.getenv("KOKORO_DTYPE")
-    if explicit:
-        return explicit
-    return "fp32" if DEFAULT_KOKORO_DEVICE in {"dml", "cuda", "webgpu"} else "q8"
-
-
-DEFAULT_KOKORO_DTYPE = _default_kokoro_dtype()
+DEFAULT_KOKORO_MODEL = _require_env("KOKORO_MODEL")
+DEFAULT_KOKORO_VOICE = _require_env("KOKORO_DEFAULT_VOICE")
+DEFAULT_KOKORO_ENGINE = _require_env("KOKORO_ENGINE").lower()
+DEFAULT_KOKORO_DEVICE = _require_env("KOKORO_DEVICE")
+DEFAULT_KOKORO_DTYPE = _require_env("KOKORO_DTYPE")
+DEFAULT_KOKORO_PHONEMIZER = _require_env("KOKORO_PHONEMIZER").lower()
+DEFAULT_KOKORO_ONNX_MODEL = _require_env("KOKORO_ONNX_MODEL")
+DEFAULT_KOKORO_ONNX_MODEL_DIR = Path(_require_env("KOKORO_ONNX_MODEL_DIR"))
+if not DEFAULT_KOKORO_ONNX_MODEL_DIR.is_absolute():
+    DEFAULT_KOKORO_ONNX_MODEL_DIR = PROJECT_ROOT / DEFAULT_KOKORO_ONNX_MODEL_DIR
+DEFAULT_KOKORO_STRICT_GPU = _required_bool_env("KOKORO_STRICT_GPU")
+DEFAULT_KOKORO_CHUNK_WORKERS = int(_require_env("KOKORO_CHUNK_WORKERS"))
+DEFAULT_KOKORO_CPU_FALLBACK_DTYPE = _require_env("KOKORO_CPU_FALLBACK_DTYPE")
+if DEFAULT_KOKORO_CHUNK_WORKERS <= 0:
+    raise RuntimeError("KOKORO_CHUNK_WORKERS must be a positive integer")
 
 KOKORO_JS = r"""
 import { KokoroTTS } from "kokoro-js";
 
-const model = process.env.KOKORO_MODEL ?? "onnx-community/Kokoro-82M-ONNX";
-const dtype = process.env.KOKORO_DTYPE ?? "q8";
-const cpuFallbackDtype = process.env.KOKORO_CPU_FALLBACK_DTYPE ?? "q8";
-const voice = process.env.KOKORO_VOICE ?? "am_puck";
-const speedRaw = process.env.KOKORO_SPEED ?? "1";
+const requiredEnv = (name) => {
+  const value = process.env[name];
+  if (!value || !value.trim()) throw new Error(`Set ${name} in .env`);
+  return value.trim();
+};
+
+const model = requiredEnv("KOKORO_MODEL");
+const dtype = requiredEnv("KOKORO_DTYPE");
+const cpuFallbackDtype = requiredEnv("KOKORO_CPU_FALLBACK_DTYPE");
+const voice = requiredEnv("KOKORO_VOICE");
+const speedRaw = requiredEnv("KOKORO_SPEED");
 const speed = Number(speedRaw);
-const deviceRaw = (process.env.KOKORO_DEVICE ?? "").trim();
-const device = deviceRaw || null;
-const text = process.env.KOKORO_TEXT ?? "";
-const outputPath = process.env.KOKORO_OUTPUT ?? "audio.wav";
+const device = requiredEnv("KOKORO_DEVICE");
+const text = requiredEnv("KOKORO_TEXT");
+const outputPath = requiredEnv("KOKORO_OUTPUT");
 
 if (!text.trim()) {
   throw new Error("Input text is empty.");
@@ -200,6 +206,23 @@ try {
 }
 
 console.log(outputPath);
+"""
+
+KOKORO_JS_PHONEMIZER = r"""
+import { phonemize } from "phonemizer";
+
+const requiredEnv = (name) => {
+  const value = process.env[name];
+  if (!value || !value.trim()) throw new Error(`Set ${name} in .env`);
+  return value.trim();
+};
+
+const text = requiredEnv("KOKORO_TEXT");
+const language = requiredEnv("KOKORO_LANGUAGE");
+
+const chunks = await phonemize(text, language);
+const phonemes = Array.isArray(chunks) ? chunks.join(" ") : String(chunks ?? "");
+process.stdout.write(phonemes);
 """
 
 
@@ -374,18 +397,14 @@ def _split_text_into_sentence_chunks(
 
 
 def _openai_client() -> OpenAI:
-    api_key = os.environ.get("OPENAI_API_KEY")
-    if not api_key:
-        raise RuntimeError("Set OPENAI_API_KEY environment variable")
+    api_key = _require_env("OPENAI_API_KEY")
     if OpenAI is None:
         raise RuntimeError("OpenAI SDK is not available")
     return OpenAI(api_key=api_key)
 
 
 def _google_client() -> genai.Client:
-    api_key = os.environ.get("GOOGLE_API_KEY")
-    if not api_key:
-        raise RuntimeError("Set GOOGLE_API_KEY environment variable")
+    api_key = _require_env("GOOGLE_API_KEY")
     if genai is None:
         raise RuntimeError("Google GenAI SDK is not available")
     return genai.Client(api_key=api_key)
@@ -448,11 +467,10 @@ def _run_kokoro_onnxruntime(text: str, output_path: Path, voice: str, speed: flo
         import scipy.io.wavfile as wavfile
         import onnxruntime as ort
         from huggingface_hub import snapshot_download
-        from misaki import en
     except Exception as exc:
         raise RuntimeError(
             "Python Kokoro CUDA backend requires numpy, scipy, onnxruntime-gpu, "
-            "huggingface_hub, and misaki[en]."
+            "and huggingface_hub."
         ) from exc
 
     _add_windows_nvidia_dll_directories()
@@ -489,16 +507,12 @@ def _run_kokoro_onnxruntime(text: str, output_path: Path, voice: str, speed: flo
             _TOKENIZERS[tok_key] = json.load(f)["model"]["vocab"]
     vocab = _TOKENIZERS[tok_key]
 
-    # Cache G2P converter
     british = voice.startswith("b")
-    if british not in _G2P_OBJECTS:
-        _G2P_OBJECTS[british] = en.G2P(trf=False, british=british, fallback=None)
-    g2p = _G2P_OBJECTS[british]
-
-    phonemes, _ = g2p(text)
+    phonemes = _run_kokoro_phonemizer(text, british)
     missing_phonemes = sorted({p for p in phonemes if p not in vocab})
     if missing_phonemes:
-        log.warning(f"Kokoro skipped tokenizer-missing phoneme(s): {''.join(missing_phonemes)}")
+        escaped = "".join(missing_phonemes).encode("unicode_escape").decode("ascii")
+        log.warning(f"Kokoro skipped tokenizer-missing phoneme(s): {escaped}")
     tokens = [vocab[p] for p in phonemes if p in vocab]
     if not tokens:
         raise RuntimeError("Kokoro phonemizer produced no tokenizer-compatible phonemes.")
@@ -550,7 +564,7 @@ def _run_kokoro_onnxruntime(text: str, output_path: Path, voice: str, speed: flo
     if requested_device == "cuda" and (not active or active[0] != "CUDAExecutionProvider"):
         raise RuntimeError(f"CUDAExecutionProvider was requested but session providers are {active}")
 
-    if os.getenv("KOKORO_STRICT_GPU", "").strip() in {"1", "true", "yes"}:
+    if DEFAULT_KOKORO_STRICT_GPU:
         disable_fallback = getattr(sess, "disable_fallback", None)
         if callable(disable_fallback):
             disable_fallback()
@@ -629,13 +643,86 @@ def _run_kokoro_js(text: str, output_path: Path, voice: str, speed: float) -> No
             print(detail)
 
 
+def _run_js_phonemizer(text: str, british: bool) -> str:
+    env = os.environ.copy()
+    env.update(
+        {
+            "KOKORO_TEXT": text,
+            "KOKORO_LANGUAGE": "en" if british else "en-us",
+        }
+    )
+
+    tmp_path: Path | None = None
+    try:
+        tmp_dir = PROJECT_ROOT / ".tmp"
+        tmp_dir.mkdir(parents=True, exist_ok=True)
+        with tempfile.NamedTemporaryFile(
+            mode="w",
+            suffix=".mjs",
+            delete=False,
+            encoding="utf-8",
+            dir=str(tmp_dir),
+        ) as tmp:
+            tmp.write(KOKORO_JS_PHONEMIZER)
+            tmp_path = Path(tmp.name)
+
+        result = subprocess.run(
+            ["node", str(tmp_path)],
+            cwd=str(PROJECT_ROOT),
+            env=env,
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+            timeout=120,
+        )
+    except FileNotFoundError as exc:
+        raise RuntimeError("Node.js not found on PATH. Install Node.js and retry.") from exc
+    finally:
+        if tmp_path and tmp_path.exists():
+            try:
+                tmp_path.unlink(missing_ok=True)
+            except PermissionError:
+                pass
+
+    if result.returncode != 0:
+        detail = (result.stderr or result.stdout or "").strip()[:1000]
+        raise RuntimeError(f"JS phonemizer failed: {detail or 'Unknown error'}")
+
+    phonemes = result.stdout.strip()
+    if not phonemes:
+        raise RuntimeError("JS phonemizer produced no phonemes.")
+    return phonemes.replace("dʒ", "ʤ").replace("tʃ", "ʧ")
+
+
+def _run_misaki_phonemizer(text: str, british: bool) -> str:
+    try:
+        from misaki import en
+    except Exception as exc:
+        raise RuntimeError("Misaki phonemizer requires misaki[en].") from exc
+
+    if british not in _G2P_OBJECTS:
+        _G2P_OBJECTS[british] = en.G2P(trf=False, british=british, fallback=None)
+    g2p = _G2P_OBJECTS[british]
+    phonemes, _ = g2p(text)
+    return phonemes
+
+
+def _run_kokoro_phonemizer(text: str, british: bool) -> str:
+    if DEFAULT_KOKORO_PHONEMIZER in {"misaki", "python"}:
+        return _run_misaki_phonemizer(text, british)
+    if DEFAULT_KOKORO_PHONEMIZER in {"js", "node", "phonemizer"}:
+        return _run_js_phonemizer(text, british)
+    raise RuntimeError("KOKORO_PHONEMIZER must be one of: misaki, js")
+
+
 def _run_kokoro(text: str, output_path: Path, voice: str, speed: float) -> None:
     if DEFAULT_KOKORO_ENGINE in {"onnxruntime", "onnx", "ort", "cuda"}:
         try:
             _run_kokoro_onnxruntime(text, output_path, voice, speed)
             return
         except Exception as exc:
-            if os.getenv("KOKORO_STRICT_GPU", "").strip() in {"1", "true", "yes"}:
+            if DEFAULT_KOKORO_STRICT_GPU:
                 raise
             log.warning(f"Kokoro ONNX Runtime backend failed; falling back to kokoro-js. {exc}")
     elif DEFAULT_KOKORO_ENGINE not in {"kokoro-js", "node", "js"}:
@@ -657,13 +744,7 @@ def _run_kokoro_chunked(text: str, output_path: Path, voice: str, speed: float) 
     with tempfile.TemporaryDirectory(dir=str(tmp_root), prefix="kokoro_chunks_") as td:
         chunk_dir = Path(td)
         chunk_paths = [chunk_dir / f"chunk_{idx:04d}.wav" for idx in range(len(chunks))]
-        configured_workers = os.getenv("KOKORO_CHUNK_WORKERS")
-        if configured_workers:
-            max_workers = int(configured_workers)
-        elif DEFAULT_KOKORO_ENGINE in {"onnxruntime", "onnx", "ort", "cuda"} and DEFAULT_KOKORO_DEVICE == "cuda":
-            max_workers = 1
-        else:
-            max_workers = min(len(chunks), max(1, os.cpu_count() or 4), 8)
+        max_workers = DEFAULT_KOKORO_CHUNK_WORKERS
         max_workers = max(1, min(len(chunks), max_workers))
 
         with ThreadPoolExecutor(max_workers=max_workers) as executor:
@@ -753,7 +834,10 @@ def tts(
         client = _google_client()
         chosen_model = DEFAULT_GEMINI_MODEL
         if chosen_model not in _ALLOWED_GEMINI_MODELS:
-            chosen_model = "gemini-2.5-flash-preview-tts"
+            raise RuntimeError(
+                "GOOGLE_TTS_MODEL must be one of: "
+                + ", ".join(sorted(_ALLOWED_GEMINI_MODELS))
+            )
         chosen_voice = (voice or DEFAULT_GEMINI_VOICE).strip()
 
         response = client.models.generate_content(
@@ -781,7 +865,8 @@ def tts(
             raise ValueError("speed must be greater than 0")
         log.info(
             f"Kokoro config model={DEFAULT_KOKORO_MODEL} dtype={DEFAULT_KOKORO_DTYPE} "
-            f"device={DEFAULT_KOKORO_DEVICE or 'default'} voice={chosen_voice} speed={chosen_speed}"
+            f"device={DEFAULT_KOKORO_DEVICE or 'default'} voice={chosen_voice} "
+            f"speed={chosen_speed} phonemizer={DEFAULT_KOKORO_PHONEMIZER}"
         )
         _run_kokoro_chunked(clean_text, out_path, chosen_voice, chosen_speed)
         return str(out_path)
