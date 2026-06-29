@@ -385,9 +385,22 @@ Useful options include:
 --max-frames <number>
 --skip-video
 --workers <number>
+--render-mode <stateful|stateless|sequential>
 --tts-voice <voice>
 --tts-speed <number>
 ```
+
+Frame rendering defaults to `--render-mode stateful`. In this mode, workers capture contiguous frame ranges and warm up by replaying earlier frames without screenshots before capturing their assigned range. This makes renderer output stable for lecture files whose visual state accidentally depends on earlier `renderAt` calls, while still allowing parallel screenshot capture.
+
+Render modes:
+
+```text
+stateful     Default. Parallel chunk rendering with warmup replay for stateful HTML.
+stateless    Fastest old scheduler. Frames may be assigned dynamically across workers; requires each renderAt(time) call to fully define the frame.
+sequential   One page renders every frame in order. Slowest but closest to live playback.
+```
+
+The CLI default worker count is the logical CPU count. For heavy Playwright rendering, start with physical-core count or lower when tuning performance. The IDE batch render path may also run multiple scene render processes in parallel, so avoid assuming `--workers` is the only source of render concurrency.
 
 The root test scripts exercise build, render, visual-only, and narration paths.
 

@@ -49,6 +49,7 @@ function parseArgs(argv) {
     ttsAudioWorkers: null,
     videoCodec: 'auto',
     x264Preset: 'veryfast',
+    renderMode: 'stateful',
     resolvedHtml: null,
     premixedAudio: null,
     keepFrames: false,
@@ -70,6 +71,7 @@ function parseArgs(argv) {
     else if (arg === '--frame-format') args.frameFormat = String(next || '').toLowerCase(), i++;
     else if (arg === '--jpeg-quality') args.jpegQuality = Number(next), i++;
     else if (arg === '--workers') args.workers = Number(next), i++;
+    else if (arg === '--render-mode') args.renderMode = String(next || '').toLowerCase(), i++;
     else if (arg === '--video-codec') args.videoCodec = String(next || '').toLowerCase(), i++;
     else if (arg === '--x264-preset') args.x264Preset = String(next || '').toLowerCase(), i++;
     else if (arg === '--resolved-html') args.resolvedHtml = next, i++;
@@ -100,6 +102,9 @@ function parseArgs(argv) {
     throw new Error('--jpeg-quality must be an integer from 1 to 100');
   }
   if (!Number.isInteger(args.workers) || args.workers <= 0) throw new Error('--workers must be a positive integer');
+  if (!['stateful', 'stateless', 'sequential'].includes(args.renderMode)) {
+    throw new Error('--render-mode must be one of: stateful, stateless, sequential');
+  }
   if (!args.ttsProvider) throw new Error('--tts-provider must not be empty');
   if (!args.ttsVoice) throw new Error('--tts-voice must not be empty');
   if (!Number.isFinite(args.ttsSpeed) || args.ttsSpeed <= 0) throw new Error('--tts-speed must be a positive number');
@@ -141,6 +146,7 @@ Options:
   --frame-format <fmt>   Temporary frame format: jpeg or png. Default: jpeg
   --jpeg-quality <1-100> JPEG quality when --frame-format jpeg. Default: 90
   --workers <number>     Parallel Playwright pages for frame rendering. Default: logical CPU core count
+  --render-mode <mode>   Frame scheduling: stateful, stateless, or sequential. Default: stateful
   --video-codec <codec>   MP4 video encoder: auto, libx264, h264_nvenc, h264_qsv, h264_amf. Default: auto
   --x264-preset <preset>  libx264 speed preset. Default: veryfast
   --resolved-html <file>  Output path for auto-built source HTML. Default: sibling resolved.html
@@ -532,8 +538,9 @@ async function renderSingleFrame(page, framesDir, frame, fps, options, totalFram
   }
 }
 
-// Render frames in parallel across multiple Playwright pages.
-async function renderFrames(browser, url, framesDir, frameCount, fps, args) {
+// Render frames as quickly as possible. This mode requires renderAt(time) to be
+// fully independent of previously rendered frames.
+async function renderFramesStateless(browser, url, framesDir, frameCount, fps, args) {
   const workerCount = Math.min(args.workers, frameCount);
   const pages = await Promise.all(
     Array.from({ length: workerCount }, () => preparePage(browser, url, args.width, args.height))
@@ -548,6 +555,77 @@ async function renderFrames(browser, url, framesDir, frameCount, fps, args) {
   }));
 
   await Promise.all(pages.map(page => page.close()));
+}
+
+function frameChunks(frameCount, workerCount) {
+  const chunkCount = Math.min(workerCount, frameCount);
+  const baseSize = Math.floor(frameCount / chunkCount);
+  const remainder = frameCount % chunkCount;
+  const chunks = [];
+  let start = 0;
+
+  for (let index = 0; index < chunkCount; index++) {
+    const size = baseSize + (index < remainder ? 1 : 0);
+    chunks.push({ index, start, end: start + size });
+    start += size;
+  }
+
+  return chunks;
+}
+
+// Replay frames without screenshots so a chunk starts with the same DOM state
+// it would have had in one-page sequential playback.
+async function warmPageToFrame(page, startFrame, fps, workerIndex) {
+  if (startFrame <= 0) return;
+  console.log(`Worker ${workerIndex + 1}: warming ${startFrame} frame(s) before capture`);
+  for (let frame = 0; frame < startFrame; frame++) {
+    await page.evaluate((t) => window.renderAt(t), frame / fps);
+  }
+}
+
+async function renderFrameRange(page, framesDir, startFrame, endFrame, fps, args, totalFrames) {
+  for (let frame = startFrame; frame < endFrame; frame++) {
+    await renderSingleFrame(page, framesDir, frame, fps, args, totalFrames);
+  }
+}
+
+// Stateful-compatible parallel rendering. Each worker captures a contiguous
+// range after replaying earlier frames, preserving sequential playback state at
+// chunk boundaries while still parallelizing screenshot capture.
+async function renderFramesStateful(browser, url, framesDir, frameCount, fps, args) {
+  const chunks = frameChunks(frameCount, Math.min(args.workers, frameCount));
+  await Promise.all(chunks.map(async (chunk) => {
+    const page = await preparePage(browser, url, args.width, args.height);
+    try {
+      await warmPageToFrame(page, chunk.start, fps, chunk.index);
+      await renderFrameRange(page, framesDir, chunk.start, chunk.end, fps, args, frameCount);
+    } finally {
+      await page.close();
+    }
+  }));
+}
+
+async function renderFramesSequential(browser, url, framesDir, frameCount, fps, args) {
+  const page = await preparePage(browser, url, args.width, args.height);
+  try {
+    await renderFrameRange(page, framesDir, 0, frameCount, fps, args, frameCount);
+  } finally {
+    await page.close();
+  }
+}
+
+async function renderFrames(browser, url, framesDir, frameCount, fps, args) {
+  if (args.renderMode === 'stateless') {
+    await renderFramesStateless(browser, url, framesDir, frameCount, fps, args);
+    return;
+  }
+
+  if (args.renderMode === 'sequential' || args.workers === 1) {
+    await renderFramesSequential(browser, url, framesDir, frameCount, fps, args);
+    return;
+  }
+
+  await renderFramesStateful(browser, url, framesDir, frameCount, fps, args);
 }
 
 // Prefer explicit video metadata, then inspect known frame containers, then canvas size.
@@ -675,7 +753,8 @@ async function main() {
   if (htmlPath !== sourceHtmlPath) console.log(`Renderable HTML: ${htmlPath}`);
   console.log(`Output: ${outputPath}`);
   console.log(`Viewport: ${args.width}x${args.height}, fps: ${args.fps}`);
-  console.log(`Frame format: ${args.frameFormat}${args.frameFormat === 'jpeg' ? ` quality ${args.jpegQuality}` : ''}, workers: ${Math.min(args.workers, frameCount)}`);
+  const activeFrameWorkers = args.renderMode === 'sequential' ? 1 : Math.min(args.workers, frameCount);
+  console.log(`Frame format: ${args.frameFormat}${args.frameFormat === 'jpeg' ? ` quality ${args.jpegQuality}` : ''}, workers: ${activeFrameWorkers}, mode: ${args.renderMode}`);
   console.log(`Video codec: ${args.videoCodec}${args.videoCodec === 'libx264' || args.videoCodec === 'auto' ? `, x264 preset: ${args.x264Preset}` : ''}`);
   console.log(`Timeline duration: ${totalDuration.toFixed(3)}s, frames: ${frameCount}${args.maxFrames ? `/${fullFrameCount}` : ''}`);
   console.log(`Audio cues: ${audioTimeline.length}`);

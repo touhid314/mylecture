@@ -6,7 +6,7 @@
  * to the terminal based on the environment configuration.
  */
 import dotenv from 'dotenv';
-dotenv.config();
+dotenv.config({ quiet: true });
 
 export enum LogLevel {
     DEBUG = 0,
