@@ -370,6 +370,17 @@ TTS provider/voice/speed are normalized in `ide-server.ts` before invoking `buil
 
 [src/render-video.ts](src/render-video.ts) uses Playwright to load HTML, evaluate deterministic frame states, capture frames, and mux audio/video with ffmpeg.
 
+`src/render-video.ts` exports a programmatic renderer API:
+
+```ts
+renderVideo(options)
+parseArgs(argv)
+defaultRenderVideoOptions()
+normalizeRenderVideoOptions(options)
+```
+
+Keep the CLI as a thin wrapper around `renderVideo(options)` for manual testing and scripts. Do not put server queueing, request concurrency, or IDE job policy inside the renderer; those belong in `src/ide-server.ts`.
+
 Common command:
 
 ```powershell
@@ -401,6 +412,8 @@ sequential   One page renders every frame in order. Slowest but closest to live 
 ```
 
 The CLI default worker count is the logical CPU count. For heavy Playwright rendering, start with physical-core count or lower when tuning performance. The IDE batch render path may also run multiple scene render processes in parallel, so avoid assuming `--workers` is the only source of render concurrency.
+
+The IDE server queues `/render-file` jobs before spawning renderer child processes. `RENDER_MAX_PARALLEL` controls how many render jobs may run concurrently across tabs; the default is `1` to avoid output and temporary-frame collisions. This queue is intentionally server-owned, not renderer-owned.
 
 The root test scripts exercise build, render, visual-only, and narration paths.
 

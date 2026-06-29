@@ -592,6 +592,12 @@ function normalizePositiveInteger(value, fallback, min = 1, max = Number.MAX_SAF
   return String(number);
 }
 
+function envPositiveInteger(name, fallback, min = 1, max = Number.MAX_SAFE_INTEGER) {
+  const value = Number(process.env[name]);
+  if (!Number.isInteger(value) || value < min || value > max) return fallback;
+  return value;
+}
+
 // Stop child process trees for long-running resolve, render, publish, or agent jobs.
 function killProcessTree(childProc) {
   if (!childProc) return;
@@ -761,6 +767,71 @@ async function runLimited(items, limit, worker) {
   if (firstError) throw firstError;
 }
 
+function createRenderJob() {
+  const job = {
+    id: nextRenderJobId++,
+    type: 'render',
+    status: 'queued',
+    childProcs: new Set(),
+    aborted: false,
+    reject: null,
+    kill: () => {
+      job.aborted = true;
+      for (const childProc of job.childProcs) {
+        killProcessTree(childProc);
+      }
+      if (job.status === 'queued' && job.reject) {
+        job.reject(new Error('Process stopped by user'));
+      }
+    }
+  };
+  return job;
+}
+
+function pumpRenderQueue() {
+  while (runningRenderJobs < maxParallelRenderJobs && queuedRenderJobs.length > 0) {
+    const entry = queuedRenderJobs.shift();
+    const { job, task, resolve, reject } = entry;
+    if (job.aborted) {
+      reject(new Error('Process stopped by user'));
+      continue;
+    }
+
+    job.status = 'running';
+    runningRenderJobs++;
+    activeRenderJobs.set(job.id, job);
+    Promise.resolve()
+      .then(() => task(job))
+      .then(resolve, reject)
+      .finally(() => {
+        activeRenderJobs.delete(job.id);
+        runningRenderJobs = Math.max(0, runningRenderJobs - 1);
+        pumpRenderQueue();
+      });
+  }
+}
+
+function enqueueRenderJob(task) {
+  const job = createRenderJob();
+  return new Promise((resolve, reject) => {
+    job.reject = reject;
+    queuedRenderJobs.push({ job, task, resolve, reject });
+    console.log(`Queued render job ${job.id}. Running ${runningRenderJobs}/${maxParallelRenderJobs}, queued ${queuedRenderJobs.length}.`);
+    pumpRenderQueue();
+  });
+}
+
+function hasRenderJobs() {
+  return activeRenderJobs.size > 0 || queuedRenderJobs.length > 0;
+}
+
+function killRenderJobs() {
+  const count = activeRenderJobs.size + queuedRenderJobs.length;
+  for (const job of activeRenderJobs.values()) job.kill();
+  for (const entry of queuedRenderJobs.splice(0)) entry.job.kill();
+  return count;
+}
+
 // Escape file paths for ffmpeg concat list files.
 function ffmpegConcatPath(filePath) {
   return path.resolve(filePath).replaceAll('\\', '/').replaceAll("'", "'\\''");
@@ -801,7 +872,7 @@ function deleteIntermediateSceneRenders(sceneOutputs, finalOutputPath) {
 }
 
 // Render a single lecture file, or delegate to batch rendering for scene folders.
-async function renderLectureFile(filePath, options = {}) {
+async function renderLectureFile(filePath, options = {}, job = createRenderJob()) {
   const inputPath = resolveInputPath(filePath);
   const basename = path.basename(inputPath);
   if (!isIndexHtmlName(basename) && !isResolvedHtmlName(basename)) {
@@ -810,21 +881,17 @@ async function renderLectureFile(filePath, options = {}) {
 
   const sceneFiles = renderSceneSet(inputPath);
   if (sceneFiles.length > 1) {
-    return await renderLectureBatch(inputPath, sceneFiles, options);
+    return await renderLectureBatch(inputPath, sceneFiles, options, job);
   }
 
   const outPath = defaultOutputPath(inputPath);
-  const renderArgs = renderArgsForFile(inputPath, outPath, options);
+  const framesDir = path.join(rootDir, '.render', 'server-render', `job-${job.id}`, 'frames');
+  const renderArgs = renderArgsForFile(inputPath, outPath, options, [
+    '--frames-dir', framesDir
+  ]);
   let childProc = null;
-  activeJob = {
-    type: 'render',
-    outPath,
-    inputPath,
-    kill: () => {
-      activeJob.aborted = true;
-      killProcessTree(childProc);
-    }
-  };
+  job.outPath = outPath;
+  job.inputPath = inputPath;
 
   try {
     await runCapture(process.execPath, ['--import', 'tsx', ...renderArgs], {
@@ -832,6 +899,7 @@ async function renderLectureFile(filePath, options = {}) {
       windowsHide: true,
       onSpawn: (child) => {
         childProc = child;
+        job.childProcs.add(child);
       }
     });
     return toViewerPath(outPath);
@@ -843,38 +911,28 @@ async function renderLectureFile(filePath, options = {}) {
         console.error(`Failed to delete partial render file: ${err.message}`);
       }
     }
-    if (activeJob && activeJob.aborted) {
+    if (job.aborted) {
       throw new Error('Process stopped by user');
     }
     throw error;
   } finally {
-    activeJob = null;
+    if (childProc) job.childProcs.delete(childProc);
+    rmSync(path.dirname(framesDir), { recursive: true, force: true });
   }
 }
 
 // Resolve and render multiple scenes, then concatenate them into one final MP4.
-async function renderLectureBatch(inputPath, sceneFiles, options = {}) {
+async function renderLectureBatch(inputPath, sceneFiles, options = {}, job = createRenderJob()) {
   const batchId = `${Date.now()}-${Math.random().toString(16).slice(2)}`;
   const tempDir = path.resolve(rootDir, '.render', 'batch-render', batchId);
   const outputPath = finalBatchOutputPath(inputPath);
   const concatListPath = path.join(tempDir, 'concat.txt');
-  const childProcs = new Set();
   let firstSceneError = null;
   let renderSceneFiles = sceneFiles;
 
   mkdirSync(tempDir, { recursive: true });
-  activeJob = {
-    type: 'render',
-    outPath: outputPath,
-    inputPath,
-    aborted: false,
-    kill: () => {
-      activeJob.aborted = true;
-      for (const childProc of childProcs) {
-        killProcessTree(childProc);
-      }
-    }
-  };
+  job.outPath = outputPath;
+  job.inputPath = inputPath;
 
   try {
     if (isIndexHtmlName(path.basename(inputPath))) {
@@ -892,20 +950,20 @@ async function renderLectureBatch(inputPath, sceneFiles, options = {}) {
             windowsHide: true,
             onSpawn: (child) => {
               childProc = child;
-              childProcs.add(child);
+              job.childProcs.add(child);
             }
           });
         } catch (error) {
           throw new Error(`Scene resolve failed for ${path.basename(scenePath)}:\n${error.message}`);
         } finally {
-          if (childProc) childProcs.delete(childProc);
+          if (childProc) job.childProcs.delete(childProc);
         }
         resolvedSceneFiles.push(resolvedPath);
       }
       renderSceneFiles = resolvedSceneFiles;
     }
 
-    if (activeJob && activeJob.aborted) {
+    if (job.aborted) {
       throw new Error('Process stopped by user');
     }
 
@@ -927,13 +985,13 @@ async function renderLectureBatch(inputPath, sceneFiles, options = {}) {
         windowsHide: true,
         onSpawn: (child) => {
           childProc = child;
-          childProcs.add(child);
+          job.childProcs.add(child);
         }
       }).catch((error) => {
         const sceneError = new Error(`Scene render failed for ${path.basename(scenePath)}:\n${error.message}`);
         if (!firstSceneError) {
           firstSceneError = sceneError;
-          for (const runningChild of childProcs) {
+          for (const runningChild of job.childProcs) {
             if (runningChild !== childProc) killProcessTree(runningChild);
           }
         }
@@ -946,11 +1004,11 @@ async function renderLectureBatch(inputPath, sceneFiles, options = {}) {
         }
         throw firstSceneError;
       }).finally(() => {
-        if (childProc) childProcs.delete(childProc);
+        if (childProc) job.childProcs.delete(childProc);
       });
     });
 
-    if (activeJob && activeJob.aborted) {
+    if (job.aborted) {
       throw new Error('Process stopped by user');
     }
 
@@ -966,13 +1024,12 @@ async function renderLectureBatch(inputPath, sceneFiles, options = {}) {
         console.error(`Failed to delete partial render file: ${err.message}`);
       }
     }
-    if (activeJob && activeJob.aborted) {
+    if (job.aborted) {
       throw new Error('Process stopped by user');
     }
     throw error;
   } finally {
     rmSync(tempDir, { recursive: true, force: true });
-    activeJob = null;
   }
 }
 
@@ -1153,6 +1210,11 @@ async function pickHtmlFile() {
 // Server-wide state tracks the selected file, preview size, and active background job.
 const args = parseArgs(process.argv.slice(2));
 let activeJob = null;
+const maxParallelRenderJobs = envPositiveInteger('RENDER_MAX_PARALLEL', 1);
+let nextRenderJobId = 1;
+let runningRenderJobs = 0;
+const queuedRenderJobs = [];
+const activeRenderJobs = new Map();
 // A server restart starts a new agent chat session. The first agent request
 // consumes this flag and runs the agent with --new-session.
 const viewerState = {
@@ -1310,13 +1372,13 @@ const server = createServer(async (request, response) => {
     try {
       const requestedPath = requestUrl.searchParams.get('file') || '';
       if (!requestedPath) throw new Error('Missing file path.');
-      const outputPath = await renderLectureFile(requestedPath, {
+      const outputPath = await enqueueRenderJob((job) => renderLectureFile(requestedPath, {
         ttsVoice: requestUrl.searchParams.get('ttsVoice'),
         ttsSpeed: requestUrl.searchParams.get('ttsSpeed'),
         fps: requestUrl.searchParams.get('fps'),
         width: requestUrl.searchParams.get('width'),
         height: requestUrl.searchParams.get('height')
-      });
+      }, job));
 
       sendJson(response, 200, {
         ok: true,
@@ -1337,6 +1399,11 @@ const server = createServer(async (request, response) => {
         const type = agentState.activeJob.type;
         agentState.activeJob.kill();
         sendJson(response, 200, { ok: true, stopped: true, type, message: `Stopped ${type} job successfully` });
+        return;
+      }
+      if (hasRenderJobs()) {
+        const count = killRenderJobs();
+        sendJson(response, 200, { ok: true, stopped: true, type: 'render', count, message: `Stopped ${count} render job(s) successfully` });
         return;
       }
       if (!activeJob) {

@@ -29,9 +29,8 @@ function defaultTtsAudioWorkerCount(provider) {
   return provider === 'kokoro' ? 6 : defaultWorkerCount();
 }
 
-// Parse render, auto-build, audio, frame, and encoder options from the CLI.
-function parseArgs(argv) {
-  const args = {
+export function defaultRenderVideoOptions() {
+  return {
     html: path.join('tests', 'fixtures', 'input-contract-test', 'index.html'),
     out: null,
     fps: 60,
@@ -57,42 +56,26 @@ function parseArgs(argv) {
     skipVideo: false,
     colorRange: 'tv'
   };
+}
 
-  for (let i = 0; i < argv.length; i++) {
-    const arg = argv[i];
-    const next = argv[i + 1];
+export function normalizeRenderVideoOptions(options = {}) {
+  const args = {
+    ...defaultRenderVideoOptions(),
+    ...options
+  };
 
-    if (arg === '--html') args.html = next, i++;
-    else if (arg === '--out') args.out = next, i++;
-    else if (arg === '--fps') args.fps = Number(next), i++;
-    else if (arg === '--width') args.width = Number(next), i++;
-    else if (arg === '--height') args.height = Number(next), i++;
-    else if (arg === '--frames-dir') args.framesDir = next, i++;
-    else if (arg === '--frame-format') args.frameFormat = String(next || '').toLowerCase(), i++;
-    else if (arg === '--jpeg-quality') args.jpegQuality = Number(next), i++;
-    else if (arg === '--workers') args.workers = Number(next), i++;
-    else if (arg === '--render-mode') args.renderMode = String(next || '').toLowerCase(), i++;
-    else if (arg === '--video-codec') args.videoCodec = String(next || '').toLowerCase(), i++;
-    else if (arg === '--x264-preset') args.x264Preset = String(next || '').toLowerCase(), i++;
-    else if (arg === '--resolved-html') args.resolvedHtml = next, i++;
-    else if (arg === '--premixed-audio') args.premixedAudio = next, i++;
-    else if (arg === '--max-frames') args.maxFrames = Number(next), i++;
-    else if (arg === '--tts-provider') args.ttsProvider = next, i++;
-    else if (arg === '--tts-voice') args.ttsVoice = next, i++;
-    else if (arg === '--tts-speed') args.ttsSpeed = Number(next), i++;
-    else if (arg === '--tts-audio-workers') args.ttsAudioWorkers = Number(next), i++;
-    else if (arg === '--no-auto-build' || arg === '--no-auto-build-plan') args.autoBuildPlan = false;
-    else if (arg === '--force-audio') args.forceAudio = true;
-    else if (arg === '--keep-frames') args.keepFrames = true;
-    else if (arg === '--skip-video') args.skipVideo = true;
-    else if (arg === '--color-range') args.colorRange = String(next || '').toLowerCase(), i++;
-    else if (arg === '--help') {
-      printHelp();
-      process.exit(0);
-    } else {
-      throw new Error(`Unknown argument: ${arg}`);
-    }
-  }
+  args.fps = Number(args.fps);
+  args.width = Number(args.width);
+  args.height = Number(args.height);
+  args.jpegQuality = Number(args.jpegQuality);
+  args.workers = Number(args.workers);
+  args.ttsSpeed = Number(args.ttsSpeed);
+  args.renderMode = String(args.renderMode || '').toLowerCase();
+  args.frameFormat = String(args.frameFormat || '').toLowerCase();
+  args.videoCodec = String(args.videoCodec || '').toLowerCase();
+  args.colorRange = String(args.colorRange || '').toLowerCase();
+  if (args.maxFrames !== null) args.maxFrames = Number(args.maxFrames);
+  if (args.ttsAudioWorkers !== null) args.ttsAudioWorkers = Number(args.ttsAudioWorkers);
 
   if (!Number.isFinite(args.fps) || args.fps <= 0) throw new Error('--fps must be a positive number');
   if (!Number.isInteger(args.width) || args.width <= 0) throw new Error('--width must be a positive integer');
@@ -129,6 +112,49 @@ function parseArgs(argv) {
   if (!args.out) args.out = defaultOutputPath(args.html);
 
   return args;
+}
+
+// Parse render, auto-build, audio, frame, and encoder options from the CLI.
+export function parseArgs(argv) {
+  const args = defaultRenderVideoOptions();
+
+  for (let i = 0; i < argv.length; i++) {
+    const arg = argv[i];
+    const next = argv[i + 1];
+
+    if (arg === '--html') args.html = next, i++;
+    else if (arg === '--out') args.out = next, i++;
+    else if (arg === '--fps') args.fps = next, i++;
+    else if (arg === '--width') args.width = next, i++;
+    else if (arg === '--height') args.height = next, i++;
+    else if (arg === '--frames-dir') args.framesDir = next, i++;
+    else if (arg === '--frame-format') args.frameFormat = next, i++;
+    else if (arg === '--jpeg-quality') args.jpegQuality = next, i++;
+    else if (arg === '--workers') args.workers = next, i++;
+    else if (arg === '--render-mode') args.renderMode = next, i++;
+    else if (arg === '--video-codec') args.videoCodec = next, i++;
+    else if (arg === '--x264-preset') args.x264Preset = String(next || '').toLowerCase(), i++;
+    else if (arg === '--resolved-html') args.resolvedHtml = next, i++;
+    else if (arg === '--premixed-audio') args.premixedAudio = next, i++;
+    else if (arg === '--max-frames') args.maxFrames = next, i++;
+    else if (arg === '--tts-provider') args.ttsProvider = next, i++;
+    else if (arg === '--tts-voice') args.ttsVoice = next, i++;
+    else if (arg === '--tts-speed') args.ttsSpeed = next, i++;
+    else if (arg === '--tts-audio-workers') args.ttsAudioWorkers = next, i++;
+    else if (arg === '--no-auto-build' || arg === '--no-auto-build-plan') args.autoBuildPlan = false;
+    else if (arg === '--force-audio') args.forceAudio = true;
+    else if (arg === '--keep-frames') args.keepFrames = true;
+    else if (arg === '--skip-video') args.skipVideo = true;
+    else if (arg === '--color-range') args.colorRange = next, i++;
+    else if (arg === '--help') {
+      printHelp();
+      process.exit(0);
+    } else {
+      throw new Error(`Unknown argument: ${arg}`);
+    }
+  }
+
+  return normalizeRenderVideoOptions(args);
 }
 
 // Human-facing CLI help for the render command.
@@ -695,10 +721,10 @@ async function detectPageViewport(page) {
   });
 }
 
-// CLI entrypoint: resolve input, capture frames, mix audio, encode video, and clean up.
-async function main() {
+// Programmatic renderer API. The CLI below is a thin wrapper around this.
+export async function renderVideo(options = {}) {
   const totalStart = performance.now();
-  const args = parseArgs(process.argv.slice(2));
+  const args = normalizeRenderVideoOptions(options);
   const sourceHtmlPath = resolveProjectPath(args.html);
   assertFileExists(sourceHtmlPath, 'HTML file');
   const htmlPath = await resolveRenderableHtml(sourceHtmlPath, args);
@@ -804,9 +830,29 @@ async function main() {
 
   console.log(`Total render command time: ${formatSeconds(performance.now() - totalStart)}`);
   console.log('Render complete.');
+  return {
+    html: sourceHtmlPath,
+    renderableHtml: htmlPath,
+    output: outputPath,
+    framesDir,
+    duration: totalDuration,
+    frameCount,
+    fps: args.fps,
+    skippedVideo: args.skipVideo
+  };
 }
 
-main().catch((error) => {
-  console.error(error.message);
-  process.exit(1);
-});
+// CLI entrypoint: parse args and call the typed renderer API.
+async function main() {
+  await renderVideo(parseArgs(process.argv.slice(2)));
+}
+
+const isCliEntrypoint = process.argv[1] &&
+  pathToFileURL(path.resolve(process.argv[1])).href === import.meta.url;
+
+if (isCliEntrypoint) {
+  main().catch((error) => {
+    console.error(error.message);
+    process.exit(1);
+  });
+}
