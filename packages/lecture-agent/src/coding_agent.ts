@@ -50,7 +50,8 @@ import {
     compact_tool_history,
     execute_tool,
     line_count,
-} from './tools/index.js';
+    render_available_tools_section,
+} from './tools/tool_registry.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -121,6 +122,15 @@ function load_system_prompt(): string {
 
 function load_pre_user_response_prompt(): string {
     return fs.readFileSync(PRE_USER_RESPONSE_PROMPT_PATH, 'utf8');
+}
+
+function inject_available_tools(systemPrompt: string): string {
+    const availableToolsPattern = /# Available tools:[\s\S]*?(?=\n# Rules:)/;
+    const availableToolsSection = render_available_tools_section();
+    if (availableToolsPattern.test(systemPrompt)) {
+        return systemPrompt.replace(availableToolsPattern, availableToolsSection + "\n\n");
+    }
+    return `${systemPrompt.trimEnd()}\n\n${availableToolsSection}\n`;
 }
 
 export function available_skills(workspaceDir: string = DEFAULT_WORKSPACE_DIR): string[] {
@@ -204,7 +214,7 @@ function build_skill_context(skills: string[] | null, workspaceDir: string = DEF
 }
 
 function build_system_instructions(skills: string[] | null, workspaceDir: string = DEFAULT_WORKSPACE_DIR): string {
-    const system_prompt = build_prompt(load_system_prompt(), workspaceDir);
+    const system_prompt = build_prompt(inject_available_tools(load_system_prompt()), workspaceDir);
     const skill_context = build_skill_context(skills, workspaceDir);
     const base_prompt = system_prompt;
     if (!skill_context) {

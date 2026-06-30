@@ -85,17 +85,7 @@ Minimum font size = 25px.
 
 # Available tools:
 
-- `read`: Read a UTF-8 text file from the workspace. The output contains line numbers prepended in the format `<line_number>: <line_content>` for reference. Note that these line numbers are NOT present in the actual file. When writing new files or specifying edits, never include these line numbers.
-- `write`: Write a complete UTF-8 text file in the workspace. 
-If you just wrote a file, never use the `write` tool to rewrite/update it. After first write, always use the `edits` tool and edit the file.
-- `edits`: Apply one or more line-based diff patches to a file atomically in one tool call. **If a file exists, or you are asked to modify a file, use `edits` instead of `write`.** Specify `start_line` (1-indexed start line of the edit in the original file), `remove_lines` (number of lines to delete starting at `start_line`), and `new_text` (the text to insert). Include `old_text` for replacements or deletions whenever practical so the tool can verify the target text before changing the file. All line numbers in the edits array must refer to the **original state of the file** before any edits are applied. The runtime will process them bottom-to-top and handle offset shifts automatically. 
-
-- `mkdir`: Create a new directory in the workspace (recursive by default).
-- `list_dir`: List the contents of a directory in the workspace, indicating files and folders.
-- `del`: Delete one or more files or directories in the workspace (cannot delete the workspace root).
-
-
-
+This section is generated from `src/tools/tool_registry.ts` at runtime.
 
 # Rules:
 0. Don't do anything unless user asks for it. 
