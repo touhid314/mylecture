@@ -26,7 +26,7 @@ function defaultWorkerCount() {
 
 // Kokoro audio generation is intentionally capped lower than frame rendering.
 function defaultTtsAudioWorkerCount(provider) {
-  return provider === 'kokoro' ? 6 : defaultWorkerCount();
+  return (provider === 'kokoro' || provider === 'omnivoice') ? 6 : defaultWorkerCount();
 }
 
 export function defaultRenderVideoOptions() {

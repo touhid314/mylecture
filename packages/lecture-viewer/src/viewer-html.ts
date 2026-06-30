@@ -1799,6 +1799,14 @@ body.file-kind-mp4 .timeline-ruler {
         <div class="resolve-option">
           <label for="resolve-tts-voice">TTS voice</label>
           <select id="resolve-tts-voice">
+            <optgroup label="OmniVoice TTS (Local)">
+              <option value="american-male-1">american-male-1 (En)</option>
+              <option value="american-male-2">american-male-2 (En)</option>
+              <option value="american-male-3">american-male-3 (En)</option>
+              <option value="johnny-harris">johnny-harris (En)</option>
+              <option value="touhid-bangla">touhid-bangla (Bn)</option>
+              <option value="touhid-english">touhid-english (En)</option>
+            </optgroup>
             <optgroup label="Kokoro TTS (Local)">
               <option value="am_puck">am_puck</option>
               <option value="af_heart" selected>af_heart</option>
@@ -1837,6 +1845,14 @@ body.file-kind-mp4 .timeline-ruler {
         <div class="render-option">
           <label for="render-tts-voice">TTS voice</label>
           <select id="render-tts-voice">
+            <optgroup label="OmniVoice TTS (Local)">
+              <option value="american-male-1">american-male-1 (En)</option>
+              <option value="american-male-2">american-male-2 (En)</option>
+              <option value="american-male-3">american-male-3 (En)</option>
+              <option value="johnny-harris">johnny-harris (En)</option>
+              <option value="touhid-bangla">touhid-bangla (Bn)</option>
+              <option value="touhid-english">touhid-english (En)</option>
+            </optgroup>
             <optgroup label="Kokoro TTS (Local)">
               <option value="am_puck">am_puck</option>
               <option value="af_heart" selected>af_heart</option>

@@ -25,7 +25,7 @@ function defaultWorkerCount() {
 }
 
 function defaultAudioWorkerCount(provider) {
-  return provider === 'kokoro' ? 6 : defaultWorkerCount();
+  return (provider === 'kokoro' || provider === 'omnivoice') ? 6 : defaultWorkerCount();
 }
 
 // Parse CLI options for resolving source HTML into timeline-ready HTML.
@@ -142,6 +142,7 @@ function resolveTtsPython() {
   }
 
   const relativePaths = [
+    ['..', 'omnivoice', '.venv'],
     ['..', '.venv'],
     ['.venv'],
     ['..', 'lecture-agent', '.venv']

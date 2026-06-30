@@ -54,6 +54,12 @@ import re
 import site
 import subprocess
 import sys
+
+if hasattr(sys.stdout, "reconfigure"):
+    sys.stdout.reconfigure(encoding="utf-8")
+if hasattr(sys.stderr, "reconfigure"):
+    sys.stderr.reconfigure(encoding="utf-8")
+
 import tempfile
 import time
 import wave
@@ -762,6 +768,97 @@ def _run_kokoro_chunked(text: str, output_path: Path, voice: str, speed: float) 
         _concat_wavs(chunk_paths, output_path)
 
 
+_OMNIVOICE_MODEL = None
+
+
+def _get_omnivoice_model():
+    global _OMNIVOICE_MODEL
+    if _OMNIVOICE_MODEL is None:
+        import torch
+        from omnivoice import OmniVoice
+        device = "cuda:0" if torch.cuda.is_available() else "cpu"
+        dtype = torch.float16 if torch.cuda.is_available() else torch.float32
+        print("[+] Loading OmniVoice model...", flush=True)
+        _OMNIVOICE_MODEL = OmniVoice.from_pretrained(
+            "k2-fsa/OmniVoice",
+            device_map=device,
+            dtype=dtype
+        )
+    return _OMNIVOICE_MODEL
+
+
+def _run_omnivoice(text: str, output_path: Path, voice: str, speed: float) -> None:
+    import soundfile as sf
+
+    # 1. Resolve voice files
+    voices_root = PROJECT_ROOT / "voices"
+    voice_dir = voices_root / voice
+    if not voice_dir.is_dir():
+        # Try case-insensitive lookup
+        found_dir = None
+        if voices_root.is_dir():
+            for item in voices_root.iterdir():
+                if item.is_dir() and item.name.lower() == voice.lower():
+                    found_dir = item
+                    break
+        if found_dir:
+            voice_dir = found_dir
+        else:
+            raise RuntimeError(f"OmniVoice voice directory not found: {voice_dir}")
+
+    # Find first .wav and first .txt
+    ref_audio = None
+    ref_text = None
+
+    for item in voice_dir.iterdir():
+        if item.is_file():
+            if item.suffix.lower() == ".wav":
+                ref_audio = item
+            elif item.suffix.lower() == ".txt":
+                try:
+                    ref_text = item.read_text(encoding="utf-8").strip()
+                except Exception:
+                    ref_text = item.read_text(encoding="latin-1").strip()
+
+    if not ref_audio:
+        raise RuntimeError(f"No reference .wav file found in voice directory: {voice_dir}")
+
+    # 2. Determine target language (Bengali if Bengali characters are present, else English)
+    has_bengali = any('\u0980' <= char <= '\u09ff' for char in text)
+    language = "Bengali" if has_bengali else "English"
+
+    # Prepare spacing for punctuation if English
+    if language.lower() in ["english", "en"]:
+        for punc in [".", ",", "?", "!"]:
+            text = text.replace(f" {punc}", f" {punc}").replace(punc, f" {punc}")
+            if ref_text:
+                ref_text = ref_text.replace(f" {punc}", f" {punc}").replace(punc, f" {punc}")
+
+    # 3. Load model and run
+    model = _get_omnivoice_model()
+
+    gen_kwargs = {
+        "text": text,
+        "language": language,
+        "speed": speed,
+        "postprocess_output": False,
+        "ref_audio": str(ref_audio),
+    }
+    if ref_text:
+        gen_kwargs["ref_text"] = ref_text
+
+    print(f"[OmniVoice] Generating TTS with voice '{voice}' ({language}, speed={speed})...", flush=True)
+    print(f"  Ref Audio: {ref_audio}", flush=True)
+    if ref_text:
+        print(f"  Ref Text: {ref_text}", flush=True)
+
+    audio = model.generate(**gen_kwargs)
+
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    sf.write(str(output_path), audio[0], 24000)
+    print(f"[OmniVoice] Audio successfully saved to: '{output_path}'", flush=True)
+
+
 def tts(
     text: str,
     provider: str = "openai",
@@ -809,8 +906,8 @@ def tts(
     chosen_provider = (provider or "openai").strip().lower()
     if chosen_provider == "gemini":
         chosen_provider = "google"
-    if chosen_provider not in {"openai", "google", "kokoro"}:
-        raise ValueError("provider must be one of: openai, google, gemini, kokoro")
+    if chosen_provider not in {"openai", "google", "kokoro", "omnivoice"}:
+        raise ValueError("provider must be one of: openai, google, gemini, kokoro, omnivoice")
 
     out_path = _resolve_output_path(output_path, chosen_provider)
     log.info(f"TTS provider={chosen_provider} -> {out_path}")
@@ -869,6 +966,14 @@ def tts(
             f"speed={chosen_speed} phonemizer={DEFAULT_KOKORO_PHONEMIZER}"
         )
         _run_kokoro_chunked(clean_text, out_path, chosen_voice, chosen_speed)
+        return str(out_path)
+
+    if chosen_provider == "omnivoice":
+        chosen_voice = (voice or "american-male-1").strip()
+        chosen_speed = float(speed) if speed is not None else 0.85
+        if chosen_speed <= 0:
+            raise ValueError("speed must be greater than 0")
+        _run_omnivoice(clean_text, out_path, chosen_voice, chosen_speed)
         return str(out_path)
 
 

@@ -570,6 +570,19 @@ function normalizeTtsVoice(value) {
 function detectProvider(voice) {
   const v = String(voice || '').trim().toLowerCase();
   if (!v) return 'kokoro';
+
+  const voicesDir = path.resolve(rootDir, 'voices');
+  if (existsSync(voicesDir)) {
+    try {
+      const folders = readdirSync(voicesDir).filter(name =>
+        statSync(path.join(voicesDir, name)).isDirectory()
+      );
+      if (folders.some(folder => folder.toLowerCase() === v)) {
+        return 'omnivoice';
+      }
+    } catch (e) {}
+  }
+
   if (v.startsWith('am_') || v.startsWith('af_') || v.startsWith('bf_') || v.startsWith('bm_')) {
     return 'kokoro';
   }
