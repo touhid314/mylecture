@@ -242,6 +242,8 @@ class LecturePlayer {
       audioCue: null,
       audioFailures: new Set(),
       speechSegmentKey: '',
+      volume: 1,
+      muted: false,
       completed: false,
       interactiveActive: false,
       gameActive: false,
@@ -287,6 +289,8 @@ class LecturePlayer {
       subtitlesEnabled: this.subtitlesEnabled,
       liveTtsEnabled: this.liveTtsEnabled,
       speed: this.speed,
+      volume: this.state.volume,
+      muted: this.state.muted,
       src: this.state.src
     };
   }
@@ -300,9 +304,13 @@ class LecturePlayer {
     if (!src) throw new Error('load requires a source.');
     // Loading a new iframe source invalidates pending ready/error listeners from
     // earlier loads; loadToken lets the finally block identify stale completions.
+    const previousVolume = this.state.volume;
+    const previousMuted = this.state.muted;
     this.pause();
     this.resetForLoad();
     this.state.src = src;
+    this.state.volume = previousVolume;
+    this.state.muted = previousMuted;
     const token = ++this.loadToken;
     const loaded = new Promise((resolve, reject) => {
       const offReady = this.on('ready', state => {
@@ -358,6 +366,7 @@ class LecturePlayer {
           this.nativeVideo = videoEl;
           this.nativeVideo.playbackRate = this.speed;
           this.nativeVideo.defaultPlaybackRate = this.speed;
+          this.applyVolume();
 
           const onMetadata = () => {
             const duration = videoEl.duration || 0;
@@ -489,6 +498,37 @@ class LecturePlayer {
     this.emit('statechange', this.snapshot());
   }
 
+  setVolume(volume, options = {}) {
+    const nextVolume = Math.max(0, Math.min(1, Number(volume)));
+    this.state.volume = Number.isFinite(nextVolume) ? nextVolume : 1;
+    if (Object.prototype.hasOwnProperty.call(options, 'muted')) {
+      this.state.muted = Boolean(options.muted);
+    } else if (this.state.volume > 0) {
+      this.state.muted = false;
+    }
+    this.applyVolume();
+    this.emit('statechange', this.snapshot());
+  }
+
+  setMuted(muted) {
+    this.state.muted = Boolean(muted);
+    this.applyVolume();
+    this.emit('statechange', this.snapshot());
+  }
+
+  applyVolume() {
+    const volume = Math.max(0, Math.min(1, Number(this.state.volume) || 0));
+    const muted = Boolean(this.state.muted || volume <= 0);
+    if (this.nativeVideo) {
+      this.nativeVideo.volume = volume;
+      this.nativeVideo.muted = muted;
+    }
+    if (this.state.audio) {
+      this.state.audio.volume = volume;
+      this.state.audio.muted = muted;
+    }
+  }
+
   setSubtitlesEnabled(enabled) {
     this.subtitlesEnabled = Boolean(enabled);
     this.updateSubtitleOverlay();
@@ -582,6 +622,7 @@ class LecturePlayer {
     utterance.lang = 'en-GB';
     if (voice) utterance.voice = voice;
     utterance.rate = Math.max(0.5, Math.min(2, this.speed));
+    utterance.volume = this.state.muted ? 0 : Math.max(0, Math.min(1, Number(this.state.volume) || 0));
     utterance.onerror = () => {
       if (this.state.speechSegmentKey === key) this.state.speechSegmentKey = '';
       this.setStatus('Live TTS unavailable in this browser');
@@ -613,12 +654,14 @@ class LecturePlayer {
         this.syncLiveTts();
       }, { once: true });
       this.state.audio.playbackRate = this.speed;
+      this.applyVolume();
       this.state.audio.currentTime = Math.max(0, offset);
       this.state.audio.play().catch(() => this.setStatus('Audio blocked until play is clicked again'));
       return;
     }
 
     this.state.audio.playbackRate = this.speed;
+    this.applyVolume();
     if (Math.abs(this.state.audio.currentTime - offset) > 0.22) {
       this.state.audio.currentTime = Math.max(0, offset);
     }

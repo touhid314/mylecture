@@ -38,6 +38,8 @@ declare class LecturePlayer {
         audioCue: any;
         audioFailures: Set<unknown>;
         speechSegmentKey: string;
+        volume: number;
+        muted: boolean;
         completed: boolean;
         interactiveActive: boolean;
         gameActive: boolean;
@@ -66,6 +68,8 @@ declare class LecturePlayer {
         subtitlesEnabled: any;
         liveTtsEnabled: any;
         speed: any;
+        volume: any;
+        muted: any;
         src: any;
     };
     setStatus(message: any): void;
@@ -73,6 +77,9 @@ declare class LecturePlayer {
     resetForLoad(): void;
     handleFrameLoad(): void;
     setSpeed(speed: any): void;
+    setVolume(volume: any, options?: {}): void;
+    setMuted(muted: any): void;
+    applyVolume(): void;
     setSubtitlesEnabled(enabled: any): void;
     setLiveTtsEnabled(enabled: any): void;
     activeVideoCue(): any;

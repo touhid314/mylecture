@@ -460,7 +460,7 @@ body.fullscreen-active #controls:hover {
 #file-row {
   grid-column: 1 / -1;
   display: grid;
-  grid-template-columns: 1fr auto auto auto;
+  grid-template-columns: 1fr auto auto auto auto;
   gap: 6px;
 }
 #current-file {
@@ -525,6 +525,7 @@ select:focus-visible {
   color: var(--text);
 }
 #fullscreen,
+#volume-toggle,
 #seek-back,
 #seek-forward {
   min-width: 28px;
@@ -554,6 +555,7 @@ select:focus-visible {
 #reload,
 #publish,
 #info,
+#volume-toggle,
 #subtitles-toggle,
 #live-tts-toggle,
 #fullscreen,
@@ -567,6 +569,8 @@ select:focus-visible {
 #reload:hover,
 #publish:hover,
 #info:hover,
+#volume-control:hover #volume-toggle,
+#volume-toggle:hover,
 #subtitles-toggle:hover,
 #live-tts-toggle:hover,
 #fullscreen:hover,
@@ -577,16 +581,36 @@ select:focus-visible {
   color: var(--text);
 }
 #subtitles-toggle.active,
-#live-tts-toggle.active {
+#live-tts-toggle.active,
+#volume-toggle.active {
   background: rgba(255, 255, 255, 0.1);
   border-color: var(--accent);
   color: var(--accent);
 }
 #subtitles-toggle.active:hover,
-#live-tts-toggle.active:hover {
+#live-tts-toggle.active:hover,
+#volume-control:hover #volume-toggle.active,
+#volume-toggle.active:hover {
   background: rgba(255, 255, 255, 0.15);
   border-color: #fff;
   color: #fff;
+}
+#volume-control {
+  display: grid;
+  grid-template-columns: 28px 96px;
+  align-items: center;
+  gap: 6px;
+  width: 130px;
+  height: 28px;
+}
+#volume-popover {
+  display: flex;
+  align-items: center;
+  min-width: 0;
+  height: 28px;
+}
+#volume-slider {
+  height: 18px;
 }
 input[type="text"] {
   width: 100%;
@@ -1918,6 +1942,12 @@ body.file-kind-mp4 .timeline-ruler {
 <section id="controls">
   <div id="file-row">
     <div id="current-file">${escapeHtml(normalizedOpenPath || 'No file selected')}</div>
+    <div id="volume-control">
+      <button id="volume-toggle" type="button" aria-label="Mute" title="Mute"></button>
+      <div id="volume-popover">
+        <input id="volume-slider" type="range" min="0" max="1" step="0.01" value="1" aria-label="Volume">
+      </div>
+    </div>
     <button id="info" type="button">Info</button>
     <button id="load">Load</button>
     <button id="reload">Reload</button>
@@ -2224,6 +2254,8 @@ const timeReadout = document.getElementById('time');
 const subtitlesToggle = document.getElementById('subtitles-toggle');
 const liveTtsToggle = document.getElementById('live-tts-toggle');
 const subtitleOverlay = document.getElementById('subtitle-overlay');
+const volumeToggle = document.getElementById('volume-toggle');
+const volumeSlider = document.getElementById('volume-slider');
 const speedSelect = document.getElementById('speed');
 const viewportPreset = document.getElementById('viewport-preset');
 const fullscreenButton = document.getElementById('fullscreen');
@@ -2478,6 +2510,8 @@ function finishJobStatus(message, state = 'success') {
 const controlIcons = {
   play: '<svg class="control-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M8 5v14l11-7z" fill="currentColor"/></svg>',
   pause: '<svg class="control-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M7 5h4v14H7zM13 5h4v14h-4z" fill="currentColor"/></svg>',
+  volume: '<svg class="control-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M4 9v6h4l5 4V5L8 9H4z" fill="currentColor"/><path d="M16 8.5a5 5 0 0 1 0 7" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>',
+  volumeMuted: '<svg class="control-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M4 9v6h4l5 4V5L8 9H4z" fill="currentColor"/><path d="M18 9l4 4m0-4l-4 4" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>',
   fullscreen: '<svg class="control-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M5 9V5h4M15 5h4v4M19 15v4h-4M9 19H5v-4" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>',
   fullscreenExit: '<svg class="control-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M9 5v4H5M19 9h-4V5M15 19v-4h4M5 15h4v4" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>'
 };
@@ -3709,6 +3743,12 @@ function updateControls(state = playerState()) {
   subtitlesToggle.setAttribute('aria-pressed', state.subtitlesEnabled ? 'true' : 'false');
   liveTtsToggle.classList.toggle('active', state.liveTtsEnabled);
   liveTtsToggle.setAttribute('aria-pressed', state.liveTtsEnabled ? 'true' : 'false');
+  const effectiveVolume = Math.max(0, Math.min(1, Number(state.volume ?? 1)));
+  const isMuted = Boolean(state.muted || effectiveVolume <= 0);
+  setIconButton(volumeToggle, isMuted ? 'volumeMuted' : 'volume', isMuted ? 'Unmute' : 'Mute');
+  volumeToggle.classList.toggle('active', !isMuted);
+  volumeToggle.setAttribute('aria-pressed', isMuted ? 'true' : 'false');
+  if (document.activeElement !== volumeSlider) volumeSlider.value = String(effectiveVolume);
   
   const hasInteractiveFile = globalEntries.some(file => file.type === 'file' && file.name.toLowerCase() === 'interactive.html');
   const hasGameFile = globalEntries.some(file => file.type === 'file' && file.name.toLowerCase() === 'game.html');
@@ -4011,6 +4051,14 @@ subtitlesToggle.addEventListener('click', () => {
 liveTtsToggle.addEventListener('click', () => {
   const state = playerState();
   player.setLiveTtsEnabled(!state.liveTtsEnabled);
+});
+volumeToggle.addEventListener('click', () => {
+  const state = playerState();
+  const volume = Number(state.volume ?? volumeSlider.value) || 1;
+  player.setVolume(volume <= 0 ? 1 : volume, { muted: !state.muted });
+});
+volumeSlider.addEventListener('input', event => {
+  player.setVolume(Number(event.target.value), { muted: Number(event.target.value) <= 0 });
 });
 scrubber.addEventListener('input', event => {
   seekToGlobalTime(Number(event.target.value));
