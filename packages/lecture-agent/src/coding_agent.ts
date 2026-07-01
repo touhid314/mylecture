@@ -559,7 +559,8 @@ export class GeminiAgentSession {
         return extract_gemini_text(response) || "Finished working.";
     }
 
-    async run(task: string, max_turns: number): Promise<string> {
+    async run(task: string, max_turns: number, abortSignal?: AbortSignal): Promise<string> {
+        if (abortSignal?.aborted) throw new AgentAbortError();
         this.userTasks.push(strip_ide_context_from_user_query(task));
         const prepared_task = prepare_user_task(task, this.workspaceDir);
         const attachments = extract_upload_attachments(task, this.workspaceDir);
@@ -569,7 +570,9 @@ export class GeminiAgentSession {
 
         const userParts: any[] = [{ text: prepared_task }];
         for (const attachment of attachments) {
+            if (abortSignal?.aborted) throw new AgentAbortError();
             userParts.push(await this.upload_attachment_part(attachment));
+            if (abortSignal?.aborted) throw new AgentAbortError();
         }
         this.contents.push({ role: "user", parts: userParts });
 
@@ -585,7 +588,9 @@ export class GeminiAgentSession {
                 let response;
                 try {
                     response = await this.client.models.generateContent(request);
+                    if (abortSignal?.aborted) throw new AgentAbortError();
                 } catch (err: any) {
+                    if (err instanceof AgentAbortError) throw err;
                     console.error("GEMINI API ERROR DETAIL:", err);
                     if (err.status) console.error("API ERROR STATUS:", err.status);
                     if (err.error) console.error("API ERROR BODY:", JSON.stringify(err.error, null, 2));
@@ -614,6 +619,7 @@ export class GeminiAgentSession {
 
                 const response_parts: any[] = [];
                 for (const call of function_calls) {
+                    if (abortSignal?.aborted) throw new AgentAbortError();
                     const name = call.name;
                     const argumentsObj = call.args || {};
                     print_step(step, `running tool \`${name}\``, Color.BLUE);
@@ -698,7 +704,8 @@ class JsonFallbackAgentSession {
         return typeof response === 'string' && response.trim() ? response.trim() : "Finished working.";
     }
 
-    async run(task: string, max_turns: number): Promise<string> {
+    async run(task: string, max_turns: number, abortSignal?: AbortSignal): Promise<string> {
+        if (abortSignal?.aborted) throw new AgentAbortError();
         this.userTasks.push(strip_ide_context_from_user_query(task));
         const prepared_task = prepare_user_task(task, this.workspaceDir);
         const attachments = extract_upload_attachments(task, this.workspaceDir);
@@ -719,6 +726,7 @@ class JsonFallbackAgentSession {
                     true,
                     false
                 );
+                if (abortSignal?.aborted) throw new AgentAbortError();
 
                 if (response === null) {
                     print_step(step, "LLM call failed", Color.RED);
@@ -751,6 +759,7 @@ class JsonFallbackAgentSession {
 
                 const name = action.tool;
                 const argumentsObj = action.arguments || {};
+                if (abortSignal?.aborted) throw new AgentAbortError();
 
                 print_step(step, `running tool \`${name}\``, Color.BLUE);
                 print_detail("arguments", compact_tool_arguments(argumentsObj), Color.DIM, 700);
@@ -883,6 +892,13 @@ export interface AgentConfig {
     onLog?: (text: string) => void;
 }
 
+export class AgentAbortError extends Error {
+    constructor() {
+        super("Agent turn stopped by user.");
+        this.name = "AgentAbortError";
+    }
+}
+
 export class ChatSession {
     private model: string;
     private workspaceDir: string;
@@ -892,6 +908,8 @@ export class ChatSession {
     private totalInputTokens: number = 0;
     private totalOutputTokens: number = 0;
     private onLog?: (text: string) => void;
+    private activeAbortController: AbortController | null = null;
+    private turnSequence: number = 0;
 
     constructor(
         model: string,
@@ -918,27 +936,81 @@ export class ChatSession {
         return { input: this.totalInputTokens, output: this.totalOutputTokens };
     }
 
-    async sendMessage(prompt: string, maxTurns?: number): Promise<string> {
+    private stoppedTurnHistory(session: any, historyBeforeTurn: ChatMessage[], prompt: string): ChatMessage[] {
+        const nextEntry = session.contents?.[historyBeforeTurn.length] || session.transcript?.[historyBeforeTurn.length];
+        if (nextEntry && nextEntry.role === "user") {
+            return [...historyBeforeTurn, nextEntry];
+        }
+        if (this.model.toLowerCase().includes("gemini")) {
+            return [...historyBeforeTurn, { role: "user", parts: [{ text: prepare_user_task(prompt, this.workspaceDir) }] }];
+        }
+        return [...historyBeforeTurn, { role: "user", content: prepare_user_task(prompt, this.workspaceDir) }];
+    }
+
+    cancelTurn(): void {
+        this.activeAbortController?.abort();
+    }
+
+    async sendMessage(prompt: string, maxTurns?: number, abortSignal?: AbortSignal): Promise<string> {
         const turnsLimit = maxTurns !== undefined ? maxTurns : this.maxTurns;
-        const session = create_agent_session(this.model, this.workspaceDir, this.skills, this.history);
+        const historyBeforeTurn = [...this.history];
+        const session = create_agent_session(this.model, this.workspaceDir, this.skills, historyBeforeTurn);
+        const turnId = ++this.turnSequence;
+        this.history = this.stoppedTurnHistory(session, historyBeforeTurn, prompt);
+        const turnAbortController = new AbortController();
+        const relayAbort = () => turnAbortController.abort();
+        if (abortSignal?.aborted) {
+            turnAbortController.abort();
+        } else {
+            abortSignal?.addEventListener('abort', relayAbort, { once: true });
+        }
+        this.activeAbortController = turnAbortController;
+        const effectiveAbortSignal = turnAbortController.signal;
 
         let result: string;
-        if (this.onLog) {
-            result = await loggerStorage.run(this.onLog, () => run_session_with_timing(session, prompt, turnsLimit));
-        } else {
-            result = await run_session_with_timing(session, prompt, turnsLimit);
+        try {
+            if (this.onLog) {
+                result = await loggerStorage.run(this.onLog, () => run_session_with_timing(session, prompt, turnsLimit, effectiveAbortSignal));
+            } else {
+                result = await run_session_with_timing(session, prompt, turnsLimit, effectiveAbortSignal);
+            }
+        } catch (err: any) {
+            if (err instanceof AgentAbortError || effectiveAbortSignal.aborted) {
+                if (this.turnSequence === turnId) {
+                    this.history = this.stoppedTurnHistory(session, historyBeforeTurn, prompt);
+                }
+                throw new AgentAbortError();
+            }
+            if (this.turnSequence === turnId) {
+                this.history = historyBeforeTurn;
+            }
+            throw err;
+        } finally {
+            abortSignal?.removeEventListener('abort', relayAbort);
+            if (this.activeAbortController === turnAbortController) {
+                this.activeAbortController = null;
+            }
         }
 
-        if (session.contents) {
-            this.history = session.contents;
-        } else if (session.transcript) {
-            this.history = session.transcript;
+        if (effectiveAbortSignal.aborted) {
+            if (this.turnSequence === turnId) {
+                this.history = this.stoppedTurnHistory(session, historyBeforeTurn, prompt);
+            }
+            throw new AgentAbortError();
         }
 
-        if (session.totalInputTokens !== undefined) {
+        if (this.turnSequence === turnId) {
+            if (session.contents) {
+                this.history = session.contents;
+            } else if (session.transcript) {
+                this.history = session.transcript;
+            }
+        }
+
+        if (this.turnSequence === turnId && session.totalInputTokens !== undefined) {
             this.totalInputTokens += session.totalInputTokens;
         }
-        if (session.totalOutputTokens !== undefined) {
+        if (this.turnSequence === turnId && session.totalOutputTokens !== undefined) {
             this.totalOutputTokens += session.totalOutputTokens;
         }
 
@@ -1000,10 +1072,10 @@ function format_duration(ms: number): string {
     return `${(ms / 1000).toFixed(2)}s`;
 }
 
-async function run_session_with_timing(session: any, task: string, max_turns: number): Promise<string> {
+async function run_session_with_timing(session: any, task: string, max_turns: number, abortSignal?: AbortSignal): Promise<string> {
     const started_at = now_ms();
     try {
-        const result = await session.run(task, max_turns);
+        const result = await session.run(task, max_turns, abortSignal);
         return result;
     } finally {
         print_detail("run time", format_duration(now_ms() - started_at), Color.DIM);

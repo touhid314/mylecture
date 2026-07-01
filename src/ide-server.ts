@@ -571,6 +571,16 @@ function detectProvider(voice) {
   const v = String(voice || '').trim().toLowerCase();
   if (!v) return 'kokoro';
 
+  const omniVoices = new Set([
+    'american-male-1',
+    'american-male-2',
+    'american-male-3',
+    'johnny-harris'
+  ]);
+  if (omniVoices.has(v)) {
+    return 'omnivoice';
+  }
+
   const voicesDir = path.resolve(rootDir, 'voices');
   if (existsSync(voicesDir)) {
     try {
@@ -590,7 +600,7 @@ function detectProvider(voice) {
   if (openAiVoices.has(v)) {
     return 'openai';
   }
-  return 'google';
+  return 'kokoro';
 }
 
 function normalizeTtsSpeed(value) {
@@ -1530,30 +1540,54 @@ const server = createServer(async (request, response) => {
           agentState.log = ''; // Reset log buffer for this turn
 
           let isAborted = false;
-          agentState.activeJob = {
+          const abortController = new AbortController();
+          const activeAgentJob = {
             type: 'agent',
+            aborted: false,
             kill: () => {
               isAborted = true;
-              agentState.activeJob.aborted = true;
+              activeAgentJob.aborted = true;
+              agentState.session?.cancelTurn?.();
+              abortController.abort();
+              if (agentState.activeJob === activeAgentJob) {
+                agentState.activeJob = null;
+              }
+              if (!response.writableEnded) {
+                sendJson(response, 200, {
+                  ok: true,
+                  stopped: true,
+                  output: '',
+                  workspace: agentWorkspaceRoot(agentState.id)
+                });
+              }
             }
           };
+          agentState.activeJob = activeAgentJob;
 
           console.log(`Starting in-process agent execution in: ${agentWorkspaceRoot(agentState.id)}`);
 
           (async () => {
             try {
-              const responseText = await agentState.session.sendMessage(task);
-              agentState.activeJob = null;
+              const responseText = await agentState.session.sendMessage(task, undefined, abortController.signal);
+              if (agentState.activeJob === activeAgentJob) {
+                agentState.activeJob = null;
+              }
               if (isAborted) {
                 return;
               }
-              sendJson(response, 200, { ok: true, output: responseText.trim(), workspace: agentWorkspaceRoot(agentState.id) });
+              if (!response.writableEnded) {
+                sendJson(response, 200, { ok: true, output: responseText.trim(), workspace: agentWorkspaceRoot(agentState.id) });
+              }
             } catch (err: any) {
-              agentState.activeJob = null;
+              if (agentState.activeJob === activeAgentJob) {
+                agentState.activeJob = null;
+              }
               if (isAborted) {
                 return;
               }
-              sendJson(response, 500, { error: err.message || `Agent execution failed: ${err}` });
+              if (!response.writableEnded) {
+                sendJson(response, 500, { error: err.message || `Agent execution failed: ${err}` });
+              }
             }
           })();
         } catch (error: any) {

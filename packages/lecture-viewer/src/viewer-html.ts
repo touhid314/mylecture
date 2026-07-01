@@ -1828,22 +1828,12 @@ body.file-kind-mp4 .timeline-ruler {
               <option value="american-male-2">american-male-2 (En)</option>
               <option value="american-male-3">american-male-3 (En)</option>
               <option value="johnny-harris">johnny-harris (En)</option>
-              <option value="touhid-bangla">touhid-bangla (Bn)</option>
-              <option value="touhid-english">touhid-english (En)</option>
             </optgroup>
             <optgroup label="Kokoro TTS (Local)">
               <option value="am_puck">am_puck</option>
               <option value="af_heart" selected>af_heart</option>
               <option value="am_adam">am_adam</option>
               <option value="bf_emma">bf_emma</option>
-            </optgroup>
-            <optgroup label="Google TTS (Gemini)">
-              <option value="Puck">Puck</option>
-              <option value="Charon">Charon</option>
-              <option value="Kore">Kore</option>
-              <option value="Fenrir">Fenrir</option>
-              <option value="Aoede">Aoede</option>
-              <option value="Zephyr">Zephyr</option>
             </optgroup>
           </select>
         </div>
@@ -1874,22 +1864,12 @@ body.file-kind-mp4 .timeline-ruler {
               <option value="american-male-2">american-male-2 (En)</option>
               <option value="american-male-3">american-male-3 (En)</option>
               <option value="johnny-harris">johnny-harris (En)</option>
-              <option value="touhid-bangla">touhid-bangla (Bn)</option>
-              <option value="touhid-english">touhid-english (En)</option>
             </optgroup>
             <optgroup label="Kokoro TTS (Local)">
               <option value="am_puck">am_puck</option>
               <option value="af_heart" selected>af_heart</option>
               <option value="am_adam">am_adam</option>
               <option value="bf_emma">bf_emma</option>
-            </optgroup>
-            <optgroup label="Google TTS (Gemini)">
-              <option value="Puck">Puck</option>
-              <option value="Charon">Charon</option>
-              <option value="Kore">Kore</option>
-              <option value="Fenrir">Fenrir</option>
-              <option value="Aoede">Aoede</option>
-              <option value="Zephyr">Zephyr</option>
             </optgroup>
           </select>
         </div>
@@ -4553,8 +4533,10 @@ async function sendChat() {
     if (payload.workspace) {
       currentBrowserFolder = payload.workspace;
     }
-    appendChatMessage(payload.output || 'Done.', 'agent');
-    playAgentResponseRing();
+    if (!payload.stopped) {
+      appendChatMessage(payload.output || 'Done.', 'agent');
+      playAgentResponseRing();
+    }
   } catch (error) {
     removeThinking();
     if (!uploadCompleted) {
@@ -4666,7 +4648,6 @@ if (agentChatStop) {
       const response = await fetch('/stop-job?agentClientId=' + encodeURIComponent(agentClientId), { method: 'POST' });
       const payload = await response.json();
       if (!response.ok) throw new Error(payload.error || 'Failed to stop agent');
-      appendChatMessage('Stopping agent...', 'error');
     } catch (error) {
       appendChatMessage('Error stopping agent: ' + error.message, 'error');
     } finally {
