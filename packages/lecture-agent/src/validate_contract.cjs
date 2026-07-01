@@ -162,6 +162,19 @@ function runChecks(windowObj) {
     }
   }
 
+  // 6. Test invocation of __RENDER_SECTION__ to catch runtime/Reference errors
+  if (typeof windowObj.__RENDER_SECTION__ === 'function' && Array.isArray(plan) && plan.length > 0) {
+    try {
+      for (const segment of plan) {
+        if (segment && segment.id) {
+          windowObj.__RENDER_SECTION__(segment, 0, 0);
+        }
+      }
+    } catch (err) {
+      errors.push(`__RENDER_SECTION__ execution failed on test call: ${err.name || 'Error'}: ${err.message || err}`);
+    }
+  }
+
   return errors;
 }
 
@@ -317,6 +330,19 @@ async function validateWithPlaywright(htmlPath) {
     await page.goto(pathToFileURL(htmlPath).href, { waitUntil: 'load', timeout: 5000 });
 
     const result = await page.evaluate(() => {
+      let renderError = null;
+      try {
+        if (typeof window.__RENDER_SECTION__ === 'function' && Array.isArray(window.__VIDEO_PLAN__)) {
+          for (const segment of window.__VIDEO_PLAN__) {
+            if (segment && segment.id) {
+              window.__RENDER_SECTION__(segment, 0, 0);
+            }
+          }
+        }
+      } catch (err) {
+        renderError = `${err.name || 'Error'}: ${err.message || err}`;
+      }
+
       return {
         __VIDEO_METADATA__: window.__VIDEO_METADATA__,
         __VIDEO_PLAN__: window.__VIDEO_PLAN__,
@@ -324,6 +350,7 @@ async function validateWithPlaywright(htmlPath) {
         __START_INTERACTIVE_TYPE__: typeof window.__START_INTERACTIVE__,
         __START_GAME_TYPE__: typeof window.__START_GAME__,
         __STOP_GAME_TYPE__: typeof window.__STOP_GAME__,
+        renderError
       };
     });
 
@@ -337,6 +364,9 @@ async function validateWithPlaywright(htmlPath) {
     };
 
     const errors = runChecks(windowObj);
+    if (result.renderError) {
+      errors.push(`__RENDER_SECTION__ execution failed on browser test call: ${result.renderError}`);
+    }
     if (errors.some((err) => err.startsWith('Missing window.__')) && scriptErrors.length > 0) {
       return [
         ...scriptErrors.slice(0, 5).map((err) => `Browser script error before contract globals: ${err}`),

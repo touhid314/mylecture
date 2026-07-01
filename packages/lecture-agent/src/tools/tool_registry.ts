@@ -12,6 +12,7 @@ import { tool_cmd, compact_cmd } from './cmd.js';
 import { tool_mkdir, compact_mkdir } from './mkdir.js';
 import { tool_list_dir, compact_list_dir } from './list_dir.js';
 import { tool_del, compact_del } from './del.js';
+import { tool_getimg, compact_getimg } from './getimg.js';
 import { should_validate_contract, validate_index_html_contract } from './utils/html_contract.js';
 export { line_count } from './utils/text_stats.js';
 import { DEFAULT_WORKSPACE_DIR } from '../workspace.js';
@@ -37,7 +38,7 @@ export type ToolRegistryEntry = {
     parameters: any;
     // Adapter from model arguments to the concrete tool function. Keep argument
     // reshaping here so adding a tool does not require a second dispatcher file.
-    execute: (argumentsObj: any, workspaceDir: string) => string;
+    execute: (argumentsObj: any, workspaceDir: string) => string | Promise<string>;
     // Compaction prevents large file contents, command output, or edit payloads
     // from being repeatedly kept in model history.
     compact: (argumentsObj: any, result: string) => ToolCompaction;
@@ -216,6 +217,27 @@ export const TOOL_REGISTRY: ToolRegistryEntry[] = [
         execute: (args, workspaceDir) => tool_del(args.paths, workspaceDir),
         compact: compact_del,
     },
+    {
+        type: "function",
+        name: "getimg",
+        active: true,
+        description: "Retrieve, search for, or generate an image. The model should plan to add images in a video at necessary places. If planning for any image, the model MUST plan it out in the VISUAL part of the script using the syntax `[(getimg:<prompt>)]`. Example: \"VISUAL: A beautiful modern dark grey 2D grid appears. An image of Einstein appears [(getimg:a portrait of einstein thinking while doing math)]. A glowing title \\\"Eigenvectors\\\" pops up.\" Before generating or editing any HTML files, the model MUST call the `getimg` tool to download the planned image. Search mode (mode='search') is the preferred method of download because it gives real downloaded images. Use generation mode (mode='gen') only when a fictitious/synthetic image is needed or when the search tool has failed to return a suitable image. Once the model has requested an image download, the agent MUST wait for the tool execution to complete and return a successful result before proceeding with code generation or completing the task.",
+        parameters: {
+            type: "object",
+            properties: {
+                prompt: { type: "string", description: "Search query or AI generation prompt description." },
+                mode: { type: "string", enum: ["search", "gen"], description: "Use 'search' to search the web, 'gen' to generate using AI." },
+                out: { type: "string", description: "Workspace-relative output file path (e.g. 'banana.png' or 'images/banana.png')." },
+                aspect: { type: "string", description: "Optional aspect ratio for AI generation (e.g., '1:1', '16:9', '9:16', '4:3', '3:2')." },
+                resolution: { type: "string", enum: ["0.5K", "512", "1K", "2K", "4K"], description: "Optional resolution tier for Gemini generations." },
+                watchman: { type: "boolean", description: "Whether to verify the image content with the LLM Watchman agent. Default is true." },
+            },
+            required: ["prompt", "mode", "out"],
+            additionalProperties: false,
+        },
+        execute: (args, workspaceDir) => tool_getimg(args, workspaceDir),
+        compact: compact_getimg,
+    },
 ];
 
 // Active tools are the only tools exposed to the model. Use this helper instead
@@ -264,18 +286,22 @@ export const TOOL_JSON_SCHEMA = {
                 new: "replacement/insertion text",
             }
         ],
+        prompt: "search query or AI generation prompt for getimg",
+        mode: "search | gen for getimg",
+        out: "workspace-relative path to save the image (e.g. 'banana.png') for getimg",
+        aspect: "optional aspect ratio like '16:9' or '1:1' for getimg",
     },
 };
 
 // Public runtime entrypoint for tool execution. It normalizes bad argument
 // payloads and converts implementation exceptions into model-readable errors.
-export function execute_tool(name: string, argumentsObj: any, workspaceDir: string = DEFAULT_WORKSPACE_DIR): string {
+export async function execute_tool(name: string, argumentsObj: any, workspaceDir: string = DEFAULT_WORKSPACE_DIR): Promise<string> {
     if (!argumentsObj || typeof argumentsObj !== 'object') {
         argumentsObj = {};
     }
 
     try {
-        return execute_registered_tool(name, argumentsObj, workspaceDir);
+        return await execute_registered_tool(name, argumentsObj, workspaceDir);
     } catch (exc: any) {
         return `ERROR: ${exc.name || 'Error'}: ${exc.message || exc}`;
     }
@@ -310,12 +336,12 @@ export function compact_tool_history(name: string, args: any, result: string): T
 
 // Internal dispatch enforces active status. If a tool is inactive, the model
 // cannot normally call it, and a forged/old call still receives "unknown tool".
-function execute_registered_tool(name: string, argumentsObj: any, workspaceDir: string = DEFAULT_WORKSPACE_DIR): string {
+async function execute_registered_tool(name: string, argumentsObj: any, workspaceDir: string = DEFAULT_WORKSPACE_DIR): Promise<string> {
     const tool = get_active_tool(name);
     if (!tool) {
         return `ERROR: unknown tool ${name}`;
     }
-    return tool.execute(argumentsObj, workspaceDir);
+    return await tool.execute(argumentsObj, workspaceDir);
 }
 
 // Compaction can still handle inactive tools so old saved history remains

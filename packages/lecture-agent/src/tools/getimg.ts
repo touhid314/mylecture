@@ -1,14 +1,14 @@
 /**
- * packages/lecture-agent/src/download-image.ts
+ * packages/lecture-agent/src/tools/getimg.ts
  *
- * Programmatic API and CLI tool to search for or generate images.
+ * Programmatic API, CLI tool, and Agent Tool to search for or generate images.
  *
  * Programmatic API:
- *   import { downloadImage } from './download-image.js';
+ *   import { downloadImage } from './getimg.js';
  *   await downloadImage({ prompt: '...', mode: 'gen', ... });
  *
  * CLI Usage:
- *   npx tsx packages/lecture-agent/src/download-image.ts --prompt "your prompt" --mode [search|gen] [options]
+ *   npx tsx packages/lecture-agent/src/tools/getimg.ts --prompt "your prompt" --mode [search|gen] [options]
  */
 
 import fs from 'fs';
@@ -18,6 +18,8 @@ import dotenv from 'dotenv';
 import { GoogleGenAI } from '@google/genai';
 import OpenAI from 'openai';
 import sharp from 'sharp';
+
+import { resolve_workspace_path } from '../workspace.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -567,7 +569,7 @@ async function handleGptImageMode(options: DownloadOptions) {
     const openai = new OpenAI({ apiKey });
 
     // Handle aspect ratios for gpt-image-2
-    let size: '1024x1024' | '1792x1024' | '1024x1792' = '1024x1024';
+    let size: '1024x1024' | '1792x1024' | '1024x1792' = '1024x1792';
     if (aspect === '16:9') {
         size = '1792x1024';
     } else if (aspect === '9:16') {
@@ -668,7 +670,7 @@ export async function downloadImage(options: DownloadOptions): Promise<void> {
 function printHelp() {
     console.log(`
 Usage:
-  npx tsx packages/lecture-agent/src/download-image.ts --prompt <prompt> [options]
+  npx tsx packages/lecture-agent/src/tools/getimg.ts --prompt <prompt> [options]
 
 Required:
   -p, --prompt <string>       The search query or AI generation prompt.
@@ -689,7 +691,7 @@ Options:
   -r, --res, --resolution     Optional: resolution tier for Gemini generations ("0.5K", "512", "1K", "2K", "4K").
   --no-watchman               Disable LLM image verification in search and gen modes.
   --log-watchman              Save all images that fail Watchman verification to a 'watchman-failed' directory.
-  --help                      Show this help message.
+  --help                      Show this message.
 `);
 }
 
@@ -789,4 +791,66 @@ const isMain = process.argv[1] && (
 );
 if (isMain) {
     main();
+}
+
+/**
+ * Agent Tool wrapper for getimg
+ */
+export async function tool_getimg(args: {
+    prompt: string;
+    mode: 'search' | 'gen';
+    model?: 'gemini-flash-lite' | 'gemini-flash' | 'gemini-pro' | 'gpt-image-2';
+    out: string;
+    width?: number;
+    height?: number;
+    aspect?: string;
+    resolution?: '0.5K' | '512' | '1K' | '2K' | '4K';
+    watchman?: boolean;
+    logWatchman?: boolean;
+}, workspaceDir?: string): Promise<string> {
+    try {
+        if (!args.prompt) {
+            return "ERROR: prompt argument is required.";
+        }
+        if (!args.mode || (args.mode !== 'search' && args.mode !== 'gen')) {
+            return "ERROR: mode must be 'search' or 'gen'.";
+        }
+        if (!args.out) {
+            return "ERROR: out file path is required.";
+        }
+
+        const resolvedOut = resolve_workspace_path(args.out, workspaceDir);
+        await downloadImage({
+            prompt: args.prompt,
+            mode: args.mode,
+            model: args.model,
+            out: resolvedOut,
+            width: args.width,
+            height: args.height,
+            aspect: args.aspect,
+            resolution: args.resolution,
+            watchman: args.watchman !== false, // default to true
+            logWatchman: args.logWatchman === true // default to false
+        });
+
+        return `getimg succeeded: successfully retrieved and saved image to ${args.out}`;
+    } catch (e: any) {
+        return `ERROR: ${e.message || String(e)}`;
+    }
+}
+
+/**
+ * History compactor to avoid keeping full images or huge execution strings in history.
+ */
+export function compact_getimg(args: any, result: string): { compactedArgs: any; compactedResult: string } {
+    return {
+        compactedArgs: {
+            prompt: args.prompt ? (args.prompt.length > 100 ? args.prompt.substring(0, 100) + '...' : args.prompt) : undefined,
+            mode: args.mode,
+            model: args.model,
+            out: args.out,
+            aspect: args.aspect
+        },
+        compactedResult: result
+    };
 }
