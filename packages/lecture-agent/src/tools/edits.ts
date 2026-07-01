@@ -1,9 +1,9 @@
 /**
  * edits.ts
  *
- * Implements the edits tool to apply structured, line-based modifications to files.
- * Validates input ranges, compares expected old text (if provided) to actual content,
- * applies the changes, and logs statistics.
+ * Implements the range-based edits tool to apply structured, line-based modifications to files.
+ * Supports replacements with inclusive ranges [a, b], insertions after line [a], and insertion at top [0].
+ * Validates input ranges, checks for overlap/index collisions, and applies changes.
  */
 import fs from 'fs';
 import path from 'path';
@@ -12,18 +12,12 @@ import { resolve_workspace_path } from '../workspace.js';
 import { purify_content_for_path } from './utils/html_contract.js';
 import { text_stats } from './utils/text_stats.js';
 
-interface LineEdit {
-    start_line: number;
-    remove_lines: number;
-    new_text: string;
-    old_text?: string;
+export interface RangeEdit {
+    lines: [number, number?]; // [a, b] to replace/delete, [a] to insert after, [0] to insert at top
+    new: string;
 }
 
-function normalize_whitespace(str: string): string {
-    return str.replace(/\s+/g, ' ').trim();
-}
-
-export function tool_edits(filePath: string, edits: LineEdit[], workspaceDir?: string): string {
+export function tool_edits(filePath: string, edits: RangeEdit[], workspaceDir?: string): string {
     const target = resolve_workspace_path(filePath, workspaceDir);
     const content = fs.readFileSync(target, 'utf8');
 
@@ -32,84 +26,126 @@ export function tool_edits(filePath: string, edits: LineEdit[], workspaceDir?: s
     }
 
     const hasCRLF = content.includes('\r\n');
-    const lines = content.split(/\r?\n/);
+    const lines = content === '' ? [] : content.split(/\r?\n/);
+    const totalLines = lines.length;
 
     // 1. Parameter Validation
-    for (let index = 0; index < edits.length; index++) {
-        const edit = edits[index];
+    const processedEdits = edits.map((edit, index) => {
         if (!edit || typeof edit !== 'object') {
             throw new Error(`edit ${index + 1} must be an object`);
         }
-
-        const { start_line, remove_lines, new_text, old_text } = edit;
-
-        if (typeof start_line !== 'number' || isNaN(start_line) || start_line < 1) {
-            throw new Error(`edit ${index + 1} must have a valid positive start_line`);
+        if (!Array.isArray(edit.lines) || edit.lines.length < 1 || edit.lines.length > 2) {
+            throw new Error(`edit ${index + 1} must have a "lines" array of length 1 or 2`);
         }
-        if (typeof remove_lines !== 'number' || isNaN(remove_lines) || remove_lines < 0) {
-            throw new Error(`edit ${index + 1} must have a valid non-negative remove_lines`);
-        }
-        if (typeof new_text !== 'string') {
-            throw new Error(`edit ${index + 1} must have a string new_text`);
-        }
-        if (old_text !== undefined && typeof old_text !== 'string') {
-            throw new Error(`edit ${index + 1} old_text must be a string if provided`);
+        if (typeof edit.new !== 'string') {
+            throw new Error(`edit ${index + 1} must have a string "new" content`);
         }
 
-        // Check if start_line is within boundaries
-        // Allowing start_line to be lines.length + 1 to append at the end of the file
-        if (start_line > lines.length + 1) {
-            throw new Error(`edit ${index + 1} start_line (${start_line}) exceeds file line count (${lines.length})`);
+        const a = edit.lines[0];
+        const b = edit.lines[1];
+
+        if (typeof a !== 'number' || isNaN(a) || a < 0) {
+            throw new Error(`edit ${index + 1} has invalid start line: ${a}. Must be a non-negative integer.`);
         }
 
-        // Check if start_line + remove_lines exceeds line boundaries
-        if (start_line - 1 + remove_lines > lines.length) {
-            throw new Error(`edit ${index + 1} remove range exceeds file boundaries (start: ${start_line}, remove: ${remove_lines}, file lines: ${lines.length})`);
-        }
-    }
+        let startLine: number;
+        let removeCount: number;
+        let targetIndex: number;
+        let isInsertion = false;
 
-    // 2. Overlap & Identity Collision Checking
-    const sortedEdits = [...edits].sort((a, b) => a.start_line - b.start_line);
-    for (let i = 0; i < sortedEdits.length - 1; i++) {
-        const current = sortedEdits[i];
-        const next = sortedEdits[i + 1];
-        
-        // The end line of the current edit (1-indexed, inclusive)
-        const currentEndLine = current.start_line + current.remove_lines - 1;
-
-        if (next.start_line <= currentEndLine || current.start_line === next.start_line) {
-            throw new Error(`edits overlap or collide in the original file: edit at start_line ${next.start_line} collides with edit at start_line ${current.start_line}`);
-        }
-    }
-
-    // 3. Safety Verification (old_text checks)
-    let safetyCheckNotes = "";
-    for (let index = 0; index < edits.length; index++) {
-        const edit = edits[index];
-        if (edit.old_text !== undefined) {
-            const originalSlice = lines.slice(edit.start_line - 1, edit.start_line - 1 + edit.remove_lines).join(hasCRLF ? '\r\n' : '\n');
-            
-            if (originalSlice !== edit.old_text) {
-                // Try whitespace-normalized matching
-                if (normalize_whitespace(originalSlice) !== normalize_whitespace(edit.old_text)) {
-                    throw new Error(`edit ${index + 1} safety check failed: original text at lines ${edit.start_line}-${edit.start_line - 1 + edit.remove_lines} did not match expected old_text`);
+        if (edit.lines.length === 1) {
+            // Insertion
+            isInsertion = true;
+            if (a === 0) {
+                // Insert at the very top (before line 1)
+                startLine = 1;
+                targetIndex = 0;
+            } else {
+                // Insert after line a
+                if (a > totalLines) {
+                    throw new Error(`edit ${index + 1}: Cannot insert after line ${a} in a file with ${totalLines} lines.`);
                 }
-                safetyCheckNotes += ` (verified edit ${index + 1} using whitespace-normalized matching)`;
+                startLine = a + 1;
+                targetIndex = a;
+            }
+            removeCount = 0;
+        } else {
+            // Replacement/deletion range [a, b]
+            if (a === 0) {
+                throw new Error(`edit ${index + 1}: Cannot replace line 0. Use [0] to insert at the top.`);
+            }
+            if (b === undefined || typeof b !== 'number' || isNaN(b) || b < a) {
+                throw new Error(`edit ${index + 1} has invalid range: [${a}, ${b}]`);
+            }
+            if (b > totalLines) {
+                throw new Error(`edit ${index + 1}: Range end ${b} exceeds total file lines (${totalLines})`);
+            }
+            startLine = a;
+            removeCount = b - a + 1;
+            targetIndex = a - 1;
+        }
+
+        return {
+            original: edit,
+            startLine,
+            removeCount,
+            targetIndex,
+            isInsertion,
+            linesInput: edit.lines,
+            newText: edit.new
+        };
+    });
+
+    // 2. Collision and Overlap Checking
+    const replacedLines = new Set<number>();
+    const insertionPoints = new Set<number>();
+    const targetIndexes = new Set<number>();
+
+    for (let idx = 0; idx < processedEdits.length; idx++) {
+        const edit = processedEdits[idx];
+        const linesInput = edit.linesInput;
+
+        if (targetIndexes.has(edit.targetIndex)) {
+            throw new Error(`Collision error: Multiple edits target the same index (${edit.targetIndex}).`);
+        }
+        targetIndexes.add(edit.targetIndex);
+
+        if (edit.isInsertion) {
+            const point = linesInput[0]; // The line we insert after
+            if (insertionPoints.has(point)) {
+                throw new Error(`Collision error: Multiple insertions target the same location (after line ${point}).`);
+            }
+            insertionPoints.add(point);
+        } else {
+            const [a, b] = linesInput as [number, number];
+            for (let line = a; line <= b; line++) {
+                if (replacedLines.has(line)) {
+                    throw new Error(`Collision error: Line ${line} is targeted by multiple replacements.`);
+                }
+                replacedLines.add(line);
             }
         }
     }
 
-    // 4. Apply Edits in reverse order (bottom-to-top) to maintain original index alignment
-    const reverseEdits = [...edits].sort((a, b) => b.start_line - a.start_line);
-    let totalRemovedLines = 0;
-    let totalAddedLines = 0;
+    // 3. Sort edits in descending order:
+    // - Primary: targetIndex descending (highest index in file applied first)
+    // - Secondary: original start line descending (forces replacements to apply before insertions at same target index)
+    processedEdits.sort((e1, e2) => {
+        if (e1.targetIndex !== e2.targetIndex) {
+            return e2.targetIndex - e1.targetIndex;
+        }
+        return e2.startLine - e1.startLine;
+    });
 
-    for (const edit of reverseEdits) {
-        const replacementLines = edit.new_text === "" ? [] : edit.new_text.split(/\r?\n/);
-        lines.splice(edit.start_line - 1, edit.remove_lines, ...replacementLines);
-        
-        totalRemovedLines += edit.remove_lines;
-        totalAddedLines += replacementLines.length;
+    // 4. Apply the splices
+    let totalRemoved = 0;
+    let totalAdded = 0;
+
+    for (const edit of processedEdits) {
+        const replacementLines = edit.newText === '' ? [] : edit.newText.split(/\r?\n/);
+        lines.splice(edit.targetIndex, edit.removeCount, ...replacementLines);
+        totalRemoved += edit.removeCount;
+        totalAdded += replacementLines.length;
     }
 
     let updatedContent = lines.join(hasCRLF ? '\r\n' : '\n');
@@ -120,19 +156,23 @@ export function tool_edits(filePath: string, edits: LineEdit[], workspaceDir?: s
 
     const stats = text_stats(updatedContent);
     const purified_note = purifiedCount ? `; purified ${purifiedCount} escaped quote(s) in HTML markup` : "";
-    const lineDelta = totalAddedLines - totalRemovedLines;
+    const lineDelta = totalAdded - totalRemoved;
 
-    return `edits succeeded for ${filePath}; applied ${edits.length} edit operation(s), removed ${totalRemovedLines} line(s), added ${totalAddedLines} line(s) (net line change: ${lineDelta >= 0 ? '+' : ''}${lineDelta})${safetyCheckNotes}${purified_note}; file now contains ${stats.characters} characters, ${stats.words} words, and ${stats.lines} lines`;
+    return `edits succeeded for ${filePath}; applied ${edits.length} edit operation(s), removed ${totalRemoved} line(s), added ${totalAdded} line(s) (net line change: ${lineDelta >= 0 ? '+' : ''}${lineDelta})${purified_note}; file now contains ${stats.characters} characters, ${stats.words} words, and ${stats.lines} lines`;
 }
 
-export function compact_edits(args: { path: string; edits: LineEdit[] }, result: string): { compactedArgs: any; compactedResult: string } {
-    const editSummaries = (args.edits || []).map(edit => {
-        return `[Line ${edit.start_line}, remove ${edit.remove_lines} line(s), insert ${edit.new_text.split('\n').length} line(s)]`;
+export function compact_edits(args: { path: string; edits: RangeEdit[] }, result: string): { compactedArgs: any; compactedResult: string } {
+    const compactedEdits = (args.edits || []).map(edit => {
+        const lineCount = edit.new.split(/\r?\n/).length;
+        return {
+            lines: edit.lines,
+            new: `... [omitted ${lineCount} line(s)]`
+        };
     });
     return {
         compactedArgs: {
             path: args.path,
-            edits: editSummaries
+            edits: compactedEdits
         },
         compactedResult: result
     };

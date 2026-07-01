@@ -87,37 +87,57 @@ export const TOOL_REGISTRY: ToolRegistryEntry[] = [
         type: "function",
         name: "edits",
         active: true,
-        description: "Apply one or more line-based diff patches to an existing file atomically. Line numbers are 1-indexed and refer to the original file state before any edits are applied.",
+        description: `Apply one or more range-based edits (replacements, insertions, deletions) to an existing file. 
+        Just provide the line number(s) that needs to be changed and the new content to be changed with. 
+        For even related content grouped together by {} or any other way, only give the line number(s) that need to be changed.
+        Every line in range of 'lines' should be different from every line in 'new'.
+        There cannot be any overlap between the old content and the new content.
+        Example: 
+            {
+            "path": "example.md",
+            
+            "edits": [
+                {
+                "lines": [2, 3],
+                "new": "<new content to replace>"
+                },
+                {
+                "lines": [119],
+                "new":"<contents to append after line 119>"
+                }
+            ]
+            }
+        
+        **Very important:** If a file already exists and you need to change it, use the edits tool instead of the write tool.
+        `,
         parameters: {
             type: "object",
             properties: {
                 path: { type: "string", description: "Workspace-relative file path." },
                 edits: {
                     type: "array",
-                    description: "List of edits to apply atomically to the file.",
+                    description: "List of range-based edits to apply atomically to the file.",
                     items: {
                         type: "object",
                         properties: {
-                            start_line: {
-                                type: "integer",
-                                description: "1-indexed starting line number of the edit in the original file.",
-                                minimum: 1
+                            lines: {
+                                type: "array",
+                                description: `Target range syntax (where 'a' and 'b' are 1-indexed line numbers): 
+                                [a, b] to replace/delete lines a to b inclusive; 
+                                [a, a] to replace/delete line a; 
+                                [a] (1-element array) to insert after line a, without replacing line a; 
+                                [0] (1-element array) to insert at the very top (before line 1).`,
+                                items: { type: "integer" },
+                                minItems: 1,
+                                maxItems: 2
                             },
-                            remove_lines: {
-                                type: "integer",
-                                description: "Number of lines to remove from the original file starting from start_line.",
-                                minimum: 0
-                            },
-                            new_text: {
+                            new: {
                                 type: "string",
-                                description: "Text to insert at start_line. Use an empty string to delete without inserting."
-                            },
-                            old_text: {
-                                type: "string",
-                                description: "Optional safety check: exact text expected in the removed range before the edit is applied."
+                                description: `The new content to replace the range or insert. 
+                                Use an empty string to delete.`
                             }
                         },
-                        required: ["start_line", "remove_lines", "new_text"],
+                        required: ["lines", "new"],
                         additionalProperties: false,
                     },
                 },
@@ -132,7 +152,7 @@ export const TOOL_REGISTRY: ToolRegistryEntry[] = [
         type: "function",
         name: "cmd",
         active: false,
-        description: "Run a shell command. This tool is intentionally inactive for normal agent behavior.",
+        description: "Run a shell command.",
         parameters: {
             type: "object",
             properties: {
@@ -240,10 +260,8 @@ export const TOOL_JSON_SCHEMA = {
         content: "complete file content for write",
         edits: [
             {
-                start_line: "1-indexed starting line number of the edit in the original file",
-                remove_lines: "number of lines to remove (0 for pure insertion)",
-                new_text: "text to insert",
-                old_text: "optional exact text expected in the removed range before applying the edit",
+                lines: [12, 14], // [a, b] to replace/delete inclusive; [a] to insert after; [0] to insert at top
+                new: "replacement/insertion text",
             }
         ],
     },
@@ -286,7 +304,7 @@ export function compact_tool_history(name: string, args: any, result: string): T
 
     try {
         return compact_registered_tool_history(name, args, result);
-    } catch {}
+    } catch { }
     return { compactedArgs: args, compactedResult: result };
 }
 

@@ -255,14 +255,14 @@ function compact_tool_arguments(argumentsObj: any): any {
 
     const compacted: any = {};
     for (const [key, value] of Object.entries(argumentsObj)) {
-        if (["content", "old_text", "new_text"].includes(key) && typeof value === 'string') {
+        if (["content", "old_text", "new_text", "new"].includes(key) && typeof value === 'string') {
             compacted[key] = compact_edit_value(value);
         } else if (key === "edits" && Array.isArray(value)) {
             compacted[key] = value.map(item => {
                 if (item && typeof item === 'object') {
                     const compactedItem: any = {};
                     for (const [item_key, item_value] of Object.entries(item)) {
-                        if (["old_text", "new_text"].includes(item_key)) {
+                        if (["old_text", "new_text", "new"].includes(item_key)) {
                             compactedItem[item_key] = compact_edit_value(item_value);
                         } else {
                             compactedItem[item_key] = item_value;
