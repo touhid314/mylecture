@@ -11,7 +11,8 @@
   "dependencies": {
     "@google/genai": "*",
     "dotenv": "*",
-    "openai": "*"
+    "openai": "*",
+    "sharp": "^0.34.5"
   },
   "devDependencies": {
     "@types/node": "*",

@@ -38,6 +38,29 @@ function loadEnv() {
 }
 loadEnv();
 
+type GetimgModel = 'gemini-flash-lite' | 'gemini-flash' | 'gemini-pro' | 'gpt-image-2';
+
+function cleanEnvValue(value: string | undefined): string {
+    let cleaned = value || "";
+    cleaned = cleaned.split('#')[0].trim();
+    if ((cleaned.startsWith('"') && cleaned.endsWith('"')) || (cleaned.startsWith("'") && cleaned.endsWith("'"))) {
+        cleaned = cleaned.slice(1, -1).trim();
+    }
+    return cleaned;
+}
+
+function getDefaultGetimgModel(): GetimgModel {
+    const configured = cleanEnvValue(process.env.GETIMG_MODEL).toLowerCase();
+    if (configured === 'gemini-flash-lite' || configured === 'gemini-flash' || configured === 'gemini-pro' || configured === 'gpt-image-2') {
+        return configured as GetimgModel;
+    }
+    return 'gemini-flash-lite';
+}
+
+function getWatchmanModel(): string {
+    return cleanEnvValue(process.env.GETIMG_WATCHMAN_MODEL) || 'gemini-2.5-flash';
+}
+
 /**
  * Options configuration for the image downloader.
  */
@@ -46,8 +69,8 @@ export interface DownloadOptions {
     prompt: string;
     /** 'search' to search the web, 'gen' to generate using AI. */
     mode: 'search' | 'gen';
-    /** The AI model to use (only applicable for 'gen' mode). Default is 'gemini-flash-lite'. */
-    model?: 'gemini-flash-lite' | 'gemini-flash' | 'gemini-pro' | 'gpt-image-2';
+    /** The AI model to use (only applicable for 'gen' mode). Defaults to GETIMG_MODEL. */
+    model?: GetimgModel;
     /** Output file path. */
     out: string;
     /** Optional width (in pixels) for the generated image. */
@@ -135,7 +158,7 @@ async function resizeTo480p(buffer: Buffer): Promise<Buffer> {
 }
 
 /**
- * Invokes Gemini 2.5 Flash to verify if a single image satisfies the user's prompt request.
+ * Invokes the configured Watchman model to verify if a single image satisfies the user's prompt request.
  * @param apiKey - The Google API key.
  * @param prompt - The user prompt/query that description should match.
  * @param imageBuffer - The image data buffer to verify (should be resized).
@@ -150,9 +173,10 @@ async function watchmanImageWithGemini(
 ): Promise<{ fulfilled: boolean; reason: string }> {
     const ai = new GoogleGenAI({ apiKey });
     const base64Image = imageBuffer.toString('base64');
+    const watchmanModel = getWatchmanModel();
 
     const response = await ai.models.generateContent({
-        model: 'gemini-2.5-flash',
+        model: watchmanModel,
         contents: [
             {
                 inlineData: {
@@ -195,7 +219,7 @@ async function watchmanImageWithGemini(
 }
 
 /**
- * Invokes Gemini 2.5 Flash to choose the best matching image from multiple candidate image buffers.
+ * Invokes the configured Watchman model to choose the best matching image from multiple candidate image buffers.
  * @param apiKey - The Google API key.
  * @param prompt - The user prompt/query to verify against.
  * @param images - An array of image structures with buffers and MIME types.
@@ -207,6 +231,7 @@ async function watchmanMultipleImagesWithGemini(
     images: { buffer: Buffer; mimeType: string }[]
 ): Promise<{ bestImageIndex: number; reason: string }> {
     const ai = new GoogleGenAI({ apiKey });
+    const watchmanModel = getWatchmanModel();
     const contents: any[] = [];
 
     images.forEach((img) => {
@@ -225,7 +250,7 @@ async function watchmanMultipleImagesWithGemini(
     contents.push(promptText);
 
     const response = await ai.models.generateContent({
-        model: 'gemini-2.5-flash',
+        model: watchmanModel,
         contents: contents,
         config: {
             responseMimeType: "application/json",
@@ -295,7 +320,7 @@ async function performWatchmanCheckForGen(options: DownloadOptions, buffer: Buff
     const mimeType = getMimeType(buffer);
     console.log(`[Watchman Agent] Resizing generated image to 480p...`);
     const resizedBuffer = await resizeTo480p(buffer);
-    console.log(`[Watchman Agent] Asking gemini-2.5-flash to verify the generated image...`);
+    console.log(`[Watchman Agent] Asking ${getWatchmanModel()} to verify the generated image...`);
     const verification = await watchmanImageWithGemini(googleApiKey, options.prompt, resizedBuffer, mimeType);
     console.log(`[Watchman Agent] Verdict: fulfilled = ${verification.fulfilled}, reason = "${verification.reason}"`);
     if (!verification.fulfilled) {
@@ -381,7 +406,7 @@ async function handleSearchMode(options: DownloadOptions) {
     console.log(`[Watchman Agent] Resizing first downloaded image to 480p...`);
     const resizedFirstBuffer = await resizeTo480p(downloadedBuffer);
 
-    console.log(`[Watchman Agent] Asking gemini-2.5-flash to verify image...`);
+    console.log(`[Watchman Agent] Asking ${getWatchmanModel()} to verify image...`);
     const verification = await watchmanImageWithGemini(apiKey, prompt, resizedFirstBuffer, mimeType);
     console.log(`[Watchman Agent] Verdict: fulfilled = ${verification.fulfilled}, reason = "${verification.reason}"`);
 
@@ -454,7 +479,7 @@ async function handleSearchMode(options: DownloadOptions) {
         };
     }));
 
-    console.log(`[Watchman Agent] Asking gemini-2.5-flash to verify the ${alternativeCandidates.length} candidate images...`);
+    console.log(`[Watchman Agent] Asking ${getWatchmanModel()} to verify the ${alternativeCandidates.length} candidate images...`);
     const multiVerification = await watchmanMultipleImagesWithGemini(apiKey, prompt, resizedCandidates);
     console.log(`[Watchman Agent] Verdict: bestImageIndex = ${multiVerification.bestImageIndex}, reason = "${multiVerification.reason}"`);
 
@@ -627,7 +652,7 @@ export async function downloadImage(options: DownloadOptions): Promise<void> {
     const { mode, model, out, resolution } = options;
 
     if (mode === 'gen') {
-        const selectedModel = model || 'gemini-flash-lite';
+        const selectedModel = model || getDefaultGetimgModel();
         if (selectedModel === 'gpt-image-2' && resolution !== undefined) {
             console.warn("Warning: --resolution is ignored for OpenAI gpt-image-2.");
         }
@@ -680,7 +705,7 @@ Options:
                               - search: Search DuckDuckGo Images and download the first working result (Default).
                               - gen: Generate an image using an AI model.
   --model <string>            The AI model to use when --mode is 'gen':
-                              - gemini-flash-lite: Gemini 3.1 Flash Lite Image (Nano Banana Lite) (Default).
+                              - gemini-flash-lite: Gemini 3.1 Flash Lite Image (Nano Banana Lite).
                               - gemini-flash: Gemini 3.1 Flash Image (Nano Banana 2).
                               - gemini-pro: Gemini 3 Pro Image (Nano Banana Pro).
                               - gpt-image-2: OpenAI gpt-image-2 (requires OPENAI_API_KEY).
@@ -689,6 +714,7 @@ Options:
   -h, --height <number>       Optional: height of the generated image.
   -a, --aspect <string>       Optional: aspect ratio for AI generation (e.g., "1:1", "16:9", "4:3", "3:2", "2:3").
   -r, --res, --resolution     Optional: resolution tier for Gemini generations ("0.5K", "512", "1K", "2K", "4K").
+  Default gen model comes from GETIMG_MODEL. Watchman model comes from GETIMG_WATCHMAN_MODEL.
   --no-watchman               Disable LLM image verification in search and gen modes.
   --log-watchman              Save all images that fail Watchman verification to a 'watchman-failed' directory.
   --help                      Show this message.
@@ -775,7 +801,7 @@ async function main() {
     const options: DownloadOptions = { prompt, mode, model, out, width, height, aspect, resolution, watchman, logWatchman };
 
     try {
-        console.log(`Starting image download. Mode: ${mode}${mode === 'gen' ? ` (Model: ${model || 'gemini-flash-lite'}${resolution ? `, Resolution: ${resolution}` : ''})` : ''}, Prompt: "${prompt}", Target file: ${out}`);
+        console.log(`Starting image download. Mode: ${mode}${mode === 'gen' ? ` (Model: ${model || getDefaultGetimgModel()}${resolution ? `, Resolution: ${resolution}` : ''})` : ''}, Prompt: "${prompt}", Target file: ${out}`);
         await downloadImage(options);
         console.log("Completed successfully!");
     } catch (e) {
@@ -785,10 +811,9 @@ async function main() {
 }
 
 // Check if run directly
-const isMain = process.argv[1] && (
-    fs.realpathSync(process.argv[1]) === fs.realpathSync(fileURLToPath(import.meta.url)) ||
-    process.argv[1] === fileURLToPath(import.meta.url)
-);
+const modulePath = fileURLToPath(import.meta.url);
+const argvPath = process.argv[1] ? path.resolve(process.argv[1]) : "";
+const isMain = !!argvPath && fs.existsSync(argvPath) && fs.realpathSync(argvPath) === fs.realpathSync(modulePath);
 if (isMain) {
     main();
 }

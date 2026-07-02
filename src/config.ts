@@ -9,6 +9,7 @@ export type AppConfig = {
   agent: {
     defaultProfile: string;
     generationDir: string;
+    enableGetimgTool: boolean;
     defaultAspectRatio: string;
     defaultLengthSeconds: number;
     embedSubtitlesByDefault: boolean;
@@ -33,6 +34,7 @@ const defaultConfig: AppConfig = {
   agent: {
     defaultProfile: 'default',
     generationDir: 'gens',
+    enableGetimgTool: false,
     defaultAspectRatio: '16:9',
     defaultLengthSeconds: 60,
     embedSubtitlesByDefault: false
@@ -117,6 +119,7 @@ function mergeConfig(raw: Record<string, Record<string, unknown>>): AppConfig {
     agent: {
       defaultProfile: normalizeProfileId(stringValue(raw.agent?.defaultProfile, defaultConfig.agent.defaultProfile)),
       generationDir: stringValue(raw.agent?.generationDir, defaultConfig.agent.generationDir),
+      enableGetimgTool: booleanValue(raw.agent?.enableGetimgTool, defaultConfig.agent.enableGetimgTool),
       defaultAspectRatio: stringValue(raw.agent?.defaultAspectRatio, defaultConfig.agent.defaultAspectRatio),
       defaultLengthSeconds: numberValue(raw.agent?.defaultLengthSeconds, defaultConfig.agent.defaultLengthSeconds, 1),
       embedSubtitlesByDefault: booleanValue(raw.agent?.embedSubtitlesByDefault, defaultConfig.agent.embedSubtitlesByDefault)

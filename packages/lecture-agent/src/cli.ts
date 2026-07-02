@@ -18,6 +18,33 @@ import {
 } from './coding_agent.js';
 import { DEFAULT_WORKSPACE_DIR } from './workspace.js';
 
+function loadConfigEnableGetimgDefault(): boolean {
+    let dir = path.dirname(fileURLToPath(import.meta.url));
+    while (dir && dir !== path.parse(dir).root) {
+        const configPath = path.join(dir, 'config.yaml');
+        if (fs.existsSync(configPath)) {
+            const content = fs.readFileSync(configPath, 'utf8');
+            let section = "";
+            for (const rawLine of content.split(/\r?\n/)) {
+                const line = rawLine.replace(/\s+#.*$/, '').trimEnd();
+                if (!line.trim() || line.trimStart().startsWith('#')) continue;
+                const sectionMatch = line.match(/^([A-Za-z0-9_-]+):\s*$/);
+                if (sectionMatch) {
+                    section = sectionMatch[1];
+                    continue;
+                }
+                const fieldMatch = line.match(/^\s+enableGetimgTool:\s*(.*?)\s*$/);
+                if (section === "agent" && fieldMatch) {
+                    return fieldMatch[1].trim().toLowerCase() === "true";
+                }
+            }
+            return false;
+        }
+        dir = path.dirname(dir);
+    }
+    return false;
+}
+
 function askQuestion(query: string): Promise<string> {
     const rl = readline.createInterface({
         input: process.stdin,
@@ -33,7 +60,7 @@ function chat_prompt(): string {
     return `\n${Color.BOLD}${Color.GREEN}You>${Color.RESET} `;
 }
 
-async function run_chat(model: string, max_turns: number, skills: string[] | null = null): Promise<void> {
+async function run_chat(model: string, max_turns: number, skills: string[] | null = null, enableGetimgTool: boolean = false): Promise<void> {
     reset_agent_session();
     
     // In chat CLI mode, we use the default workspace directory
@@ -41,7 +68,8 @@ async function run_chat(model: string, max_turns: number, skills: string[] | nul
         model,
         workspaceDir: DEFAULT_WORKSPACE_DIR,
         skills,
-        maxTurns: max_turns
+        maxTurns: max_turns,
+        enableGetimgTool
     });
     
     const session = agent.startChat();
@@ -67,6 +95,7 @@ async function run_chat(model: string, max_turns: number, skills: string[] | nul
 
 function parseCommandLineArgs() {
     const args = process.argv.slice(2);
+    const defaultEnableGetimgTool = loadConfigEnableGetimgDefault();
     const result = {
         task: [] as string[],
         chat: false,
@@ -74,6 +103,7 @@ function parseCommandLineArgs() {
         listSkills: false,
         model: process.env.AGENT_MODEL || "",
         maxTurns: 500,
+        enableGetimgTool: defaultEnableGetimgTool,
         newSession: (process.env.AGENT_NEW_SESSION || "").replace(/['"]/g, "").trim().toLowerCase() === "true"
     };
 
@@ -88,6 +118,12 @@ function parseCommandLineArgs() {
             i++;
         } else if (arg === '--list-skills') {
             result.listSkills = true;
+            i++;
+        } else if (arg === '--getimg' || arg === '--enable-getimg') {
+            result.enableGetimgTool = true;
+            i++;
+        } else if (arg === '--no-getimg' || arg === '--disable-getimg') {
+            result.enableGetimgTool = false;
             i++;
         } else if (arg === '--skill') {
             if (i + 1 < args.length) {
@@ -146,7 +182,7 @@ async function run() {
     }
 
     if (parsed.chat) {
-        await run_chat(parsed.model, parsed.maxTurns, parsed.skill);
+        await run_chat(parsed.model, parsed.maxTurns, parsed.skill, parsed.enableGetimgTool);
         process.exit(0);
     }
 
@@ -164,7 +200,7 @@ async function run() {
         process.exit(1);
     }
 
-    const result = await run_agent(task, parsed.model, parsed.maxTurns, parsed.skill);
+    const result = await run_agent(task, parsed.model, parsed.maxTurns, parsed.skill, parsed.enableGetimgTool);
     process.stdout.write(result + '\n', () => {
         setTimeout(() => {
             process.exit(0);

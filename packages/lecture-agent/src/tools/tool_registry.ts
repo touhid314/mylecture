@@ -17,6 +17,10 @@ import { should_validate_contract, validate_index_html_contract } from './utils/
 export { line_count } from './utils/text_stats.js';
 import { DEFAULT_WORKSPACE_DIR } from '../workspace.js';
 
+export type ToolRuntimeOptions = {
+    enableGetimgTool?: boolean;
+};
+
 // Tool implementations stay in their own files. This registry is the only place
 // that decides whether those implementations are visible to the model.
 export type ToolCompaction = {
@@ -242,41 +246,47 @@ export const TOOL_REGISTRY: ToolRegistryEntry[] = [
 
 // Active tools are the only tools exposed to the model. Use this helper instead
 // of filtering TOOL_REGISTRY at call sites so inactive behavior stays uniform.
-export function active_tools(): ToolRegistryEntry[] {
-    return TOOL_REGISTRY.filter(tool => tool.active);
+function is_tool_enabled(tool: ToolRegistryEntry, options: ToolRuntimeOptions = {}): boolean {
+    if (!tool.active) return false;
+    if (tool.name === 'getimg') return options.enableGetimgTool === true;
+    return true;
 }
 
-export function active_tool_names(): string[] {
-    return active_tools().map(tool => tool.name);
+export function active_tools(options: ToolRuntimeOptions = {}): ToolRegistryEntry[] {
+    return TOOL_REGISTRY.filter(tool => is_tool_enabled(tool, options));
 }
 
-export function get_active_tool(name: string): ToolRegistryEntry | undefined {
-    return active_tools().find(tool => tool.name === name);
+export function active_tool_names(options: ToolRuntimeOptions = {}): string[] {
+    return active_tools(options).map(tool => tool.name);
+}
+
+export function get_active_tool(name: string, options: ToolRuntimeOptions = {}): ToolRegistryEntry | undefined {
+    return active_tools(options).find(tool => tool.name === name);
 }
 
 // The system prompt keeps a marker for the tool section. coding_agent.ts replaces
 // that marker with this generated block so prompt text and schemas cannot drift.
-export function render_available_tools_section(): string {
-    const lines = active_tools().map(tool => `- \`${tool.name}\`: ${tool.description}`);
+export function render_available_tools_section(options: ToolRuntimeOptions = {}): string {
+    const lines = active_tools(options).map(tool => `- \`${tool.name}\`: ${tool.description}`);
     return ["# Available tools:", "", ...lines].join("\n");
 }
 
 // Gemini function declarations are built from this derived list. Do not add tools
 // directly to the model config; change TOOL_REGISTRY instead.
-export const TOOLS: any[] = active_tools().map(tool => ({
-    type: tool.type,
-    name: tool.name,
-    description: tool.description,
-    parameters: tool.parameters,
-}));
+export function tool_declarations(options: ToolRuntimeOptions = {}): any[] {
+    return active_tools(options).map(tool => ({
+        type: tool.type,
+        name: tool.name,
+        description: tool.description,
+        parameters: tool.parameters,
+    }));
+}
 
 // The JSON fallback path cannot use native function declarations, so it receives
 // this compact shape in the prompt. The allowed tool names are generated from the
 // same active registry entries.
-export const TOOL_JSON_SCHEMA = {
-    note: "brief step summary for the CLI; do not include hidden chain-of-thought",
-    tool: active_tool_names().join(" | "),
-    arguments: {
+export function tool_json_schema(options: ToolRuntimeOptions = {}): any {
+    const argumentsSchema: any = {
         path: "workspace-relative path for read/write/edits/mkdir/list_dir",
         paths: "array of workspace-relative paths to delete for del",
         content: "complete file content for write",
@@ -286,22 +296,32 @@ export const TOOL_JSON_SCHEMA = {
                 new: "replacement/insertion text",
             }
         ],
-        prompt: "search query or AI generation prompt for getimg",
-        mode: "search | gen for getimg",
-        out: "workspace-relative path to save the image (e.g. 'banana.png') for getimg",
-        aspect: "optional aspect ratio like '16:9' or '1:1' for getimg",
-    },
-};
+    };
+    if (options.enableGetimgTool === true) {
+        argumentsSchema.prompt = "search query or AI generation prompt for getimg";
+        argumentsSchema.mode = "search | gen for getimg";
+        argumentsSchema.out = "workspace-relative path to save the image (e.g. 'banana.png') for getimg";
+        argumentsSchema.aspect = "optional aspect ratio like '16:9' or '1:1' for getimg";
+    }
+    return {
+        note: "brief step summary for the CLI; do not include hidden chain-of-thought",
+        tool: active_tool_names(options).join(" | "),
+        arguments: argumentsSchema,
+    };
+}
+
+export const TOOLS: any[] = tool_declarations();
+export const TOOL_JSON_SCHEMA = tool_json_schema();
 
 // Public runtime entrypoint for tool execution. It normalizes bad argument
 // payloads and converts implementation exceptions into model-readable errors.
-export async function execute_tool(name: string, argumentsObj: any, workspaceDir: string = DEFAULT_WORKSPACE_DIR): Promise<string> {
+export async function execute_tool(name: string, argumentsObj: any, workspaceDir: string = DEFAULT_WORKSPACE_DIR, options: ToolRuntimeOptions = {}): Promise<string> {
     if (!argumentsObj || typeof argumentsObj !== 'object') {
         argumentsObj = {};
     }
 
     try {
-        return await execute_registered_tool(name, argumentsObj, workspaceDir);
+        return await execute_registered_tool(name, argumentsObj, workspaceDir, options);
     } catch (exc: any) {
         return `ERROR: ${exc.name || 'Error'}: ${exc.message || exc}`;
     }
@@ -336,8 +356,8 @@ export function compact_tool_history(name: string, args: any, result: string): T
 
 // Internal dispatch enforces active status. If a tool is inactive, the model
 // cannot normally call it, and a forged/old call still receives "unknown tool".
-async function execute_registered_tool(name: string, argumentsObj: any, workspaceDir: string = DEFAULT_WORKSPACE_DIR): Promise<string> {
-    const tool = get_active_tool(name);
+async function execute_registered_tool(name: string, argumentsObj: any, workspaceDir: string = DEFAULT_WORKSPACE_DIR, options: ToolRuntimeOptions = {}): Promise<string> {
+    const tool = get_active_tool(name, options);
     if (!tool) {
         return `ERROR: unknown tool ${name}`;
     }

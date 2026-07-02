@@ -62,6 +62,7 @@ function getAgentState(agentClientId) {
       activeJob: null,
       log: '',
       pendingNewSession: true,
+      enableGetimgTool: null,
       session: null
     };
     agentClientStates.set(id, state);
@@ -1530,6 +1531,9 @@ const server = createServer(async (request, response) => {
           const currentFile = payload.currentFile || '';
           const currentDir = payload.currentDir || '';
           const agentState = getAgentState(payload.agentClientId || requestUrl.searchParams.get('agentClientId'));
+          const enableGetimgTool = typeof payload.enableGetimgTool === 'boolean'
+            ? payload.enableGetimgTool
+            : appConfig.agent.enableGetimgTool === true;
 
           if (!message) {
             sendJson(response, 400, { error: 'Missing message parameter.' });
@@ -1552,16 +1556,22 @@ const server = createServer(async (request, response) => {
           }
           task += message;
 
+          if (agentState.session && agentState.enableGetimgTool !== enableGetimgTool) {
+            agentState.session = null;
+          }
+
           if (!agentState.session) {
             const agent = new LectureAgent({
               model: payload.model || process.env.AGENT_MODEL || "gemini-3.5-flash",
               workspaceDir: agentWorkspaceRoot(agentState.id),
+              enableGetimgTool,
               onLog: (text) => {
                 agentState.log += text;
                 process.stderr.write(text);
               }
             });
             agentState.session = agent.startChat();
+            agentState.enableGetimgTool = enableGetimgTool;
           }
 
           agentState.log = ''; // Reset log buffer for this turn

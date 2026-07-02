@@ -5,6 +5,7 @@ server:
 agent:
   defaultProfile: "default"
   generationDir: "gens"
+  enableGetimgTool: false
   defaultAspectRatio: "16:9"
   defaultLengthSeconds: 60
   embedSubtitlesByDefault: false

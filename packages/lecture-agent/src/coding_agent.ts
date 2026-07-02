@@ -44,13 +44,14 @@ import {
     resolve_workspace_path,
 } from './workspace.js';
 import {
-    TOOLS,
-    TOOL_JSON_SCHEMA,
+    type ToolRuntimeOptions,
     build_function_response_payload,
     compact_tool_history,
     execute_tool,
     line_count,
     render_available_tools_section,
+    tool_declarations,
+    tool_json_schema,
 } from './tools/tool_registry.js';
 
 const __filename = fileURLToPath(import.meta.url);
@@ -124,9 +125,9 @@ function load_pre_user_response_prompt(): string {
     return fs.readFileSync(PRE_USER_RESPONSE_PROMPT_PATH, 'utf8');
 }
 
-function inject_available_tools(systemPrompt: string): string {
+function inject_available_tools(systemPrompt: string, toolOptions: ToolRuntimeOptions = {}): string {
     const availableToolsPattern = /# Available tools:[\s\S]*?(?=\n# Rules:)/;
-    const availableToolsSection = render_available_tools_section();
+    const availableToolsSection = render_available_tools_section(toolOptions);
     if (availableToolsPattern.test(systemPrompt)) {
         return systemPrompt.replace(availableToolsPattern, availableToolsSection + "\n\n");
     }
@@ -213,8 +214,8 @@ function build_skill_context(skills: string[] | null, workspaceDir: string = DEF
     return loaded.join("\n\n---\n\n");
 }
 
-function build_system_instructions(skills: string[] | null, workspaceDir: string = DEFAULT_WORKSPACE_DIR): string {
-    const system_prompt = build_prompt(inject_available_tools(load_system_prompt()), workspaceDir);
+function build_system_instructions(skills: string[] | null, workspaceDir: string = DEFAULT_WORKSPACE_DIR, toolOptions: ToolRuntimeOptions = {}): string {
+    const system_prompt = build_prompt(inject_available_tools(load_system_prompt(), toolOptions), workspaceDir);
     const skill_context = build_skill_context(skills, workspaceDir);
     const base_prompt = system_prompt;
     if (!skill_context) {
@@ -317,7 +318,7 @@ function chat_prompt(): string {
     return `\n${Color.BOLD}${Color.GREEN}You>${Color.RESET} `;
 }
 
-function build_agent_prompt(task: string, transcript: any[]): string {
+function build_agent_prompt(task: string, transcript: any[], toolOptions: ToolRuntimeOptions = {}): string {
     return [
         "User task:",
         task,
@@ -327,7 +328,7 @@ function build_agent_prompt(task: string, transcript: any[]): string {
         "Include a short `note` field describing the next visible step.",
         "The `note` must be a concise summary, not hidden chain-of-thought.",
         "To use a tool, return only JSON shaped like:",
-        JSON.stringify(TOOL_JSON_SCHEMA, null, 2),
+        JSON.stringify(tool_json_schema(toolOptions), null, 2),
         "When the work is complete and you are ready to answer the user, return this done shape:",
         JSON.stringify(DONE_JSON_SCHEMA, null, 2),
         "Do not wrap the JSON in Markdown.",
@@ -366,9 +367,9 @@ function cleanSchema(value: any): any {
     return value;
 }
 
-function gemini_function_declarations(): any[] {
+function gemini_function_declarations(toolOptions: ToolRuntimeOptions = {}): any[] {
     const declarations: any[] = [];
-    for (const tool of TOOLS) {
+    for (const tool of tool_declarations(toolOptions)) {
         declarations.push({
             name: tool.name,
             description: tool.description,
@@ -459,8 +460,9 @@ export class GeminiAgentSession {
     private totalInputTokens: number;
     private totalOutputTokens: number;
     private workspaceDir: string;
+    private toolOptions: ToolRuntimeOptions;
 
-    constructor(model: string, workspaceDir: string, skills: string[] | null = null, initialHistory: any[] = []) {
+    constructor(model: string, workspaceDir: string, skills: string[] | null = null, initialHistory: any[] = [], toolOptions: ToolRuntimeOptions = {}) {
         const apiKey = process.env.GOOGLE_API_KEY;
         if (!apiKey) {
             throw new Error("GOOGLE_API_KEY is not set.");
@@ -468,10 +470,11 @@ export class GeminiAgentSession {
 
         this.model = model;
         this.workspaceDir = workspaceDir;
+        this.toolOptions = toolOptions;
         this.client = new GoogleGenAI({ apiKey });
         this.config = {
-            systemInstruction: build_system_instructions(skills, workspaceDir),
-            tools: [{ functionDeclarations: gemini_function_declarations() }],
+            systemInstruction: build_system_instructions(skills, workspaceDir, toolOptions),
+            tools: [{ functionDeclarations: gemini_function_declarations(toolOptions) }],
             automaticFunctionCalling: { disable: true },
             toolConfig: {
                 functionCallingConfig: { mode: "AUTO" }
@@ -625,7 +628,7 @@ export class GeminiAgentSession {
                     print_step(step, `running tool \`${name}\``, Color.BLUE);
                     print_detail("arguments", compact_tool_arguments(argumentsObj), Color.DIM, 700);
 
-                    const result = await execute_tool(name, argumentsObj, this.workspaceDir);
+                    const result = await execute_tool(name, argumentsObj, this.workspaceDir, this.toolOptions);
                     const result_color = result.startsWith("ERROR:") ? Color.RED : Color.GREEN;
                     print_detail(`tool:${name} result`, compact_tool_result(result), result_color);
 
@@ -660,13 +663,15 @@ class JsonFallbackAgentSession {
     private userTasks: string[];
     private model: string;
     private workspaceDir: string;
+    private toolOptions: ToolRuntimeOptions;
 
-    constructor(model: string, workspaceDir: string, skills: string[] | null = null, initialHistory: any[] = []) {
+    constructor(model: string, workspaceDir: string, skills: string[] | null = null, initialHistory: any[] = [], toolOptions: ToolRuntimeOptions = {}) {
         this.model = model;
         this.workspaceDir = workspaceDir;
+        this.toolOptions = toolOptions;
         this.llm = new LLM_Model(
             model,
-            build_system_instructions(skills, workspaceDir),
+            build_system_instructions(skills, workspaceDir, toolOptions),
             null,
             true
         );
@@ -718,7 +723,7 @@ class JsonFallbackAgentSession {
             for (let step = 1; step <= max_turns; step++) {
                 print_step(step, "asking model for next action", Color.MAGENTA);
                 const response = await this.llm.generate(
-                    build_agent_prompt(prepared_task, this.transcript),
+                    build_agent_prompt(prepared_task, this.transcript, this.toolOptions),
                     null,
                     null,
                     null,
@@ -764,7 +769,7 @@ class JsonFallbackAgentSession {
                 print_step(step, `running tool \`${name}\``, Color.BLUE);
                 print_detail("arguments", compact_tool_arguments(argumentsObj), Color.DIM, 700);
 
-                const result = await execute_tool(name, argumentsObj, this.workspaceDir);
+                const result = await execute_tool(name, argumentsObj, this.workspaceDir, this.toolOptions);
                 const result_color = result.startsWith("ERROR:") ? Color.RED : Color.GREEN;
                 print_detail(`tool:${name} result`, compact_tool_result(result), result_color);
 
@@ -788,11 +793,11 @@ class JsonFallbackAgentSession {
     }
 }
 
-function create_agent_session(model: string, workspaceDir: string, skills: string[] | null = null, initialHistory: any[] = []): any {
+function create_agent_session(model: string, workspaceDir: string, skills: string[] | null = null, initialHistory: any[] = [], toolOptions: ToolRuntimeOptions = {}): any {
     if (model.toLowerCase().includes("gemini")) {
-        return new GeminiAgentSession(model, workspaceDir, skills, initialHistory);
+        return new GeminiAgentSession(model, workspaceDir, skills, initialHistory, toolOptions);
     }
-    return new JsonFallbackAgentSession(model, workspaceDir, skills, initialHistory);
+    return new JsonFallbackAgentSession(model, workspaceDir, skills, initialHistory, toolOptions);
 }
 
 type ActiveAgentSession = {
@@ -802,19 +807,20 @@ type ActiveAgentSession = {
 
 let activeAgentSession: ActiveAgentSession | null = null;
 
-function agent_session_key(model: string, skills: string[] | null): string {
+function agent_session_key(model: string, skills: string[] | null, toolOptions: ToolRuntimeOptions = {}): string {
     return JSON.stringify({
         model,
-        skills: skills || []
+        skills: skills || [],
+        enableGetimgTool: toolOptions.enableGetimgTool === true
     });
 }
 
-function get_or_create_agent_session(model: string, skills: string[] | null = null): any {
-    const key = agent_session_key(model, skills);
+function get_or_create_agent_session(model: string, skills: string[] | null = null, toolOptions: ToolRuntimeOptions = {}): any {
+    const key = agent_session_key(model, skills, toolOptions);
     if (!activeAgentSession || activeAgentSession.key !== key) {
         activeAgentSession = {
             key,
-            session: create_agent_session(model, DEFAULT_WORKSPACE_DIR, skills)
+            session: create_agent_session(model, DEFAULT_WORKSPACE_DIR, skills, [], toolOptions)
         };
     }
     return activeAgentSession.session;
@@ -889,6 +895,7 @@ export interface AgentConfig {
     workspaceDir: string;
     skills?: string[] | null;
     maxTurns?: number;
+    enableGetimgTool?: boolean;
     onLog?: (text: string) => void;
 }
 
@@ -908,6 +915,7 @@ export class ChatSession {
     private totalInputTokens: number = 0;
     private totalOutputTokens: number = 0;
     private onLog?: (text: string) => void;
+    private toolOptions: ToolRuntimeOptions;
     private activeAbortController: AbortController | null = null;
     private turnSequence: number = 0;
 
@@ -917,6 +925,7 @@ export class ChatSession {
         skills: string[] | null = null,
         initialHistory: ChatMessage[] = [],
         maxTurns: number = 500,
+        toolOptions: ToolRuntimeOptions = {},
         onLog?: (text: string) => void
     ) {
         this.model = model;
@@ -924,6 +933,7 @@ export class ChatSession {
         this.skills = skills;
         this.history = [...initialHistory];
         this.maxTurns = maxTurns;
+        this.toolOptions = toolOptions;
         this.onLog = onLog;
         fs.mkdirSync(this.workspaceDir, { recursive: true });
     }
@@ -954,7 +964,7 @@ export class ChatSession {
     async sendMessage(prompt: string, maxTurns?: number, abortSignal?: AbortSignal): Promise<string> {
         const turnsLimit = maxTurns !== undefined ? maxTurns : this.maxTurns;
         const historyBeforeTurn = [...this.history];
-        const session = create_agent_session(this.model, this.workspaceDir, this.skills, historyBeforeTurn);
+        const session = create_agent_session(this.model, this.workspaceDir, this.skills, historyBeforeTurn, this.toolOptions);
         const turnId = ++this.turnSequence;
         this.history = this.stoppedTurnHistory(session, historyBeforeTurn, prompt);
         const turnAbortController = new AbortController();
@@ -1036,6 +1046,7 @@ export class LectureAgent {
             this.config.skills,
             initialHistory || [],
             this.config.maxTurns,
+            { enableGetimgTool: this.config.enableGetimgTool === true },
             this.config.onLog
         );
     }
@@ -1082,7 +1093,7 @@ async function run_session_with_timing(session: any, task: string, max_turns: nu
     }
 }
 
-export async function run_agent(task: string, model: string, max_turns: number, skills: string[] | null = null): Promise<string> {
-    const session = get_or_create_agent_session(model, skills);
+export async function run_agent(task: string, model: string, max_turns: number, skills: string[] | null = null, enableGetimgTool: boolean = false): Promise<string> {
+    const session = get_or_create_agent_session(model, skills, { enableGetimgTool });
     return await run_session_with_timing(session, task, max_turns);
 }
