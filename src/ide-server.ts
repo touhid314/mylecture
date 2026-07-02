@@ -14,8 +14,14 @@ import { spawn } from 'node:child_process';
 import path from 'node:path';
 import { createViewerHtml } from '../packages/lecture-viewer/src/index.ts';
 import { LectureAgent } from '../packages/lecture-agent/src/coding_agent.ts';
+import { loadAppConfig, resolveConfigPath } from './config.ts';
 
 const rootDir = process.cwd();
+const startupConfig = loadAppConfig(rootDir);
+
+function readAppConfig() {
+  return loadAppConfig(rootDir);
+}
 
 // Load .env
 function loadEnv() {
@@ -64,15 +70,8 @@ function getAgentState(agentClientId) {
 }
 
 function getAgentWorkspaceDir() {
-  let dir = process.env.AGENT_WORKSPACE_DIR;
-  if (dir) {
-    dir = dir.split('#')[0].trim();
-    if ((dir.startsWith('"') && dir.endsWith('"')) || (dir.startsWith("'") && dir.endsWith("'"))) {
-      dir = dir.slice(1, -1).trim();
-    }
-    return path.resolve(dir);
-  }
-  return path.resolve(rootDir, 'packages/lecture-agent/workspace');
+  const config = readAppConfig();
+  return resolveConfigPath(rootDir, config.agent.generationDir);
 }
 
 function createNewSessionWorkspace(agentClientId = 'default') {
@@ -107,7 +106,7 @@ function agentWorkspaceRoot(agentClientId = 'default') {
   return createNewSessionWorkspace(agentClientId);
 }
 
-const defaultPort = 4307;
+const defaultPort = startupConfig.server.port;
 
 // Source files without resolved timelines use this estimate for preview timing.
 function estimateTextDuration(text) {
@@ -167,8 +166,10 @@ function parseArgs(argv) {
     port: defaultPort,
     openPath: '',
     openBrowser: false,
-    width: 1920,
-    height: 1080
+    width: startupConfig.render.baseWidth,
+    height: startupConfig.render.baseHeight,
+    widthOverride: false,
+    heightOverride: false
   };
 
   for (let i = 0; i < argv.length; i++) {
@@ -177,8 +178,8 @@ function parseArgs(argv) {
 
     if (arg === '--port') args.port = Number(next), i++;
     else if (arg === '--file') args.openPath = next, i++;
-    else if (arg === '--width') args.width = Number(next), i++;
-    else if (arg === '--height') args.height = Number(next), i++;
+    else if (arg === '--width') args.width = Number(next), args.widthOverride = true, i++;
+    else if (arg === '--height') args.height = Number(next), args.heightOverride = true, i++;
     else if (arg === '--open') args.openBrowser = true;
     else if (arg === '--help') {
       printHelp();
@@ -209,8 +210,8 @@ function printHelp() {
 Options:
   --port <number>   Local server port. Default: ${defaultPort}
   --file <path>     HTML file to preselect in the viewer
-  --width <pixels>  Preview viewport width. Default: 1920
-  --height <pixels> Preview viewport height. Default: 1080
+  --width <pixels>  Preview viewport width. Default: ${startupConfig.render.baseWidth}
+  --height <pixels> Preview viewport height. Default: ${startupConfig.render.baseHeight}
   --open            Open the viewer in the default browser
 `);
 }
@@ -563,8 +564,26 @@ function resolvedSiblingPathForIndex(filePath) {
 
 // TTS options are normalized before being passed through to build-plan.ts.
 function normalizeTtsVoice(value) {
+  const config = readAppConfig();
   const voice = String(value || '').trim();
-  return voice || 'af_heart';
+  return voice || config.tts.voice;
+}
+
+function normalizeTtsProvider(value) {
+  const config = readAppConfig();
+  const provider = String(value || '').trim();
+  return provider || config.tts.provider;
+}
+
+function resolveTtsProvider(options, voice) {
+  const config = readAppConfig();
+  if (options.ttsProvider) {
+    return normalizeTtsProvider(options.ttsProvider);
+  }
+  if (voice === config.tts.voice) {
+    return config.tts.provider;
+  }
+  return detectProvider(voice);
 }
 
 function detectProvider(voice) {
@@ -649,7 +668,7 @@ async function resolveLectureFile(filePath, options = {}) {
   }
 
   const voice = normalizeTtsVoice(options.ttsVoice);
-  const provider = detectProvider(voice);
+  const provider = resolveTtsProvider(options, voice);
   let finalResolvedPath = '';
 
   const filesToResolve = options.currentOnly ? [path.basename(inputPath)] : files;
@@ -719,16 +738,17 @@ async function resolveLectureFile(filePath, options = {}) {
 
 // Build the render-video.ts child-process argument list for one HTML file.
 function renderArgsForFile(inputPath, outPath, options = {}, extraArgs = []) {
+  const config = readAppConfig();
   const basename = path.basename(inputPath);
   const voice = normalizeTtsVoice(options.ttsVoice);
-  const provider = detectProvider(voice);
+  const provider = resolveTtsProvider(options, voice);
   const renderArgs = [
     'src/render-video.ts',
     '--html', inputPath,
     '--out', outPath,
-    '--fps', normalizePositiveInteger(options.fps, 60, 1, 240),
-    '--width', normalizePositiveInteger(options.width, 1080, 1),
-    '--height', normalizePositiveInteger(options.height, 1920, 1),
+    '--fps', normalizePositiveInteger(options.fps, config.render.fps, 1, 240),
+    '--width', normalizePositiveInteger(options.width, config.render.baseWidth, 1),
+    '--height', normalizePositiveInteger(options.height, config.render.baseHeight, 1),
     '--tts-provider', provider,
     '--tts-voice', voice,
     '--tts-speed', normalizeTtsSpeed(options.ttsSpeed),
@@ -748,7 +768,7 @@ function renderArgsForFile(inputPath, outPath, options = {}, extraArgs = []) {
 // Build the build-plan.ts child-process argument list for one index HTML file.
 function buildPlanArgsForIndex(inputPath, outPath, options = {}) {
   const voice = normalizeTtsVoice(options.ttsVoice);
-  const provider = detectProvider(voice);
+  const provider = resolveTtsProvider(options, voice);
   return [
     'src/build-plan.ts',
     '--input', inputPath,
@@ -1249,7 +1269,7 @@ const viewerState = {
 
 // If another IDE server is already running, pass the selected file to it instead.
 async function pushFileToExistingViewer(args) {
-  const url = new URL(`http://127.0.0.1:${args.port}/open-file`);
+  const url = new URL(`http://${startupConfig.server.host}:${args.port}/open-file`);
   url.searchParams.set('file', args.openPath);
   url.searchParams.set('width', String(args.width));
   url.searchParams.set('height', String(args.height));
@@ -1272,17 +1292,24 @@ async function pushFileToExistingViewer(args) {
 
 // Main route table for the local IDE API and viewer UI.
 const server = createServer(async (request, response) => {
+  const appConfig = readAppConfig();
   const requestUrl = new URL(request.url, 'http://localhost');
 
   // Serve the IDE shell. The actual lecture preview is loaded through iframes/assets.
   if (requestUrl.pathname === '/' || requestUrl.pathname === '/viewer') {
-    const width = Number(requestUrl.searchParams.get('width')) || args.width;
-    const height = Number(requestUrl.searchParams.get('height')) || args.height;
+    const defaultWidth = args.widthOverride ? args.width : appConfig.render.baseWidth;
+    const defaultHeight = args.heightOverride ? args.height : appConfig.render.baseHeight;
+    const width = Number(requestUrl.searchParams.get('width')) || defaultWidth;
+    const height = Number(requestUrl.searchParams.get('height')) || defaultHeight;
     const openPath = requestUrl.searchParams.get('file') || viewerState.path || args.openPath;
     sendText(
       response,
       200,
-      createViewerHtml(openPath, width, height),
+      createViewerHtml(openPath, width, height, {
+        agent: appConfig.agent,
+        tts: appConfig.tts,
+        render: appConfig.render
+      }),
       'text/html; charset=utf-8'
     );
     return;
@@ -1484,7 +1511,7 @@ const server = createServer(async (request, response) => {
   // Return optional prompt profiles loaded from the lecture-agent workspace.
   if (requestUrl.pathname === '/agent-profiles') {
     try {
-      sendJson(response, 200, { ok: true, profiles: listAgentProfiles() });
+      sendJson(response, 200, { ok: true, profiles: listAgentProfiles(), defaultProfileId: appConfig.agent.defaultProfile });
     } catch (error) {
       sendJson(response, 500, { error: error.message });
     }
@@ -1808,9 +1835,9 @@ server.on('error', error => {
 });
 
 // Bind only to localhost; this IDE server is not intended for network exposure.
-server.listen(args.port, '127.0.0.1', () => {
+server.listen(args.port, startupConfig.server.host, () => {
   const encodedFile = args.openPath ? `?file=${encodeURIComponent(args.openPath)}` : '';
-  const url = `http://127.0.0.1:${args.port}/${encodedFile}`;
+  const url = `http://${startupConfig.server.host}:${args.port}/${encodedFile}`;
   console.log(`IDE server running at ${url}`);
   if (args.openBrowser) openBrowser(url);
 });

@@ -1,0 +1,20 @@
+server:
+  host: "127.0.0.1"
+  port: 4307
+
+agent:
+  defaultProfile: "default"
+  generationDir: "gens"
+  defaultAspectRatio: "16:9"
+  defaultLengthSeconds: 60
+  embedSubtitlesByDefault: false
+
+tts:
+  provider: "omnivoice"
+  voice: "american-male-1"
+  speed: 1.0
+
+render:
+  fps: 30
+  baseWidth: 1920
+  baseHeight: 1080

@@ -40,14 +40,51 @@ function clean_env_path(value: string | undefined): string {
     return cleaned;
 }
 
+function parse_config_generation_dir(configPath: string): string {
+    let section = "";
+    const content = fs.readFileSync(configPath, 'utf8');
+    for (const rawLine of content.split(/\r?\n/)) {
+        const line = rawLine.replace(/\s+#.*$/, '').trimEnd();
+        if (!line.trim() || line.trimStart().startsWith('#')) continue;
+
+        const sectionMatch = line.match(/^([A-Za-z0-9_-]+):\s*$/);
+        if (sectionMatch) {
+            section = sectionMatch[1];
+            continue;
+        }
+
+        const fieldMatch = line.match(/^\s+generationDir:\s*(.*?)\s*$/);
+        if (section === "agent" && fieldMatch) {
+            return clean_env_path(fieldMatch[1]);
+        }
+    }
+    return "";
+}
+
+function find_config_generation_dir(): string {
+    let dir = __dirname;
+    while (dir && dir !== path.parse(dir).root) {
+        const configPath = path.join(dir, 'config.yaml');
+        if (fs.existsSync(configPath)) {
+            const configured = parse_config_generation_dir(configPath);
+            if (configured) {
+                return path.isAbsolute(configured) ? path.resolve(configured) : path.resolve(dir, configured);
+            }
+            return "";
+        }
+        dir = path.dirname(dir);
+    }
+    return "";
+}
+
 export function get_agent_workspace_dir(): string {
     const explicitWorkspace = clean_env_path(process.env.AGENT_WORKSPACE);
     if (explicitWorkspace) {
         return path.resolve(explicitWorkspace);
     }
-    const dir = clean_env_path(process.env.AGENT_WORKSPACE_DIR);
-    if (dir) {
-        return path.resolve(dir);
+    const configWorkspace = find_config_generation_dir();
+    if (configWorkspace) {
+        return configWorkspace;
     }
     return path.join(WORKSPACE_DIR, 'agent-workspace');
 }

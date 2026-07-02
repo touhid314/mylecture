@@ -7,12 +7,75 @@
  */
 const viewerVersion = '0.2';
 
-export function createViewerHtml(openPath, initialWidth = 1920, initialHeight = 1080) {
+function viewportFromConfigAspectRatio(aspectRatio, baseWidth, baseHeight) {
+  const match = String(aspectRatio || '').match(/^(\d+(?:\.\d+)?):(\d+(?:\.\d+)?)$/);
+  const longEdge = Math.max(Number(baseWidth) || 1920, Number(baseHeight) || 1080);
+  if (!match) return { width: Number(baseWidth) || 1920, height: Number(baseHeight) || 1080 };
+
+  const widthRatio = Number(match[1]);
+  const heightRatio = Number(match[2]);
+  if (!Number.isFinite(widthRatio) || !Number.isFinite(heightRatio) || widthRatio <= 0 || heightRatio <= 0) {
+    return { width: Number(baseWidth) || 1920, height: Number(baseHeight) || 1080 };
+  }
+
+  if (widthRatio >= heightRatio) {
+    return {
+      width: longEdge,
+      height: Math.round(longEdge * heightRatio / widthRatio)
+    };
+  }
+
+  return {
+    width: Math.round(longEdge * widthRatio / heightRatio),
+    height: longEdge
+  };
+}
+
+function generationSecondsToInitialSlider(seconds) {
+  const minSeconds = 5;
+  const maxSeconds = 900;
+  const sliderMax = 1000;
+  const raw = Number(seconds);
+  const clamped = Math.max(minSeconds, Math.min(maxSeconds, Number.isFinite(raw) ? raw : 60));
+  const progress = Math.log(clamped / minSeconds) / Math.log(maxSeconds / minSeconds);
+  return Math.round(Math.max(0, Math.min(1, progress)) * sliderMax);
+}
+
+function formatInitialGenerationLength(seconds) {
+  const total = Math.round(Number(seconds) || 60);
+  if (total < 60) return `${total}s`;
+  const minutes = Math.floor(total / 60);
+  const remainder = total % 60;
+  return remainder ? `${minutes}:${String(remainder).padStart(2, '0')}` : `${minutes}:00`;
+}
+
+function selectedAttr(value, selected) {
+  return String(value) === String(selected) ? ' selected' : '';
+}
+
+export function createViewerHtml(openPath, initialWidth = 1920, initialHeight = 1080, options = {}) {
   // Normalize values before interpolation so the generated page can be served
   // directly without another runtime configuration step.
+  const agentConfig = options.agent || {};
+  const ttsConfig = options.tts || {};
+  const renderConfig = options.render || {};
   const normalizedOpenPath = openPath ? openPath.replaceAll('\\', '/') : '';
   const safeInitialWidth = Number.isInteger(initialWidth) && initialWidth > 0 ? initialWidth : 1920;
   const safeInitialHeight = Number.isInteger(initialHeight) && initialHeight > 0 ? initialHeight : 1080;
+  const defaultTtsVoice = String(ttsConfig.voice || 'af_heart');
+  const defaultTtsSpeed = String(ttsConfig.speed || 1);
+  const defaultFps = String(renderConfig.fps || 60);
+  const defaultAspectRatio = String(agentConfig.defaultAspectRatio || '16:9');
+  const defaultLengthSeconds = Number(agentConfig.defaultLengthSeconds) || 60;
+  const defaultLengthSliderValue = generationSecondsToInitialSlider(defaultLengthSeconds);
+  const defaultLengthLabel = formatInitialGenerationLength(defaultLengthSeconds);
+  const defaultRenderViewport = viewportFromConfigAspectRatio(
+    defaultAspectRatio,
+    renderConfig.baseWidth || 1920,
+    renderConfig.baseHeight || 1080
+  );
+  const defaultRenderResolution = `${defaultRenderViewport.width}x${defaultRenderViewport.height}`;
+  const embedSubtitlesChecked = agentConfig.embedSubtitlesByDefault ? ' checked' : '';
   return `<!DOCTYPE html>
 <html lang="en">
 <head>
@@ -1824,14 +1887,14 @@ body.file-kind-mp4 .timeline-ruler {
           <label for="resolve-tts-voice">TTS voice</label>
           <select id="resolve-tts-voice">
             <optgroup label="OmniVoice TTS (Local)">
-              <option value="american-male-1">american-male-1 (En)</option>
-              <option value="american-male-2">american-male-2 (En)</option>
-              <option value="american-male-3">american-male-3 (En)</option>
-              <option value="johnny-harris">johnny-harris (En)</option>
+              <option value="american-male-1"${selectedAttr('american-male-1', defaultTtsVoice)}>american-male-1 (En)</option>
+              <option value="american-male-2"${selectedAttr('american-male-2', defaultTtsVoice)}>american-male-2 (En)</option>
+              <option value="american-male-3"${selectedAttr('american-male-3', defaultTtsVoice)}>american-male-3 (En)</option>
+              <option value="johnny-harris"${selectedAttr('johnny-harris', defaultTtsVoice)}>johnny-harris (En)</option>
             </optgroup>
             <optgroup label="Kokoro TTS (Local)">
               <option value="am_puck">am_puck</option>
-              <option value="af_heart" selected>af_heart</option>
+              <option value="af_heart"${selectedAttr('af_heart', defaultTtsVoice)}>af_heart</option>
               <option value="am_adam">am_adam</option>
               <option value="bf_emma">bf_emma</option>
             </optgroup>
@@ -1840,10 +1903,10 @@ body.file-kind-mp4 .timeline-ruler {
         <div class="resolve-option">
           <label for="resolve-tts-speed">Voice speed</label>
           <select id="resolve-tts-speed">
-            <option value="1" selected>1.0x</option>
-            <option value="1.2">1.2x</option>
-            <option value="1.3">1.3x</option>
-            <option value="1.5">1.5x</option>
+            <option value="1"${selectedAttr('1', defaultTtsSpeed)}>1.0x</option>
+            <option value="1.2"${selectedAttr('1.2', defaultTtsSpeed)}>1.2x</option>
+            <option value="1.3"${selectedAttr('1.3', defaultTtsSpeed)}>1.3x</option>
+            <option value="1.5"${selectedAttr('1.5', defaultTtsSpeed)}>1.5x</option>
           </select>
         </div>
         <div class="resolve-option" style="display: flex; align-items: center; gap: 6px; padding-top: 4px; border-top: 1px solid var(--line);">
@@ -1860,14 +1923,14 @@ body.file-kind-mp4 .timeline-ruler {
           <label for="render-tts-voice">TTS voice</label>
           <select id="render-tts-voice">
             <optgroup label="OmniVoice TTS (Local)">
-              <option value="american-male-1">american-male-1 (En)</option>
-              <option value="american-male-2">american-male-2 (En)</option>
-              <option value="american-male-3">american-male-3 (En)</option>
-              <option value="johnny-harris">johnny-harris (En)</option>
+              <option value="american-male-1"${selectedAttr('american-male-1', defaultTtsVoice)}>american-male-1 (En)</option>
+              <option value="american-male-2"${selectedAttr('american-male-2', defaultTtsVoice)}>american-male-2 (En)</option>
+              <option value="american-male-3"${selectedAttr('american-male-3', defaultTtsVoice)}>american-male-3 (En)</option>
+              <option value="johnny-harris"${selectedAttr('johnny-harris', defaultTtsVoice)}>johnny-harris (En)</option>
             </optgroup>
             <optgroup label="Kokoro TTS (Local)">
               <option value="am_puck">am_puck</option>
-              <option value="af_heart" selected>af_heart</option>
+              <option value="af_heart"${selectedAttr('af_heart', defaultTtsVoice)}>af_heart</option>
               <option value="am_adam">am_adam</option>
               <option value="bf_emma">bf_emma</option>
             </optgroup>
@@ -1876,24 +1939,25 @@ body.file-kind-mp4 .timeline-ruler {
         <div class="render-option">
           <label for="render-tts-speed">Voice speed</label>
           <select id="render-tts-speed">
-            <option value="1" selected>1.0x</option>
-            <option value="1.2">1.2x</option>
-            <option value="1.3">1.3x</option>
-            <option value="1.5">1.5x</option>
+            <option value="1"${selectedAttr('1', defaultTtsSpeed)}>1.0x</option>
+            <option value="1.2"${selectedAttr('1.2', defaultTtsSpeed)}>1.2x</option>
+            <option value="1.3"${selectedAttr('1.3', defaultTtsSpeed)}>1.3x</option>
+            <option value="1.5"${selectedAttr('1.5', defaultTtsSpeed)}>1.5x</option>
           </select>
         </div>
         <div class="render-option">
           <label for="render-fps">FPS</label>
           <select id="render-fps">
-            <option value="24">24</option>
-            <option value="30">30</option>
-            <option value="60" selected>60</option>
+            <option value="24"${selectedAttr('24', defaultFps)}>24</option>
+            <option value="30"${selectedAttr('30', defaultFps)}>30</option>
+            <option value="60"${selectedAttr('60', defaultFps)}>60</option>
           </select>
         </div>
         <div class="render-option">
           <label for="render-resolution">Resolution</label>
           <select id="render-resolution">
-            <option value="1920x1080" selected>1920x1080</option>
+            <option value="${escapeHtml(defaultRenderResolution)}" selected>${escapeHtml(defaultRenderResolution)}</option>
+            <option value="1920x1080">1920x1080</option>
             <option value="1080x1920">1080x1920</option>
             <option value="720x1280">720x1280</option>
           </select>
@@ -2010,29 +2074,29 @@ body.file-kind-mp4 .timeline-ruler {
         <div class="agent-field agent-length-field">
           <label class="agent-field-label" for="agent-generation-length">Len</label>
           <div class="agent-range-row">
-            <input id="agent-generation-length" class="agent-range" type="range" min="0" max="1000" step="1" value="479">
-            <input id="agent-generation-length-value" class="agent-range-value" type="text" value="1:00" aria-label="Generation length">
+            <input id="agent-generation-length" class="agent-range" type="range" min="0" max="1000" step="1" value="${defaultLengthSliderValue}">
+            <input id="agent-generation-length-value" class="agent-range-value" type="text" value="${escapeHtml(defaultLengthLabel)}" aria-label="Generation length">
           </div>
         </div>
         <label class="agent-field" for="agent-aspect-ratio">
           <span class="agent-field-label">AR</span>
           <select id="agent-aspect-ratio" class="agent-select">
-            <option value="1:1">1:1</option>
-            <option value="4:3">4:3</option>
-            <option value="3:4">3:4</option>
-            <option value="16:9" selected>16:9</option>
-            <option value="9:16">9:16</option>
+            <option value="1:1"${selectedAttr('1:1', defaultAspectRatio)}>1:1</option>
+            <option value="4:3"${selectedAttr('4:3', defaultAspectRatio)}>4:3</option>
+            <option value="3:4"${selectedAttr('3:4', defaultAspectRatio)}>3:4</option>
+            <option value="16:9"${selectedAttr('16:9', defaultAspectRatio)}>16:9</option>
+            <option value="9:16"${selectedAttr('9:16', defaultAspectRatio)}>9:16</option>
             <option value="custom">Custom</option>
           </select>
         </label>
         <label class="agent-subtitle-row">
-          <input id="agent-embed-subtitle" class="agent-checkbox" type="checkbox">
+          <input id="agent-embed-subtitle" class="agent-checkbox" type="checkbox"${embedSubtitlesChecked}>
           <span class="agent-check-label">AI embed sub</span>
         </label>
         <label class="agent-field agent-profile-field" for="agent-profile">
           <span class="agent-field-label">Profile</span>
           <select id="agent-profile" class="agent-select">
-            <option value="">None</option>
+            <option value="default.md">default</option>
           </select>
         </label>
       </div>
@@ -2253,6 +2317,17 @@ let renderViewport = {
   width: ${safeInitialWidth},
   height: ${safeInitialHeight}
 };
+const configuredDefaults = ${JSON.stringify({
+  ttsVoice: defaultTtsVoice,
+  ttsSpeed: defaultTtsSpeed,
+  fps: defaultFps,
+  renderResolution: defaultRenderResolution,
+  renderWidth: defaultRenderViewport.width,
+  renderHeight: defaultRenderViewport.height,
+  aspectRatio: defaultAspectRatio,
+  generationLength: defaultLengthLabel,
+  defaultProfile: agentConfig.defaultProfile || 'default.md'
+})};
 let userViewportOverride = false;
 let controlsHideTimer = 0;
 let lastPlayerState = null;
@@ -2445,8 +2520,8 @@ function setRenderOptionsVisible(visible) {
 function resolveQuery() {
   const params = new URLSearchParams();
   params.set('file', currentFilePath);
-  params.set('ttsVoice', resolveTtsVoice.value || 'af_heart');
-  params.set('ttsSpeed', resolveTtsSpeed.value || '1');
+  params.set('ttsVoice', resolveTtsVoice.value || configuredDefaults.ttsVoice);
+  params.set('ttsSpeed', resolveTtsSpeed.value || configuredDefaults.ttsSpeed);
   const currentOnlyCheckbox = document.getElementById('resolve-current-only');
   if (currentOnlyCheckbox && currentOnlyCheckbox.checked) {
     params.set('currentOnly', '1');
@@ -2456,13 +2531,13 @@ function resolveQuery() {
 
 function renderQuery() {
   const params = new URLSearchParams();
-  const [width, height] = String(renderResolution.value || '1080x1920').split('x');
+  const [width, height] = String(renderResolution.value || configuredDefaults.renderResolution).split('x');
   params.set('file', currentFilePath);
-  params.set('ttsVoice', renderTtsVoice.value || 'af_heart');
-  params.set('ttsSpeed', renderTtsSpeed.value || '1');
-  params.set('fps', renderFps.value || '60');
-  params.set('width', width || '1080');
-  params.set('height', height || '1920');
+  params.set('ttsVoice', renderTtsVoice.value || configuredDefaults.ttsVoice);
+  params.set('ttsSpeed', renderTtsSpeed.value || configuredDefaults.ttsSpeed);
+  params.set('fps', renderFps.value || configuredDefaults.fps);
+  params.set('width', width || String(configuredDefaults.renderWidth));
+  params.set('height', height || String(configuredDefaults.renderHeight));
   return params.toString();
 }
 
@@ -4232,6 +4307,7 @@ const agentSupportedAttachmentExts = new Set([
 ]);
 let pendingAgentAttachments = [];
 let agentProfiles = [];
+let agentDefaultProfileId = configuredDefaults.defaultProfile;
 
 function getFileExtension(fileName) {
   const match = String(fileName || '').toLowerCase().match(/\\.([^.]+)$/);
@@ -4420,8 +4496,8 @@ function commitGenerationLengthInput() {
 }
 
 function getGenerationSettingsPrompt() {
-  const aspectRatio = agentAspectRatio ? agentAspectRatio.value : '16:9';
-  const generationLength = agentGenerationLength ? formatGenerationLength(sliderToGenerationSeconds(agentGenerationLength.value)) : '1:00';
+  const aspectRatio = agentAspectRatio ? agentAspectRatio.value : configuredDefaults.aspectRatio;
+  const generationLength = agentGenerationLength ? formatGenerationLength(sliderToGenerationSeconds(agentGenerationLength.value)) : configuredDefaults.generationLength;
   const embedSubtitle = agentEmbedSubtitle && agentEmbedSubtitle.checked ? 'yes' : 'no';
   const lines = [
     'if the user query is for video generation then follow this:',
@@ -4455,16 +4531,21 @@ async function loadAgentProfiles() {
     const payload = await response.json();
     if (!response.ok) throw new Error(payload.error || 'Failed to load profiles');
     agentProfiles = Array.isArray(payload.profiles) ? payload.profiles : [];
-    agentProfile.innerHTML = '<option value="">None</option>';
+    agentDefaultProfileId = typeof payload.defaultProfileId === 'string' && payload.defaultProfileId ? payload.defaultProfileId : configuredDefaults.defaultProfile;
+    agentProfile.innerHTML = '';
     for (const profile of agentProfiles) {
       const option = document.createElement('option');
       option.value = profile.id;
       option.textContent = profile.name || profile.fileName || profile.id;
       agentProfile.appendChild(option);
     }
+    if (agentProfiles.some(profile => profile.id === agentDefaultProfileId)) {
+      agentProfile.value = agentDefaultProfileId;
+    }
   } catch (error) {
     agentProfiles = [];
-    agentProfile.innerHTML = '<option value="">None</option>';
+    agentDefaultProfileId = configuredDefaults.defaultProfile;
+    agentProfile.innerHTML = '<option value="' + agentDefaultProfileId + '">' + agentDefaultProfileId.replace(/\\.md$/i, '') + '</option>';
     appendChatMessage('Could not load profiles: ' + error.message, 'error');
   }
 }
