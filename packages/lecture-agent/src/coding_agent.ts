@@ -625,7 +625,7 @@ export class GeminiAgentSession {
                     print_step(step, `running tool \`${name}\``, Color.BLUE);
                     print_detail("arguments", compact_tool_arguments(argumentsObj), Color.DIM, 700);
 
-                    const result = execute_tool(name, argumentsObj, this.workspaceDir);
+                    const result = await execute_tool(name, argumentsObj, this.workspaceDir);
                     const result_color = result.startsWith("ERROR:") ? Color.RED : Color.GREEN;
                     print_detail(`tool:${name} result`, compact_tool_result(result), result_color);
 
@@ -764,7 +764,7 @@ class JsonFallbackAgentSession {
                 print_step(step, `running tool \`${name}\``, Color.BLUE);
                 print_detail("arguments", compact_tool_arguments(argumentsObj), Color.DIM, 700);
 
-                const result = execute_tool(name, argumentsObj, this.workspaceDir);
+                const result = await execute_tool(name, argumentsObj, this.workspaceDir);
                 const result_color = result.startsWith("ERROR:") ? Color.RED : Color.GREEN;
                 print_detail(`tool:${name} result`, compact_tool_result(result), result_color);
 
