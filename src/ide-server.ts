@@ -59,6 +59,7 @@ function getAgentState(agentClientId) {
     state = {
       id,
       currentWorkspace: '',
+      sessionId: '',
       activeJob: null,
       log: '',
       pendingNewSession: true,
@@ -95,6 +96,7 @@ function createNewSessionWorkspace(agentClientId = 'default') {
   mkdirSync(folderPath, { recursive: true });
 
   state.currentWorkspace = folderPath;
+  state.sessionId = folderName;
   console.log(`[Session] Created new session folder: ${folderPath}`);
   return folderPath;
 }
@@ -1483,6 +1485,7 @@ const server = createServer(async (request, response) => {
       }
       agentState.log = '';
       agentState.currentWorkspace = '';
+      agentState.sessionId = '';
       agentState.pendingNewSession = true;
       agentState.session = null;
       sendJson(response, 200, { ok: true });
@@ -1564,6 +1567,7 @@ const server = createServer(async (request, response) => {
             const agent = new LectureAgent({
               model: payload.model || process.env.AGENT_MODEL || "gemini-3.5-flash",
               workspaceDir: agentWorkspaceRoot(agentState.id),
+              tokenTrackerSessionId: agentState.sessionId || path.basename(agentWorkspaceRoot(agentState.id)),
               enableGetimgTool,
               onLog: (text) => {
                 agentState.log += text;

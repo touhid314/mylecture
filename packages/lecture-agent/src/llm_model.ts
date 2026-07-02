@@ -17,6 +17,7 @@ import OpenAI from 'openai';
 
 import { log_llm_request } from './llm_prompt_logger.js';
 import { Logger } from './logger.js';
+import { extractTokenUsage, trackTokenUsageFromResponse } from './token_tracker.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -38,34 +39,25 @@ loadEnv();
 function _logTokenUsage(logger: Logger, response: any, apiType: 'openai' | 'google'): void {
     if (!response) return;
 
-    let input: number | undefined;
-    let output: number | undefined;
-    let total: number | undefined;
-
-    if (apiType === 'openai') {
-        const usage = response.usage;
-        if (usage) {
-            input = usage.prompt_tokens ?? usage.promptTokens;
-            output = usage.completion_tokens ?? usage.completionTokens;
-            total = usage.total_tokens ?? usage.totalTokens;
-        }
-    } else if (apiType === 'google') {
-        const usage = response.usageMetadata ?? response.usage_metadata;
-        if (usage) {
-            input = usage.promptTokenCount ?? usage.prompt_token_count;
-            output = usage.candidatesTokenCount ?? usage.candidates_token_count;
-            total = usage.totalTokenCount ?? usage.total_token_count;
-        }
-    }
+    const usage = extractTokenUsage(response, apiType);
+    const input = usage.inputTokens;
+    const output = usage.outputTokens;
+    const total = usage.totalTokens;
+    const cached = usage.cachedInputTokens;
 
     const parts: string[] = [];
     if (input !== undefined && input !== null) parts.push(`input=${input}`);
+    if (cached !== undefined && cached !== null) parts.push(`cached_input=${cached}`);
     if (output !== undefined && output !== null) parts.push(`output=${output}`);
     if (total !== undefined && total !== null) parts.push(`total=${total}`);
 
     if (parts.length > 0) {
         logger.info(`tokens ${parts.join(' ')}`);
     }
+}
+
+function now_ms(): number {
+    return typeof performance !== 'undefined' ? performance.now() : Date.now();
 }
 
 export class LLM_Model {
@@ -78,6 +70,8 @@ export class LLM_Model {
     public history: Array<{ role: string; content: string; attachments?: Array<{ path: string; kind: string }> }>;
     private _client: any;
     public api_type: 'openai' | 'google';
+    public token_tracker_session_id: string | null = null;
+    public token_tracker_purpose: string | null = null;
 
     constructor(
         model_name: string,
@@ -757,8 +751,18 @@ export class LLM_Model {
 
                 this.logger.debug("Sending request to OpenAI Responses API...");
                 log_llm_request("llm-model-openai-responses", response_kwargs);
+                const started_at = now_ms();
                 const response = await this._client.responses.create(response_kwargs);
+                const latency_ms = Math.round(now_ms() - started_at);
                 _logTokenUsage(this.logger, response, 'openai');
+                trackTokenUsageFromResponse({
+                    response,
+                    provider: 'openai',
+                    model: this.model_name,
+                    purpose: this.token_tracker_purpose || "llm_model_openai_responses",
+                    latencyMs: latency_ms,
+                    sessionId: this.token_tracker_session_id || undefined,
+                });
                 response_content = response.output_text || JSON.stringify(response);
             } else {
                 const messages: any[] = [];
@@ -798,8 +802,18 @@ export class LLM_Model {
 
                 this.logger.debug("Sending request to OpenAI Chat Completions API...");
                 log_llm_request("llm-model-openai-chat", request_params);
+                const started_at = now_ms();
                 const response = await this._client.chat.completions.create(request_params);
+                const latency_ms = Math.round(now_ms() - started_at);
                 _logTokenUsage(this.logger, response, 'openai');
+                trackTokenUsageFromResponse({
+                    response,
+                    provider: 'openai',
+                    model: this.model_name,
+                    purpose: this.token_tracker_purpose || "llm_model_openai_chat",
+                    latencyMs: latency_ms,
+                    sessionId: this.token_tracker_session_id || undefined,
+                });
                 response_content = response.choices[0].message.content || "";
             }
 
@@ -958,8 +972,18 @@ export class LLM_Model {
                 config: generation_config
             };
             log_llm_request("llm-model-google", request);
+            const started_at = now_ms();
             const response = await this._client.models.generateContent(request);
+            const latency_ms = Math.round(now_ms() - started_at);
             _logTokenUsage(this.logger, response, 'google');
+            trackTokenUsageFromResponse({
+                response,
+                provider: 'google',
+                model: this.model_name,
+                purpose: this.token_tracker_purpose || "llm_model_google",
+                latencyMs: latency_ms,
+                sessionId: this.token_tracker_session_id || undefined,
+            });
 
 
             let response_content = response.text || null;

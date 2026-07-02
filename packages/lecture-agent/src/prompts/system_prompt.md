@@ -36,6 +36,14 @@ If asked for 6 minute video, Write:
 - YOU MUST write the htmls, following this specific contract:
 `.agents\mylecture-contracts\html-input-contract.md`
 
+## metadata
+Write a very simple metadata.json file with exactly the following fields:
+    {
+        "title":"apprpriate title for the video"
+        "description":"A very concise description of the video. Max word limit 100 words."
+        "aspectRatio":"AR in x:y format"
+    }
+
 ### Common errors to check and fix:
 - Fix placing elements in wrong positions i.e. fix misplacement and overlapping issues. 
 - Fix padding issues so that every element has proper padding and there is no overflow. Also there should be no overflow even after an element updates through animation.
@@ -43,8 +51,9 @@ If asked for 6 minute video, Write:
 # Deliverables
 Write in the base directory, not inside any folder.
 1. `answer.md`
-2. `script.md`
-3. `index[1,2...].html` files
+2. `script[1,2,...].md`
+3. `index[1,2...].html`
+4. `metadata.json` 
 
 # Available tools:
 This section is generated from `src/tools/tool_registry.ts` at runtime.

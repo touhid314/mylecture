@@ -37,6 +37,7 @@ export const loggerStorage = new AsyncLocalStorage<(text: string) => void>();
 import { LLM_Model } from './llm_model.js';
 import { log_llm_request, start_new_llm_log_session } from './llm_prompt_logger.js';
 import { build_prompt, extract_upload_attachments, type UploadAttachment } from './prompt_builder.js';
+import { extractTokenUsage, trackTokenUsageFromResponse } from './token_tracker.js';
 import {
     BASE_DIR,
     WORKSPACE_DIR,
@@ -425,6 +426,27 @@ function format_token_totals(inputTokens: number, outputTokens: number): string 
     return `ip=${inputTokens} op=${outputTokens}`;
 }
 
+function new_token_tracker_session_id(model: string): string {
+    const safeModel = model.replace(/[^a-zA-Z0-9._-]+/g, "-").slice(0, 48);
+    const stamp = new Date().toISOString().replace(/[-:.TZ]/g, '').slice(0, 14);
+    return `${safeModel}-${stamp}-${process.pid}-${Math.random().toString(36).slice(2, 8)}`;
+}
+
+function resolve_token_tracker_session_id(model: string, workspaceDir: string, explicitSessionId?: string | null): string {
+    if (explicitSessionId && explicitSessionId.trim()) {
+        return explicitSessionId.trim();
+    }
+    const envSessionId = (process.env.TOKEN_TRACKER_SESSION_ID || "").trim();
+    if (envSessionId) {
+        return envSessionId;
+    }
+    const workspaceName = path.basename(path.resolve(workspaceDir));
+    if (workspaceName && workspaceName !== "." && workspaceName !== path.basename(path.resolve(WORKSPACE_DIR))) {
+        return workspaceName;
+    }
+    return new_token_tracker_session_id(model);
+}
+
 function gemini_output_token_count(usage: any): number | null {
     if (!usage) {
         return null;
@@ -461,8 +483,9 @@ export class GeminiAgentSession {
     private totalOutputTokens: number;
     private workspaceDir: string;
     private toolOptions: ToolRuntimeOptions;
+    private tokenTrackerSessionId: string;
 
-    constructor(model: string, workspaceDir: string, skills: string[] | null = null, initialHistory: any[] = [], toolOptions: ToolRuntimeOptions = {}) {
+    constructor(model: string, workspaceDir: string, skills: string[] | null = null, initialHistory: any[] = [], toolOptions: ToolRuntimeOptions = {}, tokenTrackerSessionId?: string | null) {
         const apiKey = process.env.GOOGLE_API_KEY;
         if (!apiKey) {
             throw new Error("GOOGLE_API_KEY is not set.");
@@ -493,7 +516,9 @@ export class GeminiAgentSession {
         }
         this.totalInputTokens = 0;
         this.totalOutputTokens = 0;
+        this.tokenTrackerSessionId = resolve_token_tracker_session_id(model, workspaceDir, tokenTrackerSessionId);
         print_detail("workspace", workspaceDir, Color.BLUE);
+        print_detail("token session", this.tokenTrackerSessionId, Color.BLUE);
         print_detail("tool mode", "native Gemini function calling", Color.BLUE);
         if (skills && skills.length > 0) {
             print_detail("skills", skills, Color.BLUE);
@@ -527,7 +552,7 @@ export class GeminiAgentSession {
         };
     }
 
-    private record_token_usage(inputTokens: number | null, outputTokens: number | null): void {
+    private record_token_usage(inputTokens: number | null, outputTokens: number | null, cachedInputTokens: number | null = null): void {
         const parts: string[] = [];
 
         if (inputTokens !== null) {
@@ -535,6 +560,10 @@ export class GeminiAgentSession {
             parts.push(`input=${inputTokens}`);
         } else {
             parts.push("input=unavailable");
+        }
+
+        if (cachedInputTokens !== null) {
+            parts.push(`cached_input=${cachedInputTokens}`);
         }
 
         if (outputTokens !== null) {
@@ -558,7 +587,16 @@ export class GeminiAgentSession {
             }
         };
         log_llm_request("coding-agent-gemini-pre-user-response", request);
+        const started_at = now_ms();
         const response = await this.client.models.generateContent(request);
+        trackTokenUsageFromResponse({
+            response,
+            provider: "google",
+            model: this.model,
+            purpose: "coding_agent_gemini_final_response",
+            latencyMs: Math.round(now_ms() - started_at),
+            sessionId: this.tokenTrackerSessionId,
+        });
         return extract_gemini_text(response) || "Finished working.";
     }
 
@@ -589,8 +627,11 @@ export class GeminiAgentSession {
                 };
                 log_llm_request("coding-agent-gemini-working", request);
                 let response;
+                let latency_ms = 0;
                 try {
+                    const started_at = now_ms();
                     response = await this.client.models.generateContent(request);
+                    latency_ms = Math.round(now_ms() - started_at);
                     if (abortSignal?.aborted) throw new AgentAbortError();
                 } catch (err: any) {
                     if (err instanceof AgentAbortError) throw err;
@@ -602,8 +643,20 @@ export class GeminiAgentSession {
                 const usage = response.usageMetadata;
                 const input_tokens = gemini_input_token_count(usage);
                 const output_tokens = gemini_output_token_count(usage);
-                this.record_token_usage(input_tokens, output_tokens);
+                const tracked_usage = extractTokenUsage(response, "google");
+                this.record_token_usage(input_tokens, output_tokens, tracked_usage.cachedInputTokens ?? null);
                 const function_calls = extract_gemini_function_calls(response);
+                const purpose = function_calls.length === 0
+                    ? `step_${step}_done`
+                    : `step_${step}_toolcall_${function_calls.map(call => call.name || "unknown").join("_")}`;
+                trackTokenUsageFromResponse({
+                    response,
+                    provider: "google",
+                    model: this.model,
+                    purpose,
+                    latencyMs: latency_ms,
+                    sessionId: this.tokenTrackerSessionId,
+                });
 
                 if (function_calls.length === 0) {
                     if (response.candidates && response.candidates.length > 0) {
@@ -664,8 +717,9 @@ class JsonFallbackAgentSession {
     private model: string;
     private workspaceDir: string;
     private toolOptions: ToolRuntimeOptions;
+    private tokenTrackerSessionId: string;
 
-    constructor(model: string, workspaceDir: string, skills: string[] | null = null, initialHistory: any[] = [], toolOptions: ToolRuntimeOptions = {}) {
+    constructor(model: string, workspaceDir: string, skills: string[] | null = null, initialHistory: any[] = [], toolOptions: ToolRuntimeOptions = {}, tokenTrackerSessionId?: string | null) {
         this.model = model;
         this.workspaceDir = workspaceDir;
         this.toolOptions = toolOptions;
@@ -675,6 +729,8 @@ class JsonFallbackAgentSession {
             null,
             true
         );
+        this.tokenTrackerSessionId = resolve_token_tracker_session_id(model, workspaceDir, tokenTrackerSessionId);
+        this.llm.token_tracker_session_id = this.tokenTrackerSessionId;
         this.transcript = [...initialHistory];
         this.userTasks = [];
         for (const msg of initialHistory) {
@@ -683,6 +739,7 @@ class JsonFallbackAgentSession {
             }
         }
         print_detail("workspace", workspaceDir, Color.BLUE);
+        print_detail("token session", this.tokenTrackerSessionId, Color.BLUE);
         print_detail("tool mode", "JSON fallback", Color.BLUE);
         if (skills && skills.length > 0) {
             print_detail("skills", skills, Color.BLUE);
@@ -697,6 +754,8 @@ class JsonFallbackAgentSession {
             null,
             false
         );
+        final_llm.token_tracker_session_id = this.tokenTrackerSessionId;
+        final_llm.token_tracker_purpose = "json_fallback_final_response";
         const response = await final_llm.generate(
             finalContext.userPrompt,
             null,
@@ -722,6 +781,7 @@ class JsonFallbackAgentSession {
         try {
             for (let step = 1; step <= max_turns; step++) {
                 print_step(step, "asking model for next action", Color.MAGENTA);
+                this.llm.token_tracker_purpose = `step_${step}_next_action`;
                 const response = await this.llm.generate(
                     build_agent_prompt(prepared_task, this.transcript, this.toolOptions),
                     null,
@@ -793,11 +853,11 @@ class JsonFallbackAgentSession {
     }
 }
 
-function create_agent_session(model: string, workspaceDir: string, skills: string[] | null = null, initialHistory: any[] = [], toolOptions: ToolRuntimeOptions = {}): any {
+function create_agent_session(model: string, workspaceDir: string, skills: string[] | null = null, initialHistory: any[] = [], toolOptions: ToolRuntimeOptions = {}, tokenTrackerSessionId?: string | null): any {
     if (model.toLowerCase().includes("gemini")) {
-        return new GeminiAgentSession(model, workspaceDir, skills, initialHistory, toolOptions);
+        return new GeminiAgentSession(model, workspaceDir, skills, initialHistory, toolOptions, tokenTrackerSessionId);
     }
-    return new JsonFallbackAgentSession(model, workspaceDir, skills, initialHistory, toolOptions);
+    return new JsonFallbackAgentSession(model, workspaceDir, skills, initialHistory, toolOptions, tokenTrackerSessionId);
 }
 
 type ActiveAgentSession = {
@@ -820,7 +880,7 @@ function get_or_create_agent_session(model: string, skills: string[] | null = nu
     if (!activeAgentSession || activeAgentSession.key !== key) {
         activeAgentSession = {
             key,
-            session: create_agent_session(model, DEFAULT_WORKSPACE_DIR, skills, [], toolOptions)
+            session: create_agent_session(model, DEFAULT_WORKSPACE_DIR, skills, [], toolOptions, resolve_token_tracker_session_id(model, DEFAULT_WORKSPACE_DIR))
         };
     }
     return activeAgentSession.session;
@@ -896,6 +956,7 @@ export interface AgentConfig {
     skills?: string[] | null;
     maxTurns?: number;
     enableGetimgTool?: boolean;
+    tokenTrackerSessionId?: string | null;
     onLog?: (text: string) => void;
 }
 
@@ -918,6 +979,7 @@ export class ChatSession {
     private toolOptions: ToolRuntimeOptions;
     private activeAbortController: AbortController | null = null;
     private turnSequence: number = 0;
+    private tokenTrackerSessionId: string;
 
     constructor(
         model: string,
@@ -926,6 +988,7 @@ export class ChatSession {
         initialHistory: ChatMessage[] = [],
         maxTurns: number = 500,
         toolOptions: ToolRuntimeOptions = {},
+        tokenTrackerSessionId?: string | null,
         onLog?: (text: string) => void
     ) {
         this.model = model;
@@ -935,6 +998,7 @@ export class ChatSession {
         this.maxTurns = maxTurns;
         this.toolOptions = toolOptions;
         this.onLog = onLog;
+        this.tokenTrackerSessionId = resolve_token_tracker_session_id(model, this.workspaceDir, tokenTrackerSessionId);
         fs.mkdirSync(this.workspaceDir, { recursive: true });
     }
 
@@ -964,7 +1028,7 @@ export class ChatSession {
     async sendMessage(prompt: string, maxTurns?: number, abortSignal?: AbortSignal): Promise<string> {
         const turnsLimit = maxTurns !== undefined ? maxTurns : this.maxTurns;
         const historyBeforeTurn = [...this.history];
-        const session = create_agent_session(this.model, this.workspaceDir, this.skills, historyBeforeTurn, this.toolOptions);
+        const session = create_agent_session(this.model, this.workspaceDir, this.skills, historyBeforeTurn, this.toolOptions, this.tokenTrackerSessionId);
         const turnId = ++this.turnSequence;
         this.history = this.stoppedTurnHistory(session, historyBeforeTurn, prompt);
         const turnAbortController = new AbortController();
@@ -1047,6 +1111,7 @@ export class LectureAgent {
             initialHistory || [],
             this.config.maxTurns,
             { enableGetimgTool: this.config.enableGetimgTool === true },
+            this.config.tokenTrackerSessionId,
             this.config.onLog
         );
     }
