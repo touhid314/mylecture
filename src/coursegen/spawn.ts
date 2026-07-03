@@ -22,6 +22,7 @@ export function killProcessTree(childProc: ReturnType<typeof spawn> | null) {
 
 export function runCapture(command: string, args: string[], options: {
   cwd?: string;
+  env?: NodeJS.ProcessEnv;
   onSpawn?: (child: ReturnType<typeof spawn>) => void;
   onStdout?: (chunk: string) => void;
   onStderr?: (chunk: string) => void;
@@ -31,6 +32,7 @@ export function runCapture(command: string, args: string[], options: {
       stdio: ['ignore', 'pipe', 'pipe'],
       windowsHide: true,
       cwd: options.cwd || rootDir,
+      env: options.env,
       shell: false
     });
 
@@ -329,7 +331,24 @@ export async function spawnRenderLecture(folderPath: string, options: {
 }
 
 export async function spawnAdmin(args: string[]) {
-  const output = await runCapture(process.execPath, ['scripts/admin.mjs', ...args], { cwd: websiteRoot() });
+  const env = { ...process.env };
+  for (const key of Object.keys(env)) {
+    if (
+      key === 'DATABASE_URL' ||
+      key === 'DIRECT_URL' ||
+      key === 'STORAGE_BACKEND' ||
+      key === 'NEXT_PUBLIC_CDN_URL' ||
+      key.startsWith('R2_') ||
+      key.startsWith('SUPABASE_') ||
+      key.startsWith('NEXT_PUBLIC_SUPABASE_')
+    ) {
+      delete env[key];
+    }
+  }
+  const output = await runCapture(process.execPath, ['scripts/admin.mjs', ...args], {
+    cwd: websiteRoot(),
+    env
+  });
   console.log(output);
   return output;
 }
