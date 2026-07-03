@@ -20,13 +20,6 @@ export function killProcessTree(childProc: ReturnType<typeof spawn> | null) {
   }
 }
 
-function spawnUsesShell(command: string) {
-  if (process.platform !== 'win32') return false;
-  // cmd.exe splits unquoted absolute paths (e.g. C:\Program Files\nodejs\node.exe).
-  if (path.isAbsolute(command) || command.includes(' ')) return false;
-  return true;
-}
-
 export function runCapture(command: string, args: string[], options: {
   cwd?: string;
   onSpawn?: (child: ReturnType<typeof spawn>) => void;
@@ -38,7 +31,7 @@ export function runCapture(command: string, args: string[], options: {
       stdio: ['ignore', 'pipe', 'pipe'],
       windowsHide: true,
       cwd: options.cwd || rootDir,
-      shell: spawnUsesShell(command)
+      shell: false
     });
 
     options.onSpawn?.(child);
@@ -336,7 +329,7 @@ export async function spawnRenderLecture(folderPath: string, options: {
 }
 
 export async function spawnAdmin(args: string[]) {
-  const output = await runCapture('node', ['scripts/admin.mjs', ...args], { cwd: websiteRoot() });
+  const output = await runCapture(process.execPath, ['scripts/admin.mjs', ...args], { cwd: websiteRoot() });
   console.log(output);
   return output;
 }
