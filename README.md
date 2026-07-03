@@ -89,6 +89,13 @@ tests/                  Structured renderer fixtures and smoke tests
   ```bash
   npm test
   ```
+* **Generate a full course** (plan → review → run → publish):
+  ```bash
+  npm run coursegen -- plan --topic "Fractions" --audience elementary --intent foundation
+  npm run coursegen -- run --course <slug-from-plan>
+  npm run coursegen -- publish --course <slug>
+  ```
+  Plans and outputs live under `gens/courses/<slug>/`. `--intent` defaults to `foundation`; see `docs/coursegen-runbook.md` for commands, parameters, and useful recipes.
 
 ---
 

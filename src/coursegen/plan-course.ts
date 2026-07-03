@@ -1,0 +1,120 @@
+import { existsSync, readFileSync, writeFileSync } from 'node:fs';
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
+import { LLM_Model } from '../../packages/lecture-agent/src/llm_model.ts';
+import { courseStatePath, ensureCourseDir } from './paths.ts';
+import { estimateCourseCostUsd, printPlanSummary } from './lecture-prompt.ts';
+import { writeCoursePlan, writeCourseState } from './state.ts';
+import { DEFAULT_LEARNING_INTENT, initialCourseState, validateCoursePlan } from './types.ts';
+import type { Audience, CoursePlan, LearningIntent } from './types.ts';
+
+export type PlanCourseOptions = {
+  topic: string;
+  audience: Audience;
+  intent?: LearningIntent;
+  scope?: string;
+  maxLectures?: number;
+  model?: string;
+  dryRun?: boolean;
+  budgetUsd?: number;
+};
+
+function plannerPromptPath() {
+  return path.join(path.dirname(fileURLToPath(import.meta.url)), 'prompts', 'planner.md');
+}
+
+function buildPlannerUserPrompt(options: PlanCourseOptions) {
+  const lines = [
+    `Topic: ${options.topic}`,
+    `Audience level: ${options.audience}`,
+    `Learning intent: ${options.intent ?? DEFAULT_LEARNING_INTENT}`
+  ];
+  if (options.scope) lines.push(`Scope: ${options.scope}`);
+  if (options.maxLectures) lines.push(`Target lecture count: ${options.maxLectures}`);
+  lines.push('Return the course plan JSON only.');
+  return lines.join('\n');
+}
+
+function extractJsonObject(text: string) {
+  const trimmed = text.trim();
+  if (trimmed.startsWith('{')) {
+    return JSON.parse(trimmed);
+  }
+  const start = trimmed.indexOf('{');
+  const end = trimmed.lastIndexOf('}');
+  if (start >= 0 && end > start) {
+    return JSON.parse(trimmed.slice(start, end + 1));
+  }
+  throw new Error('Planner response did not contain JSON.');
+}
+
+function normalizePlannerResponse(response: unknown): Record<string, unknown> {
+  if (response && typeof response === 'object' && !Array.isArray(response)) {
+    return response as Record<string, unknown>;
+  }
+  if (typeof response === 'string') {
+    return extractJsonObject(response);
+  }
+  throw new Error('Planner response did not contain JSON.');
+}
+
+function serializePlannerResponse(response: unknown) {
+  if (typeof response === 'string') return response;
+  try {
+    return JSON.stringify(response, null, 2);
+  } catch {
+    return String(response);
+  }
+}
+
+export async function planCourse(options: PlanCourseOptions): Promise<CoursePlan> {
+  const systemPrompt = readFileSync(plannerPromptPath(), 'utf8');
+  const userPrompt = buildPlannerUserPrompt(options);
+  const maxLectures = options.maxLectures ?? 12;
+
+  if (options.dryRun) {
+    console.log('--- Planner system prompt ---\n');
+    console.log(systemPrompt);
+    console.log('\n--- Planner user prompt ---\n');
+    console.log(userPrompt);
+    throw new Error('Dry run complete (no LLM call).');
+  }
+
+  const model = options.model || process.env.AGENT_MODEL || '';
+  if (!model) {
+    throw new Error('AGENT_MODEL environment variable or --model flag must be specified.');
+  }
+
+  let lastError: Error | null = null;
+  let rawResponse: unknown = null;
+
+  for (let attempt = 0; attempt < 2; attempt++) {
+    const llm = new LLM_Model(model, systemPrompt, null, true);
+    const prompt = attempt === 0
+      ? userPrompt
+      : `${userPrompt}\n\nPrevious response was invalid: ${lastError?.message}. Return valid JSON only.`;
+    rawResponse = await llm.generate(prompt, null, null, null, null, true, false);
+    try {
+      const parsed = normalizePlannerResponse(rawResponse);
+      const plan = validateCoursePlan(parsed, { maxLectures });
+      ensureCourseDir(plan.slug);
+      writeCoursePlan(plan);
+      const statePath = courseStatePath(plan.slug);
+      if (!existsSync(statePath)) {
+        writeCourseState(initialCourseState(plan, options.budgetUsd ?? 5));
+      } else {
+        console.log(`Note: existing state kept (${statePath})`);
+      }
+      printPlanSummary(plan);
+      console.log(`\nSaved: gens/courses/${plan.slug}/course-plan.json`);
+      console.log(`Estimated cost: ~$${estimateCourseCostUsd(plan).toFixed(2)}`);
+      return plan;
+    } catch (error) {
+      lastError = error instanceof Error ? error : new Error(String(error));
+    }
+  }
+
+  const debugPath = path.join(ensureCourseDir('invalid-planner-output'), `planner-raw-${Date.now()}.txt`);
+  writeFileSync(debugPath, serializePlannerResponse(rawResponse), 'utf8');
+  throw new Error(`${lastError?.message || 'Invalid planner output'} (saved raw response to ${debugPath})`);
+}
