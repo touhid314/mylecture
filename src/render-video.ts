@@ -16,6 +16,7 @@ import { performance } from 'node:perf_hooks';
 import { existsSync, mkdirSync, readFileSync, readdirSync, rmSync } from 'node:fs';
 import path from 'node:path';
 import { pathToFileURL } from 'node:url';
+import { lecturePageShimScript } from './utils/lecture-page-shims.ts';
 
 const rootDir = process.cwd();
 
@@ -529,6 +530,7 @@ async function preparePage(browser, url, width, height) {
   });
 
   await page.goto(url, { waitUntil: 'load' });
+  await page.evaluate(lecturePageShimScript);
   await page.addStyleTag({
     content: `
       *, *::before, *::after {

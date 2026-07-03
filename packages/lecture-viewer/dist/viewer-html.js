@@ -1836,6 +1836,140 @@ body.file-kind-mp4 .timeline-ruler {
   border: 1px solid rgba(255, 69, 58, 0.25);
   color: #ff453a;
 }
+#batch-dialog {
+  position: fixed;
+  inset: 0;
+  z-index: 2000;
+  display: none;
+  place-items: center;
+  padding: 18px;
+  background: rgba(0,0,0,0.65);
+  backdrop-filter: blur(4px);
+}
+#batch-panel {
+  width: min(560px, 100%);
+  max-height: min(780px, calc(100vh - 36px));
+  display: flex;
+  flex-direction: column;
+  border: 1px solid var(--line-strong);
+  border-radius: 8px;
+  background: #101010;
+  box-shadow: 0 22px 70px rgba(0,0,0,0.7);
+}
+#batch-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 14px 16px;
+  border-bottom: 1px solid var(--line);
+}
+#batch-title {
+  font-weight: 650;
+  color: var(--text);
+  font-size: 15px;
+}
+#batch-close {
+  background: transparent;
+  border: 0;
+  color: var(--muted);
+  cursor: pointer;
+  padding: 4px;
+}
+#batch-close:hover {
+  color: var(--text);
+}
+#batch-body {
+  padding: 16px;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+#batch-file-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+#batch-file-name {
+  font-size: 12px;
+  color: var(--muted-strong);
+}
+#batch-status-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  max-height: 280px;
+  overflow-y: auto;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  padding: 8px;
+  background: rgba(255,255,255,0.015);
+}
+.batch-status-row {
+  display: grid;
+  grid-template-columns: 1fr auto auto;
+  gap: 8px;
+  align-items: center;
+  font-size: 12px;
+  padding: 6px 4px;
+  border-bottom: 1px solid rgba(255,255,255,0.04);
+}
+.batch-status-row:last-child {
+  border-bottom: 0;
+}
+.batch-status-prompt {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--text);
+}
+.batch-status-tag {
+  font-size: 9px;
+  text-transform: uppercase;
+  letter-spacing: 0.4px;
+  padding: 2px 6px;
+  border-radius: 4px;
+  background: rgba(255,255,255,0.05);
+  color: var(--muted);
+  font-weight: 600;
+}
+.batch-status-tag.done { color: #30d158; background: rgba(48,209,88,0.12); }
+.batch-status-tag.error { color: #ff453a; background: rgba(255,69,58,0.12); }
+.batch-status-tag.generating,
+.batch-status-tag.resolving { color: #ffd60a; background: rgba(255,214,10,0.12); }
+.batch-status-tag.cancelled { color: var(--muted); }
+.batch-open-link {
+  font-size: 11px;
+  color: #0a84ff;
+  cursor: pointer;
+  text-decoration: none;
+}
+.batch-open-link:hover {
+  text-decoration: underline;
+}
+#batch-footer {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  padding: 12px 16px;
+  border-top: 1px solid var(--line);
+  background: #0b0b0b;
+}
+#batch-start {
+  background: #ededed;
+  color: #050505;
+  border: 1px solid #ededed;
+}
+#batch-start:hover {
+  background: #fff;
+  border-color: #fff;
+}
+#batch-start:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
 </style>
 </head>
 <body>
@@ -2046,6 +2180,7 @@ body.file-kind-mp4 .timeline-ruler {
       <div class="agent-title">Lecture Agent</div>
       <div style="display: flex; align-items: center; gap: 8px;">
         <button id="agent-new-chat" class="agent-new-chat-btn" type="button" title="New Chat">New Chat</button>
+        <button id="agent-batch-btn" class="agent-new-chat-btn" type="button" title="Batch generate from prompt list">Batch</button>
         <span class="agent-status-tag">Standby</span>
       </div>
     </div>
@@ -2194,6 +2329,72 @@ body.file-kind-mp4 .timeline-ruler {
     </form>
   </div>
 </div>
+<!-- Batch modal for generating multiple lectures from a prompt list. -->
+<div id="batch-dialog" role="dialog" aria-modal="true" aria-labelledby="batch-title">
+  <div id="batch-panel">
+    <div id="batch-header">
+      <div id="batch-title">Batch generate</div>
+      <button id="batch-close" type="button">Close</button>
+    </div>
+    <div id="batch-body">
+      <div class="form-group">
+        <label>Prompt list (.txt, one per line)</label>
+        <div id="batch-file-row">
+          <input id="batch-file-input" type="file" accept=".txt" hidden>
+          <button id="batch-file-choose" class="agent-new-chat-btn" type="button">Choose .txt</button>
+          <span id="batch-file-name">No file selected</span>
+        </div>
+      </div>
+      <div class="form-group">
+        <label for="batch-range">Range</label>
+        <input id="batch-range" type="text" placeholder="e.g. 1-10 or 1,3,5-7 (blank = all)">
+        <span id="batch-selection-info" style="display: block; margin-top: 4px; font-size: 11px; color: var(--muted);"></span>
+      </div>
+      <p style="margin: 0; font-size: 11px; color: var(--muted); line-height: 1.4;">
+        Uses the agent panel profile, aspect ratio, length, and subtitle settings. Each prompt becomes its own folder under outputs/.
+      </p>
+      <div class="form-row">
+        <div class="form-group">
+          <label for="batch-tts-voice">TTS voice</label>
+          <select id="batch-tts-voice">
+            <optgroup label="Kokoro TTS (Local)">
+              <option value="am_puck">am_puck</option>
+              <option value="af_heart" selected>af_heart</option>
+              <option value="am_adam">am_adam</option>
+              <option value="bf_emma">bf_emma</option>
+            </optgroup>
+            <optgroup label="Google TTS (Gemini)">
+              <option value="Puck">Puck</option>
+              <option value="Charon">Charon</option>
+              <option value="Kore">Kore</option>
+              <option value="Fenrir">Fenrir</option>
+              <option value="Aoede">Aoede</option>
+              <option value="Zephyr">Zephyr</option>
+            </optgroup>
+          </select>
+        </div>
+        <div class="form-group">
+          <label for="batch-tts-speed">Voice speed</label>
+          <select id="batch-tts-speed">
+            <option value="1" selected>1.0x</option>
+            <option value="1.2">1.2x</option>
+            <option value="1.3">1.3x</option>
+            <option value="1.5">1.5x</option>
+          </select>
+        </div>
+      </div>
+      <div class="form-group checkbox-group">
+        <input type="checkbox" id="batch-resolve">
+        <label for="batch-resolve">Resolve after generate</label>
+      </div>
+      <div id="batch-status-list"></div>
+    </div>
+    <div id="batch-footer">
+      <button id="batch-stop" type="button" style="display: none;">Stop</button>
+      <button id="batch-start" type="button">Start batch</button>
+    </div>
+  </div>
+</div>
 <script type="module">
 import { createLecturePlayer, lectureViewerVersion } from '/lecture-viewer/player/index.mjs';
 
@@ -2225,6 +2426,20 @@ const agentChatInput = document.getElementById('agent-chat-input');
 const agentChatSend = document.getElementById('agent-chat-send');
 const agentChatStop = document.getElementById('agent-chat-stop');
 const agentNewChat = document.getElementById('agent-new-chat');
+const agentBatchBtn = document.getElementById('agent-batch-btn');
+const batchDialog = document.getElementById('batch-dialog');
+const batchCloseButton = document.getElementById('batch-close');
+const batchFileInput = document.getElementById('batch-file-input');
+const batchFileChoose = document.getElementById('batch-file-choose');
+const batchFileName = document.getElementById('batch-file-name');
+const batchRange = document.getElementById('batch-range');
+const batchSelectionInfo = document.getElementById('batch-selection-info');
+const batchTtsVoice = document.getElementById('batch-tts-voice');
+const batchTtsSpeed = document.getElementById('batch-tts-speed');
+const batchResolve = document.getElementById('batch-resolve');
+const batchStartButton = document.getElementById('batch-start');
+const batchStopButton = document.getElementById('batch-stop');
+const batchStatusList = document.getElementById('batch-status-list');
 const agentBody = document.querySelector('.agent-body');
 const agentStatusTag = document.querySelector('.agent-status-tag');
 const agentInputArea = document.querySelector('.agent-input-area');
@@ -2510,6 +2725,7 @@ function setRenderOptionsVisible(visible) {
 function resolveQuery() {
   const params = new URLSearchParams();
   params.set('file', currentFilePath);
+  params.set('agentClientId', agentClientId);
   params.set('ttsVoice', resolveTtsVoice.value || configuredDefaults.ttsVoice);
   params.set('ttsSpeed', resolveTtsSpeed.value || configuredDefaults.ttsSpeed);
   const currentOnlyCheckbox = document.getElementById('resolve-current-only');
@@ -2523,6 +2739,7 @@ function renderQuery() {
   const params = new URLSearchParams();
   const [width, height] = String(renderResolution.value || configuredDefaults.renderResolution).split('x');
   params.set('file', currentFilePath);
+  params.set('agentClientId', agentClientId);
   params.set('ttsVoice', renderTtsVoice.value || configuredDefaults.ttsVoice);
   params.set('ttsSpeed', renderTtsSpeed.value || configuredDefaults.ttsSpeed);
   params.set('fps', renderFps.value || configuredDefaults.fps);
@@ -2920,7 +3137,9 @@ function updateScenePanel(entries) {
 
   const getFileSuffix = (name) => {
     const match = name.match(/^(?:index|resolved|rendered)(.*)\.(?:html|mp4)$/i);
-    return match ? match[1] : '';
+    if (match) return match[1] || '';
+    const sceneMatch = name.match(/-(\d+)\.mp4$/i);
+    return sceneMatch ? sceneMatch[1] : '';
   };
 
   renderedFiles.forEach(rf => {
@@ -3516,7 +3735,7 @@ async function runStopJob() {
   if (stopBtn) stopBtn.disabled = true;
   setStatus('Stopping process...');
   try {
-    const response = await fetch('/stop-job', { method: 'POST' });
+    const response = await fetch('/stop-job?agentClientId=' + encodeURIComponent(agentClientId), { method: 'POST' });
     const payload = await response.json();
     if (!response.ok) throw new Error(payload.error || 'Failed to stop');
     setStatus('Process stopped successfully');
@@ -3692,7 +3911,8 @@ async function handlePublishSubmit(event) {
     module: publishModule.value,
     order: publishLectureOrder.value,
     published: publishLecturePublished.checked,
-    sourceDir: currentBrowserFolder
+    sourceDir: currentBrowserFolder,
+    agentClientId
   };
   
   if (course === '__new__') {
@@ -3918,7 +4138,7 @@ async function pickAndLoadFile() {
 // already-open viewer tab.
 async function pollViewerCommands() {
   try {
-    const response = await fetch('/viewer-state?since=' + viewerCommandVersion, { cache: 'no-store' });
+    const response = await fetch('/viewer-state?since=' + viewerCommandVersion + '&agentClientId=' + encodeURIComponent(agentClientId), { cache: 'no-store' });
     if (!response.ok) return;
     const payload = await response.json();
     if (!payload.changed) return;
@@ -4564,6 +4784,7 @@ async function sendChat() {
   
   showThinking();
   let uploadCompleted = filesToSend.length === 0;
+  let chatLoadedIndex = false;
 
   let logPollInterval = setInterval(async () => {
     try {
@@ -4604,6 +4825,10 @@ async function sendChat() {
     if (payload.workspace) {
       currentBrowserFolder = payload.workspace;
     }
+    if (payload.indexPath) {
+      await loadFile(payload.indexPath);
+      chatLoadedIndex = true;
+    }
     if (!payload.stopped) {
       appendChatMessage(payload.output || 'Done.', 'agent');
       playAgentResponseRing();
@@ -4629,10 +4854,12 @@ async function sendChat() {
       agentStatusTag.style.color = '';
     }
     
-    if (currentBrowserFolder) {
-      browseFolder(currentBrowserFolder);
-    } else {
-      refreshFolderFiles();
+    if (!chatLoadedIndex) {
+      if (currentBrowserFolder) {
+        browseFolder(currentBrowserFolder);
+      } else {
+        refreshFolderFiles();
+      }
     }
   }
 }
@@ -4734,6 +4961,25 @@ if (agentNewChat) {
         const response = await fetch('/agent-new-chat?agentClientId=' + encodeURIComponent(agentClientId), { method: 'POST' });
         const payload = await response.json();
         if (!response.ok) throw new Error(payload.error || 'Failed to start new chat');
+        currentFilePath = '';
+        setCurrentFile('');
+        currentBrowserFolder = '';
+        folderPathLabel.textContent = 'No file selected';
+        folderPathLabel.title = '';
+        openFolderButton.disabled = true;
+        refreshFolderButton.disabled = true;
+        copyFolderPathButton.disabled = true;
+        fileList.textContent = '';
+        globalEntries = [];
+        updateScenePanel([]);
+        player.pause();
+        videoMetadata = {};
+        lastPlayerState = null;
+        if (frame) frame.src = 'about:blank';
+        if (framePreload) framePreload.src = 'about:blank';
+        setPreviewMode('html');
+        setStatus('Select a file');
+        updateControls(player.snapshot());
         if (agentBody) {
           agentBody.innerHTML = '';
           appendChatMessage("Hello! I am your Lecture Agent. I can make great lecture videos, interactive demonstrations, and games. What would you like to build today?", "agent");
@@ -4743,6 +4989,242 @@ if (agentNewChat) {
       }
     }
   });
+}
+
+let batchPrompts = [];
+let batchFileObject = null;
+let batchId = '';
+let batchPollInterval = null;
+
+function parseBatchPrompts(text) {
+  const indexPrefix = /^\\s*\\d+\\s*[.)\\]]\\s+/;
+  return String(text || '')
+    .split(/\\r?\\n/)
+    .map(line => line.replace(indexPrefix, '').trim())
+    .filter(line => line && !line.startsWith('#'));
+}
+
+function parseBatchRangeList(rangeText, total) {
+  const trimmed = String(rangeText || '').trim();
+  if (!trimmed || trimmed.toLowerCase() === 'all') {
+    return Array.from({ length: total }, (_, i) => i);
+  }
+
+  const indices = new Set();
+  let hadValidToken = false;
+
+  for (const token of trimmed.split(',')) {
+    const part = token.trim();
+    if (!part) continue;
+
+    const rangeMatch = part.match(/^(\\d+)\\s*-\\s*(\\d+)$/);
+    if (rangeMatch) {
+      hadValidToken = true;
+      let start = Math.max(1, Math.min(parseInt(rangeMatch[1], 10), total));
+      let end = Math.max(1, Math.min(parseInt(rangeMatch[2], 10), total));
+      if (start > end) [start, end] = [end, start];
+      for (let n = start; n <= end; n++) {
+        indices.add(n - 1);
+      }
+    } else if (/^\\d+$/.test(part)) {
+      hadValidToken = true;
+      indices.add(Math.max(1, Math.min(parseInt(part, 10), total)) - 1);
+    }
+  }
+
+  if (!hadValidToken) {
+    return Array.from({ length: total }, (_, i) => i);
+  }
+
+  return [...indices].sort((a, b) => a - b);
+}
+
+function updateBatchSelectionInfo() {
+  if (!batchSelectionInfo) return;
+  if (!batchFileObject || batchPrompts.length === 0) {
+    batchSelectionInfo.textContent = '';
+    return;
+  }
+  const indices = parseBatchRangeList(batchRange ? batchRange.value : '', batchPrompts.length);
+  batchSelectionInfo.textContent = indices.length + ' of ' + batchPrompts.length + ' selected';
+}
+
+function openBatchDialog() {
+  if (!batchDialog) return;
+  batchDialog.style.display = 'grid';
+  if (agentBatchBtn) agentBatchBtn.blur();
+}
+
+function closeBatchDialog() {
+  if (!batchDialog) return;
+  batchDialog.style.display = 'none';
+  if (agentBatchBtn) agentBatchBtn.focus();
+}
+
+function renderBatchStatusRows(items) {
+  if (!batchStatusList) return;
+  batchStatusList.innerHTML = '';
+  for (const item of items) {
+    const row = document.createElement('div');
+    row.className = 'batch-status-row';
+    row.dataset.itemId = item.id;
+
+    const promptEl = document.createElement('div');
+    promptEl.className = 'batch-status-prompt';
+    promptEl.title = item.prompt || '';
+    promptEl.textContent = item.prompt || '';
+
+    const tag = document.createElement('span');
+    tag.className = 'batch-status-tag ' + (item.status || 'pending');
+    tag.textContent = item.status || 'pending';
+
+    const actions = document.createElement('div');
+    if (item.status === 'done') {
+      const openPath = item.resolvedPath || item.indexPath || '';
+      if (openPath) {
+        const link = document.createElement('a');
+        link.className = 'batch-open-link';
+        link.href = '#';
+        link.textContent = 'Open';
+        link.addEventListener('click', event => {
+          event.preventDefault();
+          loadFile(openPath);
+        });
+        actions.appendChild(link);
+      }
+    } else if (item.status === 'error' && item.error) {
+      actions.title = item.error;
+      actions.textContent = '!';
+      actions.style.color = '#ff453a';
+      actions.style.fontSize = '11px';
+    }
+
+    row.appendChild(promptEl);
+    row.appendChild(tag);
+    row.appendChild(actions);
+    batchStatusList.appendChild(row);
+  }
+}
+
+async function pollBatchStatus() {
+  if (!batchId) return;
+  try {
+    const response = await fetch('/agent-batch-status?batchId=' + encodeURIComponent(batchId));
+    const payload = await response.json();
+    if (!response.ok) throw new Error(payload.error || 'Batch status failed');
+    renderBatchStatusRows(payload.items || []);
+    if (payload.status === 'done' || payload.status === 'aborted') {
+      clearInterval(batchPollInterval);
+      batchPollInterval = null;
+      if (batchStartButton) {
+        batchStartButton.disabled = false;
+        batchStartButton.style.display = '';
+      }
+      if (batchStopButton) batchStopButton.style.display = 'none';
+    }
+  } catch (error) {
+    clearInterval(batchPollInterval);
+    batchPollInterval = null;
+    if (batchStartButton) batchStartButton.disabled = false;
+    if (batchStopButton) batchStopButton.style.display = 'none';
+    appendChatMessage('Batch status error: ' + error.message, 'error');
+  }
+}
+
+async function startBatch() {
+  if (!batchFileObject || batchPrompts.length === 0) {
+    appendChatMessage('Choose a .txt file with at least one prompt.', 'error');
+    return;
+  }
+
+  const form = new FormData();
+  form.append('file', batchFileObject);
+  form.append('profileContent', getSelectedAgentProfileContent());
+  form.append('aspectRatio', agentAspectRatio ? agentAspectRatio.value : '16:9');
+  form.append('generationLength', agentGenerationLength ? formatGenerationLength(sliderToGenerationSeconds(agentGenerationLength.value)) : '1:00');
+  form.append('embedSubtitle', agentEmbedSubtitle && agentEmbedSubtitle.checked ? 'yes' : 'no');
+  form.append('ttsVoice', batchTtsVoice ? batchTtsVoice.value : 'af_heart');
+  form.append('ttsSpeed', batchTtsSpeed ? batchTtsSpeed.value : '1');
+  form.append('resolve', batchResolve && batchResolve.checked ? '1' : '0');
+  form.append('range', batchRange ? batchRange.value : '');
+
+  if (batchStartButton) batchStartButton.disabled = true;
+  if (batchStopButton) batchStopButton.style.display = '';
+
+  try {
+    const response = await fetch('/agent-batch', { method: 'POST', body: form });
+    const payload = await response.json();
+    if (!response.ok) throw new Error(payload.error || 'Batch start failed');
+
+    batchId = payload.batchId || '';
+    renderBatchStatusRows(payload.items || []);
+    if (batchPollInterval) clearInterval(batchPollInterval);
+    batchPollInterval = setInterval(pollBatchStatus, 800);
+    pollBatchStatus();
+  } catch (error) {
+    if (batchStartButton) batchStartButton.disabled = false;
+    if (batchStopButton) batchStopButton.style.display = 'none';
+    appendChatMessage('Batch start error: ' + error.message, 'error');
+  }
+}
+
+async function stopBatch() {
+  if (!batchId) return;
+  if (batchStopButton) batchStopButton.disabled = true;
+  try {
+    const response = await fetch('/agent-batch-stop?batchClientId=' + encodeURIComponent(batchId), { method: 'POST' });
+    const payload = await response.json();
+    if (!response.ok) throw new Error(payload.error || 'Batch stop failed');
+  } catch (error) {
+    appendChatMessage('Batch stop error: ' + error.message, 'error');
+  } finally {
+    clearInterval(batchPollInterval);
+    batchPollInterval = null;
+    batchId = '';
+    if (batchStartButton) {
+      batchStartButton.disabled = false;
+      batchStartButton.style.display = '';
+    }
+    if (batchStopButton) {
+      batchStopButton.style.display = 'none';
+      batchStopButton.disabled = false;
+    }
+  }
+}
+
+if (agentBatchBtn) {
+  agentBatchBtn.addEventListener('click', openBatchDialog);
+}
+if (batchCloseButton) {
+  batchCloseButton.addEventListener('click', closeBatchDialog);
+}
+if (batchDialog) {
+  batchDialog.addEventListener('click', event => {
+    if (event.target === batchDialog) closeBatchDialog();
+  });
+}
+if (batchFileChoose && batchFileInput) {
+  batchFileChoose.addEventListener('click', () => batchFileInput.click());
+  batchFileInput.addEventListener('change', async () => {
+    const file = batchFileInput.files && batchFileInput.files[0];
+    if (!file) return;
+    batchFileObject = file;
+    const text = await file.text();
+    batchPrompts = parseBatchPrompts(text);
+    if (batchFileName) {
+      batchFileName.textContent = file.name + ' (' + batchPrompts.length + ' prompt' + (batchPrompts.length === 1 ? '' : 's') + ')';
+    }
+    updateBatchSelectionInfo();
+  });
+}
+if (batchRange) {
+  batchRange.addEventListener('input', updateBatchSelectionInfo);
+}
+if (batchStartButton) {
+  batchStartButton.addEventListener('click', startBatch);
+}
+if (batchStopButton) {
+  batchStopButton.addEventListener('click', stopBatch);
 }
 
 // Initial boot: hydrate state, load the requested file, and start server polling.

@@ -8,7 +8,7 @@
  * talks to the coding agent, and publishes rendered lecture folders to
  * the website package. This server is intentionally local-only on 127.0.0.1.
  */
-import { createReadStream, existsSync, mkdirSync, readdirSync, readFileSync, rmSync, statSync, unlinkSync, writeFileSync, watch } from 'node:fs';
+import { createReadStream, existsSync, mkdirSync, readdirSync, readFileSync, renameSync, rmSync, statSync, unlinkSync, writeFileSync, watch } from 'node:fs';
 import { createServer } from 'node:http';
 import { spawn } from 'node:child_process';
 import path from 'node:path';
@@ -46,6 +46,7 @@ function loadEnv() {
 loadEnv();
 
 const agentClientStates = new Map();
+const batchJobs = new Map();
 
 function normalizeAgentClientId(value) {
   const id = String(value || '').trim();
@@ -60,6 +61,8 @@ function getAgentState(agentClientId) {
       id,
       currentWorkspace: '',
       activeJob: null,
+      pipelineJob: null,
+      viewerState: null,
       log: '',
       pendingNewSession: true,
       enableGetimgTool: null,
@@ -75,26 +78,447 @@ function getAgentWorkspaceDir() {
   return resolveConfigPath(rootDir, config.agent.generationDir);
 }
 
-function createNewSessionWorkspace(agentClientId = 'default') {
-  const state = getAgentState(agentClientId);
-  const baseDir = getAgentWorkspaceDir();
+function getOutputsDir() {
+  return path.join(getAgentWorkspaceDir(), 'outputs');
+}
+
+function slugifyText(text) {
+  return String(text || '')
+    .normalize('NFKD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/^-+|-+$/g, '')
+    .substring(0, 60);
+}
+
+function promptTextFromMessage(message) {
+  let text = String(message || '').trim();
+  text = text.replace(/\[Context:[\s\S]*?\]\s*/g, '');
+  const settingsIdx = text.search(/\nif the user query is for video generation/i);
+  if (settingsIdx >= 0) {
+    text = text.slice(0, settingsIdx);
+  }
+  text = text.split('\n').map(line => line.trim()).filter(Boolean)[0] || '';
+  text = text.replace(
+    /^(please\s+)?(make|create|build|generate)\s+(me\s+)?(a\s+)?(short\s+)?(video|reel|lecture)\s+(about|on|for|explaining)?\s*/i,
+    ''
+  );
+  text = text.replace(/^(please\s+)?/i, '');
+  text = text.replace(/[.?!]+$/g, '');
+  return text.trim();
+}
+
+function slugFromPrompt(message) {
+  const slug = slugifyText(promptTextFromMessage(message));
+  return slug || 'session';
+}
+
+function renameWorkspaceToPrompt(folderPath, message) {
+  const outputsDir = getOutputsDir();
+  const resolvedFolder = path.resolve(folderPath);
+  if (!existsSync(resolvedFolder) || !statSync(resolvedFolder).isDirectory()) {
+    return folderPath;
+  }
+  if (resolvedFolder !== outputsDir && !resolvedFolder.startsWith(outputsDir + path.sep)) {
+    return folderPath;
+  }
+
+  const slug = slugFromPrompt(message);
+  const rand = Math.random().toString(36).substring(2, 8);
+  const newName = `${slug}-${rand}`;
+  const parent = path.dirname(resolvedFolder);
+  const newDir = path.resolve(parent, newName);
+
+  if (path.resolve(newDir) !== path.resolve(resolvedFolder)) {
+    try {
+      renameSync(resolvedFolder, newDir);
+      return newDir;
+    } catch {
+      return folderPath;
+    }
+  }
+  return folderPath;
+}
+
+function folderSlugFromPath(filePath) {
+  const folderName = path.basename(path.dirname(resolveInputPath(filePath)));
+  return folderName.replace(/-[a-z0-9]{4,8}$/i, '');
+}
+
+function extractTitleSlugFromHtml(fullPath) {
+  try {
+    const content = readFileSync(fullPath, 'utf8');
+    const metadataTitleMatch = content.match(/__VIDEO_METADATA__\s*=\s*\{[\s\S]*?\btitle\s*:\s*(['"`])([\s\S]*?)\1/);
+    if (metadataTitleMatch?.[2]?.trim()) {
+      return slugifyText(metadataTitleMatch[2]);
+    }
+    const documentTitleMatch = content.match(/<title[^>]*>([\s\S]*?)<\/title>/i);
+    if (documentTitleMatch?.[1]?.trim()) {
+      return slugifyText(documentTitleMatch[1].replace(/<[^>]+>/g, ''));
+    }
+  } catch {}
+  return '';
+}
+
+function descriptiveBaseName(filePath) {
+  const inputPath = resolveInputPath(filePath);
+  const basename = path.basename(inputPath);
+  const htmlCandidates = [];
+
+  if (isResolvedHtmlName(basename)) {
+    htmlCandidates.push(inputPath);
+  } else if (isIndexHtmlName(basename)) {
+    htmlCandidates.push(inputPath);
+    const resolvedPath = resolvedSiblingPathForIndex(inputPath);
+    if (existsSync(resolvedPath)) {
+      htmlCandidates.unshift(resolvedPath);
+    }
+  }
+
+  for (const htmlPath of htmlCandidates) {
+    const titleSlug = extractTitleSlugFromHtml(htmlPath);
+    if (titleSlug) {
+      return titleSlug;
+    }
+  }
+
+  const folderSlug = folderSlugFromPath(filePath);
+  if (folderSlug && folderSlug !== 'outputs') {
+    return folderSlug;
+  }
+
+  return 'rendered';
+}
+
+function locateAgentScript() {
+  const workspaceTsAgentScript = path.resolve(rootDir, 'packages/lecture-agent/src/coding_agent.ts');
+  const siblingTsAgentScript = path.resolve(rootDir, '../lecture-agent/src/coding_agent.ts');
+  const pythonAgentScript = path.resolve(rootDir, '../lecture-agent/coding_agent.py');
+
+  if (existsSync(workspaceTsAgentScript)) {
+    return {
+      execCmd: process.platform === 'win32' ? 'npx.cmd' : 'npx',
+      execArgs: ['tsx', workspaceTsAgentScript]
+    };
+  }
+  if (existsSync(siblingTsAgentScript)) {
+    return {
+      execCmd: process.platform === 'win32' ? 'npx.cmd' : 'npx',
+      execArgs: ['tsx', siblingTsAgentScript]
+    };
+  }
+  if (existsSync(pythonAgentScript)) {
+    let pythonCmd = 'python';
+    const relativePaths = [
+      ['../.venv'],
+      ['../lecture-agent/.venv'],
+      ['.venv']
+    ];
+
+    for (const rel of relativePaths) {
+      const venvPython = process.platform === 'win32'
+        ? path.resolve(rootDir, ...rel, 'Scripts', 'python.exe')
+        : path.resolve(rootDir, ...rel, 'bin', 'python');
+
+      if (existsSync(venvPython)) {
+        pythonCmd = venvPython;
+        break;
+      }
+    }
+    return { execCmd: pythonCmd, execArgs: [pythonAgentScript] };
+  }
+
+  throw new Error(`Agent script not found at ${workspaceTsAgentScript}, ${siblingTsAgentScript} or ${pythonAgentScript}`);
+}
+
+function spawnAgentTask({ workspaceDir, sessionSlug, taskMessage, newSession = false, onStdout, onStderr }) {
+  const { execCmd, execArgs } = locateAgentScript();
+  const env = {
+    ...process.env,
+    AGENT_WORKSPACE: workspaceDir,
+    AGENT_SESSION_SLUG: sessionSlug,
+    DOTENVX_LOG_LEVEL: 'error',
+    DOTENV_LOG_LEVEL: 'error',
+    DOTENV_CONFIG_QUIET: 'true'
+  };
+  if (newSession) {
+    env.AGENT_NEW_SESSION = 'true';
+  }
+
+  let childProc = null;
+  let stdout = '';
+  let stderr = '';
+
+  const promise = new Promise((resolve, reject) => {
+    const child = spawn(execCmd, execArgs, {
+      cwd: workspaceDir,
+      stdio: ['pipe', 'pipe', 'pipe'],
+      windowsHide: true,
+      shell: true,
+      env
+    });
+    childProc = child;
+
+    child.stdin.write(taskMessage);
+    child.stdin.end();
+
+    child.stdout.on('data', chunk => {
+      const str = chunk.toString();
+      stdout += str;
+      if (typeof onStdout === 'function') onStdout(chunk, str);
+    });
+    child.stderr.on('data', chunk => {
+      const str = chunk.toString();
+      stderr += str;
+      if (typeof onStderr === 'function') onStderr(chunk, str);
+    });
+
+    child.on('error', reject);
+    child.on('close', code => {
+      if (code === 0) {
+        resolve(stdout.trim());
+      } else {
+        const output = `${stdout}\n${stderr}`
+          .split(/\r?\n/)
+          .map(line => line.trim())
+          .filter(Boolean)
+          .slice(-80)
+          .join('\n');
+        reject(new Error(output || `Agent exited with code ${code}`));
+      }
+    });
+  });
+
+  return {
+    promise,
+    kill: () => {
+      if (childProc) killProcessTree(childProc);
+    }
+  };
+}
+
+const PROMPT_INDEX_PREFIX = /^\s*\d+\s*[.)\]]\s+/;
+
+function parsePromptFile(buffer, filename = '') {
+  const text = Buffer.isBuffer(buffer) ? buffer.toString('utf8') : String(buffer || '');
+  return text
+    .split(/\r?\n/)
+    .map(line => line.replace(PROMPT_INDEX_PREFIX, '').trim())
+    .filter(line => line && !line.startsWith('#'));
+}
+
+function parseRangeList(rangeText, total) {
+  const trimmed = String(rangeText || '').trim();
+  if (!trimmed || trimmed.toLowerCase() === 'all') {
+    return Array.from({ length: total }, (_, i) => i);
+  }
+
+  const indices = new Set();
+  let hadValidToken = false;
+
+  for (const token of trimmed.split(',')) {
+    const part = token.trim();
+    if (!part) continue;
+
+    const rangeMatch = part.match(/^(\d+)\s*-\s*(\d+)$/);
+    if (rangeMatch) {
+      hadValidToken = true;
+      let start = Math.max(1, Math.min(parseInt(rangeMatch[1], 10), total));
+      let end = Math.max(1, Math.min(parseInt(rangeMatch[2], 10), total));
+      if (start > end) [start, end] = [end, start];
+      for (let n = start; n <= end; n++) {
+        indices.add(n - 1);
+      }
+    } else if (/^\d+$/.test(part)) {
+      hadValidToken = true;
+      indices.add(Math.max(1, Math.min(parseInt(part, 10), total)) - 1);
+    }
+  }
+
+  if (!hadValidToken) {
+    return Array.from({ length: total }, (_, i) => i);
+  }
+
+  return [...indices].sort((a, b) => a - b);
+}
+
+function createBatchItemWorkspace(promptText) {
+  const baseDir = getOutputsDir();
   mkdirSync(baseDir, { recursive: true });
 
-  const now = new Date();
-  const pad = (num) => String(num).padStart(2, '0');
-  const hh = pad(now.getHours());
-  const min = pad(now.getMinutes());
-  const ss = pad(now.getSeconds());
-  const dd = pad(now.getDate());
-  const mm = pad(now.getMonth() + 1);
-  const yyyy = now.getFullYear();
+  const promptSlug = slugFromPrompt(promptText);
   const randomSuffix = Math.random().toString(36).substring(2, 8);
-  const folderName = `${hh}-${min}-${ss}-${dd}-${mm}-${yyyy}-${randomSuffix}`;
+  const folderName = `${promptSlug}-${randomSuffix}`;
+  const folderPath = path.resolve(baseDir, folderName);
+
+  mkdirSync(folderPath, { recursive: true });
+  return { folderPath, sessionSlug: promptSlug };
+}
+
+function buildBatchTaskMessage(promptText, options = {}) {
+  const aspectRatio = options.aspectRatio || '16:9';
+  const generationLength = options.generationLength || '1:00';
+  const embedSubtitle = options.embedSubtitle || 'no';
+  const lines = [
+    String(promptText || '').trim(),
+    '',
+    'if the user query is for video generation then follow this:',
+    `aspect ratio: ${aspectRatio}`,
+    `generation length: ${generationLength}`,
+    `embed subtitle in video: ${embedSubtitle}`
+  ];
+  if (options.profileContent) {
+    lines.push(`profile: ${options.profileContent}`);
+  }
+  return lines.join('\n');
+}
+
+function parseTruthyFlag(value) {
+  const text = String(value || '').trim().toLowerCase();
+  return text === '1' || text === 'true' || text === 'yes';
+}
+
+function batchStatusPayload(batch) {
+  const logLines = String(batch.activeLog || '')
+    .split(/\r?\n/)
+    .filter(Boolean);
+  return {
+    ok: true,
+    batchId: batch.id,
+    status: batch.status,
+    activeLogTail: logLines.slice(-40).join('\n'),
+    items: batch.items.map(item => ({
+      id: item.id,
+      prompt: item.prompt,
+      slug: item.slug,
+      status: item.status,
+      folder: item.folder ? toViewerPath(item.folder) : '',
+      indexPath: item.indexPath ? toViewerPath(item.indexPath) : '',
+      resolvedPath: item.resolvedPath ? toViewerPath(item.resolvedPath) : '',
+      error: item.error || ''
+    }))
+  };
+}
+
+async function runBatchJob(batchId, prompts, options) {
+  const batch = batchJobs.get(batchId);
+  if (!batch) return;
+
+  batch.status = 'running';
+  batch.activeLog = '';
+
+  try {
+    for (let index = 0; index < batch.items.length; index++) {
+      if (batch.aborted) {
+        for (let remaining = index; remaining < batch.items.length; remaining++) {
+          if (batch.items[remaining].status === 'pending') {
+            batch.items[remaining].status = 'cancelled';
+          }
+        }
+        break;
+      }
+
+      const item = batch.items[index];
+      const prompt = prompts[index];
+      item.status = 'generating';
+      batch.activeLog = '';
+
+      const { folderPath, sessionSlug } = createBatchItemWorkspace(prompt);
+      item.folder = folderPath;
+      item.slug = sessionSlug;
+
+      const taskMessage = buildBatchTaskMessage(prompt, options);
+
+      try {
+        const { promise, kill } = spawnAgentTask({
+          workspaceDir: folderPath,
+          sessionSlug,
+          taskMessage,
+          newSession: true,
+          onStdout: (chunk, str) => {
+            batch.activeLog += str;
+            process.stdout.write(chunk);
+          },
+          onStderr: (chunk, str) => {
+            batch.activeLog += str;
+            process.stderr.write(chunk);
+          }
+        });
+        batch.currentKill = kill;
+
+        await promise;
+        batch.currentKill = null;
+
+        if (batch.aborted) {
+          item.status = 'cancelled';
+          continue;
+        }
+
+        const indexFiles = readdirSync(folderPath)
+          .filter(name => isIndexHtmlName(name))
+          .sort((a, b) => a.localeCompare(b, undefined, { numeric: true, sensitivity: 'base' }));
+        item.indexPath = indexFiles.length > 0 ? path.join(folderPath, indexFiles[0]) : '';
+
+        if (options.resolve && item.indexPath) {
+          item.status = 'resolving';
+          const syntheticState = { pipelineJob: null };
+          batch.currentKill = () => {
+            if (syntheticState.pipelineJob) syntheticState.pipelineJob.kill();
+          };
+
+          try {
+            item.resolvedPath = await resolveLectureFile(toViewerPath(item.indexPath), {
+              ttsVoice: options.ttsVoice,
+              ttsSpeed: options.ttsSpeed,
+              currentOnly: true,
+              agentState: syntheticState
+            });
+            item.status = 'done';
+          } catch (resolveError) {
+            item.status = 'done';
+            item.error = resolveError.message;
+          } finally {
+            batch.currentKill = null;
+          }
+        } else if (options.resolve && !item.indexPath) {
+          item.status = 'done';
+          item.error = 'No index*.html generated';
+        } else {
+          item.status = 'done';
+        }
+      } catch (agentError) {
+        batch.currentKill = null;
+        if (batch.aborted) {
+          item.status = 'cancelled';
+        } else {
+          item.status = 'error';
+          item.error = agentError.message;
+        }
+      }
+    }
+  } catch (error) {
+    batch.fatalError = error.message;
+  } finally {
+    batch.status = batch.aborted ? 'aborted' : 'done';
+    batch.currentKill = null;
+  }
+}
+
+function createNewSessionWorkspace(agentClientId = 'default', promptText = '') {
+  const state = getAgentState(agentClientId);
+  const baseDir = getOutputsDir();
+  mkdirSync(baseDir, { recursive: true });
+
+  const promptSlug = slugFromPrompt(promptText);
+  const randomSuffix = Math.random().toString(36).substring(2, 8);
+  const folderName = `${promptSlug}-${randomSuffix}`;
   const folderPath = path.resolve(baseDir, folderName);
 
   mkdirSync(folderPath, { recursive: true });
 
   state.currentWorkspace = folderPath;
+  state.sessionSlug = promptSlug;
   console.log(`[Session] Created new session folder: ${folderPath}`);
   return folderPath;
 }
@@ -329,8 +753,12 @@ function listFolderFiles(filePath) {
   };
 }
 
-// Default file browser location prefers the coding agent output folder when present.
+// Default file browser location prefers outputs/ or the active session folder.
 function defaultBrowserFolder() {
+  const outputsDir = getOutputsDir();
+  if (existsSync(outputsDir) && statSync(outputsDir).isDirectory()) {
+    return outputsDir;
+  }
   const workspaceTargetPath = getAgentWorkspaceDir();
   if (existsSync(workspaceTargetPath) && statSync(workspaceTargetPath).isDirectory()) {
     return workspaceTargetPath;
@@ -540,12 +968,17 @@ function siblingPath(filePath, name) {
 
 function defaultOutputPath(filePath) {
   const basename = path.basename(filePath);
-  const match = basename.match(/^(?:index|resolved)(.*)\.html$/i);
-  return siblingPath(filePath, `rendered${match?.[1] || ''}.mp4`);
+  const match = basename.match(/^(?:index|resolved)(\d+)\.html$/i);
+  const sceneNum = match?.[1];
+  const base = descriptiveBaseName(filePath);
+  const folderPath = path.dirname(resolveInputPath(filePath));
+  const sceneCount = readdirSync(folderPath).filter(name => isIndexHtmlName(name) || isResolvedHtmlName(name)).length;
+  const fileName = sceneNum && sceneCount > 1 ? `${base}-${sceneNum}.mp4` : `${base}.mp4`;
+  return siblingPath(filePath, fileName);
 }
 
 function finalBatchOutputPath(filePath) {
-  return siblingPath(filePath, 'rendered.mp4');
+  return siblingPath(filePath, `${descriptiveBaseName(filePath)}.mp4`);
 }
 
 // Scene naming conventions drive resolve/render batching.
@@ -655,6 +1088,7 @@ function killProcessTree(childProc) {
 async function resolveLectureFile(filePath, options = {}) {
   const inputPath = resolveInputPath(filePath);
   const folderPath = path.dirname(inputPath);
+  const agentState = options.agentState || null;
 
   if (!isIndexHtmlName(path.basename(inputPath))) {
     throw new Error('Resolve is only available for index*.html files.');
@@ -679,12 +1113,13 @@ async function resolveLectureFile(filePath, options = {}) {
     const fileOutPath = resolvedSiblingPathForIndex(fileInputPath);
 
     let childProc = null;
-    activeJob = {
+    const job = {
       type: 'resolve',
       outPath: fileOutPath,
       inputPath: fileInputPath,
+      aborted: false,
       kill: () => {
-        activeJob.aborted = true;
+        job.aborted = true;
         if (childProc) {
           if (process.platform === 'win32') {
             spawn('taskkill', ['/pid', childProc.pid, '/f', '/t'], { windowsHide: true });
@@ -694,6 +1129,7 @@ async function resolveLectureFile(filePath, options = {}) {
         }
       }
     };
+    if (agentState) agentState.pipelineJob = job;
 
     try {
       console.log(`Resolving scene: ${file} -> ${path.basename(fileOutPath)}`);
@@ -725,12 +1161,14 @@ async function resolveLectureFile(filePath, options = {}) {
           console.error(`Failed to delete partial resolve file: ${err.message}`);
         }
       }
-      if (activeJob && activeJob.aborted) {
+      if (job.aborted) {
         throw new Error('Process stopped by user');
       }
       throw error;
     } finally {
-      activeJob = null;
+      if (agentState && agentState.pipelineJob === job) {
+        agentState.pipelineJob = null;
+      }
     }
   }
 
@@ -919,6 +1357,7 @@ function deleteIntermediateSceneRenders(sceneOutputs, finalOutputPath) {
 async function renderLectureFile(filePath, options = {}, job = createRenderJob()) {
   const inputPath = resolveInputPath(filePath);
   const basename = path.basename(inputPath);
+  const agentState = options.agentState || null;
   if (!isIndexHtmlName(basename) && !isResolvedHtmlName(basename)) {
     throw new Error('Render is only available for index*.html or resolved*.html files.');
   }
@@ -936,6 +1375,7 @@ async function renderLectureFile(filePath, options = {}, job = createRenderJob()
   let childProc = null;
   job.outPath = outPath;
   job.inputPath = inputPath;
+  if (agentState) agentState.pipelineJob = job;
 
   try {
     await runCapture(process.execPath, ['--import', 'tsx', ...renderArgs], {
@@ -962,11 +1402,15 @@ async function renderLectureFile(filePath, options = {}, job = createRenderJob()
   } finally {
     if (childProc) job.childProcs.delete(childProc);
     rmSync(path.dirname(framesDir), { recursive: true, force: true });
+    if (agentState && agentState.pipelineJob === job) {
+      agentState.pipelineJob = null;
+    }
   }
 }
 
 // Resolve and render multiple scenes, then concatenate them into one final MP4.
 async function renderLectureBatch(inputPath, sceneFiles, options = {}, job = createRenderJob()) {
+  const agentState = options.agentState || null;
   const batchId = `${Date.now()}-${Math.random().toString(16).slice(2)}`;
   const tempDir = path.resolve(rootDir, '.render', 'batch-render', batchId);
   const outputPath = finalBatchOutputPath(inputPath);
@@ -977,6 +1421,7 @@ async function renderLectureBatch(inputPath, sceneFiles, options = {}, job = cre
   mkdirSync(tempDir, { recursive: true });
   job.outPath = outputPath;
   job.inputPath = inputPath;
+  if (agentState) agentState.pipelineJob = job;
 
   try {
     if (isIndexHtmlName(path.basename(inputPath))) {
@@ -1074,6 +1519,9 @@ async function renderLectureBatch(inputPath, sceneFiles, options = {}, job = cre
     throw error;
   } finally {
     rmSync(tempDir, { recursive: true, force: true });
+    if (agentState && agentState.pipelineJob === job) {
+      agentState.pipelineJob = null;
+    }
   }
 }
 
@@ -1251,7 +1699,7 @@ async function pickHtmlFile() {
   return normalizeOpenPath(resolvedPath);
 }
 
-// Server-wide state tracks the selected file, preview size, and active background job.
+// Server-wide state tracks the default selected file and preview size (CLI / legacy).
 const args = parseArgs(process.argv.slice(2));
 let activeJob = null;
 const maxParallelRenderJobs = envPositiveInteger('RENDER_MAX_PARALLEL', 1);
@@ -1267,6 +1715,19 @@ const viewerState = {
   width: args.width,
   height: args.height
 };
+
+function getClientViewerState(agentClientId) {
+  const state = getAgentState(agentClientId);
+  if (!state.viewerState) {
+    state.viewerState = {
+      version: 0,
+      path: args.openPath,
+      width: args.width,
+      height: args.height
+    };
+  }
+  return state.viewerState;
+}
 
 // If another IDE server is already running, pass the selected file to it instead.
 async function pushFileToExistingViewer(args) {
@@ -1319,12 +1780,14 @@ const server = createServer(async (request, response) => {
   // Lightweight polling endpoint used by the UI to detect selected-file changes.
   if (requestUrl.pathname === '/viewer-state') {
     const since = Number(requestUrl.searchParams.get('since')) || 0;
+    const clientId = requestUrl.searchParams.get('agentClientId');
+    const state = clientId ? getClientViewerState(clientId) : viewerState;
     sendJson(response, 200, {
-      changed: viewerState.version > since,
-      version: viewerState.version,
-      path: viewerState.path,
-      width: viewerState.width,
-      height: viewerState.height
+      changed: state.version > since,
+      version: state.version,
+      path: state.path,
+      width: state.width,
+      height: state.height
     });
     return;
   }
@@ -1401,12 +1864,17 @@ const server = createServer(async (request, response) => {
     try {
       const requestedPath = requestUrl.searchParams.get('file') || '';
       if (!requestedPath) throw new Error('Missing file path.');
+      const agentState = getAgentState(requestUrl.searchParams.get('agentClientId'));
       const resolvedPath = await resolveLectureFile(requestedPath, {
         ttsVoice: requestUrl.searchParams.get('ttsVoice'),
         ttsSpeed: requestUrl.searchParams.get('ttsSpeed'),
-        currentOnly: requestUrl.searchParams.get('currentOnly') === '1'
+        currentOnly: requestUrl.searchParams.get('currentOnly') === '1',
+        agentState
       });
 
+      const clientViewer = getClientViewerState(agentState.id);
+      clientViewer.version++;
+      clientViewer.path = resolvedPath;
       sendJson(response, 200, {
         ok: true,
         path: resolvedPath,
@@ -1423,12 +1891,14 @@ const server = createServer(async (request, response) => {
     try {
       const requestedPath = requestUrl.searchParams.get('file') || '';
       if (!requestedPath) throw new Error('Missing file path.');
+      const agentState = getAgentState(requestUrl.searchParams.get('agentClientId'));
       const outputPath = await enqueueRenderJob((job) => renderLectureFile(requestedPath, {
         ttsVoice: requestUrl.searchParams.get('ttsVoice'),
         ttsSpeed: requestUrl.searchParams.get('ttsSpeed'),
         fps: requestUrl.searchParams.get('fps'),
         width: requestUrl.searchParams.get('width'),
-        height: requestUrl.searchParams.get('height')
+        height: requestUrl.searchParams.get('height'),
+        agentState
       }, job));
 
       sendJson(response, 200, {
@@ -1442,13 +1912,19 @@ const server = createServer(async (request, response) => {
     return;
   }
 
-  // Stop the active long-running resolve, render, agent, or publish job.
+  // Stop the active long-running resolve, render, agent, or publish job for this tab.
   if (requestUrl.pathname === '/stop-job') {
     try {
       const agentState = getAgentState(requestUrl.searchParams.get('agentClientId'));
       if (agentState.activeJob) {
         const type = agentState.activeJob.type;
         agentState.activeJob.kill();
+        sendJson(response, 200, { ok: true, stopped: true, type, message: `Stopped ${type} job successfully` });
+        return;
+      }
+      if (agentState.pipelineJob) {
+        const type = agentState.pipelineJob.type;
+        agentState.pipelineJob.kill();
         sendJson(response, 200, { ok: true, stopped: true, type, message: `Stopped ${type} job successfully` });
         return;
       }
@@ -1461,10 +1937,7 @@ const server = createServer(async (request, response) => {
         sendJson(response, 200, { ok: true, stopped: false, message: 'No active job' });
         return;
       }
-
-      const type = activeJob.type;
-      activeJob.kill();
-      sendJson(response, 200, { ok: true, stopped: true, type, message: `Stopped ${type} job successfully` });
+      sendJson(response, 200, { ok: true, stopped: false, message: 'No active job' });
     } catch (error) {
       sendJson(response, 500, { error: error.message });
     }
@@ -1483,6 +1956,7 @@ const server = createServer(async (request, response) => {
       }
       agentState.log = '';
       agentState.currentWorkspace = '';
+      agentState.sessionSlug = '';
       agentState.pendingNewSession = true;
       agentState.session = null;
       sendJson(response, 200, { ok: true });
@@ -1540,13 +2014,40 @@ const server = createServer(async (request, response) => {
             return;
           }
 
-          if (agentState.pendingNewSession || !agentState.currentWorkspace) {
-            createNewSessionWorkspace(agentState.id);
+          const outputsDir = getOutputsDir();
+          const openFile = currentFile ? resolveInputPath(currentFile) : '';
+          const openFileExists = !!(openFile && existsSync(openFile) && statSync(openFile).isFile());
+          const openDir = openFileExists ? path.dirname(openFile) : '';
+          const openUnderOutputs = !!(openDir && (path.resolve(openDir) === outputsDir || openDir.startsWith(outputsDir + path.sep)));
+
+          const oldWorkspace = agentState.currentWorkspace;
+          let workspaceDir;
+          if (openUnderOutputs) {
+            workspaceDir = openDir;
+            agentState.currentWorkspace = workspaceDir;
+            agentState.sessionSlug = folderSlugFromPath(openFile);
             agentState.pendingNewSession = false;
+          } else if (agentState.pendingNewSession || !agentState.currentWorkspace) {
+            workspaceDir = createNewSessionWorkspace(agentState.id, message);
+            agentState.pendingNewSession = false;
+          } else {
+            workspaceDir = agentWorkspaceRoot(agentState.id);
           }
 
+          if (oldWorkspace && oldWorkspace !== agentState.currentWorkspace) {
+            agentState.session = null;
+          }
+
+          const sessionSlug = agentState.sessionSlug || slugFromPrompt(message);
+
           let task = '';
-          if (currentFile) {
+          if (openFileExists) {
+            const contextOpenFile = openDir && workspaceDir !== openDir
+              ? path.join(workspaceDir, path.relative(openDir, openFile))
+              : openFile;
+            const relPath = path.relative(workspaceDir, contextOpenFile).replaceAll(path.sep, '/') || path.basename(openFile);
+            task += `[Context: The user is currently viewing the file "${relPath}" in the editor. Use this as the target file if they refer to "this file", "the script", "the code", or "the HTML".]\n\n`;
+          } else if (currentFile) {
             const relPath = path.relative(rootDir, resolveInputPath(currentFile)).replaceAll(path.sep, '/');
             task += `[Context: The user is currently viewing the file "${relPath}" in the editor. Use this as the target file if they refer to "this file", "the script", "the code", or "the HTML".]\n\n`;
           }
@@ -1563,7 +2064,7 @@ const server = createServer(async (request, response) => {
           if (!agentState.session) {
             const agent = new LectureAgent({
               model: payload.model || process.env.AGENT_MODEL || "gemini-3.5-flash",
-              workspaceDir: agentWorkspaceRoot(agentState.id),
+              workspaceDir,
               enableGetimgTool,
               onLog: (text) => {
                 agentState.log += text;
@@ -1601,7 +2102,7 @@ const server = createServer(async (request, response) => {
           };
           agentState.activeJob = activeAgentJob;
 
-          console.log(`Starting in-process agent execution in: ${agentWorkspaceRoot(agentState.id)}`);
+          console.log(`Starting in-process agent execution in: ${workspaceDir}`);
 
           (async () => {
             try {
@@ -1613,7 +2114,19 @@ const server = createServer(async (request, response) => {
                 return;
               }
               if (!response.writableEnded) {
-                sendJson(response, 200, { ok: true, output: responseText.trim(), workspace: agentWorkspaceRoot(agentState.id) });
+                let indexPath = '';
+                if (existsSync(workspaceDir) && statSync(workspaceDir).isDirectory()) {
+                  const indexFiles = readdirSync(workspaceDir)
+                    .filter(name => isIndexHtmlName(name))
+                    .sort((a, b) => a.localeCompare(b, undefined, { numeric: true, sensitivity: 'base' }));
+                  indexPath = indexFiles.length > 0 ? toViewerPath(path.join(workspaceDir, indexFiles[0])) : '';
+                }
+                sendJson(response, 200, {
+                  ok: true,
+                  output: responseText.trim(),
+                  workspace: toViewerPath(workspaceDir),
+                  indexPath
+                });
               }
             } catch (err: any) {
               if (agentState.activeJob === activeAgentJob) {
@@ -1674,6 +2187,7 @@ const server = createServer(async (request, response) => {
       request.on('end', async () => {
         try {
           const payload = JSON.parse(bodyData || '{}');
+          const agentState = getAgentState(payload.agentClientId || requestUrl.searchParams.get('agentClientId'));
           
           const course = payload.course || '';
           const slug = payload.slug || '';
@@ -1727,13 +2241,15 @@ const server = createServer(async (request, response) => {
           let stderr = '';
           let childProc = null;
 
-          activeJob = {
+          const job = {
             type: 'publish',
+            aborted: false,
             kill: () => {
-              activeJob.aborted = true;
+              job.aborted = true;
               if (childProc) killProcessTree(childProc);
             }
           };
+          agentState.pipelineJob = job;
 
           const child = spawn('node', args, {
             cwd: websiteDir,
@@ -1758,15 +2274,22 @@ const server = createServer(async (request, response) => {
             console.error(str.trim());
           });
 
+          let responded = false;
+          const respondOnce = (status, body) => {
+            if (responded) return;
+            responded = true;
+            sendJson(response, status, body);
+          };
+
           child.on('error', err => {
-            activeJob = null;
-            sendJson(response, 500, { error: err.message });
+            if (agentState.pipelineJob === job) agentState.pipelineJob = null;
+            respondOnce(500, { error: err.message });
           });
 
           child.on('close', code => {
-            activeJob = null;
+            if (agentState.pipelineJob === job) agentState.pipelineJob = null;
             if (code === 0) {
-              sendJson(response, 200, { ok: true, output: stdout.trim() });
+              respondOnce(200, { ok: true, output: stdout.trim() });
             } else {
               const output = `${stdout}\n${stderr}`
                 .split(/\r?\n/)
@@ -1774,7 +2297,7 @@ const server = createServer(async (request, response) => {
                 .filter(Boolean)
                 .slice(-80)
                 .join('\n');
-              sendJson(response, 500, { error: output || `Publish exited with code ${code}` });
+              respondOnce(500, { error: output || `Publish exited with code ${code}` });
             }
           });
 
@@ -1792,6 +2315,143 @@ const server = createServer(async (request, response) => {
   if (requestUrl.pathname === '/agent-log') {
     const agentState = getAgentState(requestUrl.searchParams.get('agentClientId'));
     sendJson(response, 200, { log: agentState.log });
+    return;
+  }
+
+  if (requestUrl.pathname === '/agent-batch') {
+    try {
+      if (request.method !== 'POST') {
+        sendJson(response, 405, { error: 'Method not allowed' });
+        return;
+      }
+
+      const contentType = request.headers['content-type'] || '';
+      if (!String(contentType).toLowerCase().startsWith('multipart/form-data')) {
+        sendJson(response, 400, { error: 'Upload must use multipart/form-data.' });
+        return;
+      }
+
+      const body = await receiveRequestBody(request);
+      const parts = parseMultipartFormData(contentType, body);
+      const fields = {};
+      let filePart = null;
+
+      for (const part of parts) {
+        if (part.name === 'file' && part.filename) {
+          filePart = part;
+        } else if (part.name) {
+          fields[part.name] = part.data.toString('utf8');
+        }
+      }
+
+      if (!filePart) {
+        sendJson(response, 400, { error: 'Missing prompt file.' });
+        return;
+      }
+
+      const prompts = parsePromptFile(filePart.data, filePart.filename);
+      const selectedIndices = parseRangeList(String(fields.range || ''), prompts.length);
+      const selectedPrompts = selectedIndices.map(i => prompts[i]);
+      if (prompts.length === 0 || selectedPrompts.length === 0) {
+        sendJson(response, 400, { error: 'No prompts found in file.' });
+        return;
+      }
+
+      const batchId = `${Date.now()}-${Math.random().toString(16).slice(2, 8)}`;
+      const options = {
+        profileContent: String(fields.profileContent || '').trim(),
+        aspectRatio: String(fields.aspectRatio || '16:9').trim() || '16:9',
+        generationLength: String(fields.generationLength || '1:00').trim() || '1:00',
+        embedSubtitle: String(fields.embedSubtitle || 'no').trim().toLowerCase() === 'yes' ? 'yes' : 'no',
+        ttsVoice: normalizeTtsVoice(fields.ttsVoice),
+        ttsSpeed: normalizeTtsSpeed(fields.ttsSpeed),
+        resolve: parseTruthyFlag(fields.resolve)
+      };
+
+      const batch = {
+        id: batchId,
+        status: 'running',
+        aborted: false,
+        activeLog: '',
+        currentKill: null,
+        items: selectedPrompts.map((prompt, index) => ({
+          id: `${batchId}-${index + 1}`,
+          prompt,
+          slug: slugFromPrompt(prompt),
+          status: 'pending',
+          folder: '',
+          indexPath: '',
+          resolvedPath: '',
+          error: ''
+        }))
+      };
+      batchJobs.set(batchId, batch);
+
+      runBatchJob(batchId, selectedPrompts, options).catch(error => {
+        const job = batchJobs.get(batchId);
+        if (job) {
+          job.fatalError = error.message;
+          job.status = job.aborted ? 'aborted' : 'done';
+        }
+      });
+
+      sendJson(response, 200, {
+        ok: true,
+        batchId,
+        originalCount: prompts.length,
+        selectedCount: selectedPrompts.length,
+        items: batch.items.map(item => ({
+          id: item.id,
+          prompt: item.prompt,
+          slug: item.slug,
+          status: item.status,
+          folder: '',
+          resolvedPath: '',
+          error: ''
+        }))
+      });
+    } catch (error) {
+      sendJson(response, 400, { error: error.message });
+    }
+    return;
+  }
+
+  if (requestUrl.pathname === '/agent-batch-status') {
+    const batchId = requestUrl.searchParams.get('batchId')
+      || requestUrl.searchParams.get('batchClientId')
+      || '';
+    const batch = batchJobs.get(batchId);
+    if (!batch) {
+      sendJson(response, 404, { error: 'Unknown batch job.' });
+      return;
+    }
+    sendJson(response, 200, batchStatusPayload(batch));
+    return;
+  }
+
+  if (requestUrl.pathname === '/agent-batch-stop') {
+    try {
+      if (request.method !== 'POST') {
+        sendJson(response, 405, { error: 'Method not allowed' });
+        return;
+      }
+      const batchId = requestUrl.searchParams.get('batchClientId')
+        || requestUrl.searchParams.get('batchId')
+        || '';
+      const batch = batchJobs.get(batchId);
+      if (batch) {
+        batch.aborted = true;
+        if (typeof batch.currentKill === 'function') {
+          batch.currentKill();
+        }
+        if (batch.status === 'running') {
+          batch.status = 'aborted';
+        }
+      }
+      sendJson(response, 200, { ok: true });
+    } catch (error) {
+      sendJson(response, 500, { error: error.message });
+    }
     return;
   }
 

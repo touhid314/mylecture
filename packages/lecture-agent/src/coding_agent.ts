@@ -417,12 +417,33 @@ function extract_gemini_text(response: any): string {
     return chunks.join("\n").trim();
 }
 
+const INPUT_USD_PER_MILLION = 1.5;
+const CACHED_INPUT_USD_PER_MILLION = 0.15;
+const OUTPUT_USD_PER_MILLION = 9;
+
 function numeric_token_count(value: any): number | null {
     return typeof value === 'number' && Number.isFinite(value) ? value : null;
 }
 
-function format_token_totals(inputTokens: number, outputTokens: number): string {
-    return `ip=${inputTokens} op=${outputTokens}`;
+function estimate_token_cost_usd(inputTokens: number, outputTokens: number, cachedTokens: number = 0): number {
+    const billableInputTokens = Math.max(inputTokens - cachedTokens, 0);
+    return (
+        billableInputTokens * INPUT_USD_PER_MILLION +
+        cachedTokens * CACHED_INPUT_USD_PER_MILLION +
+        outputTokens * OUTPUT_USD_PER_MILLION
+    ) / 1_000_000;
+}
+
+function format_estimated_cost_usd(inputTokens: number, outputTokens: number, cachedTokens: number = 0): string {
+    const usd = estimate_token_cost_usd(inputTokens, outputTokens, cachedTokens);
+    if (usd >= 1) {
+        return `cost=$${usd.toFixed(2)}`;
+    }
+    return `cost=$${usd.toFixed(4)}`;
+}
+
+function format_token_totals(inputTokens: number, outputTokens: number, cachedTokens: number = 0): string {
+    return `ip=${inputTokens} op=${outputTokens} cache=${cachedTokens} ${format_estimated_cost_usd(inputTokens, outputTokens, cachedTokens)}`;
 }
 
 function gemini_output_token_count(usage: any): number | null {
@@ -451,6 +472,14 @@ function gemini_input_token_count(usage: any): number | null {
     return (prompt || 0) + toolUsePrompt;
 }
 
+function gemini_cached_token_count(usage: any): number | null {
+    if (!usage) {
+        return null;
+    }
+    return numeric_token_count(usage.cachedContentTokenCount)
+        ?? numeric_token_count(usage.cached_content_token_count);
+}
+
 export class GeminiAgentSession {
     private model: string;
     private client: GoogleGenAI;
@@ -459,6 +488,7 @@ export class GeminiAgentSession {
     private userTasks: string[];
     private totalInputTokens: number;
     private totalOutputTokens: number;
+    private totalCachedTokens: number;
     private workspaceDir: string;
     private toolOptions: ToolRuntimeOptions;
 
@@ -493,6 +523,7 @@ export class GeminiAgentSession {
         }
         this.totalInputTokens = 0;
         this.totalOutputTokens = 0;
+        this.totalCachedTokens = 0;
         print_detail("workspace", workspaceDir, Color.BLUE);
         print_detail("tool mode", "native Gemini function calling", Color.BLUE);
         if (skills && skills.length > 0) {
@@ -527,8 +558,13 @@ export class GeminiAgentSession {
         };
     }
 
-    private record_token_usage(inputTokens: number | null, outputTokens: number | null): void {
+    private record_token_usage(
+        inputTokens: number | null,
+        outputTokens: number | null,
+        cachedTokens: number | null
+    ): void {
         const parts: string[] = [];
+        const cachedForCost = cachedTokens ?? 0;
 
         if (inputTokens !== null) {
             this.totalInputTokens += inputTokens;
@@ -544,8 +580,23 @@ export class GeminiAgentSession {
             parts.push("output=unavailable");
         }
 
+        if (cachedTokens !== null) {
+            this.totalCachedTokens += cachedTokens;
+            parts.push(`cached=${cachedTokens}`);
+        } else {
+            parts.push("cached=0");
+        }
+
+        if (inputTokens !== null || outputTokens !== null) {
+            parts.push(format_estimated_cost_usd(inputTokens ?? 0, outputTokens ?? 0, cachedForCost));
+        }
+
         print_detail("tokens", parts.join(" "), Color.DIM);
-        print_detail("token totals", format_token_totals(this.totalInputTokens, this.totalOutputTokens), Color.DIM);
+        print_detail(
+            "token totals",
+            format_token_totals(this.totalInputTokens, this.totalOutputTokens, this.totalCachedTokens),
+            Color.DIM
+        );
     }
 
     private async generate_sanitized_final_response(): Promise<string> {
@@ -602,7 +653,8 @@ export class GeminiAgentSession {
                 const usage = response.usageMetadata;
                 const input_tokens = gemini_input_token_count(usage);
                 const output_tokens = gemini_output_token_count(usage);
-                this.record_token_usage(input_tokens, output_tokens);
+                const cached_tokens = gemini_cached_token_count(usage);
+                this.record_token_usage(input_tokens, output_tokens, cached_tokens);
                 const function_calls = extract_gemini_function_calls(response);
 
                 if (function_calls.length === 0) {
@@ -842,14 +894,7 @@ function compact_gemini_turn(contents: any[]): void {
     for (const msg of contents) {
         if (!msg || !msg.parts) continue;
         for (const part of msg.parts) {
-            if (part.functionCall) {
-                const name = part.functionCall.name;
-                const id = part.functionCall.id || "";
-                const key = `${name}:${id}`;
-                const args = callArgsMap.get(key) || part.functionCall.args || {};
-                const { compactedArgs } = compact_tool_history(name, args, "");
-                part.functionCall.args = compactedArgs;
-            } else if (part.functionResponse) {
+            if (part.functionResponse) {
                 const name = part.functionResponse.name;
                 const id = part.functionResponse.id || "";
                 const key = `${name}:${id}`;
@@ -865,12 +910,7 @@ function compact_gemini_turn(contents: any[]): void {
 
 function compact_fallback_turn(transcript: any[]): void {
     for (const entry of transcript) {
-        if (entry.model_response && entry.model_response.tool) {
-            const name = entry.model_response.tool;
-            const args = entry.model_response.arguments || {};
-            const { compactedArgs } = compact_tool_history(name, args, "");
-            entry.model_response.arguments = compactedArgs;
-        } else if (entry.tool) {
+        if (entry.tool) {
             const name = entry.tool;
             const args = entry.arguments || {};
             const rawResult = entry.result || "";

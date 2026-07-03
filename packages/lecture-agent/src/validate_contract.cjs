@@ -374,6 +374,140 @@ async function validateWithPlaywright(htmlPath) {
       ];
     }
 
+    if (errors.length === 0) {
+      try {
+        const layoutResult = await page.evaluate(async () => {
+          const errors = [];
+          const warnings = [];
+          
+          const plan = window.__VIDEO_PLAN__;
+          const render = window.__RENDER_SECTION__;
+          if (!Array.isArray(plan) || typeof render !== 'function') {
+            return { errors, warnings };
+          }
+          
+          const W = window.innerWidth;
+          const H = window.innerHeight;
+          const isMobile = (W / H) < 0.7;
+          
+          function isVisible(el) {
+            const rect = el.getBoundingClientRect();
+            if (rect.width <= 0 || rect.height <= 0) return false;
+            const style = window.getComputedStyle(el);
+            if (style.display === 'none' || style.visibility === 'hidden' || parseFloat(style.opacity) === 0) return false;
+            return true;
+          }
+          
+          function isBackground(el) {
+            let current = el;
+            while (current) {
+              const id = (current.id || '').toLowerCase();
+              const className = (current.className || '');
+              const classStr = typeof className === 'string' ? className.toLowerCase() : '';
+              if (
+                id.includes('background') || id.includes('bg-') || id.includes('decor') || id.includes('watermark') ||
+                classStr.includes('background') || classStr.includes('bg-') || classStr.includes('decor') || classStr.includes('watermark')
+              ) {
+                return true;
+              }
+              const style = window.getComputedStyle(current);
+              if (parseInt(style.zIndex, 10) < 0) {
+                return true;
+              }
+              current = current.parentElement;
+            }
+            return false;
+          }
+
+          function hasDirectText(el) {
+            return Array.from(el.childNodes).some(node => {
+              return node.nodeType === Node.TEXT_NODE && node.nodeValue.trim().length > 0;
+            });
+          }
+          
+          function checkCurrentLayout(segmentId) {
+            const elements = Array.from(document.querySelectorAll('body *'));
+            const leafContentElements = [];
+            
+            for (const el of elements) {
+              if (!isVisible(el)) continue;
+              
+              const tag = el.tagName.toLowerCase();
+              const isVisual = ['img', 'canvas', 'video', 'svg', 'code', 'pre', 'button', 'input'].includes(tag);
+              const isText = hasDirectText(el);
+              
+              if (isVisual || isText) {
+                leafContentElements.push({
+                  el,
+                  tag,
+                  isText,
+                  isVisual,
+                  isBg: isBackground(el),
+                  rect: el.getBoundingClientRect(),
+                  text: el.innerText ? el.innerText.trim().substring(0, 30) : ''
+                });
+              }
+            }
+            
+            // 1. Check for Viewport Overflow
+            for (const item of leafContentElements) {
+              if (item.isBg) continue;
+              
+              if (item.rect.left < -3 || item.rect.right > W + 3) {
+                const desc = item.isText ? `text "${item.text}"` : `<${item.tag}>`;
+                errors.push(`[Segment: ${segmentId}] Content overflows screen horizontally: ${desc} (left: ${item.rect.left.toFixed(0)}, right: ${item.rect.right.toFixed(0)}, screen width: ${W})`);
+              }
+            }
+            
+            // 2. Safe Zone Violations (only for mobile 9:16 aspect ratio)
+            if (isMobile) {
+              const topSafeLine = H * 0.10;
+              const bottomSafeLine = H * 0.80;
+              
+              for (const item of leafContentElements) {
+                if (item.isBg) continue;
+                
+                if (item.rect.top < topSafeLine) {
+                  const desc = item.isText ? `text "${item.text}"` : `<${item.tag}>`;
+                  warnings.push(`[Segment: ${segmentId}] Content is in the top safe zone (top 10%): ${desc} (top: ${item.rect.top.toFixed(0)}, safe limit: ${topSafeLine.toFixed(0)})`);
+                }
+                if (item.rect.bottom > bottomSafeLine) {
+                  const desc = item.isText ? `text "${item.text}"` : `<${item.tag}>`;
+                  warnings.push(`[Segment: ${segmentId}] Content is in the bottom safe zone (bottom 20%): ${desc} (bottom: ${item.rect.bottom.toFixed(0)}, safe limit: ${bottomSafeLine.toFixed(0)})`);
+                }
+              }
+            }
+          }
+          
+          let globalTime = 0;
+          for (const segment of plan) {
+            const renderTime = 1.0;
+            try {
+              render(segment, renderTime, globalTime + renderTime);
+              await new Promise(resolve => requestAnimationFrame(resolve));
+              checkCurrentLayout(segment.id);
+            } catch (e) {
+              errors.push(`Failed to render segment ${segment.id}: ${e.message}`);
+            }
+            globalTime += segment.duration || 5;
+          }
+          
+          return { errors, warnings };
+        });
+
+        if (layoutResult.warnings && layoutResult.warnings.length > 0) {
+          console.warn("\nLayout warnings:");
+          layoutResult.warnings.forEach(warn => console.warn(` - ${warn}`));
+        }
+
+        if (layoutResult.errors && layoutResult.errors.length > 0) {
+          errors.push(...layoutResult.errors);
+        }
+      } catch (layoutErr) {
+        errors.push(`Failed to execute timeline layout validation: ${layoutErr.message}`);
+      }
+    }
+
     return errors;
   } finally {
     await browser.close();

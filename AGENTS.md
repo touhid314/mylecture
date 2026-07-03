@@ -123,6 +123,9 @@ Important routes:
 /agent-profiles           Return prompt profile markdown files.
 /agent-chat               Send IDE context plus user message to the coding agent.
 /agent-log                Return buffered agent process logs.
+/agent-batch              Start batch generation from a .txt prompt list (multipart).
+/agent-batch-status       Poll batch job progress and per-item folders.
+/agent-batch-stop         Abort a running batch job.
 /pick                     Windows-native file picker.
 /list-courses             Ask website admin script for courses.
 /publish-lecture          Publish rendered lecture folder to website repo.
@@ -184,6 +187,26 @@ profile: <profile markdown content, only when selected>
 ```
 
 If profile is `None`, no `profile:` line is appended.
+
+## Batch Generation
+
+The IDE **Batch** button (agent panel header) accepts a `.txt` file with one prompt per line (blank lines and `#` comments are skipped). Lines may be numbered (e.g. `1. First prompt`); the leading number prefix is stripped before the prompt is sent to the agent. Use the optional **Range** field to run a subset: `1-10`, `1,3,5-7`, or leave blank / `all` for every prompt. Each selected prompt is processed **sequentially**:
+
+1. A dedicated `outputs/<slug>-<rand>/` folder is created.
+2. The coding agent generates raw `index.html` in that folder.
+3. Optionally (checkbox, default off), `build-plan.ts` resolves the raw to `resolved.html`.
+
+Routes:
+
+```text
+POST /agent-batch          multipart: file, range (optional, e.g. 1-10 or 1,3,5-7),
+                           profileContent, aspectRatio, generationLength,
+                           embedSubtitle, ttsVoice, ttsSpeed, resolve (1|0)
+GET  /agent-batch-status   ?batchId= — per-item status, folder paths, active log tail
+POST /agent-batch-stop     ?batchClientId= — abort remaining items and kill current child
+```
+
+Review generated folders in the file browser, preview keepers in the viewer, then resolve/render manually for final MP4s. Batch does not render video.
 
 ## Agent Profiles
 

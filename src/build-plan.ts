@@ -15,6 +15,7 @@ import os from 'node:os';
 import { existsSync, mkdirSync, readFileSync, statSync, writeFileSync, unlinkSync } from 'node:fs';
 import path from 'node:path';
 import { pathToFileURL } from 'node:url';
+import { lecturePageShimHtml } from './utils/lecture-page-shims.ts';
 
 const rootDir = process.cwd();
 
@@ -216,11 +217,15 @@ async function readPlanFromHtml(inputPath) {
   const plan = await page.evaluate(() => window.__VIDEO_PLAN__);
   await browser.close();
 
-  if (errors.length > 0) {
-    throw new Error(`Source page errors:\n${errors.join('\n')}`);
-  }
   if (!Array.isArray(plan) || plan.length === 0) {
+    if (errors.length > 0) {
+      throw new Error(`Source page errors:\n${errors.join('\n')}`);
+    }
     throw new Error('Source HTML must expose a non-empty window.__VIDEO_PLAN__ array.');
+  }
+
+  if (errors.length > 0) {
+    console.warn(`Source page had ${errors.length} non-fatal error(s) while loading; continuing resolve:\n${errors.join('\n')}`);
   }
 
   return plan;
@@ -491,6 +496,7 @@ function writeResolvedHtml(inputPath, outputPath, timeline, resolvedAt = new Dat
     '<script id="resolved-timeline">',
     `window.__RESOLVED_TIMELINE__ = ${jsString(timeline)};`,
     '</script>',
+    lecturePageShimHtml,
     '<script id="resolved-render-runtime">',
     `(() => {
   const timeline = window.__RESOLVED_TIMELINE__;

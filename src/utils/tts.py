@@ -106,15 +106,22 @@ log = Logger()
 DEFAULT_OUTPUT_DIR = PROJECT_ROOT / "outputs/tts"
 DEFAULT_KOKORO_OUTPUT_DIR = PROJECT_ROOT / "outputs/tts_kokoro"
 
-def _require_env(name: str) -> str:
+def _require_env(name: str, default: str | None = None) -> str:
     value = os.getenv(name)
     if value is None or not value.strip():
+        if default is not None:
+            return default
         raise RuntimeError(f"Set {name} in .env")
     return value.strip()
 
 
-def _required_bool_env(name: str) -> bool:
-    value = _require_env(name).lower()
+def _required_bool_env(name: str, default: bool | None = None) -> bool:
+    value = os.getenv(name)
+    if value is None or not value.strip():
+        if default is not None:
+            return default
+        raise RuntimeError(f"Set {name} in .env")
+    value = value.strip().lower()
     if value in {"1", "true", "yes"}:
         return True
     if value in {"0", "false", "no"}:
@@ -122,11 +129,11 @@ def _required_bool_env(name: str) -> bool:
     raise RuntimeError(f"{name} must be one of: true, false, 1, 0, yes, no")
 
 
-DEFAULT_OPENAI_MODEL = _require_env("OPENAI_TTS_MODEL")
-DEFAULT_OPENAI_VOICE = _require_env("OPENAI_TTS_VOICE")
+DEFAULT_OPENAI_MODEL = _require_env("OPENAI_TTS_MODEL", "gpt-4o-mini-tts-2025-12-15")
+DEFAULT_OPENAI_VOICE = _require_env("OPENAI_TTS_VOICE", "cedar")
 
-DEFAULT_GEMINI_MODEL = _require_env("GOOGLE_TTS_MODEL")
-DEFAULT_GEMINI_VOICE = _require_env("GOOGLE_TTS_VOICE")
+DEFAULT_GEMINI_MODEL = _require_env("GOOGLE_TTS_MODEL", "gemini-3.1-flash-tts-preview")
+DEFAULT_GEMINI_VOICE = _require_env("GOOGLE_TTS_VOICE", "Vindemiatrix")
 _ALLOWED_GEMINI_MODELS = {
     "gemini-3-flash-preview-tts",
     "gemini-3-flash-lite-preview-tts",
@@ -134,19 +141,19 @@ _ALLOWED_GEMINI_MODELS = {
     "gemini-2.5-flash-preview-tts",
 }
 
-DEFAULT_KOKORO_MODEL = _require_env("KOKORO_MODEL")
-DEFAULT_KOKORO_VOICE = _require_env("KOKORO_DEFAULT_VOICE")
-DEFAULT_KOKORO_ENGINE = _require_env("KOKORO_ENGINE").lower()
-DEFAULT_KOKORO_DEVICE = _require_env("KOKORO_DEVICE")
-DEFAULT_KOKORO_DTYPE = _require_env("KOKORO_DTYPE")
-DEFAULT_KOKORO_PHONEMIZER = _require_env("KOKORO_PHONEMIZER").lower()
-DEFAULT_KOKORO_ONNX_MODEL = _require_env("KOKORO_ONNX_MODEL")
-DEFAULT_KOKORO_ONNX_MODEL_DIR = Path(_require_env("KOKORO_ONNX_MODEL_DIR"))
+DEFAULT_KOKORO_MODEL = _require_env("KOKORO_MODEL", "onnx-community/Kokoro-82M-ONNX")
+DEFAULT_KOKORO_VOICE = _require_env("KOKORO_DEFAULT_VOICE", "am_puck")
+DEFAULT_KOKORO_ENGINE = _require_env("KOKORO_ENGINE", "onnxruntime").lower()
+DEFAULT_KOKORO_DEVICE = _require_env("KOKORO_DEVICE", "cuda")
+DEFAULT_KOKORO_DTYPE = _require_env("KOKORO_DTYPE", "fp32")
+DEFAULT_KOKORO_PHONEMIZER = _require_env("KOKORO_PHONEMIZER", "js").lower()
+DEFAULT_KOKORO_ONNX_MODEL = _require_env("KOKORO_ONNX_MODEL", "model.onnx")
+DEFAULT_KOKORO_ONNX_MODEL_DIR = Path(_require_env("KOKORO_ONNX_MODEL_DIR", "models/kokoro-onnx"))
 if not DEFAULT_KOKORO_ONNX_MODEL_DIR.is_absolute():
     DEFAULT_KOKORO_ONNX_MODEL_DIR = PROJECT_ROOT / DEFAULT_KOKORO_ONNX_MODEL_DIR
-DEFAULT_KOKORO_STRICT_GPU = _required_bool_env("KOKORO_STRICT_GPU")
-DEFAULT_KOKORO_CHUNK_WORKERS = int(_require_env("KOKORO_CHUNK_WORKERS"))
-DEFAULT_KOKORO_CPU_FALLBACK_DTYPE = _require_env("KOKORO_CPU_FALLBACK_DTYPE")
+DEFAULT_KOKORO_STRICT_GPU = _required_bool_env("KOKORO_STRICT_GPU", True)
+DEFAULT_KOKORO_CHUNK_WORKERS = int(_require_env("KOKORO_CHUNK_WORKERS", "1"))
+DEFAULT_KOKORO_CPU_FALLBACK_DTYPE = _require_env("KOKORO_CPU_FALLBACK_DTYPE", "q8")
 if DEFAULT_KOKORO_CHUNK_WORKERS <= 0:
     raise RuntimeError("KOKORO_CHUNK_WORKERS must be a positive integer")
 

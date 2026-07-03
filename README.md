@@ -46,6 +46,21 @@ tests/                  Structured renderer fixtures and smoke tests
    ```bash
    python -c "from huggingface_hub import snapshot_download; snapshot_download('onnx-community/Kokoro-82M-v1.0-ONNX', local_dir='models/kokoro-onnx', allow_patterns=['onnx/model.onnx','voices/*','tokenizer.json'])"
    ```
+5. **OmniVoice TTS (optional, for voice-cloning in the IDE)**:
+   From the workspace root (`MyLecture/`), run:
+   ```powershell
+   powershell -ExecutionPolicy Bypass -File omnivoice/setup.ps1
+   ```
+   This creates `omnivoice/.venv` with PyTorch (CUDA) and the `omnivoice` package. The IDE resolve/render pipeline prefers that venv automatically.
+
+   Verify with:
+   ```powershell
+   powershell -ExecutionPolicy Bypass -File omnivoice/verify-tts.ps1
+   ```
+
+   In the IDE, open **Resolve** or **Render** options and pick a voice under **OmniVoice TTS (Local)** — e.g. `american-male-1`, `johnny-harris`, or `touhid-english`. Reference clips live in `mylecture/voices/<voice-name>/` (`.wav` + transcript `.txt`).
+
+   The first generation downloads the `k2-fsa/OmniVoice` model from Hugging Face (~few GB). An NVIDIA GPU with CUDA is recommended; CPU fallback works but is much slower.
 
 ---
 

@@ -121,6 +121,7 @@ Tool rules that matter:
 - Use `edits` for existing files or follow-up changes.
 - Batch known edits to the same file into one `edits` call.
 - `read` output contains line numbers for reference only; those numbers are not part of the file.
+- `read` accepts optional `start_line` (1-indexed) and `limit` to return a slice of large files; output line numbers still match the original file.
 - `edits` line numbers refer to the original file state before that edit call.
 - HTML contract validation runs after successful writes/edits to relevant `index*.html` files; fix validation failures before claiming completion.
 

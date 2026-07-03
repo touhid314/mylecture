@@ -59,16 +59,29 @@ export const TOOL_REGISTRY: ToolRegistryEntry[] = [
         type: "function",
         name: "read",
         active: true,
-        description: "Read a UTF-8 text file from the workspace. The output contains line numbers prepended in the format `<line_number>: <line_content>` for reference. These line numbers are not present in the actual file.",
+        description: "Read a UTF-8 text file from the workspace. The output contains line numbers prepended in the format `<line_number>: <line_content>` for reference. These line numbers are not present in the actual file. For large files, pass optional `start_line` (1-indexed) and `limit` to read a slice; line numbers in the output always match the original file.",
         parameters: {
             type: "object",
             properties: {
-                path: { type: "string", description: "Workspace-relative file path." }
+                path: { type: "string", description: "Workspace-relative file path." },
+                start_line: {
+                    type: "integer",
+                    description: "Optional 1-indexed first line to return. Defaults to 1.",
+                    minimum: 1,
+                },
+                limit: {
+                    type: "integer",
+                    description: "Optional maximum number of lines to return from start_line. If omitted, returns through the end of the file.",
+                    minimum: 1,
+                },
             },
             required: ["path"],
             additionalProperties: false,
         },
-        execute: (args, workspaceDir) => tool_read(args.path, workspaceDir),
+        execute: (args, workspaceDir) => tool_read(args.path, workspaceDir, {
+            start_line: args.start_line,
+            limit: args.limit,
+        }),
         compact: compact_read,
     },
     {
@@ -288,6 +301,8 @@ export function tool_declarations(options: ToolRuntimeOptions = {}): any[] {
 export function tool_json_schema(options: ToolRuntimeOptions = {}): any {
     const argumentsSchema: any = {
         path: "workspace-relative path for read/write/edits/mkdir/list_dir",
+        start_line: "optional 1-indexed first line for read (defaults to 1)",
+        limit: "optional max lines to return from start_line for read",
         paths: "array of workspace-relative paths to delete for del",
         content: "complete file content for write",
         edits: [
