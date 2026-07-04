@@ -13,7 +13,12 @@ import { tool_mkdir, compact_mkdir } from './mkdir.js';
 import { tool_list_dir, compact_list_dir } from './list_dir.js';
 import { tool_del, compact_del } from './del.js';
 import { tool_getimg, compact_getimg } from './getimg.js';
-import { should_validate_contract, validate_index_html_contract } from './utils/html_contract.js';
+import {
+    should_validate_contract,
+    should_validate_practice_page,
+    validate_index_html_contract,
+    validate_practice_page_contract
+} from './utils/html_contract.js';
 export { line_count } from './utils/text_stats.js';
 import { DEFAULT_WORKSPACE_DIR } from '../workspace.js';
 
@@ -350,6 +355,11 @@ export function build_function_response_payload(name: string, argumentsObj: any,
     if (!result.startsWith("ERROR:") && should_validate_contract(name, argumentsObj)) {
         const validation = validate_index_html_contract(argumentsObj.path, workspaceDir);
         payload["contract_validation"] = validation;
+        payload["result"] = `${payload["result"]}\n${validation}`;
+    }
+    if (!result.startsWith("ERROR:") && should_validate_practice_page(name, argumentsObj)) {
+        const validation = validate_practice_page_contract(argumentsObj.path, workspaceDir);
+        payload["practice_validation"] = validation;
         payload["result"] = `${payload["result"]}\n${validation}`;
     }
 

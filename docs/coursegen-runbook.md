@@ -2,6 +2,8 @@
 
 Use these commands from the `mylecture/` package root.
 
+Before changing coursegen behavior or prompts, read `docs/coursegen-principles.md`. It explains the generalization-first product goals that should guide agent edits.
+
 ## Setup
 
 1. Install dependencies:
@@ -52,7 +54,7 @@ Generated course state and artifacts live in `gens/courses/<course-slug>/`.
 
 - `--topic <text>`: Required subject or unit title.
 - `--audience <level>`: Required learner level; one of `early`, `elementary`, `middle`, `general`, `undergraduate`, `graduate`.
-- `--intent <name>`: Learning goal; one of `foundation`, `practice`, `exam`, `professional`, `exploration`, `teaching`. Defaults to `foundation`.
+- `--intent <name>`: Learning goal; one of `foundation`, `academic`, `practice`, `exam`, `professional`, `exploration`, `teaching`. Defaults to `foundation`.
 - `--scope <text>`: Optional boundary for the course, such as “introductory naming and visual models only”.
 - `--lectures <n>`: Target lecture count from `1` to `30`. Defaults to `12`.
 - `--budget <usd>`: Default run budget stored with the course plan. Defaults to `5`.
@@ -92,6 +94,11 @@ npm run coursegen -- plan --topic "Photosynthesis" --audience middle --intent fo
 Generate a shorter professional course:
 ```powershell
 npm run coursegen -- plan --topic "SQL Indexes" --audience general --intent professional --lectures 6 --scope "query planning and practical index selection"
+```
+
+Plan an undergraduate coursework unit:
+```powershell
+npm run coursegen -- plan --topic "Cellular Respiration" --audience undergraduate --intent academic --lectures 8 --scope "glycolysis through the electron transport chain"
 ```
 
 Regenerate one problematic lecture:

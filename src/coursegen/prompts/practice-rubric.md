@@ -21,7 +21,7 @@ Answer with JSON only:
 
 3. **Unclear multi-activity navigation:** Multiple activities exist but tabs do not indicate "Activity X of N" or equivalent clear numbering.
 
-4. **Layout:** Obvious overlap, clipped text, or controls pushed off-screen in the screenshots.
+4. **Layout:** Obvious overlap, clipped text, visible scrollbars, nested scroll panes, or controls pushed off-screen in the screenshots.
 
 5. **Instructions:** No "How to play" or equivalent instruction band.
 

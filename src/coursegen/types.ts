@@ -1,7 +1,7 @@
 export const AUDIENCES = ['early', 'elementary', 'middle', 'general', 'undergraduate', 'graduate'] as const;
 export type Audience = (typeof AUDIENCES)[number];
 
-export const LEARNING_INTENTS = ['foundation', 'practice', 'exam', 'professional', 'exploration', 'teaching'] as const;
+export const LEARNING_INTENTS = ['foundation', 'academic', 'practice', 'exam', 'professional', 'exploration', 'teaching'] as const;
 export type LearningIntent = (typeof LEARNING_INTENTS)[number];
 export const DEFAULT_LEARNING_INTENT: LearningIntent = 'foundation';
 

@@ -15,7 +15,99 @@ export type RubricResult = {
 export type ScreenshotCaptureResult = {
   screenshotPaths: string[];
   pageErrors: string[];
+  readabilityFindings: string[];
 };
+
+// Computed typography requirements enforced by automated QA. Keep aligned with
+// prompts/interactive-practice.md.
+const MIN_VISIBLE_TEXT_PX = 14;
+const MIN_BODY_TEXT_PX = 16;
+const MAX_FINDINGS_PER_CATEGORY = 3;
+
+async function collectReadabilityFindings(page: Page, context: string): Promise<string[]> {
+  const findings = await page.evaluate(({ minVisibleTextPx, minBodyTextPx, maxFindingsPerCategory }: { minVisibleTextPx: number; minBodyTextPx: number; maxFindingsPerCategory: number }) => {
+    const issues: string[] = [];
+    const de = document.documentElement;
+    const body = document.body;
+    if (!body) return issues;
+
+    if (de.scrollWidth > de.clientWidth + 2 || body.scrollWidth > de.clientWidth + 2) {
+      issues.push(`page overflows horizontally (content ${Math.max(de.scrollWidth, body.scrollWidth)}px wide, viewport ${de.clientWidth}px)`);
+    }
+    if (de.scrollHeight > de.clientHeight + 2 || body.scrollHeight > de.clientHeight + 2) {
+      issues.push(`page overflows vertically (content ${Math.max(de.scrollHeight, body.scrollHeight)}px tall, viewport ${de.clientHeight}px)`);
+    }
+
+    function describeElement(el: HTMLElement) {
+      if (el.id) return `#${el.id}`;
+      const className = Array.from(el.classList).slice(0, 2).map(name => `.${name}`).join('');
+      return `${el.tagName.toLowerCase()}${className}`;
+    }
+
+    const internalScroll: string[] = [];
+    const ignoreScrollSelector = 'html, body, pre, code, textarea, select, option, .katex-mathml, .katex-mathml *';
+    const allElements = Array.from(body.querySelectorAll<HTMLElement>('*'));
+    for (const el of allElements) {
+      if (el.matches(ignoreScrollSelector)) continue;
+      const style = getComputedStyle(el);
+      if (style.display === 'none' || style.visibility === 'hidden' || Number(style.opacity) === 0) continue;
+      const rect = el.getBoundingClientRect();
+      if (rect.width <= 0 || rect.height <= 0) continue;
+      if (rect.bottom < 0 || rect.top > de.clientHeight || rect.right < 0 || rect.left > de.clientWidth) continue;
+
+      const verticalOverflow = el.scrollHeight - el.clientHeight;
+      const horizontalOverflow = el.scrollWidth - el.clientWidth;
+      const clipsOrScrollsY = style.overflowY !== 'visible';
+      const clipsOrScrollsX = style.overflowX !== 'visible';
+      if (verticalOverflow > 4 && clipsOrScrollsY) {
+        internalScroll.push(`${describeElement(el)} has internal vertical overflow (${el.scrollHeight}px content, ${el.clientHeight}px visible)`);
+      }
+      if (horizontalOverflow > 4 && clipsOrScrollsX) {
+        internalScroll.push(`${describeElement(el)} has internal horizontal overflow (${el.scrollWidth}px content, ${el.clientWidth}px visible)`);
+      }
+    }
+    for (const item of internalScroll.slice(0, maxFindingsPerCategory)) {
+      issues.push(`internal scroll/clipping: ${item}`);
+    }
+
+    const tiny: string[] = [];
+    const undersizedBody: string[] = [];
+    const seen = new Set<Element>();
+    const walker = document.createTreeWalker(body, NodeFilter.SHOW_TEXT);
+    const controlSelector = 'button, input, select, textarea, [role="tab"], [data-activity-tab], .badge, .chip, .tag, .axis, .tick, .caption, .label, svg';
+    const bodySelector = 'p, li, #activity-instructions, #activity-stage, #activity-controls, main, aside, section, article, .prompt, .instructions, .feedback, .question, .card';
+
+    while (walker.nextNode()) {
+      const text = (walker.currentNode.textContent || '').replace(/\s+/g, ' ').trim();
+      if (text.length < 3) continue;
+      const el = walker.currentNode.parentElement;
+      if (!el || seen.has(el)) continue;
+      seen.add(el);
+      const style = getComputedStyle(el);
+      if (style.display === 'none' || style.visibility === 'hidden' || Number(style.opacity) === 0) continue;
+      const rect = el.getBoundingClientRect();
+      if (rect.width <= 0 || rect.height <= 0) continue;
+      if (rect.bottom < 0 || rect.top > de.clientHeight || rect.right < 0 || rect.left > de.clientWidth) continue;
+      const fontSize = Number.parseFloat(style.fontSize);
+      if (!Number.isFinite(fontSize)) continue;
+      const controlLike = Boolean(el.closest(controlSelector));
+      const bodyLike = text.length >= 18 && !controlLike && Boolean(el.closest(bodySelector));
+      if (fontSize < minVisibleTextPx) {
+        tiny.push(`"${text.slice(0, 40)}" renders at ${fontSize.toFixed(1)}px`);
+      } else if (fontSize < minBodyTextPx && bodyLike) {
+        undersizedBody.push(`"${text.slice(0, 40)}" renders at ${fontSize.toFixed(1)}px`);
+      }
+    }
+    for (const item of tiny.slice(0, maxFindingsPerCategory)) {
+      issues.push(`text below ${minVisibleTextPx}px minimum: ${item}`);
+    }
+    for (const item of undersizedBody.slice(0, maxFindingsPerCategory)) {
+      issues.push(`body/prompt text below ${minBodyTextPx}px target: ${item}`);
+    }
+    return issues;
+  }, { minVisibleTextPx: MIN_VISIBLE_TEXT_PX, minBodyTextPx: MIN_BODY_TEXT_PX, maxFindingsPerCategory: MAX_FINDINGS_PER_CATEGORY });
+  return findings.map(finding => `[${context}] ${finding}`);
+}
 
 function loadRubricPrompt() {
   return readFileSync(path.join(PROMPTS_DIR, 'practice-rubric.md'), 'utf8').trim();
@@ -72,6 +164,7 @@ export async function capturePracticeScreenshots(htmlPath: string, outDir: strin
   });
   const screenshotPaths: string[] = [];
   const pageErrors: string[] = [];
+  const readabilityFindings: string[] = [];
 
   try {
     const page = await browser.newPage({
@@ -91,6 +184,7 @@ export async function capturePracticeScreenshots(htmlPath: string, outDir: strin
     const activePath = path.join(outDir, 'screen-active.png');
     await page.screenshot({ path: activePath, fullPage: false });
     screenshotPaths.push(activePath);
+    readabilityFindings.push(...await collectReadabilityFindings(page, 'main screen'));
 
     const tabSelectors = [
       '[data-activity-tab]',
@@ -114,6 +208,7 @@ export async function capturePracticeScreenshots(htmlPath: string, outDir: strin
         const tabPath = path.join(outDir, `screen-tab-${index}.png`);
         await page.screenshot({ path: tabPath, fullPage: false });
         screenshotPaths.push(tabPath);
+        readabilityFindings.push(...await collectReadabilityFindings(page, `tab ${index + 1}`));
       } catch {
         // ignore tab click failures
       }
@@ -122,7 +217,7 @@ export async function capturePracticeScreenshots(htmlPath: string, outDir: strin
     await browser.close();
   }
 
-  return { screenshotPaths, pageErrors };
+  return { screenshotPaths, pageErrors, readabilityFindings: [...new Set(readabilityFindings)] };
 }
 
 function normalizeRubricResponse(raw: unknown): RubricResult {
@@ -148,12 +243,22 @@ export async function reviewPracticeWithRubric(options: {
   screenshotDir: string;
   model?: string;
 }): Promise<RubricResult> {
-  const { screenshotPaths, pageErrors } = await capturePracticeScreenshots(options.htmlPath, options.screenshotDir);
+  const { screenshotPaths, pageErrors, readabilityFindings } = await capturePracticeScreenshots(options.htmlPath, options.screenshotDir);
   if (pageErrors.length > 0) {
     return { passed: false, findings: [`Page JavaScript error: ${pageErrors[0]}`] };
   }
   if (screenshotPaths.length === 0) {
     return { passed: false, findings: ['Could not capture screenshots'] };
+  }
+  if (readabilityFindings.length > 0) {
+    // Fail before the LLM rubric: these are objective violations, and fixing them
+    // changes the layout enough that a rubric pass now would be wasted.
+    return {
+      passed: false,
+      findings: readabilityFindings.map(finding =>
+        `Readability check (1280x720): ${finding}. Fix by reducing content, compacting chrome, or splitting steps.`
+      )
+    };
   }
 
   const model = options.model || process.env.AGENT_MODEL;

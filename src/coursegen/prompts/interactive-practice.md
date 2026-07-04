@@ -17,7 +17,38 @@ Use this region structure — do not invent a different layout per activity:
 
 Every activity tab/nav button must carry `data-activity-tab="<activity-id>"` (the id from interactiveSpec). The currently active tab must have `data-active="true"`.
 
-Grid: header spans full width; instructions full width; stage left (~65%); controls right (~35%) on desktop. Use `min-height: 0` and `overflow: auto` so nothing clips.
+Grid: header spans full width; instructions full width; stage left (~65%); controls right (~35%) on desktop. Use `min-height: 0`, `clamp()`, flexible grids, and compact copy so the active activity fits the embedded player without document scrollbars or internal scroll panes.
+
+## Viewport-fit contract
+
+These pages run inside a website lesson player, not as standalone web pages. The active activity must fit inside the visible frame.
+
+- At `1280x720`, the full active screen must fit within `100vw` by `100vh` with no visible scrollbars.
+- On small screens, switch to one column and simplify density, but still keep the current prompt, primary visual/control, progress, feedback area, and next action visible without nested scrolling.
+- Set `html`, `body`, and `#app` to use the full viewport height and avoid page-level overflow.
+- Do not solve crowding by adding `overflow: auto` to `#activity-stage`, `#activity-controls`, or body. Instead reduce on-screen content (see the content budget below), shorten copy, and scale visuals with `max-height`/`max-width`.
+- Automated QA rejects internal panel overflow (`scrollHeight`/`scrollWidth` beyond the visible box); tiny scrollbars or clipped rows mean the screen does not fit.
+- Controls should remain touch-friendly, but do not use fixed oversized typography that forces scrolling on laptop or phone viewports.
+
+## Readability floor (hard requirement — automated QA rejects violations)
+
+- No visible text may render below **14px** computed font size at `1280x720`. This includes slider labels, axis labels, captions, badges, and footnotes.
+- **Never shrink text to make content fit.** If a screen does not fit at 14px+, remove content, shorten copy, or split the activity into steps — shrinking the font is not an acceptable fix.
+- Body copy, prompts, instructions, questions, and feedback must render at **16px+**. Only short secondary labels, captions, axis labels, badges, and footnotes may go down to 14px.
+
+## Content budget (per visible screen)
+
+A screen is what the learner sees at one moment. Each screen may show at most:
+
+- **one** primary visual (canvas, SVG, diagram, question card, or worked example)
+- **one** cluster of related controls (aim for ≤5 interactive inputs visible at once)
+- **one** feedback/status area, plus the header and short instructions
+
+If the activity needs more than this (presets + sliders + derivation panels + readouts, multiple question types, reference material), use **progressive disclosure** instead of cramming:
+
+- Split the activity into sequential steps inside the same tab ("Step 1 of 3: choose a particle" → "Step 2: adjust energy" → "Step 3: interpret the graph"), with a visible step indicator and Next/Back controls.
+- Or move secondary reference content behind a toggle/details control that replaces (not overlays shrunken beside) the primary visual.
+- Prefer fewer, larger, clearer elements over a dashboard that shows everything at once. A focused screen with 3 controls beats a dense lab bench with 12.
 
 ## Activity modes (declare each activity explicitly)
 
@@ -67,6 +98,6 @@ Each activity/game spec includes `visibleSetup`, `learnerAction`, `controls`, `f
 
 ## Technical
 
-- Full viewport, dark background `#121212`, minimum 22px body text.
+- Full viewport, dark background `#121212`, readable responsive text using `clamp()` with a minimum of 14px (e.g. `clamp(14px, 1.2vw, 18px)`), never below.
 - Self-contained: no external scripts unless explicitly allowed by the task message.
 - Initialize all state before wiring click handlers.

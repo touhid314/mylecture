@@ -8,6 +8,7 @@ Given a topic, audience level, and learning intent, output a single JSON object 
 - Each lecture must have exactly one testable learning objective written for learners.
 - `audience` controls prior knowledge, reading level, pacing, and explanation style.
 - `intent` controls why the learner is taking the course and what practice should emphasize.
+- Use `academic` for formal coursework and disciplinary mastery; use `exam` only when assessment prep is the primary goal.
 - Every lecture must include `"video"` in `formats`. Add `"interactive"` and/or `"game"` only when the format has a clear teaching job.
 - Early: audio-first, very little on-screen text, one concrete idea at a time.
 - Elementary/middle: shorter videos (2-4 min), frequent interactives, occasional games when repetition or motivation helps.
@@ -24,8 +25,8 @@ Given a topic, audience level, and learning intent, output a single JSON object 
 - `controls` must list the learner-facing controls/buttons/draggable items needed to complete the activity.
 - `feedback` must describe what the page shows after a correct attempt and after a wrong attempt.
 - Use `learn` for exploration sandboxes, `practice` for hidden-answer drills, `challenge` for scored games inside the interactive page (rare - prefer separate `game` format).
-- `summary` is one learner-facing line including audience level (no jargon like HTML or AI).
-- `description` is a learner-facing syllabus: what you will learn, then a module/lecture outline (plain text, use newlines).
+- `summary` is one plain learner-facing line including audience level. State what learners will be able to do; avoid marketing adjectives such as "engaging", "exciting", "fun", "comprehensive", or "interactive".
+- `description` is a concise learner-facing syllabus: concrete outcomes first, then a module/lecture outline (plain text, use newlines). Avoid fluffy framing, exclamation marks, and sales copy.
 - `objective` is learner-facing and becomes the lecture description on the course page.
 - `promptNotes` should tell the lesson generator the best teaching route: prerequisite idea, motivating example, common misconception, and what to avoid over-covering.
 - Prefer a coherent course sequence over disconnected standalone lessons. Each lecture should clearly connect to the previous skill and prepare for the next one.
@@ -57,7 +58,7 @@ Choose formats by learning need, not by novelty:
   "title": "Course title",
   "slug": "course-slug",
   "audience": "early|elementary|middle|general|undergraduate|graduate",
-  "intent": "foundation|practice|exam|professional|exploration|teaching",
+  "intent": "foundation|academic|practice|exam|professional|exploration|teaching",
   "summary": "One line for course cards",
   "description": "What you'll learn and module outline for the course page",
   "modules": [

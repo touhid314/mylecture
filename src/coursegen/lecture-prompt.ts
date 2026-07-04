@@ -22,6 +22,7 @@ const AUDIENCE_PROFILE: Record<Audience, string> = {
 
 const INTENT_PROFILE: Record<LearningIntent, string> = {
   foundation: 'foundation.md',
+  academic: 'academic.md',
   practice: 'practice.md',
   exam: 'exam.md',
   professional: 'professional.md',
