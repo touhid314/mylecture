@@ -4238,6 +4238,13 @@ player.on('error', error => setStatus(error.message));
 player.on('ended', async () => {
   const currentIndex = currentScenesList.findIndex(file => file.path === currentFilePath);
   if (currentIndex > -1 && currentIndex < currentScenesList.length - 1) {
+    const currentScene = currentScenesList[currentIndex];
+    updateControls({
+      ...playerState(),
+      time: currentScene.duration,
+      duration: currentScene.duration
+    });
+    await new Promise(resolve => requestAnimationFrame(() => resolve()));
     const nextScene = currentScenesList[currentIndex + 1];
     setStatus('Auto-advancing to ' + nextScene.name + '...');
     await swapToPreloadedScene(nextScene.path);

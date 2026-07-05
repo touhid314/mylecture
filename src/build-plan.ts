@@ -16,6 +16,7 @@ import { existsSync, mkdirSync, readFileSync, statSync, writeFileSync, unlinkSyn
 import path from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { lecturePageShimHtml } from './utils/lecture-page-shims.ts';
+import { writeLectureCaptionsVtt } from './captions-vtt.ts';
 
 const rootDir = process.cwd();
 
@@ -37,6 +38,7 @@ function parseArgs(argv) {
     provider: 'kokoro',
     voice: 'af_heart',
     speed: 1,
+    narrationPause: 0.15,
     audioWorkers: null,
     forceAudio: false
   };
@@ -50,6 +52,7 @@ function parseArgs(argv) {
     else if (arg === '--provider') args.provider = next, i++;
     else if (arg === '--voice') args.voice = next, i++;
     else if (arg === '--speed') args.speed = Number(next), i++;
+    else if (arg === '--narration-pause') args.narrationPause = Number(next), i++;
     else if (arg === '--audio-workers') args.audioWorkers = Number(next), i++;
     else if (arg === '--force-audio') args.forceAudio = true;
     else if (arg === '--help') {
@@ -62,6 +65,9 @@ function parseArgs(argv) {
 
   if (!Number.isFinite(args.speed) || args.speed <= 0) {
     throw new Error('--speed must be a positive number');
+  }
+  if (!Number.isFinite(args.narrationPause) || args.narrationPause < 0 || args.narrationPause > 2) {
+    throw new Error('--narration-pause must be a number from 0 to 2');
   }
 
   if (args.audioWorkers === null) {
@@ -89,6 +95,7 @@ Options:
   --provider <name>    TTS provider passed to src/utils/tts.py. Default: kokoro
   --voice <name>       TTS voice passed to src/utils/tts.py. Default: af_heart
   --speed <number>     TTS speed passed to src/utils/tts.py. Default: 1
+  --narration-pause <s> Seconds to hold visuals after each narration cue. Default: 0.15
   --audio-workers <n>  Concurrent audio files to generate. Default: 6 for Kokoro, CPU count otherwise
   --force-audio        Regenerate narration audio even if files already exist
 `);
@@ -442,13 +449,24 @@ async function resolveTimeline(plan, inputPath, outputPath, args) {
       }
 
       const duration = await measureAudioDuration(audioInfo.audioPath);
+      const pauseAfter = Number.isFinite(Number(section.pauseAfter))
+        ? Math.max(0, Math.min(2, Number(section.pauseAfter)))
+        : args.narrationPause;
+      const visualDuration = duration + pauseAfter;
       const audioSrc = audioInfo.displayPath;
-      const item = { ...section, kind: sectionKind, audio: audioSrc, resolvedDuration: duration };
+      const item = {
+        ...section,
+        kind: sectionKind,
+        audio: audioSrc,
+        audioDuration: duration,
+        resolvedDuration: visualDuration,
+        pauseAfter
+      };
 
       videoTimeline.push({
         start: cursor,
-        end: cursor + duration,
-        duration,
+        end: cursor + visualDuration,
+        duration: visualDuration,
         sectionId: section.id,
         item
       });
@@ -459,7 +477,7 @@ async function resolveTimeline(plan, inputPath, outputPath, args) {
         text: section.text,
         sectionId: section.id
       });
-      cursor += duration;
+      cursor += visualDuration;
       continue;
     }
 
@@ -588,9 +606,11 @@ async function main() {
   const timeline = await resolveTimeline(plan, inputPath, outputPath, args);
   writeResolvedHtml(inputPath, outputPath, timeline);
 
+  const captionsPath = writeLectureCaptionsVtt(path.dirname(outputPath));
   console.log(`Resolved duration: ${timeline.duration.toFixed(3)}s`);
   console.log(`Audio cues: ${timeline.audioTimeline.length}`);
   console.log(`Wrote ${outputPath}`);
+  if (captionsPath) console.log(`Wrote ${captionsPath}`);
 }
 
 main().catch(error => {

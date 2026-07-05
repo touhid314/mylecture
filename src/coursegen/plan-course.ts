@@ -5,12 +5,12 @@ import { LLM_Model } from '../../packages/lecture-agent/src/llm_model.ts';
 import { courseStatePath, ensureCourseDir } from './paths.ts';
 import { estimateCourseCostUsd, printPlanSummary } from './lecture-prompt.ts';
 import { writeCoursePlan, writeCourseState } from './state.ts';
-import { DEFAULT_LEARNING_INTENT, initialCourseState, validateCoursePlan } from './types.ts';
+import { initialCourseState, validateCoursePlan } from './types.ts';
 import type { Audience, CoursePlan, LearningIntent } from './types.ts';
 
 export type PlanCourseOptions = {
   topic: string;
-  audience: Audience;
+  audience?: Audience;
   intent?: LearningIntent;
   scope?: string;
   maxLectures?: number;
@@ -26,8 +26,12 @@ function plannerPromptPath() {
 function buildPlannerUserPrompt(options: PlanCourseOptions) {
   const lines = [
     `Topic: ${options.topic}`,
-    `Audience level: ${options.audience}`,
-    `Learning intent: ${options.intent ?? DEFAULT_LEARNING_INTENT}`
+    options.audience
+      ? `Audience level override: ${options.audience}`
+      : 'Audience level: choose the best catalog placement for this topic',
+    options.intent
+      ? `Learning intent override: ${options.intent}`
+      : 'Learning intent: choose the best catalog placement for this topic'
   ];
   if (options.scope) lines.push(`Scope: ${options.scope}`);
   if (options.maxLectures) lines.push(`Target lecture count: ${options.maxLectures}`);
@@ -48,7 +52,7 @@ function extractJsonObject(text: string) {
   throw new Error('Planner response did not contain JSON.');
 }
 
-function normalizePlannerResponse(response: unknown): Record<string, unknown> {
+export function normalizePlannerResponse(response: unknown): Record<string, unknown> {
   if (response && typeof response === 'object' && !Array.isArray(response)) {
     return response as Record<string, unknown>;
   }
@@ -58,7 +62,7 @@ function normalizePlannerResponse(response: unknown): Record<string, unknown> {
   throw new Error('Planner response did not contain JSON.');
 }
 
-function serializePlannerResponse(response: unknown) {
+export function serializePlannerResponse(response: unknown) {
   if (typeof response === 'string') return response;
   try {
     return JSON.stringify(response, null, 2);

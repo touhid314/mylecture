@@ -1,0 +1,789 @@
+﻿<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Coursegen</title>
+  <style>
+    :root {
+      --bg: #0f1419;
+      --panel: #161d27;
+      --panel-2: #1c2533;
+      --border: #2a3544;
+      --text: #e7edf5;
+      --muted: #8b9bb0;
+      --accent: #5b9cf5;
+      --accent-2: #3d7dd6;
+      --ok: #3ecf8e;
+      --warn: #f0b429;
+      --bad: #f07178;
+      --review: #c792ea;
+      --radius: 10px;
+      --shadow: 0 10px 30px rgba(0, 0, 0, 0.25);
+      font-family: "Segoe UI", system-ui, -apple-system, sans-serif;
+      color: var(--text);
+      background: radial-gradient(circle at top left, #182235, var(--bg) 45%);
+    }
+
+    * { box-sizing: border-box; }
+    body { margin: 0; min-height: 100vh; }
+    button, input, select, textarea {
+      font: inherit;
+      color: inherit;
+    }
+    button {
+      cursor: pointer;
+      border: 1px solid var(--border);
+      background: var(--panel-2);
+      color: var(--text);
+      border-radius: 8px;
+      padding: 0.55rem 0.9rem;
+      transition: background 0.15s, border-color 0.15s;
+    }
+    button:hover:not(:disabled) { border-color: var(--accent); background: #243044; }
+    button.primary {
+      background: linear-gradient(180deg, var(--accent), var(--accent-2));
+      border-color: transparent;
+      color: #fff;
+      font-weight: 600;
+    }
+    button.primary:hover:not(:disabled) { filter: brightness(1.05); }
+    button:disabled { opacity: 0.55; cursor: not-allowed; }
+    input, select, textarea {
+      width: 100%;
+      background: #0d1218;
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 0.55rem 0.7rem;
+    }
+    textarea { min-height: 72px; resize: vertical; }
+    label { display: grid; gap: 0.35rem; font-size: 0.9rem; color: var(--muted); }
+    .layout {
+      display: grid;
+      grid-template-columns: 280px 1fr;
+      min-height: 100vh;
+    }
+    .sidebar {
+      border-right: 1px solid var(--border);
+      background: rgba(15, 20, 25, 0.85);
+      padding: 1rem;
+      display: flex;
+      flex-direction: column;
+      gap: 1rem;
+    }
+    .brand {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 0.5rem;
+    }
+    .brand h1 {
+      margin: 0;
+      font-size: 1.15rem;
+      letter-spacing: 0.02em;
+    }
+    .brand p {
+      margin: 0.2rem 0 0;
+      color: var(--muted);
+      font-size: 0.82rem;
+    }
+    .course-list {
+      display: grid;
+      gap: 0.45rem;
+      overflow: auto;
+      flex: 1;
+      min-height: 0;
+    }
+    .course-item {
+      text-align: left;
+      padding: 0.7rem 0.8rem;
+      background: var(--panel);
+      border-radius: var(--radius);
+    }
+    .course-item.active {
+      border-color: var(--accent);
+      box-shadow: inset 0 0 0 1px rgba(91, 156, 245, 0.35);
+    }
+    .course-item strong { display: block; font-size: 0.95rem; }
+    .course-item span { color: var(--muted); font-size: 0.8rem; }
+    .main {
+      padding: 1.2rem 1.4rem 1.4rem;
+      display: grid;
+      grid-template-rows: auto 1fr auto;
+      gap: 1rem;
+      min-height: 100vh;
+    }
+    .panel {
+      background: rgba(22, 29, 39, 0.92);
+      border: 1px solid var(--border);
+      border-radius: 14px;
+      box-shadow: var(--shadow);
+      padding: 1rem;
+    }
+    .hero {
+      display: flex;
+      justify-content: space-between;
+      gap: 1rem;
+      align-items: flex-start;
+      flex-wrap: wrap;
+    }
+    .hero h2 { margin: 0 0 0.35rem; font-size: 1.45rem; }
+    .hero .meta { color: var(--muted); font-size: 0.92rem; line-height: 1.5; }
+    .stats {
+      display: flex;
+      gap: 0.75rem;
+      flex-wrap: wrap;
+    }
+    .stat {
+      min-width: 110px;
+      padding: 0.7rem 0.85rem;
+      border-radius: 10px;
+      background: var(--panel-2);
+      border: 1px solid var(--border);
+    }
+    .stat strong { display: block; font-size: 1.2rem; }
+    .stat span { color: var(--muted); font-size: 0.78rem; }
+    .progress {
+      margin-top: 0.8rem;
+      height: 10px;
+      background: #0d1218;
+      border-radius: 999px;
+      overflow: hidden;
+      border: 1px solid var(--border);
+    }
+    .progress > div {
+      height: 100%;
+      background: linear-gradient(90deg, var(--accent), var(--ok));
+      width: 0%;
+      transition: width 0.25s ease;
+    }
+    .grid-2 {
+      display: grid;
+      grid-template-columns: 1.1fr 0.9fr;
+      gap: 1rem;
+      min-height: 0;
+    }
+    .section-title {
+      margin: 0 0 0.8rem;
+      font-size: 0.95rem;
+      text-transform: uppercase;
+      letter-spacing: 0.08em;
+      color: var(--muted);
+    }
+    .actions {
+      display: grid;
+      gap: 0.55rem;
+    }
+    .actions .row {
+      display: flex;
+      gap: 0.5rem;
+      flex-wrap: wrap;
+    }
+    .lectures {
+      overflow: auto;
+      max-height: 52vh;
+    }
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      font-size: 0.88rem;
+    }
+    th, td {
+      text-align: left;
+      padding: 0.55rem 0.45rem;
+      border-bottom: 1px solid rgba(42, 53, 68, 0.7);
+      vertical-align: top;
+    }
+    th { color: var(--muted); font-weight: 600; position: sticky; top: 0; background: var(--panel); }
+    .badge {
+      display: inline-block;
+      padding: 0.15rem 0.45rem;
+      border-radius: 999px;
+      font-size: 0.74rem;
+      font-weight: 600;
+      text-transform: capitalize;
+      border: 1px solid transparent;
+    }
+    .badge.done { color: var(--ok); background: rgba(62, 207, 142, 0.12); border-color: rgba(62, 207, 142, 0.25); }
+    .badge.failed { color: var(--bad); background: rgba(240, 113, 120, 0.12); border-color: rgba(240, 113, 120, 0.25); }
+    .badge.needs-review { color: var(--review); background: rgba(199, 146, 234, 0.12); border-color: rgba(199, 146, 234, 0.25); }
+    .badge.pending { color: var(--muted); background: rgba(139, 155, 176, 0.08); border-color: rgba(139, 155, 176, 0.2); }
+    .badge.generating, .badge.resolving, .badge.rendering, .badge.generating-practice, .badge.reviewing {
+      color: var(--warn);
+      background: rgba(240, 180, 41, 0.12);
+      border-color: rgba(240, 180, 41, 0.25);
+    }
+    .plan-form {
+      display: grid;
+      gap: 0.8rem;
+    }
+    .plan-form .row-2 {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 0.75rem;
+    }
+    .log {
+      font-family: Consolas, "Cascadia Mono", monospace;
+      font-size: 0.78rem;
+      line-height: 1.45;
+      background: #0a0f14;
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      padding: 0.75rem;
+      height: 220px;
+      overflow: auto;
+      white-space: pre-wrap;
+      word-break: break-word;
+    }
+    .log-toolbar {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      gap: 0.5rem;
+      margin-bottom: 0.5rem;
+    }
+    .empty {
+      color: var(--muted);
+      padding: 2rem 1rem;
+      text-align: center;
+    }
+    .checkbox {
+      display: flex;
+      align-items: center;
+      gap: 0.45rem;
+      color: var(--muted);
+      font-size: 0.86rem;
+    }
+    .checkbox input { width: auto; }
+    details {
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      padding: 0.55rem 0.75rem;
+      background: var(--panel-2);
+    }
+    details summary {
+      cursor: pointer;
+      color: var(--muted);
+      font-size: 0.88rem;
+    }
+    .advanced-grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 0.65rem;
+      margin-top: 0.75rem;
+    }
+    @media (max-width: 980px) {
+      .layout { grid-template-columns: 1fr; }
+      .sidebar { min-height: auto; }
+      .grid-2 { grid-template-columns: 1fr; }
+      .lectures { max-height: none; }
+    }
+  </style>
+</head>
+<body>
+  <div class="layout">
+    <aside class="sidebar">
+      <div class="brand">
+        <div>
+          <h1>Coursegen</h1>
+          <p>Plan, run, publish</p>
+        </div>
+        <button id="refreshCoursesBtn" title="Refresh course list">↻</button>
+      </div>
+      <button class="primary" id="newCourseBtn">+ New course</button>
+      <div class="course-list" id="courseList"></div>
+    </aside>
+
+    <main class="main">
+      <section class="panel" id="heroPanel">
+        <div class="empty">Select a course or create a new one.</div>
+      </section>
+
+      <section class="grid-2">
+        <div class="panel" id="leftPanel"></div>
+        <div class="panel" id="rightPanel"></div>
+      </section>
+
+      <section class="panel">
+        <div class="log-toolbar">
+          <strong>Job log</strong>
+          <div class="row">
+            <button id="stopJobBtn" disabled>Stop job</button>
+            <button id="clearLogBtn">Clear view</button>
+          </div>
+        </div>
+        <div class="log" id="jobLog">No jobs yet.</div>
+      </section>
+    </main>
+  </div>
+
+  <script>
+    const state = {
+      courses: [],
+      selectedSlug: null,
+      summary: null,
+      meta: null,
+      activeJobId: null,
+      logLines: [],
+      pollTimer: null
+    };
+
+    const els = {
+      courseList: document.getElementById('courseList'),
+      heroPanel: document.getElementById('heroPanel'),
+      leftPanel: document.getElementById('leftPanel'),
+      rightPanel: document.getElementById('rightPanel'),
+      jobLog: document.getElementById('jobLog'),
+      stopJobBtn: document.getElementById('stopJobBtn'),
+      clearLogBtn: document.getElementById('clearLogBtn'),
+      refreshCoursesBtn: document.getElementById('refreshCoursesBtn'),
+      newCourseBtn: document.getElementById('newCourseBtn')
+    };
+
+    async function api(path, options) {
+      const response = await fetch(path, options);
+      const payload = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(payload.error || `HTTP ${response.status}`);
+      return payload;
+    }
+
+    function badgeClass(status) {
+      if (status === 'done') return 'done';
+      if (status === 'failed') return 'failed';
+      if (status === 'needs-review') return 'needs-review';
+      if (status === 'pending') return 'pending';
+      return 'generating';
+    }
+
+    function renderLog() {
+      els.jobLog.textContent = state.logLines.length ? state.logLines.join('\n') : 'No jobs yet.';
+      els.jobLog.scrollTop = els.jobLog.scrollHeight;
+    }
+
+    function setLog(lines) {
+      state.logLines = Array.isArray(lines) ? lines.slice() : [];
+      renderLog();
+    }
+
+    function appendLog(line) {
+      state.logLines.push(line);
+      if (state.logLines.length > 4000) state.logLines.splice(0, state.logLines.length - 3000);
+      renderLog();
+    }
+
+    async function loadMeta() {
+      state.meta = await api('/api/meta');
+    }
+
+    async function loadCourses() {
+      const payload = await api('/api/courses');
+      state.courses = payload.courses || [];
+      renderCourseList();
+    }
+
+    async function loadSummary(slug) {
+      state.summary = await api(`/api/courses/${encodeURIComponent(slug)}`);
+      renderMain();
+    }
+
+    function renderCourseList() {
+      if (!state.courses.length) {
+        els.courseList.innerHTML = '<div class="empty">No courses yet.</div>';
+        return;
+      }
+      els.courseList.innerHTML = state.courses.map(course => `
+        <button class="course-item ${course.slug === state.selectedSlug ? 'active' : ''}" data-slug="${course.slug}">
+          <strong>${escapeHtml(course.title)}</strong>
+          <span>${escapeHtml(course.slug)} · ${course.doneCount}/${course.lectureCount} done</span>
+        </button>
+      `).join('');
+      els.courseList.querySelectorAll('[data-slug]').forEach(button => {
+        button.addEventListener('click', () => selectCourse(button.dataset.slug));
+      });
+    }
+
+    function escapeHtml(value) {
+      return String(value)
+        .replaceAll('&', '&amp;')
+        .replaceAll('<', '&lt;')
+        .replaceAll('>', '&gt;')
+        .replaceAll('"', '&quot;');
+    }
+
+    async function selectCourse(slug) {
+      state.selectedSlug = slug;
+      renderCourseList();
+      await loadSummary(slug);
+    }
+
+    function showPlanForm() {
+      state.selectedSlug = null;
+      state.summary = null;
+      renderCourseList();
+      renderPlanForm();
+      els.heroPanel.innerHTML = '<div class="hero"><div><h2>New course</h2><p class="meta">Plan a syllabus with the course planner. Generation runs after you pick the course from the sidebar.</p></div></div>';
+      els.rightPanel.innerHTML = '<div class="empty">After planning, select the new course to run generation.</div>';
+    }
+
+    function renderPlanForm() {
+      const audiences = ['', ...(state.meta?.audiences || [])];
+      const intents = ['', ...(state.meta?.intents || [])];
+      els.leftPanel.innerHTML = `
+        <h3 class="section-title">Plan</h3>
+        <form class="plan-form" id="planForm">
+          <label>Topic
+            <input name="topic" placeholder="Fractions, SQL indexes, Photosynthesis..." required />
+          </label>
+          <label>Scope (optional)
+            <textarea name="scope" placeholder="Narrow the unit, e.g. introductory naming and visual models only"></textarea>
+          </label>
+          <div class="row-2">
+            <label>Audience
+              <select name="audience">
+                ${audiences.map(value => `<option value="${value}">${value || 'Auto (planner chooses)'}</option>`).join('')}
+              </select>
+            </label>
+            <label>Intent
+              <select name="intent">
+                ${intents.map(value => `<option value="${value}">${value || 'Auto (planner chooses)'}</option>`).join('')}
+              </select>
+            </label>
+          </div>
+          <div class="row-2">
+            <label>Lectures
+              <input name="lectures" type="number" min="1" max="30" value="12" />
+            </label>
+            <label>Budget (USD)
+              <input name="budget" type="number" min="1" step="0.5" value="5" />
+            </label>
+          </div>
+          <label>Model (optional)
+            <input name="model" placeholder="${escapeHtml(state.meta?.defaultModel || 'AGENT_MODEL')}" />
+          </label>
+          <label class="checkbox"><input type="checkbox" name="dryRun" /> Dry run (print prompts only)</label>
+          <button class="primary" type="submit">Plan course</button>
+        </form>
+      `;
+      document.getElementById('planForm').addEventListener('submit', onPlanSubmit);
+    }
+
+    async function onPlanSubmit(event) {
+      event.preventDefault();
+      const form = event.target;
+      const body = {
+        command: 'plan',
+        topic: form.topic.value.trim(),
+        scope: form.scope.value.trim() || undefined,
+        audience: form.audience.value || undefined,
+        intent: form.intent.value || undefined,
+        lectures: Number(form.lectures.value || 12),
+        budget: Number(form.budget.value || 5),
+        model: form.model.value.trim() || undefined,
+        dryRun: form.dryRun.checked
+      };
+      await startJob(body);
+    }
+
+    function renderMain() {
+      if (!state.summary) return;
+      const { plan, state: courseState, progress, lectures, estimatedCostUsd, courseDir } = state.summary;
+      const pct = progress.total ? Math.round((progress.done / progress.total) * 100) : 0;
+      const spent = courseState?.spentUsd ?? 0;
+      const budget = courseState?.budgetUsd ?? 5;
+      const renderReady = progress.renderReady ?? 0;
+
+      els.heroPanel.innerHTML = `
+        <div class="hero">
+          <div>
+            <h2>${escapeHtml(plan.title)}</h2>
+            <p class="meta">
+              <strong>${escapeHtml(plan.slug)}</strong> · ${escapeHtml(plan.audience)} · ${escapeHtml(plan.intent)}<br />
+              ${escapeHtml(plan.summary)}
+            </p>
+            <div class="progress"><div style="width:${pct}%"></div></div>
+          </div>
+          <div class="stats">
+            <div class="stat"><strong>${progress.done}/${progress.total}</strong><span>lectures done</span></div>
+            <div class="stat"><strong>$${spent.toFixed(2)}</strong><span>spent / $${budget.toFixed(2)}</span></div>
+            <div class="stat"><strong>~$${estimatedCostUsd.toFixed(2)}</strong><span>estimated total</span></div>
+          </div>
+        </div>
+      `;
+
+      els.leftPanel.innerHTML = `
+        <h3 class="section-title">Actions</h3>
+        <div class="actions">
+          <div class="row">
+            <button class="primary" data-action="run">Run generation</button>
+            <button data-action="resume">Resume / retry failed</button>
+          </div>
+          <div class="row">
+            <button data-action="render" ${renderReady ? '' : 'disabled title="No resolved lectures without MP4"'}>Render MP4${renderReady ? ` (${renderReady})` : ''}</button>
+            <button data-action="script">Script lab</button>
+          </div>
+          <div class="row">
+            <button data-action="publish">Upload draft</button>
+            <button data-action="go-live">Go live</button>
+          </div>
+          <div class="row">
+            <button data-action="status">Refresh status</button>
+            <button data-action="open-folder">Open folder</button>
+          </div>
+          <details>
+            <summary>Extend plan</summary>
+            <p class="meta" style="margin:0.5rem 0 0.75rem; font-size:0.82rem; color:var(--muted);">
+              Planner proposes the next module from the existing syllabus. Optional hints below steer it.
+            </p>
+            <form class="plan-form" id="extendForm" style="margin-top:0.25rem;">
+              <label>Topic hint (optional)
+                <input name="topic" placeholder="Leave blank to let the planner decide" />
+              </label>
+              <label>Scope hint (optional)
+                <textarea name="scope" placeholder="Narrow the addition if you have a preference"></textarea>
+              </label>
+              <label>Module title hint (optional)
+                <input name="moduleTitle" placeholder="Applications of Logarithms" />
+              </label>
+              <label>Placement
+                <select name="placement">
+                  <option value="auto" selected>Auto</option>
+                  <option value="append-last">Append to last module</option>
+                  <option value="new-module">Create new module</option>
+                </select>
+              </label>
+              <label>New lectures
+                <input name="lectures" type="number" min="1" max="27" value="3" />
+              </label>
+              <label class="checkbox"><input type="checkbox" name="dryRun" /> Dry run (print prompts only)</label>
+              <button class="primary" type="submit">Extend plan</button>
+            </form>
+          </details>
+          <details>
+            <summary>Advanced options</summary>
+            <div class="advanced-grid">
+              <label>Target lecture slug<input id="forceLecture" placeholder="lecture-slug" /></label>
+              <label>Script lecture slug<input id="scriptLecture" placeholder="optional" /></label>
+              <label>Budget override<input id="runBudget" type="number" min="1" step="0.5" placeholder="${budget}" /></label>
+              <label>Model<input id="runModel" placeholder="${escapeHtml(state.meta?.defaultModel || '')}" /></label>
+              <label>Max turns<input id="maxTurns" type="number" min="1" value="60" /></label>
+              <label>Practice turns<input id="maxPracticeTurns" type="number" min="1" value="40" /></label>
+              <label>Lecture timeout (min)<input id="lectureTimeout" type="number" min="1" value="20" /></label>
+              <label>TTS voice<input id="ttsVoice" placeholder="${escapeHtml(state.meta?.defaultTtsVoice || 'american-male-3')} (default)" /></label>
+            </div>
+            <div style="margin-top:0.65rem; display:grid; gap:0.35rem;">
+              <label class="checkbox"><input type="checkbox" id="renderMp4" /> After run/resume, render MP4 too (still regenerates targeted lectures)</label>
+              <label class="checkbox"><input type="checkbox" id="skipPracticeReview" /> Skip practice screenshot QA</label>
+              <label class="checkbox"><input type="checkbox" id="skipScriptReview" /> Skip script review</label>
+              <label class="checkbox"><input type="checkbox" id="noReview" /> Script lab: skip review</label>
+              <label class="checkbox"><input type="checkbox" id="dryRunAction" /> Dry run</label>
+            </div>
+          </details>
+        </div>
+      `;
+
+      els.leftPanel.querySelectorAll('[data-action]').forEach(button => {
+        button.addEventListener('click', () => onAction(button.dataset.action));
+      });
+      document.getElementById('extendForm')?.addEventListener('submit', onExtendSubmit);
+
+      els.rightPanel.innerHTML = `
+        <h3 class="section-title">Lectures</h3>
+        <div class="lectures">
+          <table>
+            <thead>
+              <tr>
+                <th>#</th>
+                <th>Title</th>
+                <th>Status</th>
+                <th>Cost</th>
+              </tr>
+            </thead>
+            <tbody>
+              ${lectures.map(lecture => `
+                <tr>
+                  <td>${lecture.order}</td>
+                  <td>
+                    <div>${escapeHtml(lecture.title)}</div>
+                    <div style="color:var(--muted); font-size:0.78rem;">${escapeHtml(lecture.slug)}</div>
+                    ${lecture.error ? `<div style="color:var(--bad); font-size:0.78rem;">${escapeHtml(lecture.error.split('\n')[0])}</div>` : ''}
+                    ${lecture.renderReady ? `<div style="color:var(--muted); font-size:0.78rem;">resolved, no MP4 yet</div>` : ''}
+                    ${lecture.hasMp4 ? `<div style="color:var(--ok); font-size:0.78rem;">MP4 ready</div>` : ''}
+                  </td>
+                  <td><span class="badge ${badgeClass(lecture.status)}">${escapeHtml(lecture.status)}</span></td>
+                  <td>$${Number(lecture.costUsd || 0).toFixed(2)}</td>
+                </tr>
+              `).join('')}
+            </tbody>
+          </table>
+        </div>
+        <p class="meta" style="margin-top:0.75rem;">Folder: ${escapeHtml(courseDir)}</p>
+      `;
+    }
+
+    function readAdvanced() {
+      const val = id => document.getElementById(id)?.value?.trim();
+      const num = id => {
+        const raw = val(id);
+        return raw ? Number(raw) : undefined;
+      };
+      return {
+        forceLecture: val('forceLecture') || undefined,
+        lecture: val('scriptLecture') || undefined,
+        budget: num('runBudget'),
+        model: val('runModel') || undefined,
+        maxTurns: num('maxTurns'),
+        maxPracticeTurns: num('maxPracticeTurns'),
+        lectureTimeout: num('lectureTimeout'),
+        ttsVoice: val('ttsVoice') || undefined,
+        skipPracticeReview: document.getElementById('skipPracticeReview')?.checked || false,
+        skipScriptReview: document.getElementById('skipScriptReview')?.checked || false,
+        noReview: document.getElementById('noReview')?.checked || false,
+        dryRun: document.getElementById('dryRunAction')?.checked || false,
+        render: document.getElementById('renderMp4')?.checked || false
+      };
+    }
+
+    async function onExtendSubmit(event) {
+      event.preventDefault();
+      if (!state.selectedSlug) return;
+      const form = event.target;
+      const body = {
+        command: 'extend',
+        courseSlug: state.selectedSlug,
+        topic: form.topic.value.trim() || undefined,
+        scope: form.scope.value.trim() || undefined,
+        moduleTitle: form.moduleTitle.value.trim() || undefined,
+        placement: form.placement.value || 'auto',
+        lectures: Number(form.lectures.value || 3),
+        dryRun: form.dryRun.checked
+      };
+      if (!confirm('Extend this course? The planner will propose the next module from the existing syllabus.')) return;
+      await startJob(body);
+    }
+
+    async function onAction(action) {
+      if (!state.selectedSlug) return;
+      const advanced = readAdvanced();
+
+      if (action === 'status') {
+        await loadSummary(state.selectedSlug);
+        return;
+      }
+      if (action === 'open-folder') {
+        await api(`/api/open-folder/${encodeURIComponent(state.selectedSlug)}`);
+        return;
+      }
+
+      const renderReadyCount = state.summary?.progress?.renderReady ?? 0;
+      const messages = {
+        run: 'Start full course generation? This can take a long time and spend API budget.',
+        resume: advanced.forceLecture
+          ? `Resume will regenerate "${advanced.forceLecture}"${advanced.render ? ' and then render MP4' : ''}. Use the Render MP4 button for render-only. Continue?`
+          : 'Resume generation and retry failed lectures?',
+        render: `Render MP4 from existing resolved HTML only (no re-resolve)? ${renderReadyCount} lecture(s) ready.`,
+        script: 'Run script lab for this course?',
+        publish: 'Upload course as a draft to the website package?',
+        'go-live': 'Publish this course live on the catalog?'
+      };
+      if (!confirm(messages[action] || 'Run this action?')) return;
+
+      const body = {
+        courseSlug: state.selectedSlug,
+        yes: true,
+        ...advanced
+      };
+
+      if (action === 'run') body.command = 'run';
+      else if (action === 'resume') body.command = 'resume';
+      else if (action === 'render') {
+        body.command = 'render';
+        delete body.render;
+        delete body.skipPracticeReview;
+        delete body.skipScriptReview;
+      }
+      else if (action === 'script') body.command = 'script';
+      else if (action === 'publish') body.command = 'publish';
+      else if (action === 'go-live') {
+        body.command = 'publish';
+        body.goLive = true;
+      }
+
+      await startJob(body);
+    }
+
+    async function startJob(body) {
+      const job = await api('/api/jobs', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body)
+      });
+      state.activeJobId = job.id;
+      setLog(job.log || []);
+      els.stopJobBtn.disabled = job.status !== 'running';
+      startPolling();
+    }
+
+    async function pollJob() {
+      if (!state.activeJobId) return;
+      try {
+        const job = await api(`/api/jobs/${encodeURIComponent(state.activeJobId)}`);
+        setLog(job.log || []);
+        els.stopJobBtn.disabled = job.status !== 'running';
+
+        if (job.status === 'running') {
+          if (state.selectedSlug) await loadSummary(state.selectedSlug);
+          await loadCourses();
+          return;
+        }
+
+        stopPolling();
+        await loadCourses();
+        if (job.courseSlug) {
+          state.selectedSlug = job.courseSlug;
+          await loadSummary(job.courseSlug);
+        } else if (state.selectedSlug) {
+          await loadSummary(state.selectedSlug);
+        }
+      } catch (error) {
+        appendLog(`Poll error: ${error.message}`);
+      }
+    }
+
+    function startPolling() {
+      stopPolling();
+      state.pollTimer = setInterval(pollJob, 2000);
+      pollJob();
+    }
+
+    function stopPolling() {
+      if (state.pollTimer) {
+        clearInterval(state.pollTimer);
+        state.pollTimer = null;
+      }
+    }
+
+    els.stopJobBtn.addEventListener('click', async () => {
+      if (!state.activeJobId) return;
+      await api(`/api/jobs/${encodeURIComponent(state.activeJobId)}/stop`, { method: 'POST' });
+      await pollJob();
+    });
+
+    els.clearLogBtn.addEventListener('click', () => setLog([]));
+    els.refreshCoursesBtn.addEventListener('click', loadCourses);
+    els.newCourseBtn.addEventListener('click', showPlanForm);
+
+    async function boot() {
+      try {
+        await loadMeta();
+        await loadCourses();
+        showPlanForm();
+      } catch (error) {
+        els.heroPanel.innerHTML = `<div class="empty">Failed to connect: ${escapeHtml(error.message)}</div>`;
+      }
+    }
+
+    boot();
+  </script>
+</body>
+</html>
+

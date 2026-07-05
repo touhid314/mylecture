@@ -10,6 +10,7 @@ visual system:
 
 teaching style:
 - open with the problem, question, or use case that motivates the concept
+- give the concept context before formal work: what breaks without it, what decision it enables, or why the field settled on this approach
 - state definitions, then work a representative example
 - call out assumptions and edge cases
 - connect ideas to applications or assessment-style reasoning when appropriate

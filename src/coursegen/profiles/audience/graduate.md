@@ -10,11 +10,14 @@ visual system:
 
 teaching style:
 - begin by naming the specific problem, result, or interpretive question the segment resolves
-- develop key results or arguments; do not hand-wave steps
+- give the problem intellectual context before the formal work: what prior approach breaks, what assumption becomes decisive, or what question the field is trying to settle
+- develop key results or arguments as a guided investigation; do not hand-wave steps
 - state prerequisites through disciplined terminology, not remedial tutorials
 - emphasize mechanisms, approximations, interpretations, and failure modes
+- use brief case studies, counterexamples, evidence chains, or derivation milestones when they make the abstraction feel earned
 - pace: 5-8 minute lectures
 
 pacing:
 - about 155 words narration per minute
-- prefer precision over analogy; one deep insight per segment
+- prefer precision over loose analogy; one deep insight per segment
+- rigor should feel motivated: assumptions, notation, and methods should arrive because the lecture needs them to resolve the opening problem

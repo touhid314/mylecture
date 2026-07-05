@@ -656,7 +656,10 @@ async function renderFrames(browser, url, framesDir, frameCount, fps, args) {
   await renderFramesStateful(browser, url, framesDir, frameCount, fps, args);
 }
 
-// Prefer explicit video metadata, then inspect known frame containers, then canvas size.
+// Prefer concrete authored frame containers, then canvas size, then broad metadata.
+// A generic metadata value like "16:9" describes shape, not necessarily the CSS
+// pixel size of the generated page. If a page hard-codes a 1280x720 stage, using
+// the 1920x1080 metadata fallback captures the stage as a top-left tile.
 async function detectPageViewport(page) {
   return await page.evaluate(() => {
     const presets = {
@@ -665,34 +668,10 @@ async function detectPageViewport(page) {
       '1:1': { width: 1080, height: 1080 },
       '4:5': { width: 1080, height: 1350 }
     };
-    
-    const aspectRatio = window.__VIDEO_METADATA__?.aspectRatio;
-    if (aspectRatio) {
-      const normalized = String(aspectRatio).trim();
-      if (presets[normalized]) return presets[normalized];
-      
-      const match = normalized.match(/^(\d+(?:\.\d+)?):(\d+(?:\.\d+)?)$/);
-      if (match) {
-        const widthRatio = Number(match[1]);
-        const heightRatio = Number(match[2]);
-        if (Number.isFinite(widthRatio) && Number.isFinite(heightRatio) && widthRatio > 0 && heightRatio > 0) {
-          const longEdge = 1920;
-          if (widthRatio >= heightRatio) {
-            return {
-              width: longEdge,
-              height: Math.round(longEdge * heightRatio / widthRatio)
-            };
-          } else {
-            return {
-              width: Math.round(longEdge * widthRatio / heightRatio),
-              height: longEdge
-            };
-          }
-        }
-      }
-    }
-
     const candidates = [
+      document.getElementById('viewport'),
+      document.getElementById('stage'),
+      document.getElementById('app'),
       document.getElementById('frame'),
       document.querySelector('.video-frame'),
       document.getElementById('video-frame'),
@@ -716,6 +695,32 @@ async function detectPageViewport(page) {
       const height = Number(canvas.getAttribute('height'));
       if (Number.isFinite(width) && Number.isFinite(height) && width >= 320 && height >= 240) {
         return { width, height };
+      }
+    }
+
+    const aspectRatio = window.__VIDEO_METADATA__?.aspectRatio;
+    if (aspectRatio) {
+      const normalized = String(aspectRatio).trim();
+      if (presets[normalized]) return presets[normalized];
+
+      const match = normalized.match(/^(\d+(?:\.\d+)?):(\d+(?:\.\d+)?)$/);
+      if (match) {
+        const widthRatio = Number(match[1]);
+        const heightRatio = Number(match[2]);
+        if (Number.isFinite(widthRatio) && Number.isFinite(heightRatio) && widthRatio > 0 && heightRatio > 0) {
+          const longEdge = 1920;
+          if (widthRatio >= heightRatio) {
+            return {
+              width: longEdge,
+              height: Math.round(longEdge * heightRatio / widthRatio)
+            };
+          } else {
+            return {
+              width: Math.round(longEdge * widthRatio / heightRatio),
+              height: longEdge
+            };
+          }
+        }
       }
     }
 
@@ -748,7 +753,7 @@ export async function renderVideo(options = {}) {
 
   const detectedViewport = await detectPageViewport(timelinePage);
   if (detectedViewport) {
-    console.log(`Auto-detected viewport from metadata: ${detectedViewport.width}x${detectedViewport.height} (originally: ${args.width}x${args.height})`);
+    console.log(`Auto-detected viewport: ${detectedViewport.width}x${detectedViewport.height} (originally: ${args.width}x${args.height})`);
     args.width = detectedViewport.width;
     args.height = detectedViewport.height;
   }

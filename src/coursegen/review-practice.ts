@@ -38,12 +38,6 @@ async function collectReadabilityFindings(page: Page, context: string): Promise<
       issues.push(`page overflows vertically (content ${Math.max(de.scrollHeight, body.scrollHeight)}px tall, viewport ${de.clientHeight}px)`);
     }
 
-    function describeElement(el: HTMLElement) {
-      if (el.id) return `#${el.id}`;
-      const className = Array.from(el.classList).slice(0, 2).map(name => `.${name}`).join('');
-      return `${el.tagName.toLowerCase()}${className}`;
-    }
-
     const internalScroll: string[] = [];
     const ignoreScrollSelector = 'html, body, pre, code, textarea, select, option, .katex-mathml, .katex-mathml *';
     const allElements = Array.from(body.querySelectorAll<HTMLElement>('*'));
@@ -60,10 +54,16 @@ async function collectReadabilityFindings(page: Page, context: string): Promise<
       const clipsOrScrollsY = style.overflowY !== 'visible';
       const clipsOrScrollsX = style.overflowX !== 'visible';
       if (verticalOverflow > 4 && clipsOrScrollsY) {
-        internalScroll.push(`${describeElement(el)} has internal vertical overflow (${el.scrollHeight}px content, ${el.clientHeight}px visible)`);
+        const label = el.id
+          ? `#${el.id}`
+          : `${el.tagName.toLowerCase()}${Array.from(el.classList).slice(0, 2).map(name => `.${name}`).join('')}`;
+        internalScroll.push(`${label} has internal vertical overflow (${el.scrollHeight}px content, ${el.clientHeight}px visible)`);
       }
       if (horizontalOverflow > 4 && clipsOrScrollsX) {
-        internalScroll.push(`${describeElement(el)} has internal horizontal overflow (${el.scrollWidth}px content, ${el.clientWidth}px visible)`);
+        const label = el.id
+          ? `#${el.id}`
+          : `${el.tagName.toLowerCase()}${Array.from(el.classList).slice(0, 2).map(name => `.${name}`).join('')}`;
+        internalScroll.push(`${label} has internal horizontal overflow (${el.scrollWidth}px content, ${el.clientWidth}px visible)`);
       }
     }
     for (const item of internalScroll.slice(0, maxFindingsPerCategory)) {

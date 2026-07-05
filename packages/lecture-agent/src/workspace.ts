@@ -98,3 +98,30 @@ export function resolve_workspace_path(filePath: string, workspaceDir: string = 
     }
     return target;
 }
+
+function is_agents_path(filePath: string): boolean {
+    const normalized = path.normalize(filePath).replace(/\\/g, '/');
+    return normalized === '.agents' || normalized.startsWith('.agents/');
+}
+
+function resolve_agents_root(baseDir: string): string {
+    return path.resolve(baseDir, '.agents');
+}
+
+/** Read-only fallback for packaged `.agents/**` resources when absent from the active workspace. */
+export function resolve_agent_resource_path(filePath: string, workspaceDir: string = DEFAULT_WORKSPACE_DIR): string {
+    const workspaceTarget = resolve_workspace_path(filePath, workspaceDir);
+    if (fs.existsSync(workspaceTarget)) {
+        return workspaceTarget;
+    }
+    if (!is_agents_path(filePath)) {
+        return workspaceTarget;
+    }
+
+    const baseTarget = path.resolve(BASE_DIR, filePath);
+    const agentsRoot = resolve_agents_root(BASE_DIR);
+    if (baseTarget !== agentsRoot && !baseTarget.startsWith(agentsRoot + path.sep)) {
+        throw new Error(`path escapes .agents root: ${filePath}`);
+    }
+    return baseTarget;
+}

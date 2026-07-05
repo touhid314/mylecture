@@ -1,7 +1,7 @@
 import { readFileSync } from 'node:fs';
 import path from 'node:path';
 import type { Audience, CoursePlan, GameSpec, InteractiveSpec, LearningIntent, PlannedLecture } from './types.ts';
-import { resolveGameSpec, resolveInteractiveSpec } from './types.ts';
+import { flattenPlanLectures, resolveGameSpec, resolveInteractiveSpec } from './types.ts';
 import { DEFAULT_LEARNING_INTENT } from './types.ts';
 
 const PROMPTS_DIR = path.join(import.meta.dirname, 'prompts');
@@ -50,6 +50,35 @@ function formatDuration(minutes: number) {
   return `${whole}:00`;
 }
 
+const SCRIPT_CRAFT = loadPromptFile('script-craft.md');
+
+export function formatLectureSequenceContext(plan: CoursePlan, lecture: PlannedLecture) {
+  const rows = flattenPlanLectures(plan);
+  const index = rows.findIndex(row => row.slug === lecture.slug);
+  if (index < 0) return '';
+
+  const previous = rows[index - 1];
+  const next = rows[index + 1];
+  const lines = [
+    'Internal course sequence context (for planning only; do not mention this metadata to learners):',
+    `- This is lecture ${index + 1} of ${rows.length}.`,
+    previous ? `- Previous lecture: ${previous.title} (${previous.objective})` : '- This is the first lecture in the course.',
+    next ? `- Next planned lecture: ${next.title} (${next.objective})` : '- No next lecture is currently planned.'
+  ];
+
+  if (!next) {
+    lines.push('- Because this is currently the last planned lecture, end by closing the current lesson cleanly while remaining valid if the course is extended later. Do not say "final lecture", "finished the course", "completed the course", "next lecture", "up next", or leave a dangling practice prompt after the conclusion.');
+  } else {
+    lines.push('- The ending may gently prepare the learner for the next idea, but do not say the lesson number or make the course sequence metadata explicit.');
+  }
+
+  if (lecture.formats.includes('interactive') || lecture.formats.includes('game')) {
+    lines.push('- If practice follows this video, mention it only as a natural next action before the final closing beat, not as a stray command after the conclusion.');
+  }
+
+  return lines.join('\n');
+}
+
 export function formatInteractiveSpec(spec: InteractiveSpec) {
   const lines = spec.activities.map((activity, index) => {
     return [
@@ -86,21 +115,28 @@ export function buildVideoTaskMessage(plan: CoursePlan, lecture: PlannedLecture,
     `Learning objective: ${lecture.objective}`,
     `Audience level: ${plan.audience}`,
     `Learning intent: ${intent}`,
+    formatLectureSequenceContext(plan, lecture),
     lecture.promptNotes ? `Notes: ${lecture.promptNotes}` : '',
     '',
     'if the user query is for video generation then follow this:',
     'aspect ratio: 16:9',
+    'render frame: fill the whole 16:9 stage. Prefer a responsive full-viewport root (`html`, `body`, and the main stage at `width: 100vw; height: 100vh`) or a fixed 1920x1080 stage. Do not hard-code a smaller 1280x720 stage unless every visual element scales to fill the export viewport.',
     `generation length: ${formatDuration(lecture.durationMinutes)}`,
     'embed subtitle in video: no',
     `profile: ${profileContent}`,
     '',
     'Course lesson structure:',
     '- Open with a concrete question, problem, or motivating example that makes the learning objective feel useful.',
-    '- State what the learner will be able to do, then teach through one clear sequence of explanation and examples.',
+    '- Spend the first minute orienting the learner: the relevant background, the stakes of the problem, and the obstacle this lecture resolves.',
+    '- State what the learner will be able to do, then teach through one clear sequence of explanation, example, and consequence.',
     '- Keep the lesson aligned to the single objective; avoid attention-grabbing detours, broad surveys, or tangents that do not support the objective.',
+    '- Make visuals carry the story: update the scene when the reasoning advances, reveal assumptions as they matter, and compare before/after states.',
     '- End with a short takeaway that names the skill the learner can now practice.',
     '',
-    'Create only the video lecture (index.html and assets). Do NOT create any interactive practice or game files (no interactive.html, game.html, or anything under activities/) — those are generated in a separate pass.'
+    'Before writing HTML, write `script.md` using this shared script craft guide. Then build the video from that script:',
+    SCRIPT_CRAFT,
+    '',
+    'Create only the video lecture (index.html and assets). Do NOT create any interactive practice or game files (no interactive.html, game.html, or anything under activities/) - those are generated in a separate pass.'
   ].filter(line => line !== '');
 
   return lines.join('\n');

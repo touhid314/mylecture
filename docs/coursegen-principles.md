@@ -4,7 +4,7 @@ This file is for agents working on `src/coursegen/`, coursegen prompts, generate
 
 ## Product Goal
 
-Coursegen should take a topic, audience level, intent, scope, and lecture count, then produce a coherent course that teaches the subject well enough to feel close to publishable after review.
+Coursegen should take a topic, optional catalog-placement overrides, scope, and lecture count, then produce a coherent course that teaches the subject well enough to feel close to publishable after review.
 
 That means every improvement should help many possible courses, audiences, and subjects. Fractions, SQL indexes, history, physics, writing, and professional training should all benefit from the same underlying rules.
 
@@ -53,10 +53,12 @@ A course is not a playlist of standalone videos. It should have a learning path.
 - Short courses should still have a beginning, middle, and end.
 - Long courses should be grouped into modules that reflect conceptual dependencies, not arbitrary chunks.
 
-Use the audience and intent profiles as axes:
+Use the audience and intent profiles as catalog placement axes:
 
 - `audience` describes learner maturity, reading level, pacing, and assumed background.
 - `intent` describes why the learner is taking the course and what type of transfer matters.
+
+By default, the planner should infer the best audience and intent for the topic. Manual audience/intent inputs are overrides for deliberate editorial cases, not the normal way to create variants. Avoid filling the catalog with the same topic repeated across many difficulties or intents unless the scope is genuinely different.
 
 Before adding a new profile, ask whether it is really a new axis or just a combination of existing audience plus intent plus scope.
 

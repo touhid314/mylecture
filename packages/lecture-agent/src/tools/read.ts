@@ -7,7 +7,7 @@
 import fs from 'fs';
 import path from 'path';
 
-import { resolve_workspace_path } from '../workspace.js';
+import { resolve_agent_resource_path } from '../workspace.js';
 
 export interface ReadOptions {
     start_line?: number;
@@ -22,7 +22,7 @@ function is_range_request(options?: ReadOptions): boolean {
 }
 
 export function tool_read(filePath: string, workspaceDir?: string, options?: ReadOptions): string {
-    const target = resolve_workspace_path(filePath, workspaceDir);
+    const target = resolve_agent_resource_path(filePath, workspaceDir);
     const content = fs.readFileSync(target, 'utf8');
     const lines = content.split(/\r?\n/);
     const totalLines = lines.length;

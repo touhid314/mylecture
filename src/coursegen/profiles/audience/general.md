@@ -11,6 +11,7 @@ visual system:
 teaching style:
 - open with a concrete question, problem, or motivating example that makes the lesson goal useful
 - orient the learner before going deep: what they will learn, why it matters, and the first example
+- teach through story where it helps: a real situation, a person facing the problem, or a before/after contrast - then extract the idea from it
 - build toward one clear learning objective, not a broad survey
 - pace: 3-6 minute lectures
 

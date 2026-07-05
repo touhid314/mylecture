@@ -4,8 +4,10 @@ import type { CoursePlan, CourseState, LectureState, PracticeReviewStatus } from
 import {
   getCourseDir,
   isIndexHtmlName,
+  isResolvedHtmlName,
   lectureFolderName,
-  lectureFolderPath
+  lectureFolderPath,
+  resolvedSiblingPathForIndex
 } from './paths.ts';
 import {
   buildGameTaskMessage,
@@ -13,6 +15,7 @@ import {
   buildPracticeRepairMessage,
   buildVideoTaskMessage,
   estimateCourseCostUsd,
+  formatLectureSequenceContext,
   formatGameSpec,
   formatInteractiveSpec,
   GAME_PRACTICE_REL,
@@ -21,10 +24,11 @@ import {
   type PracticeHtmlRelPath
 } from './lecture-prompt.ts';
 import { readCoursePlan, readCourseState, writeCourseState } from './state.ts';
-import { flattenPlanLectures, initialCourseState, resolveGameSpec, resolveInteractiveSpec } from './types.ts';
+import { DEFAULT_LEARNING_INTENT, flattenPlanLectures, initialCourseState, resolveGameSpec, resolveInteractiveSpec } from './types.ts';
 import { parseCostUsdFromOutput, spawnAgent, spawnRenderLecture, spawnResolve } from './spawn.ts';
 import { confirm } from './confirm.ts';
 import { cleanupScreenshotDir, reviewPracticeWithRubric, type RubricResult } from './review-practice.ts';
+import { buildScriptRepairMessage, reviewScriptWithRubric, type ScriptReviewResult } from './review-script.ts';
 
 export type RunCourseOptions = {
   courseSlug: string;
@@ -36,10 +40,15 @@ export type RunCourseOptions = {
   retryFailed?: boolean;
   forceLecture?: string;
   skipPracticeReview?: boolean;
+  skipScriptReview?: boolean;
   ttsVoice?: string;
   ttsSpeed?: string;
   model?: string;
   dryRun?: boolean;
+  /** When true, mux resolved HTML to MP4 after resolve. Default: false (resolve-only). */
+  render?: boolean;
+  /** When true, only mux existing resolved HTML to MP4 — no agent, resolve, or practice. */
+  renderOnly?: boolean;
 };
 
 type PracticeKind = 'interactive' | 'game';
@@ -77,7 +86,7 @@ function defaultReviewFields(lecture: Partial<LectureState>) {
   } as const;
 }
 
-function syncStateFromPlan(state: CourseState, plan: CoursePlan) {
+export function syncStateFromPlan(state: CourseState, plan: CoursePlan) {
   const rows = flattenPlanLectures(plan);
   const bySlug = new Map(state.lectures.map(lecture => [lecture.slug, lecture]));
   state.lectures = rows.map(row => {
@@ -146,7 +155,41 @@ function practiceReviewPending(lecture: LectureState) {
   return interactivePending || gamePending;
 }
 
-function shouldRunLecture(lecture: LectureState, options: RunCourseOptions) {
+function wantsRender(options: RunCourseOptions) {
+  return options.render === true;
+}
+
+function findLatestIndexFile(folderPath: string) {
+  if (!existsSync(folderPath)) return null;
+  const indexFiles = readdirSync(folderPath)
+    .filter(name => isIndexHtmlName(name))
+    .sort((a, b) => a.localeCompare(b, undefined, { numeric: true, sensitivity: 'base' }));
+  const latest = indexFiles[indexFiles.length - 1];
+  return latest ? path.join(folderPath, latest) : null;
+}
+
+export function hasResolvedHtml(folderPath: string) {
+  if (!existsSync(folderPath)) return false;
+  return readdirSync(folderPath)
+    .filter(name => isIndexHtmlName(name))
+    .some(name => existsSync(resolvedSiblingPathForIndex(path.join(folderPath, name))));
+}
+
+export function lectureRenderReady(plan: CoursePlan, lecture: LectureState) {
+  if (!lecture.formats.includes('video')) return false;
+  const folderName = lecture.folderName || lectureFolderName(lecture.order, lecture.slug);
+  const folderPath = lectureFolderPath(plan.slug, folderName);
+  if (!hasResolvedHtml(folderPath)) return false;
+  return !(lecture.mp4Path && existsSync(lecture.mp4Path));
+}
+
+function shouldRunLecture(lecture: LectureState, plan: CoursePlan, options: RunCourseOptions) {
+  if (options.renderOnly) {
+    if (options.forceLecture) {
+      return options.forceLecture === lecture.slug && lectureRenderReady(plan, lecture);
+    }
+    return lectureRenderReady(plan, lecture);
+  }
   if (options.forceLecture) {
     return lecture.slug === options.forceLecture;
   }
@@ -161,14 +204,15 @@ function shouldRunLecture(lecture: LectureState, options: RunCourseOptions) {
     return true;
   }
   if (lecture.status === 'needs-review') return Boolean(options.retryFailed);
+  if (lecture.status === 'done' && wantsRender(options) && lecture.formats.includes('video')) {
+    if (!lecture.mp4Path || !existsSync(lecture.mp4Path)) return true;
+  }
   if (lecture.status === 'done' && practiceReviewPending(lecture)) return true;
   return lecture.status === 'pending';
 }
 
 function findIndexFile(folderPath: string) {
-  if (!existsSync(folderPath)) return null;
-  const indexFiles = readdirSync(folderPath).filter(name => isIndexHtmlName(name));
-  return indexFiles[0] ? path.join(folderPath, indexFiles[0]) : null;
+  return findLatestIndexFile(folderPath);
 }
 
 function cleanupLegacyTopLevelPracticeFiles(folderPath: string) {
@@ -184,6 +228,26 @@ function cleanupCourseLegacyPracticeFiles(plan: CoursePlan, state: CourseState) 
   for (const lecture of state.lectures) {
     const folderName = lecture.folderName || lectureFolderName(lecture.order, lecture.slug);
     cleanupLegacyTopLevelPracticeFiles(lectureFolderPath(plan.slug, folderName));
+  }
+}
+
+function cleanupVideoArtifactsForRerun(folderPath: string) {
+  if (!existsSync(folderPath)) return;
+  for (const entry of readdirSync(folderPath, { withFileTypes: true })) {
+    const entryPath = path.join(folderPath, entry.name);
+    if (entry.isDirectory()) {
+      if (entry.name === 'audio') {
+        rmSync(entryPath, { recursive: true, force: true });
+      }
+      continue;
+    }
+    if (
+      isIndexHtmlName(entry.name) ||
+      isResolvedHtmlName(entry.name) ||
+      entry.name.toLowerCase().endsWith('.mp4')
+    ) {
+      rmSync(entryPath, { force: true });
+    }
   }
 }
 
@@ -318,6 +382,83 @@ async function reviewOnePracticeFile(options: {
   }
 }
 
+/**
+ * Narration-quality gate: review the generated script before paying for TTS
+ * and render. Fails soft - after one revision pass, generation continues even
+ * if the reviewer is still unhappy, since narration style is subjective and a
+ * stalled pipeline is worse than an imperfect script.
+ */
+async function runScriptReviewPhase(
+  plan: CoursePlan,
+  planned: NonNullable<ReturnType<typeof findPlannedLecture>>,
+  lectureState: LectureState,
+  state: CourseState,
+  folderPath: string,
+  options: RunCourseOptions
+) {
+  const reviewOptions = {
+    folderPath,
+    objective: lectureState.objective,
+    audience: plan.audience,
+    intent: plan.intent ?? DEFAULT_LEARNING_INTENT,
+    durationMinutes: planned.lecture.durationMinutes,
+    courseContext: formatLectureSequenceContext(plan, planned.lecture),
+    model: options.model
+  };
+
+  console.log('  Reviewing narration script...');
+  let result: ScriptReviewResult;
+  try {
+    result = await reviewScriptWithRubric(reviewOptions);
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    console.log(`  Script review skipped (infrastructure error): ${message}`);
+    return;
+  }
+
+  if (result.passed) {
+    console.log('  Script review: passed');
+    return;
+  }
+
+  console.log('  Script review failed; running one narration revision pass...');
+  result.findings.forEach(finding => console.log(`    - ${finding}`));
+
+  try {
+    await runAgentTask({
+      workspaceDir: folderPath,
+      taskMessage: buildScriptRepairMessage({
+        objective: lectureState.objective,
+        findings: result.findings
+      }),
+      maxTurns: options.maxTurns ?? 60,
+      model: options.model,
+      timeoutMinutes: options.lectureTimeoutMinutes ?? 20,
+      onCost: makeCostRecorder(lectureState, state)
+    });
+    writeCourseState(state);
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    console.log(`  Narration revision failed: ${message}. Continuing with original narration.`);
+    return;
+  }
+
+  try {
+    result = await reviewScriptWithRubric(reviewOptions);
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    console.log(`  Script re-review skipped (infrastructure error): ${message}`);
+    return;
+  }
+
+  if (result.passed) {
+    console.log('  Script review: passed after revision');
+    return;
+  }
+  console.log('  Script review still failing after one revision; continuing to render. Remaining findings:');
+  result.findings.forEach(finding => console.log(`    - ${finding}`));
+}
+
 async function runPracticePhase(
   plan: CoursePlan,
   state: CourseState,
@@ -450,12 +591,64 @@ async function runOneLecture(
 
   const folderName = lectureState.folderName || lectureFolderName(lectureState.order, lectureState.slug);
   const folderPath = lectureFolderPath(plan.slug, folderName);
-  const existingIndex = findIndexFile(folderPath);
+  const existingIndex = findLatestIndexFile(folderPath);
   const videoAlreadyRendered = Boolean(lectureState.mp4Path && existsSync(lectureState.mp4Path));
+  const resolvedReady = hasResolvedHtml(folderPath);
+
+  if (options.renderOnly) {
+    if (options.dryRun) {
+      console.log(`\n--- ${lectureState.title} (render MP4 only) ---\nFolder: ${folderPath}\n`);
+      return;
+    }
+    if (!resolvedReady) {
+      lectureState.status = 'failed';
+      lectureState.error = 'No resolved HTML found; run generation/resolve first';
+      writeCourseState(state);
+      return;
+    }
+    if (videoAlreadyRendered) {
+      console.log('  MP4 already exists; skipping.');
+      return;
+    }
+    const priorStatus = lectureState.status;
+    const priorError = lectureState.error;
+    lectureState.status = 'rendering';
+    writeCourseState(state);
+    try {
+      const mp4Path = await spawnRenderLecture(folderPath, {
+        ttsVoice: options.ttsVoice,
+        ttsSpeed: options.ttsSpeed
+      });
+      lectureState.mp4Path = mp4Path;
+      if (priorStatus === 'needs-review') {
+        lectureState.status = 'needs-review';
+        lectureState.error = priorError;
+      } else {
+        lectureState.status = 'done';
+        lectureState.error = '';
+      }
+    } catch (error) {
+      lectureState.status = 'failed';
+      lectureState.error = `Render failed: ${error instanceof Error ? error.message : String(error)}`;
+    }
+    writeCourseState(state);
+    return;
+  }
+
+  const renderOnly =
+    wantsRender(options) &&
+    !options.forceLecture &&
+    Boolean(existingIndex) &&
+    resolvedReady &&
+    !videoAlreadyRendered &&
+    lectureState.status !== 'pending' &&
+    lectureState.status !== 'generating';
 
   const skipVideo =
-    videoAlreadyRendered &&
+    !renderOnly &&
     !options.forceLecture &&
+    Boolean(existingIndex) &&
+    (videoAlreadyRendered || (!wantsRender(options) && resolvedReady)) &&
     lectureState.status !== 'generating' &&
     lectureState.status !== 'resolving' &&
     lectureState.status !== 'rendering' &&
@@ -478,13 +671,44 @@ async function runOneLecture(
   lectureState.folderName = folderName;
 
   if (options.forceLecture) {
+    cleanupVideoArtifactsForRerun(folderPath);
     lectureState.interactiveReview = 'not-required';
     lectureState.interactiveReviewNotes = '';
     lectureState.gameReview = 'not-required';
     lectureState.gameReviewNotes = '';
+    lectureState.mp4Path = '';
   }
 
-  let indexPath = existingIndex;
+  let indexPath = options.forceLecture ? null : existingIndex;
+
+  if (renderOnly) {
+    lectureState.error = '';
+    lectureState.status = 'rendering';
+    writeCourseState(state);
+    try {
+      const mp4Path = await spawnRenderLecture(folderPath, {
+        ttsVoice: options.ttsVoice,
+        ttsSpeed: options.ttsSpeed
+      });
+      lectureState.mp4Path = mp4Path;
+    } catch (error) {
+      lectureState.status = 'failed';
+      lectureState.error = `Render failed: ${error instanceof Error ? error.message : String(error)}`;
+      writeCourseState(state);
+      return;
+    }
+    indexPath = findLatestIndexFile(folderPath);
+    if (!indexPath) {
+      lectureState.status = 'failed';
+      lectureState.error = 'Video index missing; cannot generate practice assets';
+      writeCourseState(state);
+      return;
+    }
+    await runPracticePhase(plan, state, lectureState, planned, folderPath, indexPath, options);
+    finalizeLectureStatus(lectureState);
+    writeCourseState(state);
+    return;
+  }
 
   if (!skipVideo) {
     lectureState.attempts += 1;
@@ -518,6 +742,11 @@ async function runOneLecture(
       return;
     }
 
+    if (!options.skipScriptReview) {
+      await runScriptReviewPhase(plan, planned, lectureState, state, folderPath, options);
+      indexPath = findIndexFile(folderPath) ?? indexPath;
+    }
+
     lectureState.status = 'resolving';
     writeCourseState(state);
     try {
@@ -532,19 +761,23 @@ async function runOneLecture(
       return;
     }
 
-    lectureState.status = 'rendering';
-    writeCourseState(state);
-    try {
-      const mp4Path = await spawnRenderLecture(folderPath, {
-        ttsVoice: options.ttsVoice,
-        ttsSpeed: options.ttsSpeed
-      });
-      lectureState.mp4Path = mp4Path;
-    } catch (error) {
-      lectureState.status = 'failed';
-      lectureState.error = `Render failed: ${error instanceof Error ? error.message : String(error)}`;
+    if (wantsRender(options)) {
+      lectureState.status = 'rendering';
       writeCourseState(state);
-      return;
+      try {
+        const mp4Path = await spawnRenderLecture(folderPath, {
+          ttsVoice: options.ttsVoice,
+          ttsSpeed: options.ttsSpeed
+        });
+        lectureState.mp4Path = mp4Path;
+      } catch (error) {
+        lectureState.status = 'failed';
+        lectureState.error = `Render failed: ${error instanceof Error ? error.message : String(error)}`;
+        writeCourseState(state);
+        return;
+      }
+    } else {
+      console.log('  Skipping MP4 render (pass --render to enable).');
     }
   } else if (!indexPath) {
     lectureState.status = 'failed';
@@ -580,21 +813,28 @@ export async function runCourse(options: RunCourseOptions) {
     cleanupCourseLegacyPracticeFiles(plan, state);
   }
 
-  const pending = state.lectures.filter(lecture => shouldRunLecture(lecture, options));
+  const pending = state.lectures.filter(lecture => shouldRunLecture(lecture, plan, options));
   if (pending.length === 0) {
-    console.log('No lectures to run. Use --retry-failed, --force-lecture <slug>, or resume after needs-review.');
+    if (options.renderOnly) {
+      console.log('No lectures ready to render. Each lecture needs resolved HTML and no existing MP4.');
+    } else {
+      console.log('No lectures to run. Use --retry-failed, --force-lecture <slug>, or resume after needs-review.');
+    }
     return state;
   }
 
   printPlanSummary(plan);
-  console.log(`\nLectures to generate: ${pending.map(l => l.slug).join(', ')}`);
-  console.log(`Budget: $${state.budgetUsd.toFixed(2)} (spent so far: $${state.spentUsd.toFixed(2)})`);
+  const actionLabel = options.renderOnly ? 'render' : 'generate';
+  console.log(`\nLectures to ${actionLabel}: ${pending.map(l => l.slug).join(', ')}`);
+  if (!options.renderOnly) {
+    console.log(`Budget: $${state.budgetUsd.toFixed(2)} (spent so far: $${state.spentUsd.toFixed(2)})`);
+  }
 
   if (!options.dryRun) {
-    const ok = await confirm(
-      `Start generation for ${pending.length} lecture(s)? Estimated ~$${estimateCourseCostUsd(plan).toFixed(2)}.`,
-      options.yes
-    );
+    const confirmMessage = options.renderOnly
+      ? `Render MP4 for ${pending.length} lecture(s) from existing resolved HTML?`
+      : `Start generation for ${pending.length} lecture(s)? Estimated ~$${estimateCourseCostUsd(plan).toFixed(2)}.`;
+    const ok = await confirm(confirmMessage, options.yes);
     if (!ok) {
       console.log('Cancelled.');
       return state;
@@ -602,14 +842,19 @@ export async function runCourse(options: RunCourseOptions) {
   }
 
   for (const lectureState of state.lectures) {
-    if (!shouldRunLecture(lectureState, options)) continue;
+    if (!shouldRunLecture(lectureState, plan, options)) continue;
 
-    if (lectureState.attempts >= state.maxAttempts && !options.forceLecture && lectureState.status === 'pending') {
+    if (
+      !options.renderOnly &&
+      lectureState.attempts >= state.maxAttempts &&
+      !options.forceLecture &&
+      lectureState.status === 'pending'
+    ) {
       console.log(`Skipping ${lectureState.slug}: max attempts (${state.maxAttempts}) reached. Use --force-lecture to retry.`);
       continue;
     }
 
-    if (state.spentUsd >= state.budgetUsd && !options.forceLecture) {
+    if (!options.renderOnly && state.spentUsd >= state.budgetUsd && !options.forceLecture) {
       console.log(`Budget cap reached ($${state.budgetUsd.toFixed(2)}). Stopping before ${lectureState.slug}.`);
       break;
     }
@@ -617,7 +862,7 @@ export async function runCourse(options: RunCourseOptions) {
     console.log(`\n=== Lecture ${lectureState.order}: ${lectureState.title} ===`);
     await runOneLecture(plan, state, lectureState, options);
 
-    if (state.spentUsd >= state.budgetUsd && lectureState.status !== 'done') {
+    if (!options.renderOnly && state.spentUsd >= state.budgetUsd && lectureState.status !== 'done') {
       console.log(`Budget cap reached after ${lectureState.slug}.`);
       break;
     }
@@ -626,7 +871,10 @@ export async function runCourse(options: RunCourseOptions) {
   const done = state.lectures.filter(l => l.status === 'done').length;
   const failed = state.lectures.filter(l => l.status === 'failed').length;
   const needsReview = state.lectures.filter(l => l.status === 'needs-review').length;
-  console.log(`\nRun complete: ${done} done, ${failed} failed, ${needsReview} needs-review, spent ~$${state.spentUsd.toFixed(2)} / $${state.budgetUsd.toFixed(2)}`);
+  const summary = options.renderOnly
+    ? `\nRender complete: ${done} done, ${failed} failed, ${needsReview} needs-review`
+    : `\nRun complete: ${done} done, ${failed} failed, ${needsReview} needs-review, spent ~$${state.spentUsd.toFixed(2)} / $${state.budgetUsd.toFixed(2)}`;
+  console.log(summary);
   console.log(`Course folder: ${getCourseDir(options.courseSlug)}`);
   return state;
 }

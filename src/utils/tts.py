@@ -262,7 +262,7 @@ def _save_wave(filename: str, pcm: bytes, channels: int = 1, rate: int = 24000, 
         wf.writeframes(pcm)
 
 
-def _concat_wavs(input_paths: list[Path], output_path: Path) -> None:
+def _concat_wavs(input_paths: list[Path], output_path: Path, pause_seconds: float = 0.0) -> None:
     if not input_paths:
         raise ValueError("No WAV chunks provided for concatenation.")
 
@@ -340,7 +340,7 @@ def _concat_wavs(input_paths: list[Path], output_path: Path) -> None:
 
     expected: tuple[int, int, int, int] | None = None
     all_data = bytearray()
-    for wav_path in input_paths:
+    for idx, wav_path in enumerate(input_paths):
         fmt, ch, sr, bps, data = _read_wav_chunks(wav_path)
         current = (fmt, ch, sr, bps)
         if expected is None:
@@ -349,6 +349,10 @@ def _concat_wavs(input_paths: list[Path], output_path: Path) -> None:
             raise RuntimeError(
                 f"WAV format mismatch while concatenating chunks: expected {expected}, got {current} at {wav_path}"
             )
+        if idx > 0 and pause_seconds > 0:
+            bytes_per_sample = bps // 8
+            frame_count = max(0, int(round(sr * pause_seconds)))
+            all_data.extend(b"\x00" * frame_count * ch * bytes_per_sample)
         all_data.extend(data)
 
     assert expected is not None
@@ -407,6 +411,53 @@ def _split_text_into_sentence_chunks(
         chunks.append(" ".join(current_sentences))
 
     return chunks
+
+
+_DIGIT_WORDS = {
+    "0": "zero",
+    "1": "one",
+    "2": "two",
+    "3": "three",
+    "4": "four",
+    "5": "five",
+    "6": "six",
+    "7": "seven",
+    "8": "eight",
+    "9": "nine",
+}
+
+
+def _sentence_pause_seconds() -> float:
+    raw = os.getenv("TTS_SENTENCE_PAUSE_SECONDS", "0.08")
+    try:
+        return max(0.0, min(0.5, float(raw)))
+    except Exception:
+        return 0.08
+
+
+def _light_normalize_tts_text(text: str) -> str:
+    if os.getenv("TTS_TEXT_NORMALIZATION", "light").strip().lower() in {"0", "false", "off", "none", "raw"}:
+        return text
+
+    def decimal_repl(match: re.Match[str]) -> str:
+        whole = match.group(1)
+        frac = match.group(2)
+        whole_words = " ".join(_DIGIT_WORDS[d] for d in whole) if len(whole) > 1 and whole.startswith("0") else whole
+        frac_words = " ".join(_DIGIT_WORDS[d] for d in frac)
+        return f"{whole_words} point {frac_words}"
+
+    normalized = re.sub(r"(?<![\w.])(\d+)\.(\d+)(?![\w.])", decimal_repl, text)
+    normalized = re.sub(r"\bL\s*-\s*N\b", "natural log", normalized, flags=re.IGNORECASE)
+    normalized = re.sub(r"\bL\s*-\s*O\s*-\s*G\b", "log", normalized, flags=re.IGNORECASE)
+    return normalized
+
+
+def _split_for_sentence_pauses(text: str) -> list[str]:
+    clean = re.sub(r"\s+", " ", (text or "").strip())
+    if not clean:
+        return []
+    sentences = [s.strip() for s in re.split(r"(?<=[.!?])\s+", clean) if s.strip()]
+    return sentences or [clean]
 
 
 def _openai_client() -> OpenAI:
@@ -745,7 +796,8 @@ def _run_kokoro(text: str, output_path: Path, voice: str, speed: float) -> None:
 
 
 def _run_kokoro_chunked(text: str, output_path: Path, voice: str, speed: float) -> None:
-    chunks = _split_text_into_sentence_chunks(text)
+    pause_seconds = _sentence_pause_seconds()
+    chunks = _split_for_sentence_pauses(text) if pause_seconds > 0 else _split_text_into_sentence_chunks(text)
     if len(chunks) <= 1:
         _run_kokoro(text, output_path, voice, speed)
         return
@@ -772,7 +824,7 @@ def _run_kokoro_chunked(text: str, output_path: Path, voice: str, speed: float) 
                 except Exception as exc:
                     raise RuntimeError(f"Kokoro chunk {idx + 1}/{len(chunks)} failed: {exc}") from exc
 
-        _concat_wavs(chunk_paths, output_path)
+        _concat_wavs(chunk_paths, output_path, pause_seconds=pause_seconds)
 
 
 _OMNIVOICE_MODEL = None
@@ -866,6 +918,25 @@ def _run_omnivoice(text: str, output_path: Path, voice: str, speed: float) -> No
     print(f"[OmniVoice] Audio successfully saved to: '{output_path}'", flush=True)
 
 
+def _run_omnivoice_chunked(text: str, output_path: Path, voice: str, speed: float) -> None:
+    pause_seconds = _sentence_pause_seconds()
+    chunks = _split_for_sentence_pauses(text) if pause_seconds > 0 else [text]
+    if len(chunks) <= 1:
+        _run_omnivoice(text, output_path, voice, speed)
+        return
+
+    tmp_root = PROJECT_ROOT / ".tmp"
+    tmp_root.mkdir(parents=True, exist_ok=True)
+    with tempfile.TemporaryDirectory(dir=str(tmp_root), prefix="omnivoice_chunks_") as td:
+        chunk_dir = Path(td)
+        chunk_paths = []
+        for idx, chunk_text in enumerate(chunks):
+            chunk_path = chunk_dir / f"chunk_{idx:04d}.wav"
+            _run_omnivoice(chunk_text, chunk_path, voice, speed)
+            chunk_paths.append(chunk_path)
+        _concat_wavs(chunk_paths, output_path, pause_seconds=pause_seconds)
+
+
 def tts(
     text: str,
     provider: str = "openai",
@@ -906,7 +977,7 @@ def tts(
 
             kokoro voices demo: https://gregr.org/tts-samples/
     """
-    clean_text = (text or "").strip()
+    clean_text = _light_normalize_tts_text((text or "").strip())
     if not clean_text:
         raise ValueError("Text content is empty.")
 
@@ -980,7 +1051,7 @@ def tts(
         chosen_speed = float(speed) if speed is not None else 0.85
         if chosen_speed <= 0:
             raise ValueError("speed must be greater than 0")
-        _run_omnivoice(clean_text, out_path, chosen_voice, chosen_speed)
+        _run_omnivoice_chunked(clean_text, out_path, chosen_voice, chosen_speed)
         return str(out_path)
 
 

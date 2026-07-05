@@ -1,4 +1,5 @@
 import { existsSync } from 'node:fs';
+import { writeLectureCaptionsVtt } from '../captions-vtt.ts';
 import { lectureFolderPath } from './paths.ts';
 import { readCoursePlan, readCourseState } from './state.ts';
 import { spawnAdmin } from './spawn.ts';
@@ -73,6 +74,9 @@ export async function publishCourse(options: PublishCourseOptions) {
     for (const lecture of state.lectures) {
       console.log(`\nPublishing lecture: ${lecture.slug}`);
       try {
+        const sourceDir = lectureSourceDir(options.courseSlug, lecture);
+        const captionsPath = existsSync(sourceDir) ? writeLectureCaptionsVtt(sourceDir) : null;
+        if (captionsPath) console.log(`  captions: ${captionsPath}`);
         await spawnAdmin(['publish-lecture', '--course', plan.slug, '--slug', lecture.slug]);
       } catch (err) {
         const message = err instanceof Error ? err.message : String(err);
@@ -102,6 +106,11 @@ export async function publishCourse(options: PublishCourseOptions) {
 
       if (lecture.status === 'needs-review') {
         console.warn(`Warning: ${lecture.slug} has needs-review status — practice QA not passed; draft upload may ship incomplete activities.`);
+      }
+
+      const captionsPath = writeLectureCaptionsVtt(sourceDir);
+      if (captionsPath) {
+        console.log(`  captions: ${captionsPath}`);
       }
 
       const args = [

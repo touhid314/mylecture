@@ -2,6 +2,7 @@ import { existsSync, mkdirSync, readdirSync, renameSync, rmSync, statSync, unlin
 import { spawn } from 'node:child_process';
 import path from 'node:path';
 import { loadAppConfig } from '../config.ts';
+import { writeLectureCaptionsVtt } from '../captions-vtt.ts';
 import {
   ffmpegConcatPath,
   isIndexHtmlName,
@@ -10,6 +11,8 @@ import {
   rootDir,
   websiteRoot
 } from './paths.ts';
+
+export const DEFAULT_COURSEGEN_TTS_VOICE = 'american-male-3';
 
 export function killProcessTree(childProc: ReturnType<typeof spawn> | null) {
   if (!childProc || !childProc.pid) return;
@@ -167,9 +170,8 @@ export function spawnAgent(options: SpawnAgentOptions) {
 }
 
 function normalizeTtsVoice(value?: string) {
-  const config = loadAppConfig(rootDir);
   const voice = String(value || '').trim();
-  return voice || config.tts.voice;
+  return voice || DEFAULT_COURSEGEN_TTS_VOICE;
 }
 
 function normalizeTtsSpeed(value?: string | number) {
@@ -214,6 +216,8 @@ export async function spawnResolve(indexPath: string, options: { ttsVoice?: stri
       '--speed', speed
     ]);
   }
+
+  writeLectureCaptionsVtt(folderPath);
 }
 
 function descriptiveBaseName(folderPath: string) {
@@ -271,6 +275,8 @@ export async function spawnRenderLecture(folderPath: string, options: {
       ], { onSpawn: options.onSpawn });
     }
   }
+
+  writeLectureCaptionsVtt(folderPath);
 
   const resolvedFiles = indexFiles.map(indexPath => resolvedSiblingPathForIndex(indexPath));
   const sceneOutputs = resolvedFiles.map(scenePath => defaultSceneOutputPath(scenePath));

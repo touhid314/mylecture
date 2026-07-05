@@ -17,6 +17,7 @@
     "version:sync": "node --import tsx src/sync-versions.ts",
     "ide": "npm run version:sync && npm run build:viewer && node --import tsx src/ide-server.ts",
     "coursegen": "node --import tsx src/coursegen/cli.ts",
+    "coursegen:ui": "node --import tsx src/coursegen/server.ts",
     "test": "npm run test:build && npm run test:render && npm run test:visual && npm run test:narration",
     "test:build": "node --import tsx src/build-plan.ts --input tests/fixtures/input-contract-test/index.html --out .render/tests/input-contract-resolved.html",
     "test:render": "node --import tsx src/render-video.ts --html tests/fixtures/input-contract-test/index.html --resolved-html .render/tests/input-contract-render-resolved.html --out .render/tests/input-contract-smoke.mp4 --max-frames 5 --skip-video",

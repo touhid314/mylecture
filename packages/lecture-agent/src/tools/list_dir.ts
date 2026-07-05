@@ -5,11 +5,11 @@
  * Resolves paths and formats output with entry types (FILE, DIR, OTHER).
  */
 import fs from 'fs';
-import { resolve_workspace_path } from '../workspace.js';
+import { resolve_agent_resource_path } from '../workspace.js';
 
 export function tool_list_dir(dirPath?: string, workspaceDir?: string): string {
     try {
-        const target = resolve_workspace_path(dirPath || "", workspaceDir);
+        const target = resolve_agent_resource_path(dirPath || "", workspaceDir);
         if (!fs.existsSync(target)) {
             return `ERROR: path does not exist: ${dirPath || ""}`;
         }
