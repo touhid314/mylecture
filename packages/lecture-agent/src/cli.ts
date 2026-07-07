@@ -62,7 +62,7 @@ function chat_prompt(): string {
 
 async function run_chat(model: string, max_turns: number, skills: string[] | null = null, enableGetimgTool: boolean = false): Promise<void> {
     reset_agent_session();
-    
+
     // In chat CLI mode, we use the default workspace directory
     const agent = new LectureAgent({
         model,
@@ -71,10 +71,10 @@ async function run_chat(model: string, max_turns: number, skills: string[] | nul
         maxTurns: max_turns,
         enableGetimgTool
     });
-    
+
     const session = agent.startChat();
     console.error("Chat mode. Type /exit or /quit to stop.");
-    
+
     while (true) {
         try {
             const message = (await askQuestion(chat_prompt())).trim();

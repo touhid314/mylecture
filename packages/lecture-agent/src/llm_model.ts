@@ -955,6 +955,10 @@ export class LLM_Model {
             contents.push({ role: "user", parts: userParts });
 
             const generation_config: any = {};
+            const gemini_max_tokens = process.env.GEMINI_MAX_TOKENS;
+            if (gemini_max_tokens) {
+                generation_config.maxOutputTokens = parseInt(gemini_max_tokens.replace(/,/g, ''), 10);
+            }
             if (return_json) {
                 generation_config.responseMimeType = "application/json";
             }
@@ -1034,4 +1038,57 @@ export class LLM_Model {
             }
         }
     }
+
+    public get client(): any {
+        return this._client;
+    }
+
+    public async generateContent(request: any, purpose: string): Promise<any> {
+        if (this.api_type !== "google") {
+            throw new Error("generateContent is only supported for Google Gemini models");
+        }
+        this.logger.debug("Sending request to Google Gemini API (Client models.generate_content) via LLM_Model...");
+        log_llm_request("coding-agent-gemini-working", request);
+        const started_at = now_ms();
+        const response = await this._client.models.generateContent(request);
+        const latency_ms = Math.round(now_ms() - started_at);
+        _logTokenUsage(this.logger, response, 'google');
+
+        let finalPurpose = purpose;
+        if (purpose.startsWith("step_")) {
+            const function_calls = extract_gemini_function_calls(response);
+            finalPurpose = function_calls.length === 0
+                ? `${purpose}_done`
+                : `${purpose}_toolcall_${function_calls.map((call: any) => call.name || "unknown").join("_")}`;
+        }
+
+        trackTokenUsageFromResponse({
+            response,
+            provider: 'google',
+            model: this.model_name,
+            purpose: finalPurpose,
+            latencyMs: latency_ms,
+            sessionId: this.token_tracker_session_id || undefined,
+        });
+        return response;
+    }
+}
+
+function extract_gemini_function_calls(response: any): any[] {
+    if (response.functionCalls && response.functionCalls.length > 0) {
+        return response.functionCalls;
+    }
+    const found: any[] = [];
+    if (response.candidates && response.candidates.length > 0) {
+        for (const candidate of response.candidates) {
+            if (candidate.content && candidate.content.parts) {
+                for (const part of candidate.content.parts) {
+                    if (part.functionCall) {
+                        found.push(part.functionCall);
+                    }
+                }
+            }
+        }
+    }
+    return found;
 }

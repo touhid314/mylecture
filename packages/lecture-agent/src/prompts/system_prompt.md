@@ -40,8 +40,7 @@ If asked for 6 minute video, Write:
 Write a very simple metadata.json file with exactly the following fields:
     {
         "title":"apprpriate title for the video"
-        "description":"A very concise description of the video. Max word limit 100 words."
-        "aspectRatio":"AR in x:y format"
+        "description":"A very concise description of the video in one sentence."
     }
 
 ### Common errors to check and fix:

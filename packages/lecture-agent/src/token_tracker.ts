@@ -280,7 +280,10 @@ export function extractTokenUsage(response: any, provider: Provider): Pick<Token
         }
         const inputTokens = numberOrNull(usage?.input_tokens ?? usage?.prompt_tokens ?? usage?.promptTokens);
         const outputTokens = numberOrNull(usage?.output_tokens ?? usage?.completion_tokens ?? usage?.completionTokens);
-        const totalTokens = numberOrNull(usage?.total_tokens ?? usage?.totalTokens);
+        let totalTokens = numberOrNull(usage?.total_tokens ?? usage?.totalTokens);
+        if (totalTokens === null && inputTokens !== null && outputTokens !== null) {
+            totalTokens = inputTokens + outputTokens;
+        }
         const cachedInputTokens = numberOrNull(
             usage?.input_tokens_details?.cached_tokens ??
             usage?.prompt_tokens_details?.cached_tokens ??
@@ -301,7 +304,10 @@ export function extractTokenUsage(response: any, provider: Provider): Pick<Token
         const thoughtsTokens = numberOrNull(usage?.thoughtsTokenCount ?? usage?.thoughts_token_count) || 0;
         const inputTokens = promptTokens === null && toolUsePromptTokens === 0 ? null : (promptTokens || 0) + toolUsePromptTokens;
         const outputTokens = candidatesTokens === null && thoughtsTokens === 0 ? null : (candidatesTokens || 0) + thoughtsTokens;
-        const totalTokens = numberOrNull(usage?.totalTokenCount ?? usage?.total_token_count);
+        let totalTokens = numberOrNull(usage?.totalTokenCount ?? usage?.total_token_count);
+        if (totalTokens === null && inputTokens !== null && outputTokens !== null) {
+            totalTokens = inputTokens + outputTokens;
+        }
         const cachedInputTokens = numberOrNull(usage?.cachedContentTokenCount ?? usage?.cached_content_token_count);
         return { inputTokens, cachedInputTokens, outputTokens, totalTokens, rawUsage: usage || null };
     }
@@ -343,15 +349,22 @@ export function trackTokenUsage(record: TokenUsageRecord): StoredTokenUsageRecor
         return null;
     }
 
+    const inputTokens = numberOrNull(record.inputTokens);
+    const cachedInputTokens = numberOrNull(record.cachedInputTokens);
+    const outputTokens = numberOrNull(record.outputTokens);
+    const totalTokens = numberOrNull(record.totalTokens) ?? (
+        (inputTokens !== null && outputTokens !== null) ? inputTokens + outputTokens : null
+    );
+
     const fullRecord = {
         sessionId: record.sessionId || PROCESS_SESSION_ID,
         provider: record.provider || "unknown",
         model: record.model,
         purpose: record.purpose,
-        inputTokens: numberOrNull(record.inputTokens),
-        cachedInputTokens: numberOrNull(record.cachedInputTokens),
-        outputTokens: numberOrNull(record.outputTokens),
-        totalTokens: numberOrNull(record.totalTokens),
+        inputTokens,
+        cachedInputTokens,
+        outputTokens,
+        totalTokens,
         latencyMs: numberOrNull(record.latencyMs),
         inputModality: record.inputModality || "standard",
         outputModality: record.outputModality || "standard",
@@ -585,15 +598,15 @@ button:hover{background:#f3f6fb}
   </section>
   <section>
     <h2>Cost By Session</h2>
-    <table><thead><tr><th>Session</th><th>Started</th><th>Calls</th><th>Input</th><th>Cached</th><th>Output</th><th>Total</th><th>Avg Latency</th><th>Cost</th></tr></thead><tbody id="sessions"></tbody></table>
+    <table><thead><tr><th>Session</th><th>Started</th><th>Calls</th><th>Uncached</th><th>Cached</th><th>Output</th><th>Total</th><th>Avg Latency</th><th>Cost</th></tr></thead><tbody id="sessions"></tbody></table>
   </section>
   <section>
     <h2>Cost By Model</h2>
-    <table><thead><tr><th>Model</th><th>Calls</th><th>Input</th><th>Cached</th><th>Output</th><th>Total</th><th>Avg Latency</th><th>Cost</th></tr></thead><tbody id="models"></tbody></table>
+    <table><thead><tr><th>Model</th><th>Calls</th><th>Uncached</th><th>Cached</th><th>Output</th><th>Total</th><th>Avg Latency</th><th>Cost</th></tr></thead><tbody id="models"></tbody></table>
   </section>
   <section>
     <h2>Recent Calls</h2>
-    <table><thead><tr><th>Time</th><th>Purpose</th><th>Model</th><th>Input</th><th>Cached</th><th>Output</th><th>Total</th><th>Latency</th><th>Cost</th></tr></thead><tbody id="recent"></tbody></table>
+    <table><thead><tr><th>Time</th><th>Purpose</th><th>Model</th><th>Uncached</th><th>Cached</th><th>Output</th><th>Total</th><th>Latency</th><th>Cost</th></tr></thead><tbody id="recent"></tbody></table>
   </section>
 </main>
 <div class="modal" id="costModal">
@@ -622,14 +635,14 @@ function renderSessions(data){
     const sessionCalls = calls[row.sessionId] || [];
     const parent = '<tr class="session-row" data-session="' + esc(row.sessionId) + '"><td class="mono">' + (isOpen ? 'v ' : '> ') + esc(row.sessionId) + '</td><td>' +
       new Date(row.startedAt).toLocaleString() + '</td><td>' + fmt.format(row.calls || 0) + '</td><td>' +
-      fmt.format(row.inputTokens || 0) + '</td><td>' + fmt.format(row.cachedInputTokens || 0) + '</td><td>' +
+      fmt.format(Math.max((row.inputTokens || 0) - (row.cachedInputTokens || 0), 0)) + '</td><td>' + fmt.format(row.cachedInputTokens || 0) + '</td><td>' +
       fmt.format(row.outputTokens || 0) + '</td><td>' + fmt.format(row.totalTokens || 0) + '</td><td>' +
       seconds(row.avgLatencyMs) + '</td><td>' + money(row.costUsd) + '</td></tr>';
     const children = isOpen ? sessionCalls.map(call =>
       '<tr class="call-row"><td class="mono">' + esc(call.purpose) + '<br><span class="muted">' + esc(call.model) + '</span></td><td class="mono">' +
       new Date(call.createdAt).toLocaleTimeString() + '</td><td>1</td><td>' +
-      fmt.format(call.inputTokens || 0) + '</td><td>' + fmt.format(call.cachedInputTokens || 0) + '</td><td>' +
-      fmt.format(call.outputTokens || 0) + '</td><td>' + fmt.format(call.totalTokens || 0) + '</td><td>' +
+      fmt.format(Math.max((call.inputTokens || 0) - (call.cachedInputTokens || 0), 0)) + '</td><td>' + fmt.format(call.cachedInputTokens || 0) + '</td><td>' +
+      fmt.format(call.outputTokens || 0) + '</td><td>' + fmt.format(call.totalTokens || ((call.inputTokens || 0) + (call.outputTokens || 0))) + '</td><td>' +
       seconds(call.latencyMs) + '</td><td>' + money(call.costUsd) + '</td></tr>'
     ).join('') : '';
     return parent + children;
@@ -666,14 +679,14 @@ async function refresh(){
   renderCosts(data);
   document.getElementById('models').innerHTML = (data.byModel || []).map(row =>
     '<tr><td class="mono">' + row.model + '</td><td>' + fmt.format(row.calls || 0) + '</td><td>' +
-    fmt.format(row.inputTokens || 0) + '</td><td>' + fmt.format(row.cachedInputTokens || 0) + '</td><td>' +
+    fmt.format(Math.max((row.inputTokens || 0) - (row.cachedInputTokens || 0), 0)) + '</td><td>' + fmt.format(row.cachedInputTokens || 0) + '</td><td>' +
     fmt.format(row.outputTokens || 0) + '</td><td>' + fmt.format(row.totalTokens || 0) + '</td><td>' +
     seconds(row.avgLatencyMs) + '</td><td>' + money(row.costUsd) + '</td></tr>'
   ).join('');
   document.getElementById('recent').innerHTML = (data.recent || []).map(row =>
     '<tr><td class="mono">' + new Date(row.createdAt).toLocaleTimeString() + '</td><td>' + row.purpose + '</td><td class="mono">' + row.model + '</td><td>' +
-    fmt.format(row.inputTokens || 0) + '</td><td>' + fmt.format(row.cachedInputTokens || 0) + '</td><td>' +
-    fmt.format(row.outputTokens || 0) + '</td><td>' + fmt.format(row.totalTokens || 0) + '</td><td>' +
+    fmt.format(Math.max((row.inputTokens || 0) - (row.cachedInputTokens || 0), 0)) + '</td><td>' + fmt.format(row.cachedInputTokens || 0) + '</td><td>' +
+    fmt.format(row.outputTokens || 0) + '</td><td>' + fmt.format(row.totalTokens || ((row.inputTokens || 0) + (row.outputTokens || 0))) + '</td><td>' +
     seconds(row.latencyMs) + '</td><td>' + money(row.costUsd) + '</td></tr>'
   ).join('');
 }

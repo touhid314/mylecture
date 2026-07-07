@@ -24,20 +24,44 @@
  *
  * 4. **reset_agent_session** (Function)
  *    Cleans up the active global agent session and workspace directory.
+/**
+ * coding_agent.ts
+ *
+ * The main orchestrator and core library interface for the lecture-agent.
+ * Exposes a clean, thread-safe Programmatic API for running one-off tasks
+ * or persistent multi-turn chat sessions with automated history compaction.
+ *
+ * ### Programmatic API:
+ *
+ * 1. **LectureAgent** (Class)
+ *    The core entry point. Configured with LLM models, sandbox workspaces, and skills.
+ *    - `constructor(config: AgentConfig)`
+ *    - `startChat(initialHistory?: ChatMessage[]): ChatSession` - Starts a multi-turn chat.
+ *    - `run(options: { prompt: string, history?: ChatMessage[], maxTurns?: number })` - Runs a stateless turn.
+ *
+ * 2. **ChatSession** (Class)
+ *    Represents an active multi-turn chat session with stateful, in-memory conversation history.
+ *    - `sendMessage(prompt: string, maxTurns?: number): Promise<string>` - Sends a user message.
+ *    - `getHistory(): ChatMessage[]` - Returns the active compacted history list.
+ *    - `getTokenUsage(): { input: number, output: number }` - Returns token usage statistics.
+ *
+ * 3. **run_agent** (Function)
+ *    Utility wrapper to run a single task in a stateless manner (backwards compatible).
+ *
+ * 4. **reset_agent_session** (Function)
+ *    Cleans up the active global agent session and workspace directory.
  */
 import fs from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import dotenv from 'dotenv';
 import { AsyncLocalStorage } from 'node:async_hooks';
-import { GoogleGenAI } from '@google/genai';
-
 export const loggerStorage = new AsyncLocalStorage<(text: string) => void>();
 
 import { LLM_Model } from './llm_model.js';
 import { log_llm_request, start_new_llm_log_session } from './llm_prompt_logger.js';
 import { build_prompt, extract_upload_attachments, type UploadAttachment } from './prompt_builder.js';
-import { extractTokenUsage, trackTokenUsageFromResponse } from './token_tracker.js';
+import { extractTokenUsage } from './token_tracker.js';
 import {
     BASE_DIR,
     WORKSPACE_DIR,
@@ -475,7 +499,7 @@ function gemini_input_token_count(usage: any): number | null {
 
 export class GeminiAgentSession {
     private model: string;
-    private client: GoogleGenAI;
+    private llm: LLM_Model;
     private config: any;
     private contents: any[];
     private userTasks: string[];
@@ -486,15 +510,13 @@ export class GeminiAgentSession {
     private tokenTrackerSessionId: string;
 
     constructor(model: string, workspaceDir: string, skills: string[] | null = null, initialHistory: any[] = [], toolOptions: ToolRuntimeOptions = {}, tokenTrackerSessionId?: string | null) {
-        const apiKey = process.env.GOOGLE_API_KEY;
-        if (!apiKey) {
-            throw new Error("GOOGLE_API_KEY is not set.");
-        }
-
         this.model = model;
         this.workspaceDir = workspaceDir;
         this.toolOptions = toolOptions;
-        this.client = new GoogleGenAI({ apiKey });
+        this.llm = new LLM_Model(model);
+        this.tokenTrackerSessionId = resolve_token_tracker_session_id(model, workspaceDir, tokenTrackerSessionId);
+        this.llm.token_tracker_session_id = this.tokenTrackerSessionId;
+        const gemini_max_tokens = process.env.GEMINI_MAX_TOKENS;
         this.config = {
             systemInstruction: build_system_instructions(skills, workspaceDir, toolOptions),
             tools: [{ functionDeclarations: gemini_function_declarations(toolOptions) }],
@@ -503,6 +525,9 @@ export class GeminiAgentSession {
                 functionCallingConfig: { mode: "AUTO" }
             }
         };
+        if (gemini_max_tokens) {
+            this.config.maxOutputTokens = parseInt(gemini_max_tokens.replace(/,/g, ''), 10);
+        }
         this.contents = [...initialHistory];
         this.userTasks = [];
         for (const msg of initialHistory) {
@@ -516,7 +541,6 @@ export class GeminiAgentSession {
         }
         this.totalInputTokens = 0;
         this.totalOutputTokens = 0;
-        this.tokenTrackerSessionId = resolve_token_tracker_session_id(model, workspaceDir, tokenTrackerSessionId);
         print_detail("workspace", workspaceDir, Color.BLUE);
         print_detail("token session", this.tokenTrackerSessionId, Color.BLUE);
         print_detail("tool mode", "native Gemini function calling", Color.BLUE);
@@ -527,7 +551,7 @@ export class GeminiAgentSession {
 
     private async upload_attachment_part(attachment: UploadAttachment): Promise<any> {
         print_detail("upload", `${attachment.kind}:${attachment.path}`, Color.BLUE);
-        const filesClient = this.client.files as any;
+        const filesClient = this.llm.client.files as any;
         let fileRef = await filesClient.upload({
             file: attachment.path,
             mimeType: attachment.mimeType
@@ -586,17 +610,7 @@ export class GeminiAgentSession {
                 systemInstruction: finalContext.systemInstruction
             }
         };
-        log_llm_request("coding-agent-gemini-pre-user-response", request);
-        const started_at = now_ms();
-        const response = await this.client.models.generateContent(request);
-        trackTokenUsageFromResponse({
-            response,
-            provider: "google",
-            model: this.model,
-            purpose: "coding_agent_gemini_final_response",
-            latencyMs: Math.round(now_ms() - started_at),
-            sessionId: this.tokenTrackerSessionId,
-        });
+        const response = await this.llm.generateContent(request, "coding_agent_gemini_final_response");
         return extract_gemini_text(response) || "Finished working.";
     }
 
@@ -625,13 +639,9 @@ export class GeminiAgentSession {
                     contents: this.contents,
                     config: this.config
                 };
-                log_llm_request("coding-agent-gemini-working", request);
                 let response;
-                let latency_ms = 0;
                 try {
-                    const started_at = now_ms();
-                    response = await this.client.models.generateContent(request);
-                    latency_ms = Math.round(now_ms() - started_at);
+                    response = await this.llm.generateContent(request, `step_${step}`);
                     if (abortSignal?.aborted) throw new AgentAbortError();
                 } catch (err: any) {
                     if (err instanceof AgentAbortError) throw err;
@@ -646,22 +656,8 @@ export class GeminiAgentSession {
                 const tracked_usage = extractTokenUsage(response, "google");
                 this.record_token_usage(input_tokens, output_tokens, tracked_usage.cachedInputTokens ?? null);
                 const function_calls = extract_gemini_function_calls(response);
-                const purpose = function_calls.length === 0
-                    ? `step_${step}_done`
-                    : `step_${step}_toolcall_${function_calls.map(call => call.name || "unknown").join("_")}`;
-                trackTokenUsageFromResponse({
-                    response,
-                    provider: "google",
-                    model: this.model,
-                    purpose,
-                    latencyMs: latency_ms,
-                    sessionId: this.tokenTrackerSessionId,
-                });
 
                 if (function_calls.length === 0) {
-                    if (response.candidates && response.candidates.length > 0) {
-                        this.contents.push(response.candidates[0].content);
-                    }
                     print_step(step, "done", Color.GREEN);
                     return extract_gemini_text(response) || "Done.";
                 }
@@ -867,20 +863,21 @@ type ActiveAgentSession = {
 
 let activeAgentSession: ActiveAgentSession | null = null;
 
-function agent_session_key(model: string, skills: string[] | null, toolOptions: ToolRuntimeOptions = {}): string {
+function agent_session_key(model: string, skills: string[] | null, toolOptions: ToolRuntimeOptions = {}, workspaceDir: string = DEFAULT_WORKSPACE_DIR): string {
     return JSON.stringify({
         model,
         skills: skills || [],
-        enableGetimgTool: toolOptions.enableGetimgTool === true
+        enableGetimgTool: toolOptions.enableGetimgTool === true,
+        workspaceDir
     });
 }
 
-function get_or_create_agent_session(model: string, skills: string[] | null = null, toolOptions: ToolRuntimeOptions = {}): any {
-    const key = agent_session_key(model, skills, toolOptions);
+function get_or_create_agent_session(model: string, skills: string[] | null = null, toolOptions: ToolRuntimeOptions = {}, workspaceDir: string = DEFAULT_WORKSPACE_DIR): any {
+    const key = agent_session_key(model, skills, toolOptions, workspaceDir);
     if (!activeAgentSession || activeAgentSession.key !== key) {
         activeAgentSession = {
             key,
-            session: create_agent_session(model, DEFAULT_WORKSPACE_DIR, skills, [], toolOptions, resolve_token_tracker_session_id(model, DEFAULT_WORKSPACE_DIR))
+            session: create_agent_session(model, workspaceDir, skills, [], toolOptions, resolve_token_tracker_session_id(model, workspaceDir))
         };
     }
     return activeAgentSession.session;
@@ -1158,7 +1155,7 @@ async function run_session_with_timing(session: any, task: string, max_turns: nu
     }
 }
 
-export async function run_agent(task: string, model: string, max_turns: number, skills: string[] | null = null, enableGetimgTool: boolean = false): Promise<string> {
-    const session = get_or_create_agent_session(model, skills, { enableGetimgTool });
+export async function run_agent(task: string, model: string, max_turns: number, skills: string[] | null = null, enableGetimgTool: boolean = false, workspaceDir: string = DEFAULT_WORKSPACE_DIR): Promise<string> {
+    const session = get_or_create_agent_session(model, skills, { enableGetimgTool }, workspaceDir);
     return await run_session_with_timing(session, task, max_turns);
 }
