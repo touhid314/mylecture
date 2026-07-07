@@ -1,6 +1,6 @@
 # Theme
 # background color
-Solid, dark charcoal matte (#121212).
+Solid, dark charcoal matte (#121212). No background grid, solid background.
 
 # font
 - family: Lato
