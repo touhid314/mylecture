@@ -17,10 +17,20 @@ Your job is to catch the "AI reading a textbook" failure mode before the lecture
 11. **Beat length.** Flag any `NARRATION:` beat over 45 words, or clusters of beats that consistently run over 35 words. Long beats usually signal textbook prose instead of spoken teaching.
 12. **Step-by-step cadence.** Flag derivation, proof, calculation, code walkthrough, close reading, design critique, or other step-by-step sequences of three or more beats that use the same declarative shape throughout instead of including a question, "notice", "watch", prediction, or similar teacher move.
 13. **TTS-safe narration.** Flag raw LaTeX, code fences, markdown math delimiters, notation-heavy syntax, long formula chains, awkward coordinate recitations, or pronunciation-hostile wording inside `NARRATION:` that should be spoken naturally, simplified, or moved to `VISUAL:`.
-14. **Narration-visual alignment.** Flag narration that points to a visual detail but mismatches the paired visual: signs, directions, positions, labels, variable names, before/after states, numerator/denominator language, or left/right/top/bottom references.
+14. **Narration-visual alignment.** Flag narration that points to a visual detail but mismatches the paired visual: signs, directions, positions, labels, variable names, before/after states, numerator/denominator language, or left/right/top/bottom references. Also fail if a later beat silently rewrites the worked example into a different expression than the narration (for example, changing factors or the sign of a result while the voice still describes the original form).
 15. **Conclusion quality.** Flag endings that stop abruptly, open with generic recap language like "let us summarize", "by establishing this framework", or "you are now equipped", rehash every point as a checklist, or append a dangling practice command after the conclusion. A good ending should synthesize the durable idea in plain language, name the learner's new capability, and leave a natural sense of closure. Also flag course-sequence leakage such as "final lecture", "lesson 1 of 3", "finished the course", or "up next" phrasing that would become wrong if the course is extended.
 16. **Natural cadence.** Flag scripts that feel like constant talking without breathing room: every beat is a full explanatory paragraph, there are no short beats or pauses implied by punctuation, or math narration runs straight through without a human pause point.
 17. **Blandness.** Do not excuse bland narration because the audience is academic, professional, or advanced. Formality may change terminology and rigor, but the script should still sound like a clear human teacher.
+
+## Extra checks for adaptive skill nodes
+
+Apply this section only when the user prompt includes "Adaptive skill-node context".
+
+18. **Portable-node language.** Fail if narration assumes a fixed route through the course: "previous lesson", "next lesson", "earlier/later in the course", lesson numbers, "now that you finished", "as we saw before", "up next", or similar sequence-dependent phrasing.
+19. **Single skill focus.** Fail if the script tries to teach multiple new skills, surveys a broad topic, or spends substantial time on enrichment/remediation instead of the one listed objective and `teaches` moves.
+20. **Prerequisite boundary.** Fail if the script depends on knowledge outside the listed prerequisites/assumptions without briefly re-anchoring it in plain language.
+21. **Practice alignment.** Fail if the ending does not name the exact practice move the learner is ready to try, or if the taught skill does not match the `teaches` metadata when provided.
+22. **Micro-lesson density.** For 2-3 minute adaptive lessons, fail if the narration feels like a compressed full lecture: long setup, broad context, multiple examples, or a recap-heavy ending. It should be one quick problem, one explanation, one practice-ready takeaway.
 
 ## What NOT to penalize
 

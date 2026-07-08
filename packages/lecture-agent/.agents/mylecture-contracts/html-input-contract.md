@@ -73,6 +73,7 @@ Rules:
 ```text
 text is the narration script
 audio must be a relative .wav path
+must NOT declare duration (timing is derived from audio at resolve time)
 ```
 
 

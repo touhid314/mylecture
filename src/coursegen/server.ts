@@ -8,8 +8,18 @@ import { spawn, type ChildProcessWithoutNullStreams } from 'node:child_process';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { loadEnv } from './env.ts';
+import {
+  appendJobLogLine,
+  listPersistedJobs,
+  nextJobCounter,
+  readJobLogLines,
+  updateJobRecord,
+  writeJobRecord,
+  type JobStatus
+} from './job-logs.ts';
 import { rootDir } from './paths.ts';
 import { getCourseSummary, listCourses } from './status-api.ts';
+import { lectureSlugFromJobArgs, resetInterruptedLectures } from './run-course.ts';
 import { DEFAULT_COURSEGEN_TTS_VOICE } from './spawn.ts';
 import { AUDIENCES, LEARNING_INTENTS } from './types.ts';
 
@@ -22,12 +32,11 @@ const PORT = Number(process.env.COURSEGEN_UI_PORT || 3940);
 const HOST = '127.0.0.1';
 const UI_PATH = path.join(path.dirname(fileURLToPath(import.meta.url)), 'ui.html');
 
-type JobStatus = 'queued' | 'running' | 'done' | 'failed' | 'stopped';
-
 type Job = {
   id: string;
   command: string;
   courseSlug?: string;
+  targetLectureSlug?: string;
   status: JobStatus;
   log: string[];
   exitCode: number | null;
@@ -37,7 +46,9 @@ type Job = {
 };
 
 const jobs = new Map<string, Job>();
-let jobCounter = 0;
+const JOB_SOURCE = 'coursegen-ui' as const;
+const JOB_ID_PREFIX = 'job-';
+let jobCounter = nextJobCounter(JOB_SOURCE, JOB_ID_PREFIX);
 
 function sendJson(response: ServerResponse, status: number, payload: unknown) {
   const body = JSON.stringify(payload);
@@ -68,14 +79,50 @@ async function readJsonBody<T extends Record<string, unknown>>(request: Incoming
 
 function appendLog(job: Job, line: string) {
   job.log.push(line);
-  if (job.log.length > 4000) {
-    job.log.splice(0, job.log.length - 3000);
+  appendJobLogLine(job.id, line, job.courseSlug);
+}
+
+function persistJob(job: Job) {
+  writeJobRecord({
+    id: job.id,
+    source: JOB_SOURCE,
+    command: job.command,
+    courseSlug: job.courseSlug,
+    status: job.status,
+    exitCode: job.exitCode,
+    startedAt: job.startedAt,
+    finishedAt: job.finishedAt
+  });
+}
+
+function restorePersistedJobs() {
+  for (const record of listPersistedJobs(JOB_SOURCE, 100)) {
+    const job: Job = {
+      id: record.id,
+      command: record.command || 'unknown',
+      courseSlug: record.courseSlug,
+      status: record.status,
+      log: readJobLogLines(record.id),
+      exitCode: record.exitCode,
+      startedAt: record.startedAt,
+      finishedAt: record.finishedAt
+    };
+
+    if (job.status === 'running' || job.status === 'queued') {
+      job.status = 'failed';
+      job.finishedAt = job.finishedAt || new Date().toISOString();
+      const message = 'Interrupted: UI server restarted while this job was active.';
+      appendLog(job, message);
+      updateJobRecord(job.id, { status: job.status, finishedAt: job.finishedAt });
+    }
+
+    jobs.set(job.id, job);
   }
 }
 
 function createJob(command: string, courseSlug?: string): Job {
   const job: Job = {
-    id: `job-${++jobCounter}`,
+    id: `${JOB_ID_PREFIX}${++jobCounter}`,
     command,
     courseSlug,
     status: 'queued',
@@ -84,6 +131,7 @@ function createJob(command: string, courseSlug?: string): Job {
     startedAt: new Date().toISOString()
   };
   jobs.set(job.id, job);
+  persistJob(job);
   return job;
 }
 
@@ -96,8 +144,25 @@ function killJobTree(child: ChildProcessWithoutNullStreams) {
   }
 }
 
+function releaseInterruptedLectures(job: Job) {
+  if (!job.courseSlug) return;
+  try {
+    if (resetInterruptedLectures(job.courseSlug, {
+      lectureSlug: job.targetLectureSlug,
+      reason: 'Stopped by user',
+    })) {
+      appendLog(job, `Released interrupted lecture state for ${job.courseSlug}${job.targetLectureSlug ? ` (${job.targetLectureSlug})` : ''}.`);
+    }
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    appendLog(job, `Warning: could not release interrupted lecture state: ${message}`);
+  }
+}
+
 function spawnCoursegenJob(job: Job, args: string[]) {
+  job.targetLectureSlug = lectureSlugFromJobArgs(args);
   job.status = 'running';
+  updateJobRecord(job.id, { status: job.status });
   appendLog(job, `$ npm run coursegen -- ${args.join(' ')}`);
 
   const child = spawn('npm', ['run', 'coursegen', '--', ...args], {
@@ -123,7 +188,9 @@ function spawnCoursegenJob(job: Job, args: string[]) {
     job.exitCode = code;
 
     if (job.status === 'stopped') {
+      releaseInterruptedLectures(job);
       appendLog(job, `Stopped (${signal || 'killed'})`);
+      updateJobRecord(job.id, { status: job.status, finishedAt: job.finishedAt, exitCode: job.exitCode });
       return;
     }
 
@@ -134,12 +201,14 @@ function spawnCoursegenJob(job: Job, args: string[]) {
       job.status = 'failed';
       appendLog(job, `Exited with code ${code ?? 'unknown'}.`);
     }
+    updateJobRecord(job.id, { status: job.status, finishedAt: job.finishedAt, exitCode: job.exitCode });
   });
 
   child.on('error', error => {
     job.status = 'failed';
     job.finishedAt = new Date().toISOString();
     appendLog(job, `Spawn error: ${error.message}`);
+    updateJobRecord(job.id, { status: job.status, finishedAt: job.finishedAt, exitCode: job.exitCode });
   });
 }
 
@@ -211,6 +280,7 @@ function startJobFromBody(body: Record<string, unknown>) {
     job.status = 'failed';
     job.finishedAt = new Date().toISOString();
     appendLog(job, 'Error: topic is required.');
+    updateJobRecord(job.id, { status: job.status, finishedAt: job.finishedAt });
     return job;
   }
 
@@ -218,6 +288,7 @@ function startJobFromBody(body: Record<string, unknown>) {
     job.status = 'failed';
     job.finishedAt = new Date().toISOString();
     appendLog(job, 'Error: course slug is required.');
+    updateJobRecord(job.id, { status: job.status, finishedAt: job.finishedAt });
     return job;
   }
 
@@ -225,6 +296,7 @@ function startJobFromBody(body: Record<string, unknown>) {
     job.status = 'failed';
     job.finishedAt = new Date().toISOString();
     appendLog(job, 'Error: course slug is required.');
+    updateJobRecord(job.id, { status: job.status, finishedAt: job.finishedAt });
     return job;
   }
 
@@ -232,6 +304,7 @@ function startJobFromBody(body: Record<string, unknown>) {
     job.status = 'failed';
     job.finishedAt = new Date().toISOString();
     appendLog(job, 'Error: course slug is required.');
+    updateJobRecord(job.id, { status: job.status, finishedAt: job.finishedAt });
     return job;
   }
 
@@ -245,12 +318,14 @@ function serializeJob(job: Job) {
     command: job.command,
     courseSlug: job.courseSlug,
     status: job.status,
-    log: job.log,
+    log: readJobLogLines(job.id),
     exitCode: job.exitCode,
     startedAt: job.startedAt,
     finishedAt: job.finishedAt
   };
 }
+
+restorePersistedJobs();
 
 const server = createServer(async (request, response) => {
   const url = new URL(request.url || '/', `http://${HOST}`);
@@ -328,7 +403,9 @@ const server = createServer(async (request, response) => {
       }
       if (job.child) {
         job.status = 'stopped';
+        updateJobRecord(job.id, { status: job.status });
         killJobTree(job.child);
+        releaseInterruptedLectures(job);
         sendJson(response, 200, serializeJob(job));
         return;
       }

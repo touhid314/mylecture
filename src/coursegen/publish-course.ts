@@ -25,7 +25,7 @@ export async function publishCourse(options: PublishCourseOptions) {
   const needsReview = state.lectures.filter(lecture => lecture.status === 'needs-review');
   if (options.goLive && needsReview.length > 0) {
     console.error(`Cannot go live: ${needsReview.length} lecture(s) need practice QA review: ${needsReview.map(l => l.slug).join(', ')}`);
-    console.error(`Re-run with: npm run coursegen -- resume --course ${options.courseSlug} after fixes, or edit activities/interactive/index.html / activities/game/index.html manually and clear needs-review.`);
+    console.error(`Re-run with: npm run coursegen -- resume --course ${options.courseSlug} after fixes, or edit activities/*/stage.js (adaptive shell courses — reassemble index.html via coursegen) or activities/*/index.html (legacy) manually and clear needs-review.`);
     process.exitCode = 1;
     return;
   }
@@ -93,6 +93,12 @@ export async function publishCourse(options: PublishCourseOptions) {
       return;
     }
 
+    await spawnAdmin([
+      'upsert-course',
+      '--slug', plan.slug,
+      '--title', plan.title,
+      '--category', plan.categoryId
+    ]);
     await spawnAdmin(['publish-course', '--slug', plan.slug]);
   } else {
     let first = true;
@@ -129,6 +135,7 @@ export async function publishCourse(options: PublishCourseOptions) {
         args.push('--course-title', plan.title);
         args.push('--course-description', plan.description);
         args.push('--course-summary', plan.summary);
+        args.push('--course-category', plan.categoryId);
         first = false;
       }
 

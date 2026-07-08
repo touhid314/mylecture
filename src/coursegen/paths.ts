@@ -14,8 +14,22 @@ export function getCourseDir(courseSlug: string) {
   return path.join(getCoursesRoot(), courseSlug);
 }
 
+export function getCoursegenJobsDir() {
+  const config = loadAppConfig(rootDir);
+  const generationDir = resolveConfigPath(rootDir, config.agent.generationDir);
+  return path.join(generationDir, 'coursegen-jobs');
+}
+
+export function courseRunLogPath(courseSlug: string) {
+  return path.join(getCourseDir(courseSlug), 'coursegen.log');
+}
+
 export function coursePlanPath(courseSlug: string) {
   return path.join(getCourseDir(courseSlug), 'course-plan.json');
+}
+
+export function skillGraphPath(courseSlug: string) {
+  return path.join(getCourseDir(courseSlug), 'skillGraph.json');
 }
 
 export function courseStatePath(courseSlug: string) {

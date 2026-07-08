@@ -3,6 +3,7 @@ import { coursePlanPath, courseStatePath, getCourseDir, getCoursesRoot } from '.
 import { estimateCourseCostUsd } from './lecture-prompt.ts';
 import { lectureRenderReady } from './run-course.ts';
 import { readCoursePlan, readCourseState } from './state.ts';
+import { flattenPlanLectures } from './types.ts';
 import type { CoursePlan, CourseState, LectureState } from './types.ts';
 
 export type CourseListItem = {
@@ -97,11 +98,35 @@ export function getCourseSummary(courseSlug: string): CourseSummary {
   const statePath = courseStatePath(courseSlug);
   const state = existsSync(statePath) ? readCourseState(courseSlug) : null;
 
-  const lectures: LectureSummary[] = (state?.lectures ?? []).map(lecture => ({
-    ...lecture,
-    hasMp4: Boolean(lecture.mp4Path && existsSync(lecture.mp4Path)),
-    renderReady: lectureRenderReady(plan, lecture)
-  }));
+  const lectures: LectureSummary[] = state
+    ? state.lectures.map(lecture => ({
+        ...lecture,
+        hasMp4: Boolean(lecture.mp4Path && existsSync(lecture.mp4Path)),
+        renderReady: lectureRenderReady(plan, lecture)
+      }))
+    : flattenPlanLectures(plan).map(lecture => ({
+        slug: lecture.slug,
+        title: lecture.title,
+        module: lecture.module,
+        order: lecture.order,
+        folderName: '',
+        objective: lecture.objective,
+        durationMinutes: lecture.durationMinutes,
+        formats: lecture.formats,
+        status: 'pending',
+        attempts: 0,
+        costUsd: 0,
+        error: '',
+        mp4Path: '',
+        interactiveReview: 'not-required',
+        interactiveReviewNotes: '',
+        gameReview: 'not-required',
+        gameReviewNotes: '',
+        videoFrameReview: 'not-required',
+        videoFrameReviewNotes: '',
+        hasMp4: false,
+        renderReady: false
+      }));
 
   const progress = {
     total: lectures.length,

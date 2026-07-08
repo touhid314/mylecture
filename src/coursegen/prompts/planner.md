@@ -36,7 +36,7 @@ Given a topic and any optional audience/intent overrides, output a single JSON o
 - `durationMinutes` must be an integer between 2 and 10.
 - `promptNotes` are internal guidance for the lesson generator (not shown to learners).
 - When `formats` includes `"interactive"`, include `interactiveSpec` with 1-3 activities. Each activity needs `id`, `title`, `mode` (`learn`|`practice`|`challenge`), `visibleSetup`, `learnerAction`, `controls`, `feedback`, and `successCriterion`.
-- When `formats` includes `"game"`, include `gameSpec` with `mission`, `visibleSetup`, `learnerAction`, `controls`, `feedback`, and `successCriterion` (score target out of 100).
+- When `formats` includes `"game"`, include `gameSpec` with `mission`, `visibleSetup`, `learnerAction`, `controls`, `feedback`, `successCriterion` (score target out of 100), and `pacing` (`relaxed`|`steady`|`brisk`). Pick the band from item difficulty — never invent raw timer seconds; coursegen maps the band to durations.
 - `visibleSetup` must name the exact visible scenario, prompt, state, or cue the learner sees before acting.
 - `learnerAction` must be one concrete action chain, not a broad goal (e.g. "sort each example into a category, then press Check" instead of "practice the topic").
 - `controls` must list the learner-facing controls/buttons/draggable items needed to complete the activity.
@@ -51,6 +51,7 @@ Given a topic and any optional audience/intent overrides, output a single JSON o
 - Plan each video as a teachable episode: a concrete setup, a question or conflict, the explanation that resolves it, and one takeaway the learner carries into the next lecture.
 - Prefer a coherent course sequence over disconnected standalone lessons. Each lecture should clearly connect to the previous skill and prepare for the next one.
 - Slugs: lowercase hyphenated, no spaces.
+- Set `categoryId` to the single best catalog subject for this course. Use the category list supplied in the user prompt; pick by what the course teaches, not incidental words in the title.
 
 ## Format mix guidance
 
@@ -79,6 +80,7 @@ Choose formats by learning need, not by novelty:
   "slug": "course-slug",
   "audience": "early|elementary|middle|general|undergraduate|graduate",
   "intent": "foundation|academic|practice|exam|professional|exploration|teaching",
+  "categoryId": "mathematics|computer-science|system-design|science|artificial-intelligence|engineering|humanities|professional-skills",
   "summary": "One line for course cards",
   "description": "What you'll learn and module outline for the course page",
   "modules": [
@@ -122,7 +124,8 @@ Choose formats by learning need, not by novelty:
             "learnerAction": "Build or choose a response for the current challenge, then press Check challenge",
             "controls": ["Response controls", "Check challenge", "Clear response", "Next challenge"],
             "feedback": "A correct response adds points and explains the key idea; a wrong response highlights the missed clue and invites a retry",
-            "successCriterion": "Score 70+ by completing the challenges accurately"
+            "successCriterion": "Score 70+ by completing the challenges accurately",
+            "pacing": "steady"
           }
         }
       ]

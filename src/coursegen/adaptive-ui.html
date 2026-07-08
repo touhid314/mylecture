@@ -1,0 +1,1441 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Adaptive Path Studio</title>
+  <style>
+    :root {
+      --ink: #17211d;
+      --paper: #f7f7f2;
+      --surface: #ffffff;
+      --mist: #e7ece6;
+      --line: #cbd6cc;
+      --muted: #65736b;
+      --green: #2f7d5b;
+      --green-deep: #195b3d;
+      --blue: #426c9f;
+      --amber: #b97521;
+      --red: #b4493f;
+      --violet: #74519b;
+      --shadow: 0 18px 48px rgba(23, 33, 29, 0.12);
+      font-family: Inter, "Segoe UI", system-ui, -apple-system, sans-serif;
+      color: var(--ink);
+      background:
+        linear-gradient(90deg, rgba(47, 125, 91, 0.08) 1px, transparent 1px),
+        linear-gradient(180deg, rgba(47, 125, 91, 0.07) 1px, transparent 1px),
+        var(--paper);
+      background-size: 28px 28px;
+    }
+
+    * { box-sizing: border-box; }
+    body { margin: 0; min-height: 100vh; }
+    button, input, select, textarea { font: inherit; color: inherit; }
+    button {
+      min-height: 38px;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: var(--surface);
+      padding: 0.5rem 0.75rem;
+      cursor: pointer;
+      transition: border-color 0.15s, transform 0.15s, background 0.15s;
+    }
+    button:hover:not(:disabled) { border-color: var(--green); transform: translateY(-1px); }
+    button:disabled { cursor: not-allowed; opacity: 0.55; }
+    button.primary { background: var(--green); border-color: var(--green); color: #fff; font-weight: 700; }
+    button.secondary { background: #edf4ef; border-color: #b8d3c1; color: var(--green-deep); font-weight: 700; }
+    button.warn { border-color: #e0b574; background: #fff6e8; color: #7a4a08; }
+    input, select, textarea {
+      width: 100%;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: var(--surface);
+      padding: 0.58rem 0.68rem;
+      outline: none;
+    }
+    input:focus, select:focus, textarea:focus, button:focus-visible {
+      border-color: var(--green);
+      box-shadow: 0 0 0 3px rgba(47, 125, 91, 0.18);
+    }
+    textarea { min-height: 78px; resize: vertical; }
+    label {
+      display: grid;
+      gap: 0.32rem;
+      align-content: start;
+      color: var(--muted);
+      font-size: 0.86rem;
+    }
+
+    .app {
+      display: grid;
+      grid-template-columns: 320px minmax(0, 1fr) 360px;
+      gap: 1rem;
+      min-height: 100vh;
+      padding: 1rem;
+    }
+    .rail, .work, .ops {
+      min-width: 0;
+      border: 1px solid var(--line);
+      background: rgba(255, 255, 255, 0.88);
+      box-shadow: var(--shadow);
+    }
+    .rail, .ops {
+      display: grid;
+      grid-template-rows: auto minmax(0, 1fr);
+      border-radius: 8px;
+      overflow: hidden;
+    }
+    .work {
+      display: grid;
+      grid-template-rows: auto auto minmax(0, 1fr);
+      border-radius: 8px;
+      overflow: hidden;
+    }
+    .header {
+      padding: 0.9rem 1rem;
+      border-bottom: 1px solid var(--line);
+      background: linear-gradient(180deg, #fff, #f0f5ef);
+    }
+    .brand {
+      display: flex;
+      justify-content: space-between;
+      align-items: start;
+      gap: 0.75rem;
+    }
+    h1, h2, h3, p { margin: 0; }
+    h1 { font-size: 1.25rem; line-height: 1.1; letter-spacing: 0; }
+    h2 { font-size: 1.05rem; }
+    h3 { font-size: 0.92rem; }
+    .sub { color: var(--muted); font-size: 0.84rem; line-height: 1.35; margin-top: 0.25rem; }
+    .chip {
+      display: inline-flex;
+      align-items: center;
+      gap: 0.3rem;
+      border: 1px solid var(--line);
+      border-radius: 999px;
+      padding: 0.2rem 0.48rem;
+      font-size: 0.72rem;
+      font-weight: 700;
+      background: var(--surface);
+      white-space: nowrap;
+    }
+    .chip.hot { background: #dff2e4; border-color: #acd5b9; color: var(--green-deep); }
+    .content {
+      min-height: 0;
+      overflow: auto;
+      padding: 1rem;
+    }
+    .stack {
+      display: grid;
+      gap: 0.72rem;
+      align-content: start;
+      align-items: start;
+    }
+    .rail .content,
+    .ops .content {
+      align-content: start;
+    }
+    .row { display: flex; gap: 0.55rem; align-items: center; flex-wrap: wrap; }
+    .row > * { min-width: 0; }
+    .split { display: grid; grid-template-columns: 1fr 1fr; gap: 0.65rem; }
+    .section-label {
+      color: var(--muted);
+      font-size: 0.73rem;
+      font-weight: 800;
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+    }
+    .path-list { display: grid; gap: 0.45rem; }
+    .path-item {
+      width: 100%;
+      text-align: left;
+      background: #fbfcfa;
+      padding: 0.75rem;
+    }
+    .path-item.active {
+      border-color: var(--green);
+      background: #edf7f0;
+    }
+    .path-title { display: block; font-weight: 800; }
+    .path-meta { display: block; margin-top: 0.2rem; color: var(--muted); font-size: 0.78rem; }
+    .summary {
+      display: grid;
+      grid-template-columns: repeat(6, minmax(0, 1fr));
+      gap: 0.55rem;
+      padding: 1rem;
+      border-bottom: 1px solid var(--line);
+      background: rgba(255, 255, 255, 0.72);
+    }
+    .metric {
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: var(--surface);
+      padding: 0.75rem;
+      min-width: 0;
+    }
+    .metric strong { display: block; font-size: 1.35rem; line-height: 1; }
+    .metric span { display: block; color: var(--muted); font-size: 0.75rem; margin-top: 0.25rem; }
+    .map-toolbar {
+      display: flex;
+      justify-content: space-between;
+      gap: 0.75rem;
+      align-items: center;
+      padding: 0.85rem 1rem;
+      border-bottom: 1px solid var(--line);
+      background: #fbfcfa;
+    }
+    .node-map {
+      min-height: 0;
+      overflow: auto;
+      padding: 1rem;
+    }
+    .module {
+      display: grid;
+      gap: 0.55rem;
+      margin-bottom: 1rem;
+    }
+    .module-head {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      gap: 0.75rem;
+      padding-bottom: 0.35rem;
+      border-bottom: 1px solid var(--line);
+    }
+    .nodes {
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(230px, 1fr));
+      gap: 0.55rem;
+    }
+    .node {
+      border: 1px solid var(--line);
+      border-left-width: 5px;
+      border-radius: 8px;
+      background: var(--surface);
+      padding: 0.72rem;
+      display: grid;
+      gap: 0.45rem;
+      min-height: 128px;
+    }
+    .node.pending { border-left-color: var(--muted); }
+    .node.done { border-left-color: var(--green); }
+    .node.failed { border-left-color: var(--red); }
+    .node.needs-review { border-left-color: var(--violet); }
+    .node.generating, .node.resolving, .node.rendering, .node.reviewing, .node.generating-practice {
+      border-left-color: var(--amber);
+    }
+    .node.in-progress {
+      animation: node-pulse 1.6s ease-in-out infinite;
+    }
+    @keyframes node-pulse {
+      0%, 100% { box-shadow: 0 0 0 0 rgba(185, 117, 33, 0); }
+      50% { box-shadow: 0 0 0 3px rgba(185, 117, 33, 0.22); }
+    }
+    .node-top {
+      display: flex;
+      justify-content: space-between;
+      gap: 0.5rem;
+      align-items: start;
+    }
+    .node-title { font-weight: 800; font-size: 0.92rem; line-height: 1.25; }
+    .node-objective {
+      color: var(--muted);
+      font-size: 0.78rem;
+      line-height: 1.35;
+      display: -webkit-box;
+      -webkit-line-clamp: 3;
+      -webkit-box-orient: vertical;
+      overflow: hidden;
+    }
+    .badge {
+      border-radius: 999px;
+      padding: 0.14rem 0.45rem;
+      font-size: 0.68rem;
+      font-weight: 800;
+      text-transform: capitalize;
+      background: var(--mist);
+      white-space: nowrap;
+    }
+    .badge.done { background: #dff2e4; color: var(--green-deep); }
+    .badge.failed { background: #f8dfdc; color: var(--red); }
+    .badge.needs-review { background: #eadff6; color: var(--violet); }
+    .badge.pending { background: #edf0ed; color: var(--muted); }
+    .badge.generating, .badge.resolving, .badge.rendering, .badge.reviewing, .badge.generating-practice {
+      background: #fff0d6;
+      color: #794a08;
+    }
+    .badge.hot { background: #fff0d6; color: #794a08; }
+    .node-actions {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 0.4rem;
+      margin-top: auto;
+      padding-top: 0.35rem;
+    }
+    .node-actions button {
+      min-height: 32px;
+      padding: 0.35rem 0.55rem;
+      font-size: 0.78rem;
+      flex: 1 1 calc(50% - 0.25rem);
+      min-width: 7.5rem;
+    }
+    .node-actions button.preview-node,
+    .node-actions button.render-node {
+      flex: 1 1 calc(50% - 0.25rem);
+    }
+    .node-actions button.repair-node {
+      flex: 1 1 100%;
+      background: var(--green);
+      color: #0d1a12;
+      border-color: var(--green);
+      font-weight: 700;
+    }
+    .node-actions button.regenerate-node {
+      flex: 1 1 100%;
+      background: transparent;
+      color: var(--muted);
+      border-color: var(--line);
+      font-size: 0.72rem;
+    }
+    .node-actions button:disabled {
+      opacity: 0.45;
+      cursor: not-allowed;
+    }
+    .log {
+      font-family: "Cascadia Mono", Consolas, monospace;
+      font-size: 0.75rem;
+      line-height: 1.42;
+      white-space: pre-wrap;
+      word-break: break-word;
+      min-height: 180px;
+      max-height: 34vh;
+      overflow: auto;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: #13201a;
+      color: #dbf2e4;
+      padding: 0.8rem;
+    }
+    .empty {
+      min-height: 280px;
+      display: grid;
+      place-items: center;
+      text-align: center;
+      color: var(--muted);
+      padding: 2rem;
+    }
+    .range-row {
+      display: grid;
+      grid-template-columns: 1fr 64px;
+      gap: 0.45rem;
+      align-items: center;
+    }
+    input[type="range"] { padding: 0; accent-color: var(--green); }
+    .switch {
+      display: flex;
+      align-items: center;
+      gap: 0.45rem;
+      color: var(--muted);
+      font-size: 0.86rem;
+    }
+    .switch input { width: auto; }
+    .preview-overlay {
+      position: fixed;
+      inset: 0;
+      z-index: 20;
+      display: none;
+      place-items: stretch;
+      background: rgba(23, 33, 29, 0.42);
+      padding: 1rem;
+    }
+    .preview-overlay.open { display: grid; }
+    .preview-shell {
+      min-width: 0;
+      min-height: 0;
+      display: grid;
+      grid-template-rows: auto minmax(0, 1fr);
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: #f8faf6;
+      box-shadow: 0 24px 80px rgba(23, 33, 29, 0.25);
+      overflow: hidden;
+    }
+    .preview-head {
+      display: grid;
+      gap: 0.7rem;
+      padding: 0.85rem 1rem;
+      border-bottom: 1px solid var(--line);
+      background: linear-gradient(180deg, #fff, #eef5ef);
+    }
+    .preview-titlebar {
+      display: flex;
+      justify-content: space-between;
+      align-items: start;
+      gap: 0.75rem;
+    }
+    .segmented {
+      display: inline-flex;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      overflow: hidden;
+      background: var(--surface);
+    }
+    .segmented button {
+      min-height: 32px;
+      border: 0;
+      border-radius: 0;
+      padding: 0.35rem 0.65rem;
+      background: transparent;
+      font-size: 0.8rem;
+    }
+    .segmented button.active {
+      background: var(--green);
+      color: #fff;
+      font-weight: 800;
+    }
+    .preview-stage {
+      min-height: 0;
+      display: grid;
+      place-items: center;
+      overflow: auto;
+      padding: 1rem;
+      background:
+        linear-gradient(90deg, rgba(23, 33, 29, 0.05) 1px, transparent 1px),
+        linear-gradient(180deg, rgba(23, 33, 29, 0.05) 1px, transparent 1px),
+        #e9eee8;
+      background-size: 20px 20px;
+    }
+    .preview-stack {
+      width: 100%;
+      display: grid;
+      justify-items: center;
+    }
+    .preview-frame-wrap {
+      width: min(100%, 1180px);
+      aspect-ratio: 16 / 9;
+      max-height: min(68vh, 760px);
+      border: 1px solid #9fac9f;
+      border-radius: 8px;
+      background: #fff;
+      box-shadow: 0 18px 50px rgba(23, 33, 29, 0.2);
+      overflow: hidden;
+    }
+    .preview-frame-wrap.phone {
+      width: min(390px, calc(100vw - 2rem));
+      height: min(844px, calc(100vh - 9rem));
+      aspect-ratio: auto;
+      border: 10px solid #17211d;
+      border-radius: 28px;
+      background: #17211d;
+    }
+    .preview-frame-wrap iframe {
+      width: 100%;
+      height: 100%;
+      border: 0;
+      background: #fff;
+      display: block;
+    }
+    /* Video artifacts render at the fixed 1920x1080 authoring viewport and are
+       scaled to fit, exactly like the production website viewer. Reflowing the
+       video page at preview size shows layouts learners never see. */
+    .video-scale-wrap {
+      position: relative;
+      width: 100%;
+      height: 100%;
+      overflow: hidden;
+      background: #000;
+    }
+    .video-scale-wrap iframe {
+      position: absolute;
+      top: 50%;
+      left: 50%;
+      width: 1920px;
+      height: 1080px;
+      transform-origin: center center;
+      background: #000;
+    }
+    .preview-frame-wrap video {
+      width: 100%;
+      height: 100%;
+      display: block;
+      background: #111a16;
+    }
+    .preview-player {
+      width: min(100%, 1180px);
+      display: grid;
+      grid-template-columns: auto 1fr auto;
+      gap: 0.65rem;
+      align-items: center;
+      margin-top: 0.65rem;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: rgba(255, 255, 255, 0.9);
+      padding: 0.55rem;
+    }
+    .preview-player.hidden { display: none; }
+    .preview-player button { min-height: 32px; padding: 0.35rem 0.7rem; }
+    .preview-time {
+      font-family: "Cascadia Mono", Consolas, monospace;
+      color: var(--muted);
+      font-size: 0.78rem;
+      min-width: 88px;
+      text-align: right;
+    }
+    .preview-empty {
+      width: min(520px, 100%);
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: var(--surface);
+      padding: 1rem;
+      text-align: center;
+      color: var(--muted);
+    }
+
+    @media (max-width: 1180px) {
+      .app { grid-template-columns: 300px minmax(0, 1fr); }
+      .ops { grid-column: 1 / -1; grid-template-rows: auto; }
+      .ops .content { display: grid; grid-template-columns: 1fr 1fr; gap: 1rem; }
+    }
+    @media (max-width: 760px) {
+      .app { display: block; padding: 0.6rem; }
+      .rail, .work, .ops { margin-bottom: 0.75rem; }
+      .summary { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+      .ops .content { display: grid; grid-template-columns: 1fr; }
+      .split { grid-template-columns: 1fr; }
+      .nodes { grid-template-columns: 1fr; }
+      .preview-overlay { padding: 0.5rem; }
+      .preview-titlebar { display: grid; }
+      .preview-stage { padding: 0.5rem; }
+    }
+  </style>
+</head>
+<body>
+  <div class="app">
+    <aside class="rail">
+      <div class="header">
+        <div class="brand">
+          <div>
+            <h1>Adaptive Path Studio</h1>
+            <p class="sub">Plan the whole learning graph, then fill it in node by node.</p>
+          </div>
+          <span class="chip">local</span>
+        </div>
+      </div>
+      <div class="content stack">
+        <section class="stack">
+          <div class="section-label">New blueprint</div>
+          <label>Subject or course
+            <input id="topic" placeholder="Algebra foundations" />
+          </label>
+          <label>Scope
+            <textarea id="scope" placeholder="Optional: what this path should fully cover"></textarea>
+          </label>
+          <div class="split">
+            <label>Audience
+              <select id="audience"><option value="">Auto</option></select>
+            </label>
+            <label>Max nodes
+              <input id="maxNodes" type="number" min="1" max="120" placeholder="Auto" />
+            </label>
+          </div>
+          <label>Model
+            <input id="model" placeholder="Default AGENT_MODEL" />
+          </label>
+          <label>Budget
+            <input id="planBudget" type="number" min="1" step="1" value="5" />
+          </label>
+          <div class="row">
+            <button class="primary" id="planBtn">Plan full path</button>
+            <label class="switch"><input id="planDryRun" type="checkbox" /> dry run</label>
+          </div>
+        </section>
+
+        <section class="stack">
+          <div class="row" style="justify-content: space-between;">
+            <div class="section-label">Blueprints</div>
+            <button id="refreshBtn">Refresh</button>
+          </div>
+          <div id="pathList" class="path-list"></div>
+        </section>
+      </div>
+    </aside>
+
+    <main class="work">
+      <div class="header">
+        <div class="brand">
+          <div>
+            <h2 id="courseTitle">No adaptive path selected</h2>
+            <p id="courseSummary" class="sub">Create or select a blueprint to inspect the node queue.</p>
+          </div>
+          <span id="courseSlug" class="chip">waiting</span>
+        </div>
+      </div>
+
+      <section class="summary">
+        <div class="metric"><strong id="mTotal">0</strong><span>Total nodes</span></div>
+        <div class="metric"><strong id="mDone">0</strong><span>Generated</span></div>
+        <div class="metric"><strong id="mPending">0</strong><span>Pending</span></div>
+        <div class="metric"><strong id="mReview">0</strong><span>Needs review</span></div>
+        <div class="metric"><strong id="mBudget">$0 / $5</strong><span>Spent / budget cap</span></div>
+        <div class="metric"><strong id="mCost">$0</strong><span>Full estimate</span></div>
+      </section>
+
+      <div class="map-toolbar">
+        <div>
+          <div class="section-label">Node map</div>
+          <p class="sub" id="mapHint">Recommended route order with portable node status.</p>
+        </div>
+        <select id="statusFilter" style="max-width: 180px;">
+          <option value="all">All nodes</option>
+          <option value="pending">Pending</option>
+          <option value="done">Generated</option>
+          <option value="needs-review">Needs review</option>
+          <option value="failed">Failed</option>
+        </select>
+      </div>
+
+      <section id="nodeMap" class="node-map">
+        <div class="empty">
+          <div>
+            <h2>Select a path</h2>
+            <p class="sub">Adaptive blueprints appear in the left rail after planning.</p>
+          </div>
+        </div>
+      </section>
+    </main>
+
+    <aside class="ops">
+      <div class="header">
+        <h2>Batch controls</h2>
+        <p class="sub">Generate the next few pending nodes without changing the blueprint.</p>
+      </div>
+      <div class="content stack">
+        <section class="stack">
+          <div class="section-label">Fill next nodes</div>
+          <label>Node batch size
+            <div class="range-row">
+              <input id="nodeLimit" type="range" min="1" max="20" value="5" />
+              <input id="nodeLimitText" type="number" min="1" max="120" value="5" />
+            </div>
+          </label>
+          <div class="split">
+            <label>Budget override
+              <input id="batchBudget" type="number" min="1" step="0.5" placeholder="from course-state" />
+            </label>
+            <label>Timeout min
+              <input id="lectureTimeout" type="number" min="1" value="20" />
+            </label>
+          </div>
+          <div class="split">
+            <label>Video turns
+              <input id="maxTurns" type="number" min="1" value="60" />
+            </label>
+            <label>Practice turns
+              <input id="maxPracticeTurns" type="number" min="1" value="8" />
+            </label>
+          </div>
+          <div class="row">
+            <button class="primary" id="batchBtn">Generate batch</button>
+            <label class="switch"><input id="render" type="checkbox" /> render MP4</label>
+            <label class="switch"><input id="retryFailed" type="checkbox" /> retry failed</label>
+            <label class="switch"><input id="batchDryRun" type="checkbox" /> dry run</label>
+          </div>
+        </section>
+
+        <section class="stack">
+          <div class="row" style="justify-content: space-between;">
+            <div class="section-label">Job log</div>
+            <button class="warn" id="stopBtn" disabled>Stop</button>
+          </div>
+          <div id="jobStatus" class="sub">No job running.</div>
+          <div id="log" class="log"></div>
+        </section>
+      </div>
+    </aside>
+  </div>
+
+  <div id="previewOverlay" class="preview-overlay" aria-hidden="true">
+    <section class="preview-shell" role="dialog" aria-modal="true" aria-labelledby="previewTitle">
+      <div class="preview-head">
+        <div class="preview-titlebar">
+          <div>
+            <h2 id="previewTitle">Preview</h2>
+            <p id="previewMeta" class="sub">Open a generated node to test the learner flow.</p>
+            <p id="previewNotes" class="sub"></p>
+          </div>
+          <div class="row">
+            <div class="segmented" id="previewViewport">
+              <button data-viewport="desktop" class="active">Desktop</button>
+              <button data-viewport="phone">Phone</button>
+            </div>
+            <button id="reloadPreviewBtn">Reload</button>
+            <button id="closePreviewBtn">Close</button>
+          </div>
+        </div>
+        <div class="row" style="justify-content: space-between;">
+          <div class="segmented" id="previewTabs"></div>
+          <span id="previewSignal" class="chip">no completion event</span>
+        </div>
+      </div>
+      <div id="previewStage" class="preview-stage">
+        <div class="preview-empty">No generated artifacts available for this node yet.</div>
+      </div>
+    </section>
+  </div>
+
+  <script>
+    const state = {
+      meta: null,
+      paths: [],
+      selectedSlug: '',
+      summary: null,
+      activeJobId: '',
+      activeJob: null,
+      pollTimer: null,
+      preview: {
+        open: false,
+        nodeSlug: '',
+        activeArtifactId: '',
+        viewport: 'desktop',
+        data: null,
+        completed: false,
+        playing: false,
+        currentTime: 0,
+        duration: 0,
+        rafId: 0,
+        lastTick: 0,
+        audio: null,
+        audioSrc: '',
+      },
+    };
+
+    const $ = (id) => document.getElementById(id);
+
+    function statusClass(status) {
+      return String(status || 'pending').replace(/[^a-z0-9-]/gi, '-');
+    }
+
+    const IN_PROGRESS_STATUSES = new Set([
+      'generating',
+      'resolving',
+      'rendering',
+      'reviewing',
+      'generating-practice',
+    ]);
+
+    function activeJobForCourse() {
+      if (!state.activeJobId || !state.activeJob) return null;
+      if (!['queued', 'running'].includes(state.activeJob.status)) return null;
+      if (state.activeJob.courseSlug && state.activeJob.courseSlug !== state.selectedSlug) return null;
+      return state.activeJob;
+    }
+
+    function effectiveNodeStatus(node) {
+      const stored = node.state.status || 'pending';
+      const job = activeJobForCourse();
+      if (!job || job.targetLectureSlug !== node.slug) return stored;
+      if (IN_PROGRESS_STATUSES.has(stored)) return stored;
+      if (job.action === 'render-node') return 'rendering';
+      if (job.action === 'repair-node') return 'reviewing';
+      if (job.action === 'single-node') return 'generating';
+      return stored;
+    }
+
+    function progressLabel(status) {
+      const labels = {
+        rendering: 'Rendering MP4…',
+        resolving: 'Resolving audio…',
+        generating: 'Generating video…',
+        reviewing: 'Reviewing practice…',
+        'generating-practice': 'Generating practice…',
+      };
+      return labels[status] || 'Generation in progress…';
+    }
+
+    function escapeHtml(value) {
+      return String(value || '').replace(/[&<>"']/g, (char) => ({
+        '&': '&amp;',
+        '<': '&lt;',
+        '>': '&gt;',
+        '"': '&quot;',
+        "'": '&#39;',
+      }[char]));
+    }
+
+    async function api(path, options) {
+      const response = await fetch(path, options);
+      const data = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(data.error || `Request failed: ${response.status}`);
+      return data;
+    }
+
+    function setLog(lines) {
+      const log = $('log');
+      log.textContent = (lines || []).join('\n');
+      log.scrollTop = log.scrollHeight;
+    }
+
+    function setJob(job) {
+      if (!job) return;
+      const wasActive = Boolean(state.activeJobId);
+      const isActive = ['queued', 'running'].includes(job.status);
+      state.activeJobId = isActive ? job.id : '';
+      state.activeJob = isActive ? job : null;
+      $('stopBtn').disabled = !state.activeJobId;
+      $('jobStatus').textContent = `${job.action} · ${job.status}${job.courseSlug ? ` · ${job.courseSlug}` : ''}${job.targetLectureSlug ? ` · ${job.targetLectureSlug}` : ''}`;
+      setLog(job.log);
+      if (state.activeJobId) {
+        renderNodeMap();
+      } else if (wasActive) {
+        refreshAll();
+      }
+    }
+
+    function runNodeAction(action) {
+      action().catch((error) => {
+        $('jobStatus').textContent = error.message;
+      });
+    }
+
+    async function refreshSummary() {
+      if (!state.selectedSlug) return;
+      state.summary = await api(`/api/paths/${encodeURIComponent(state.selectedSlug)}`);
+      updateSummary();
+      renderNodeMap();
+    }
+
+    async function pollJob(jobId) {
+      clearInterval(state.pollTimer);
+      state.pollTimer = setInterval(async () => {
+        try {
+          const job = await api(`/api/jobs/${encodeURIComponent(jobId)}`);
+          setJob(job);
+          if (['queued', 'running'].includes(job.status)) {
+            await refreshSummary();
+          } else {
+            clearInterval(state.pollTimer);
+          }
+        } catch (error) {
+          $('jobStatus').textContent = error.message;
+          clearInterval(state.pollTimer);
+        }
+      }, 1400);
+    }
+
+    function formNumber(id) {
+      const value = $(id).value;
+      if (value === '') return undefined;
+      const num = Number(value);
+      return Number.isFinite(num) ? num : undefined;
+    }
+
+    async function startJob(path, body) {
+      const job = await api(path, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body),
+      });
+      setJob(job);
+      pollJob(job.id);
+    }
+
+    function renderPaths() {
+      const list = $('pathList');
+      if (!state.paths.length) {
+        list.innerHTML = '<p class="sub">No adaptive blueprints yet.</p>';
+        return;
+      }
+      list.innerHTML = state.paths.map((path) => `
+        <button class="path-item ${path.slug === state.selectedSlug ? 'active' : ''}" data-slug="${path.slug}">
+          <span class="path-title">${path.title}</span>
+          <span class="path-meta">${path.doneCount}/${path.lectureCount} generated · ${path.pendingCount} pending</span>
+        </button>
+      `).join('');
+      list.querySelectorAll('button[data-slug]').forEach((button) => {
+        button.addEventListener('click', () => selectPath(button.dataset.slug));
+      });
+    }
+
+    function updateSummary() {
+      const summary = state.summary;
+      if (!summary) {
+        $('courseTitle').textContent = 'No adaptive path selected';
+        $('courseSummary').textContent = 'Create or select a blueprint to inspect the node queue.';
+        $('courseSlug').textContent = 'waiting';
+        ['mTotal', 'mDone', 'mPending', 'mReview'].forEach((id) => $(id).textContent = '0');
+        $('mBudget').textContent = '$0 / $5';
+        $('mCost').textContent = '$0';
+        $('batchBudget').value = '';
+        $('batchBudget').placeholder = 'from course-state';
+        return;
+      }
+      const spent = Number(summary.state?.spentUsd ?? 0);
+      const budgetCap = Number(summary.state?.budgetUsd ?? 5);
+      $('courseTitle').textContent = summary.plan.title;
+      $('courseSummary').textContent = summary.plan.summary || summary.plan.description || '';
+      $('courseSlug').textContent = summary.plan.slug;
+      $('mTotal').textContent = summary.progress.total;
+      $('mDone').textContent = summary.progress.done;
+      $('mPending').textContent = summary.progress.pending;
+      $('mReview').textContent = summary.progress.needsReview;
+      $('mBudget').textContent = `$${spent.toFixed(2)} / $${budgetCap.toFixed(2)}`;
+      $('mCost').textContent = `$${Number(summary.estimatedCostUsd || 0).toFixed(0)}`;
+      $('batchBudget').value = '';
+      $('batchBudget').placeholder = String(budgetCap);
+    }
+
+    function groupNodes(summary) {
+      const bySlug = new Map((summary.lectures || []).map((lecture) => [lecture.slug, lecture]));
+      return (summary.plan.modules || []).map((module) => ({
+        title: module.title,
+        nodes: (module.lectures || []).map((node) => ({
+          ...node,
+          state: bySlug.get(node.slug) || { status: 'pending' },
+        })),
+      }));
+    }
+
+    function renderNodeMap() {
+      const container = $('nodeMap');
+      const summary = state.summary;
+      if (!summary) {
+        container.innerHTML = '<div class="empty"><div><h2>Select a path</h2><p class="sub">Adaptive blueprints appear in the left rail after planning.</p></div></div>';
+        return;
+      }
+      const filter = $('statusFilter').value;
+      const modules = groupNodes(summary);
+      const html = modules.map((module) => {
+        const nodes = module.nodes.filter((node) => filter === 'all' || node.state.status === filter);
+        if (!nodes.length) return '';
+        return `
+          <div class="module">
+            <div class="module-head">
+              <h3>${escapeHtml(module.title)}</h3>
+              <span class="chip">${nodes.length} node${nodes.length === 1 ? '' : 's'}</span>
+            </div>
+            <div class="nodes">
+              ${nodes.map((node) => {
+                const status = effectiveNodeStatus(node);
+                const prereqs = (node.prerequisites || []).length ? `Requires: ${node.prerequisites.join(', ')}` : 'Entry node';
+                const canRender = node.state.renderReady || node.state.status === 'done' || node.state.status === 'needs-review';
+                const hasMp4 = node.state.hasMp4;
+                const inProgress = IN_PROGRESS_STATUSES.has(status);
+                const isNeedsReview = status === 'needs-review';
+                const videoFrameNeedsReview = node.state.videoFrameReview === 'needs-review';
+                const badgeLabel = isNeedsReview
+                  ? `${status.replace(/-/g, ' ')}${videoFrameNeedsReview ? ' · video' : ''}`
+                  : status.replace(/-/g, ' ');
+                const canMutate = !inProgress && !state.activeJobId;
+                const previewDisabled = !node.state.folderName;
+                const renderDisabled = !canRender || hasMp4 || inProgress || Boolean(state.activeJobId);
+                let actionButtons = `
+                      <button type="button" data-node="${node.slug}" class="preview-node" ${previewDisabled ? 'disabled' : ''}>Preview</button>
+                      <button type="button" data-node="${node.slug}" class="render-node" ${renderDisabled ? 'disabled' : ''}>${hasMp4 ? 'MP4 ready' : inProgress && status === 'rendering' ? 'Rendering…' : 'Generate MP4'}</button>`;
+                if (isNeedsReview && canMutate) {
+                  actionButtons += `
+                      <button type="button" data-node="${node.slug}" class="repair-node">Rerun fix</button>
+                      <button type="button" data-node="${node.slug}" class="regenerate-node">Regenerate from scratch</button>`;
+                } else if ((status === 'pending' || status === 'failed') && canMutate) {
+                  actionButtons += `
+                      <button type="button" data-node="${node.slug}" class="single-node">Generate node</button>`;
+                } else if (inProgress) {
+                  actionButtons += `
+                      <span class="sub in-progress-label" style="flex:1 1 100%; margin:0;">${progressLabel(status)}</span>`;
+                }
+                return `
+                  <article class="node ${statusClass(status)}${inProgress ? ' in-progress' : ''}">
+                    <div class="node-top">
+                      <div class="node-title">${escapeHtml(node.title)}</div>
+                      <span class="badge ${IN_PROGRESS_STATUSES.has(status) ? 'hot' : statusClass(status)}">${badgeLabel}</span>
+                    </div>
+                    <p class="node-objective">${escapeHtml(node.objective || '')}</p>
+                    <span class="sub">${escapeHtml(prereqs)}</span>
+                    <div class="node-actions">
+                      ${actionButtons}
+                    </div>
+                  </article>
+                `;
+              }).join('')}
+            </div>
+          </div>
+        `;
+      }).join('');
+      container.innerHTML = html || '<div class="empty"><div><h2>No nodes match this filter</h2><p class="sub">Change the filter to inspect the rest of the path.</p></div></div>';
+      container.querySelectorAll('.repair-node').forEach((button) => {
+        button.addEventListener('click', () => runNodeAction(() => repairSingleNode(button.dataset.node)));
+      });
+      container.querySelectorAll('.regenerate-node').forEach((button) => {
+        button.addEventListener('click', () => runNodeAction(() => regenerateSingleNode(button.dataset.node)));
+      });
+      container.querySelectorAll('.single-node').forEach((button) => {
+        button.addEventListener('click', () => runNodeAction(() => generateSingleNode(button.dataset.node)));
+      });
+      container.querySelectorAll('.preview-node').forEach((button) => {
+        button.addEventListener('click', () => runNodeAction(() => openPreview(button.dataset.node)));
+      });
+      container.querySelectorAll('.render-node').forEach((button) => {
+        button.addEventListener('click', () => runNodeAction(() => renderNodeMp4(button.dataset.node)));
+      });
+    }
+
+    function renderPreview() {
+      stopPreviewPlayback();
+      const preview = state.preview;
+      const overlay = $('previewOverlay');
+      overlay.classList.toggle('open', preview.open);
+      overlay.setAttribute('aria-hidden', preview.open ? 'false' : 'true');
+      if (!preview.open) return;
+
+      const node = preview.data && preview.data.node;
+      const artifacts = (preview.data && preview.data.artifacts) || [];
+      let active = artifacts.find((artifact) => artifact.id === preview.activeArtifactId && artifact.available);
+      if (!active) {
+        active = artifacts.find((artifact) => artifact.available);
+        state.preview.activeArtifactId = active?.id || '';
+      }
+      $('previewTitle').textContent = node ? node.title : 'Preview';
+      $('previewMeta').textContent = node
+        ? `${node.status || 'pending'} - ${node.slug}${active?.source ? ` - ${active.source}` : ''}`
+        : 'Open a generated node to test the learner flow.';
+      const notes = [node?.error, node?.interactiveReviewNotes, node?.gameReviewNotes, node?.videoFrameReviewNotes].filter(Boolean).join(' ');
+      $('previewNotes').textContent = notes ? `Review notes: ${notes}` : '';
+      $('previewSignal').textContent = preview.completed ? 'completion event received' : 'no completion event';
+      $('previewSignal').classList.toggle('hot', preview.completed);
+
+      $('previewViewport').querySelectorAll('button').forEach((button) => {
+        button.classList.toggle('active', button.dataset.viewport === preview.viewport);
+      });
+
+      const tabs = $('previewTabs');
+      tabs.innerHTML = artifacts.map((artifact) => `
+        <button
+          type="button"
+          data-artifact-id="${artifact.id}"
+          class="${artifact.id === preview.activeArtifactId ? 'active' : ''}"
+          ${artifact.available ? '' : 'disabled'}
+        >${artifact.label}</button>
+      `).join('');
+      tabs.querySelectorAll('button[data-artifact-id]').forEach((button) => {
+        button.addEventListener('click', (event) => {
+          event.preventDefault();
+          state.preview.activeArtifactId = button.dataset.artifactId;
+          state.preview.completed = false;
+          renderPreview();
+        });
+      });
+
+      if (!active) {
+        $('previewStage').innerHTML = '<div class="preview-empty">No generated artifacts available for this node yet.</div>';
+        return;
+      }
+
+      $('previewStage').innerHTML = `
+        <div class="preview-stack">
+          <div class="preview-frame-wrap ${preview.viewport === 'phone' ? 'phone' : 'desktop'}">
+            ${active.kind === 'mp4'
+              ? `<video id="previewFrame" title="Learner preview" controls src="${active.url}"></video>`
+              : active.kind === 'video'
+                ? `<div class="video-scale-wrap"><iframe id="previewFrame" title="Learner preview" src="${active.url}"></iframe></div>`
+                : `<iframe id="previewFrame" title="Learner preview" src="${active.url}"></iframe>`}
+          </div>
+          <div id="previewPlayer" class="preview-player ${active.kind === 'video' ? '' : 'hidden'}">
+            <button id="previewPlayBtn">Play</button>
+            <input id="previewScrubber" type="range" min="0" max="0" step="0.05" value="0" />
+            <span id="previewTime" class="preview-time">0:00 / 0:00</span>
+          </div>
+        </div>
+      `;
+      if (active.kind === 'video') {
+        scalePreviewVideoFrame();
+        wirePreviewPlayer();
+      }
+    }
+
+    // Video pages are authored against a fixed 1920x1080 stage. The production
+    // viewer scales that stage to fit; reflowing it at panel size instead would
+    // show broken layouts learners never see. Mirror production here.
+    function scalePreviewVideoFrame() {
+      const wrap = document.querySelector('.video-scale-wrap');
+      const frame = document.getElementById('previewFrame');
+      if (!wrap || !frame || frame.tagName !== 'IFRAME') return;
+      const rect = wrap.getBoundingClientRect();
+      if (rect.width < 1 || rect.height < 1) return;
+      const scale = Math.min(rect.width / 1920, rect.height / 1080);
+      frame.style.transform = `translate(-50%, -50%) scale(${scale})`;
+    }
+    window.addEventListener('resize', scalePreviewVideoFrame);
+
+    function formatTime(seconds) {
+      const value = Math.max(0, Number(seconds) || 0);
+      const mins = Math.floor(value / 60);
+      const secs = Math.floor(value % 60).toString().padStart(2, '0');
+      return `${mins}:${secs}`;
+    }
+
+    function videoFrameWindow() {
+      const frame = document.getElementById('previewFrame');
+      return frame && frame.tagName === 'IFRAME' ? frame.contentWindow : null;
+    }
+
+    function stopPreviewPlayback() {
+      if (state.preview.rafId) cancelAnimationFrame(state.preview.rafId);
+      state.preview.rafId = 0;
+      state.preview.playing = false;
+      state.preview.lastTick = 0;
+      if (state.preview.audio) state.preview.audio.pause();
+    }
+
+    function syncPreviewPlayer() {
+      const scrubber = document.getElementById('previewScrubber');
+      const time = document.getElementById('previewTime');
+      const play = document.getElementById('previewPlayBtn');
+      if (scrubber) {
+        scrubber.max = String(state.preview.duration || 0);
+        scrubber.value = String(state.preview.currentTime || 0);
+      }
+      if (time) time.textContent = `${formatTime(state.preview.currentTime)} / ${formatTime(state.preview.duration)}`;
+      if (play) play.textContent = state.preview.playing ? 'Pause' : 'Play';
+    }
+
+    function seekPreviewVideo(time) {
+      const target = Math.max(0, Math.min(state.preview.duration || 0, Number(time) || 0));
+      state.preview.currentTime = target;
+      const win = videoFrameWindow();
+      if (win && typeof win.renderAt === 'function') win.renderAt(target);
+      syncPreviewAudio(state.preview.playing);
+      syncPreviewPlayer();
+    }
+
+    function activePreviewArtifact() {
+      const artifacts = (state.preview.data && state.preview.data.artifacts) || [];
+      return artifacts.find((artifact) => artifact.id === state.preview.activeArtifactId && artifact.available);
+    }
+
+    function resolvePreviewAssetUrl(src) {
+      const active = activePreviewArtifact();
+      if (!active?.url) return '';
+      return new URL(src, new URL(active.url, window.location.href)).href;
+    }
+
+    function audioCueAt(time) {
+      const timeline = videoFrameWindow()?.__AUDIO_TIMELINE__;
+      if (!Array.isArray(timeline)) return null;
+      return timeline.find((cue) => {
+        const start = Number(cue.start) || 0;
+        const duration = Number(cue.duration) || 0;
+        return time >= start && time < start + duration;
+      }) || null;
+    }
+
+    function ensurePreviewAudio() {
+      if (!state.preview.audio) {
+        state.preview.audio = new Audio();
+        state.preview.audio.preload = 'auto';
+      }
+      return state.preview.audio;
+    }
+
+    function syncPreviewAudio(shouldPlay) {
+      const cue = audioCueAt(state.preview.currentTime);
+      const audio = ensurePreviewAudio();
+      if (!cue?.src) {
+        audio.pause();
+        return;
+      }
+
+      const src = resolvePreviewAssetUrl(cue.src);
+      if (!src) return;
+      if (state.preview.audioSrc !== src) {
+        audio.pause();
+        audio.src = src;
+        state.preview.audioSrc = src;
+      }
+
+      const cueStart = Number(cue.start) || 0;
+      const localTime = Math.max(0, state.preview.currentTime - cueStart);
+      if (Number.isFinite(localTime) && Math.abs((audio.currentTime || 0) - localTime) > 0.25) {
+        audio.currentTime = localTime;
+      }
+
+      if (shouldPlay) {
+        audio.play().catch(() => {
+          state.preview.playing = false;
+          syncPreviewPlayer();
+        });
+      } else {
+        audio.pause();
+      }
+    }
+
+    function tickPreviewVideo(now) {
+      if (!state.preview.playing) return;
+      if (!state.preview.lastTick) state.preview.lastTick = now;
+      const delta = (now - state.preview.lastTick) / 1000;
+      state.preview.lastTick = now;
+      const next = state.preview.currentTime + delta;
+      if (next >= state.preview.duration) {
+        state.preview.playing = false;
+        seekPreviewVideo(state.preview.duration);
+        return;
+      }
+      seekPreviewVideo(next);
+      state.preview.rafId = requestAnimationFrame(tickPreviewVideo);
+    }
+
+    function togglePreviewPlayback() {
+      state.preview.playing = !state.preview.playing;
+      state.preview.lastTick = 0;
+      syncPreviewPlayer();
+      if (state.preview.playing) {
+        syncPreviewAudio(true);
+        state.preview.rafId = requestAnimationFrame(tickPreviewVideo);
+      } else {
+        stopPreviewPlayback();
+        syncPreviewPlayer();
+      }
+    }
+
+    function wirePreviewPlayer() {
+      const frame = document.getElementById('previewFrame');
+      const play = document.getElementById('previewPlayBtn');
+      const scrubber = document.getElementById('previewScrubber');
+      if (play) play.addEventListener('click', togglePreviewPlayback);
+      if (scrubber) {
+        scrubber.addEventListener('input', () => {
+          stopPreviewPlayback();
+          seekPreviewVideo(scrubber.value);
+        });
+      }
+      if (frame) {
+        frame.addEventListener('load', () => {
+          const win = videoFrameWindow();
+          state.preview.duration = Number(win?.__VIDEO_DURATION__ || 0);
+          state.preview.currentTime = Math.min(0.5, state.preview.duration || 0);
+          state.preview.audioSrc = '';
+          seekPreviewVideo(state.preview.currentTime);
+        });
+      }
+    }
+
+    async function openPreview(nodeSlug) {
+      if (!state.selectedSlug || !nodeSlug) return;
+      const data = await api(`/api/preview/${encodeURIComponent(state.selectedSlug)}/${encodeURIComponent(nodeSlug)}`);
+      const available = (data.artifacts || []).filter((artifact) => artifact.available);
+      state.preview.open = true;
+      state.preview.nodeSlug = nodeSlug;
+      state.preview.data = data;
+      state.preview.activeArtifactId = available[0]?.id || '';
+      state.preview.completed = false;
+      renderPreview();
+    }
+
+    function closePreview() {
+      stopPreviewPlayback();
+      state.preview.open = false;
+      renderPreview();
+    }
+
+    function reloadPreview() {
+      const frame = document.getElementById('previewFrame');
+      if (frame) {
+        stopPreviewPlayback();
+        state.preview.completed = false;
+        frame.src = frame.src;
+        renderPreview();
+      }
+    }
+
+    async function refreshPaths() {
+      const data = await api('/api/paths');
+      state.paths = data.paths || [];
+      if (!state.selectedSlug && state.paths[0]) state.selectedSlug = state.paths[0].slug;
+      renderPaths();
+    }
+
+    async function selectPath(slug) {
+      if (!slug) return;
+      state.selectedSlug = slug;
+      state.summary = await api(`/api/paths/${encodeURIComponent(slug)}`);
+      renderPaths();
+      updateSummary();
+      renderNodeMap();
+    }
+
+    async function refreshAll() {
+      await refreshPaths();
+      if (state.selectedSlug) {
+        await selectPath(state.selectedSlug);
+      } else {
+        updateSummary();
+        renderNodeMap();
+      }
+    }
+
+    async function loadMeta() {
+      state.meta = await api('/api/meta');
+      const audience = $('audience');
+      for (const value of state.meta.audiences || []) {
+        const option = document.createElement('option');
+        option.value = value;
+        option.textContent = value;
+        audience.appendChild(option);
+      }
+      $('model').placeholder = state.meta.defaultModel || 'Default AGENT_MODEL';
+    }
+
+    async function planPath() {
+      await startJob('/api/plan', {
+        topic: $('topic').value,
+        scope: $('scope').value,
+        audience: $('audience').value,
+        maxNodes: formNumber('maxNodes'),
+        budget: formNumber('planBudget'),
+        model: $('model').value,
+        dryRun: $('planDryRun').checked,
+      });
+    }
+
+    async function generateBatch() {
+      if (!state.selectedSlug) return;
+      await startJob('/api/batch', {
+        courseSlug: state.selectedSlug,
+        nodeLimit: formNumber('nodeLimitText') || 5,
+        budget: formNumber('batchBudget'),
+        lectureTimeout: formNumber('lectureTimeout'),
+        maxTurns: formNumber('maxTurns'),
+        maxPracticeTurns: formNumber('maxPracticeTurns'),
+        model: $('model').value,
+        render: $('render').checked,
+        retryFailed: $('retryFailed').checked,
+        dryRun: $('batchDryRun').checked,
+      });
+    }
+
+    async function repairSingleNode(nodeSlug) {
+      if (!state.selectedSlug || !nodeSlug) return;
+      const title = state.summary?.lectures?.find((lecture) => lecture.slug === nodeSlug)?.title ?? nodeSlug;
+      if (!window.confirm(
+        `Rerun practice fix for "${title}"?\n\nVideo HTML and resolved files are kept; interactive/game practice is re-reviewed and repaired. If video frame QA was flagged, that check is re-run too.`,
+      )) {
+        return;
+      }
+      await startJob('/api/node/repair', {
+        courseSlug: state.selectedSlug,
+        nodeSlug,
+        lectureTimeout: formNumber('lectureTimeout'),
+        model: $('model').value,
+        dryRun: $('batchDryRun').checked,
+      });
+    }
+
+    async function regenerateSingleNode(nodeSlug) {
+      if (!state.selectedSlug || !nodeSlug) return;
+      const title = state.summary?.lectures?.find((lecture) => lecture.slug === nodeSlug)?.title ?? nodeSlug;
+      if (!window.confirm(
+        `Regenerate "${title}" from scratch?\n\nThis deletes video HTML, resolved HTML, audio, MP4, and practice files for this node.`,
+      )) {
+        return;
+      }
+      await startJob('/api/node', {
+        courseSlug: state.selectedSlug,
+        nodeSlug,
+        budget: formNumber('batchBudget'),
+        model: $('model').value,
+        render: $('render').checked,
+        dryRun: $('batchDryRun').checked,
+      });
+    }
+
+    async function generateSingleNode(nodeSlug) {
+      if (!state.selectedSlug || !nodeSlug) return;
+      const title = state.summary?.lectures?.find((lecture) => lecture.slug === nodeSlug)?.title ?? nodeSlug;
+      if (!window.confirm(`Generate "${title}"?`)) return;
+      await startJob('/api/node', {
+        courseSlug: state.selectedSlug,
+        nodeSlug,
+        budget: formNumber('batchBudget'),
+        model: $('model').value,
+        render: $('render').checked,
+        dryRun: $('batchDryRun').checked,
+      });
+    }
+
+    async function renderNodeMp4(nodeSlug) {
+      if (!state.selectedSlug || !nodeSlug) return;
+      await startJob('/api/node/render', {
+        courseSlug: state.selectedSlug,
+        nodeSlug,
+        dryRun: $('batchDryRun').checked,
+      });
+    }
+
+    async function stopJob() {
+      if (!state.activeJobId) return;
+      const job = await api(`/api/jobs/${encodeURIComponent(state.activeJobId)}/stop`, { method: 'POST' });
+      setJob(job);
+    }
+
+    function wire() {
+      $('refreshBtn').addEventListener('click', refreshAll);
+      $('planBtn').addEventListener('click', () => planPath().catch((e) => $('jobStatus').textContent = e.message));
+      $('batchBtn').addEventListener('click', () => generateBatch().catch((e) => $('jobStatus').textContent = e.message));
+      $('stopBtn').addEventListener('click', () => stopJob().catch((e) => $('jobStatus').textContent = e.message));
+      $('closePreviewBtn').addEventListener('click', closePreview);
+      $('reloadPreviewBtn').addEventListener('click', reloadPreview);
+      $('previewOverlay').addEventListener('click', (event) => {
+        if (event.target === $('previewOverlay')) closePreview();
+      });
+      $('previewViewport').querySelectorAll('button[data-viewport]').forEach((button) => {
+        button.addEventListener('click', () => {
+          state.preview.viewport = button.dataset.viewport;
+          renderPreview();
+        });
+      });
+      window.addEventListener('message', (event) => {
+        if (event.source !== document.getElementById('previewFrame')?.contentWindow) return;
+        const data = event.data || {};
+        if (data.type === 'mylecture:activity-complete' || data.type === 'activity-complete' || data.completed === true) {
+          state.preview.completed = true;
+          renderPreview();
+        }
+      });
+      window.addEventListener('keydown', (event) => {
+        if (event.key === 'Escape' && state.preview.open) closePreview();
+      });
+      $('statusFilter').addEventListener('change', renderNodeMap);
+      $('nodeLimit').addEventListener('input', () => $('nodeLimitText').value = $('nodeLimit').value);
+      $('nodeLimitText').addEventListener('input', () => {
+        const value = Math.max(1, Math.min(20, Number($('nodeLimitText').value) || 1));
+        $('nodeLimit').value = String(value);
+      });
+    }
+
+    async function restoreLatestJob() {
+      try {
+        const { jobs } = await api('/api/jobs');
+        const latest = state.selectedSlug
+          ? jobs.find(job => job.courseSlug === state.selectedSlug) || jobs[0]
+          : jobs[0];
+        if (!latest?.log?.length) return;
+        setJob(latest);
+        if (['queued', 'running'].includes(latest.status)) {
+          pollJob(latest.id);
+        }
+      } catch {
+        // ignore restore errors on boot
+      }
+    }
+
+    async function init() {
+      wire();
+      await loadMeta();
+      await refreshAll();
+      await restoreLatestJob();
+    }
+
+    init().catch((error) => {
+      $('jobStatus').textContent = error.message;
+    });
+  </script>
+</body>
+</html>

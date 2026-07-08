@@ -18,6 +18,7 @@ Use these principles:
 - Use TTS-friendly wording. Prefer short, common words when they mean the same thing: "math researchers" over "mathematicians", "connection" over "relationship", "natural log" over repeatedly saying "natural logarithm", and "log button" over spelling out "L-O-G" after the term is established.
 - Build in breathing room with punctuation and beat shape. Use occasional short beats, questions, and sentence fragments where a human teacher would pause. Do not write every beat as one continuous explanation.
 - When narration points to a visual detail, match the visual exactly: signs, directions, positions, labels, variable names, before/after states, and left/right/top/bottom references.
+- Do not rewrite a worked example into a different mathematical form than the narration is saying. If the voice says "negative three times negative four," the on-screen expression must still show that product (or an explicitly labeled equivalent), not a silently fused rewrite that changes the factors or the sign of the result.
 - When explaining a result, name the actual cause shown in the visual or worked step. Do not invent a shortcut explanation that contradicts the formula, diagram, evidence, or example on screen.
 - Keep advanced material rigorous without compressing too many abstractions into one sentence.
 - In step-by-step reasoning, let the learner participate: ask what would happen, point out what changed, or contrast the tempting move with the better move.

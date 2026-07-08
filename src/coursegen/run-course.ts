@@ -1,4 +1,4 @@
-import { existsSync, mkdirSync, readdirSync, rmSync } from 'node:fs';
+import { existsSync, mkdirSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import type { CoursePlan, CourseState, LectureState, PracticeReviewStatus } from './types.ts';
 import {
@@ -15,20 +15,43 @@ import {
   buildPracticeRepairMessage,
   buildVideoTaskMessage,
   estimateCourseCostUsd,
+  estimateLecturesCostUsd,
   formatLectureSequenceContext,
+  formatAdaptiveSkillContext,
   formatGameSpec,
   formatInteractiveSpec,
   GAME_PRACTICE_REL,
+  GAME_STAGE_REL,
   INTERACTIVE_PRACTICE_REL,
+  INTERACTIVE_STAGE_REL,
+  defaultMaxPracticeRepairTurns,
+  defaultMaxPracticeTurns,
   printPlanSummary,
   type PracticeHtmlRelPath
 } from './lecture-prompt.ts';
+import {
+  assembleActivityHtml,
+  buildActivityShellConfig,
+  stageCssRelForKind,
+  stageRelForKind,
+  validateStageJs
+} from './activity-shell/assemble.ts';
+import { buildStageJsScaffold, shouldWriteStageScaffold } from './activity-shell/stage-scaffold.ts';
 import { readCoursePlan, readCourseState, writeCourseState } from './state.ts';
 import { DEFAULT_LEARNING_INTENT, flattenPlanLectures, initialCourseState, resolveGameSpec, resolveInteractiveSpec } from './types.ts';
 import { parseCostUsdFromOutput, spawnAgent, spawnRenderLecture, spawnResolve } from './spawn.ts';
+
+const ADAPTIVE_VIDEO_SKILL = ['adaptive-micro-lesson'] as const;
 import { confirm } from './confirm.ts';
+import { filterRepairableFindings, isQaInfrastructureFinding, joinReviewNotes, singleLineNote, splitStoredReviewNotes } from './review-notes.ts';
+import { LARGE_PRACTICE_FILE_LINES, countPracticeFileLines } from './practice-repair-context.ts';
 import { cleanupScreenshotDir, reviewPracticeWithRubric, type RubricResult } from './review-practice.ts';
 import { buildScriptRepairMessage, reviewScriptWithRubric, type ScriptReviewResult } from './review-script.ts';
+import {
+  buildVideoFrameRepairMessage,
+  collectVideoFrameFindings,
+  MAX_VIDEO_FRAME_FINDINGS
+} from './video-frame-qa.ts';
 
 export type RunCourseOptions = {
   courseSlug: string;
@@ -39,6 +62,9 @@ export type RunCourseOptions = {
   lectureTimeoutMinutes?: number;
   retryFailed?: boolean;
   forceLecture?: string;
+  /** Re-run practice QA/repair for one lecture without touching video artifacts. */
+  repairPractice?: string;
+  nodeLimit?: number;
   skipPracticeReview?: boolean;
   skipScriptReview?: boolean;
   ttsVoice?: string;
@@ -52,6 +78,78 @@ export type RunCourseOptions = {
 };
 
 type PracticeKind = 'interactive' | 'game';
+
+const MAX_PRACTICE_REPAIR_PASSES = 2;
+
+function isShellBasedPractice(folderPath: string, kind: PracticeKind): boolean {
+  return existsSync(path.join(folderPath, stageRelForKind(kind)));
+}
+
+function assembleAdaptivePracticeHtml(options: {
+  folderPath: string;
+  kind: PracticeKind;
+  spec: NonNullable<ReturnType<typeof resolveInteractiveSpec>> | NonNullable<ReturnType<typeof resolveGameSpec>>;
+  title: string;
+  objective: string;
+}): string[] {
+  const stagePath = path.join(options.folderPath, stageRelForKind(options.kind));
+  const htmlPath = path.join(
+    options.folderPath,
+    options.kind === 'interactive' ? INTERACTIVE_PRACTICE_REL : GAME_PRACTICE_REL
+  );
+  const stageCssPath = path.join(options.folderPath, stageCssRelForKind(options.kind));
+
+  if (!existsSync(stagePath)) {
+    if (existsSync(htmlPath)) {
+      console.log(`  Warning: ${stageRelForKind(options.kind)} missing; using existing index.html as legacy practice.`);
+      return [];
+    }
+    return [`${stageRelForKind(options.kind)} not found after generation`];
+  }
+
+  const stageJs = readFileSync(stagePath, 'utf8');
+  const validationFindings = validateStageJs(stageJs);
+  if (validationFindings.length > 0) {
+    if (existsSync(htmlPath)) {
+      rmSync(htmlPath, { force: true });
+      console.log(`  Removed stale ${options.kind === 'interactive' ? INTERACTIVE_PRACTICE_REL : GAME_PRACTICE_REL} after stage validation failure.`);
+    }
+    return validationFindings.map(finding => `Stage validation: ${finding}`);
+  }
+
+  const config = buildActivityShellConfig(options.kind, options.spec, {
+    title: options.title,
+    objective: options.objective
+  });
+  const stageCss = existsSync(stageCssPath) ? readFileSync(stageCssPath, 'utf8') : undefined;
+  const html = assembleActivityHtml({ config, stageJs, stageCss });
+  mkdirSync(path.dirname(htmlPath), { recursive: true });
+  writeFileSync(htmlPath, html, 'utf8');
+  console.log(`  Assembled ${options.kind === 'interactive' ? INTERACTIVE_PRACTICE_REL : GAME_PRACTICE_REL} from stage module.`);
+  return [];
+}
+
+function seedAdaptiveStageScaffold(options: {
+  folderPath: string;
+  kind: PracticeKind;
+  spec: NonNullable<ReturnType<typeof resolveInteractiveSpec>> | NonNullable<ReturnType<typeof resolveGameSpec>>;
+  title: string;
+  objective: string;
+  forceOverwrite?: boolean;
+}): void {
+  const stageRel = stageRelForKind(options.kind);
+  const stagePath = path.join(options.folderPath, stageRel);
+  const stageExists = existsSync(stagePath);
+  if (!shouldWriteStageScaffold(stageExists, options.forceOverwrite === true)) return;
+
+  const shellConfig = buildActivityShellConfig(options.kind, options.spec, {
+    title: options.title,
+    objective: options.objective
+  });
+  mkdirSync(path.dirname(stagePath), { recursive: true });
+  writeFileSync(stagePath, buildStageJsScaffold(options.kind, shellConfig), 'utf8');
+  console.log(`  ${stageExists ? 'Re-seeded' : 'Seeded'} ${stageRel} scaffold`);
+}
 
 const LEGACY_TOP_LEVEL_PRACTICE_FILES = ['interactive.html', 'game.html'] as const;
 
@@ -70,6 +168,15 @@ function setPracticeReview(
   }
 }
 
+function setVideoFrameReview(
+  lectureState: LectureState,
+  status: PracticeReviewStatus,
+  notes: string
+) {
+  lectureState.videoFrameReview = status;
+  lectureState.videoFrameReviewNotes = notes;
+}
+
 function makeCostRecorder(lectureState: LectureState, state: CourseState) {
   return (costUsd: number) => {
     lectureState.costUsd = Number((lectureState.costUsd + costUsd).toFixed(4));
@@ -82,7 +189,9 @@ function defaultReviewFields(lecture: Partial<LectureState>) {
     interactiveReview: lecture.interactiveReview ?? 'not-required',
     interactiveReviewNotes: lecture.interactiveReviewNotes ?? '',
     gameReview: lecture.gameReview ?? 'not-required',
-    gameReviewNotes: lecture.gameReviewNotes ?? ''
+    gameReviewNotes: lecture.gameReviewNotes ?? '',
+    videoFrameReview: lecture.videoFrameReview ?? 'not-required',
+    videoFrameReviewNotes: lecture.videoFrameReviewNotes ?? ''
   } as const;
 }
 
@@ -109,6 +218,10 @@ export function syncStateFromPlan(state: CourseState, plan: CoursePlan) {
       if (!row.formats.includes('game')) {
         synced.gameReview = 'not-required';
         synced.gameReviewNotes = '';
+      }
+      if (!row.formats.includes('video')) {
+        synced.videoFrameReview = 'not-required';
+        synced.videoFrameReviewNotes = '';
       }
       return synced;
     }
@@ -159,13 +272,21 @@ function wantsRender(options: RunCourseOptions) {
   return options.render === true;
 }
 
+function getimgToolEnabledForPlan(plan: CoursePlan) {
+  return plan.adaptivePath === true ? false : undefined;
+}
+
 function findLatestIndexFile(folderPath: string) {
-  if (!existsSync(folderPath)) return null;
-  const indexFiles = readdirSync(folderPath)
+  const files = findIndexHtmlFiles(folderPath);
+  return files.length > 0 ? files[files.length - 1] : null;
+}
+
+function findIndexHtmlFiles(folderPath: string): string[] {
+  if (!existsSync(folderPath)) return [];
+  return readdirSync(folderPath)
     .filter(name => isIndexHtmlName(name))
-    .sort((a, b) => a.localeCompare(b, undefined, { numeric: true, sensitivity: 'base' }));
-  const latest = indexFiles[indexFiles.length - 1];
-  return latest ? path.join(folderPath, latest) : null;
+    .sort((a, b) => a.localeCompare(b, undefined, { numeric: true, sensitivity: 'base' }))
+    .map(name => path.join(folderPath, name));
 }
 
 export function hasResolvedHtml(folderPath: string) {
@@ -184,6 +305,9 @@ export function lectureRenderReady(plan: CoursePlan, lecture: LectureState) {
 }
 
 function shouldRunLecture(lecture: LectureState, plan: CoursePlan, options: RunCourseOptions) {
+  if (options.repairPractice) {
+    return lecture.slug === options.repairPractice;
+  }
   if (options.renderOnly) {
     if (options.forceLecture) {
       return options.forceLecture === lecture.slug && lectureRenderReady(plan, lecture);
@@ -209,10 +333,6 @@ function shouldRunLecture(lecture: LectureState, plan: CoursePlan, options: RunC
   }
   if (lecture.status === 'done' && practiceReviewPending(lecture)) return true;
   return lecture.status === 'pending';
-}
-
-function findIndexFile(folderPath: string) {
-  return findLatestIndexFile(folderPath);
 }
 
 function cleanupLegacyTopLevelPracticeFiles(folderPath: string) {
@@ -256,6 +376,8 @@ async function runAgentTask(options: {
   taskMessage: string;
   maxTurns: number;
   model?: string;
+  skills?: string[];
+  enableGetimgTool?: boolean;
   timeoutMinutes: number;
   onCost: (costUsd: number) => void;
 }) {
@@ -272,6 +394,8 @@ async function runAgentTask(options: {
       taskMessage: options.taskMessage,
       maxTurns: options.maxTurns,
       model: options.model,
+      skills: options.skills,
+      enableGetimgTool: options.enableGetimgTool,
       onStdout: chunk => { agentOutput += chunk; },
       onStderr: chunk => { agentOutput += chunk; }
     });
@@ -288,6 +412,7 @@ async function runAgentTask(options: {
 }
 
 async function reviewOnePracticeFile(options: {
+  plan: CoursePlan;
   lectureState: LectureState;
   state: CourseState;
   folderPath: string;
@@ -296,21 +421,46 @@ async function reviewOnePracticeFile(options: {
   specText: string;
   spec: NonNullable<ReturnType<typeof resolveInteractiveSpec>> | NonNullable<ReturnType<typeof resolveGameSpec>>;
   runOptions: RunCourseOptions;
-  allowRepair: boolean;
+  storedFindings?: string[];
 }): Promise<'passed' | 'needs-review'> {
   const htmlPath = path.join(options.folderPath, options.fileName);
   const screenshotDir = path.join(options.folderPath, '.practice-review', options.kind);
+  const shellBased = options.plan.adaptivePath === true && isShellBasedPractice(options.folderPath, options.kind);
 
-  if (!existsSync(htmlPath)) {
-    setPracticeReview(options.lectureState, options.kind, 'needs-review', `${options.fileName} not found after generation`);
+  let assemblyPreflight: RubricResult | null = null;
+  if (shellBased) {
+    const assemblyFindings = assembleAdaptivePracticeHtml({
+      folderPath: options.folderPath,
+      kind: options.kind,
+      spec: options.spec,
+      title: options.lectureState.title,
+      objective: options.lectureState.objective
+    });
+    if (assemblyFindings.length > 0) {
+      assemblyPreflight = { passed: false, findings: assemblyFindings };
+    }
+  }
+
+  if (!assemblyPreflight && !existsSync(htmlPath)) {
+    const existingNotes = options.kind === 'interactive'
+      ? options.lectureState.interactiveReviewNotes.trim()
+      : options.lectureState.gameReviewNotes.trim();
+    const notFoundLine = `${options.fileName} not found after generation`;
+    const priorFindings = splitStoredReviewNotes(existingNotes)
+      .filter(finding => !finding.startsWith(notFoundLine));
+    setPracticeReview(
+      options.lectureState,
+      options.kind,
+      'needs-review',
+      joinReviewNotes([notFoundLine, ...priorFindings])
+    );
     writeCourseState(options.state);
     return 'needs-review';
   }
 
-  try {
-    let result: RubricResult;
+  const runRubricReview = async (): Promise<RubricResult | null> => {
     try {
-      result = await reviewPracticeWithRubric({
+      return await reviewPracticeWithRubric({
         objective: options.lectureState.objective,
         htmlPath,
         kind: options.kind,
@@ -320,52 +470,120 @@ async function reviewOnePracticeFile(options: {
       });
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
-      setPracticeReview(options.lectureState, options.kind, 'needs-review', `QA infrastructure error: ${message}`);
+      setPracticeReview(options.lectureState, options.kind, 'needs-review', singleLineNote(`QA infrastructure error: ${message}`));
       writeCourseState(options.state);
-      return 'needs-review';
+      return null;
+    }
+  };
+
+  try {
+    let result: RubricResult;
+    const lineCountPath = shellBased
+      ? path.join(options.folderPath, stageRelForKind(options.kind))
+      : htmlPath;
+    const fileLineCount = existsSync(lineCountPath)
+      ? countPracticeFileLines(readFileSync(lineCountPath, 'utf8'))
+      : 0;
+    const storedFindingsRepairable = options.storedFindings
+      ? filterRepairableFindings(options.storedFindings)
+      : [];
+    const skipStoredFindingsForOversizedFile =
+      storedFindingsRepairable.length > 0 && fileLineCount > LARGE_PRACTICE_FILE_LINES;
+
+    if (skipStoredFindingsForOversizedFile) {
+      console.log(
+        `  Practice ${shellBased ? 'stage' : 'file'} is ${fileLineCount} lines (>${LARGE_PRACTICE_FILE_LINES}); re-running QA before repair instead of using stored notes alone.`
+      );
     }
 
-    if (!result.passed && options.allowRepair) {
-      console.log(`  Practice QA failed for ${options.fileName}; running one repair pass...`);
-      result.findings.forEach(finding => console.log(`    - ${finding}`));
+    if (assemblyPreflight) {
+      result = assemblyPreflight;
+    } else if (options.storedFindings && options.storedFindings.length > 0 && !skipStoredFindingsForOversizedFile) {
+      const repairable = storedFindingsRepairable;
+      if (repairable.length === 0) {
+        console.log('  Stored notes are QA tooling errors or shell-chrome findings (not stage-fixable); re-running automated review...');
+        if (options.storedFindings.some(isQaInfrastructureFinding)) {
+          console.log('  Tip: restart `npm run adaptive:ui` after updating coursegen so QA uses the latest code.');
+        }
+        const reviewed = await runRubricReview();
+        if (!reviewed) return 'needs-review';
+        result = reviewed;
+      } else {
+        result = { passed: false, findings: repairable };
+      }
+    } else {
+      const reviewed = await runRubricReview();
+      if (!reviewed) return 'needs-review';
+      result = reviewed;
+    }
+
+    for (let repairPass = 0; repairPass < MAX_PRACTICE_REPAIR_PASSES; repairPass += 1) {
+      if (result.passed) break;
+
+      const actionableFindings = filterRepairableFindings(result.findings);
+      if (actionableFindings.length === 0) {
+        console.log('  No HTML-fixable QA findings; skipping agent repair.');
+        break;
+      }
+
+      const repairTurns = defaultMaxPracticeRepairTurns(options.plan);
+      console.log(`  Practice QA failed for ${options.fileName}; running repair pass ${repairPass + 1}/${MAX_PRACTICE_REPAIR_PASSES} (max ${repairTurns} turns)...`);
+      actionableFindings.forEach(finding => console.log(`    - ${finding}`));
+      const shellBased = options.plan.adaptivePath === true && isShellBasedPractice(options.folderPath, options.kind);
+      const stageRel = options.kind === 'interactive' ? INTERACTIVE_STAGE_REL : GAME_STAGE_REL;
+      const stagePath = path.join(options.folderPath, stageRel);
       const repairMessage = buildPracticeRepairMessage({
         fileName: options.fileName,
         objective: options.lectureState.objective,
-        findings: result.findings,
-        specText: options.specText
+        findings: actionableFindings,
+        specText: options.specText,
+        htmlPath,
+        maxTurns: repairTurns,
+        adaptive: options.plan.adaptivePath === true,
+        shellBased,
+        stageRel,
+        stagePath,
+        kind: options.kind,
+        spec: options.spec,
+        title: options.lectureState.title
       });
       try {
         await runAgentTask({
           workspaceDir: options.folderPath,
           taskMessage: repairMessage,
-          maxTurns: options.runOptions.maxPracticeTurns ?? 40,
+          maxTurns: repairTurns,
           model: options.runOptions.model,
+          enableGetimgTool: getimgToolEnabledForPlan(options.plan),
           timeoutMinutes: options.runOptions.lectureTimeoutMinutes ?? 20,
           onCost: makeCostRecorder(options.lectureState, options.state)
         });
       } catch (error) {
         const message = error instanceof Error ? error.message : String(error);
-        setPracticeReview(options.lectureState, options.kind, 'needs-review', `QA infrastructure error: ${message}`);
+        setPracticeReview(options.lectureState, options.kind, 'needs-review', singleLineNote(`QA infrastructure error: ${message}`));
         writeCourseState(options.state);
         return 'needs-review';
       }
 
-      cleanupScreenshotDir(screenshotDir);
-      try {
-        result = await reviewPracticeWithRubric({
-          objective: options.lectureState.objective,
-          htmlPath,
+      if (options.plan.adaptivePath === true) {
+        const assemblyFindings = assembleAdaptivePracticeHtml({
+          folderPath: options.folderPath,
           kind: options.kind,
           spec: options.spec,
-          screenshotDir,
-          model: options.runOptions.model
+          title: options.lectureState.title,
+          objective: options.lectureState.objective
         });
-      } catch (error) {
-        const message = error instanceof Error ? error.message : String(error);
-        setPracticeReview(options.lectureState, options.kind, 'needs-review', `QA infrastructure error: ${message}`);
-        writeCourseState(options.state);
-        return 'needs-review';
+        if (assemblyFindings.length > 0) {
+          result = { passed: false, findings: assemblyFindings };
+          continue;
+        }
       }
+
+      cleanupScreenshotDir(screenshotDir);
+      const reviewed = await runRubricReview();
+      if (!reviewed) return 'needs-review';
+      result = reviewed;
+
+      if (result.passed) break;
     }
 
     if (result.passed) {
@@ -374,7 +592,7 @@ async function reviewOnePracticeFile(options: {
       return 'passed';
     }
 
-    setPracticeReview(options.lectureState, options.kind, 'needs-review', result.findings.join('; '));
+    setPracticeReview(options.lectureState, options.kind, 'needs-review', joinReviewNotes(result.findings.map(singleLineNote)));
     writeCourseState(options.state);
     return 'needs-review';
   } finally {
@@ -402,7 +620,10 @@ async function runScriptReviewPhase(
     audience: plan.audience,
     intent: plan.intent ?? DEFAULT_LEARNING_INTENT,
     durationMinutes: planned.lecture.durationMinutes,
-    courseContext: formatLectureSequenceContext(plan, planned.lecture),
+    courseContext: plan.adaptivePath
+      ? formatAdaptiveSkillContext(plan, planned.lecture)
+      : formatLectureSequenceContext(plan, planned.lecture),
+    adaptiveSkill: plan.adaptivePath ? planned.lecture : undefined,
     model: options.model
   };
 
@@ -429,10 +650,13 @@ async function runScriptReviewPhase(
       workspaceDir: folderPath,
       taskMessage: buildScriptRepairMessage({
         objective: lectureState.objective,
-        findings: result.findings
+        findings: result.findings,
+        adaptive: plan.adaptivePath === true
       }),
       maxTurns: options.maxTurns ?? 60,
       model: options.model,
+      skills: plan.adaptivePath ? [...ADAPTIVE_VIDEO_SKILL] : undefined,
+      enableGetimgTool: getimgToolEnabledForPlan(plan),
       timeoutMinutes: options.lectureTimeoutMinutes ?? 20,
       onCost: makeCostRecorder(lectureState, state)
     });
@@ -443,20 +667,139 @@ async function runScriptReviewPhase(
     return;
   }
 
+  console.log('  Narration revision applied; continuing.');
+}
+
+async function runVideoFrameQaPhase(
+  plan: CoursePlan,
+  lectureState: LectureState,
+  state: CourseState,
+  folderPath: string,
+  options: RunCourseOptions
+): Promise<void> {
+  if (!plan.adaptivePath) return;
+
+  const htmlPaths = findIndexHtmlFiles(folderPath);
+  if (htmlPaths.length === 0) return;
+
+  console.log('  Reviewing video frame layout...');
+  let findings: string[];
   try {
-    result = await reviewScriptWithRubric(reviewOptions);
+    findings = await collectVideoFrameFindings(htmlPaths);
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
-    console.log(`  Script re-review skipped (infrastructure error): ${message}`);
+    console.log(`  Video frame QA skipped (infrastructure error): ${message}`);
+    setVideoFrameReview(lectureState, 'needs-review', singleLineNote(`QA infrastructure error: ${message}`));
+    writeCourseState(state);
     return;
   }
 
-  if (result.passed) {
-    console.log('  Script review: passed after revision');
+  if (findings.length === 0) {
+    console.log('  Video frame QA: passed');
+    setVideoFrameReview(lectureState, 'passed', '');
+    writeCourseState(state);
     return;
   }
-  console.log('  Script review still failing after one revision; continuing to render. Remaining findings:');
-  result.findings.forEach(finding => console.log(`    - ${finding}`));
+
+  setVideoFrameReview(lectureState, 'needs-review', joinReviewNotes(findings.map(singleLineNote)));
+  writeCourseState(state);
+
+  console.log('  Video frame QA failed; running one layout repair pass...');
+  findings.forEach(finding => console.log(`    - ${finding}`));
+
+  try {
+    await runAgentTask({
+      workspaceDir: folderPath,
+      taskMessage: buildVideoFrameRepairMessage(findings),
+      maxTurns: options.maxTurns ?? 60,
+      model: options.model,
+      skills: [...ADAPTIVE_VIDEO_SKILL],
+      enableGetimgTool: getimgToolEnabledForPlan(plan),
+      timeoutMinutes: options.lectureTimeoutMinutes ?? 20,
+      onCost: makeCostRecorder(lectureState, state)
+    });
+    writeCourseState(state);
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    console.log(`  Video frame repair failed: ${message}. Continuing with current HTML.`);
+  }
+
+  const rerunPaths = findIndexHtmlFiles(folderPath);
+  try {
+    findings = rerunPaths.length > 0 ? await collectVideoFrameFindings(rerunPaths) : findings;
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    console.log(`  Video frame QA re-check skipped: ${message}`);
+    setVideoFrameReview(lectureState, 'needs-review', joinReviewNotes([
+      ...findings.map(singleLineNote),
+      singleLineNote(`QA infrastructure error: ${message}`)
+    ]));
+    writeCourseState(state);
+    return;
+  }
+
+  if (findings.length === 0) {
+    console.log('  Video frame QA: passed after repair');
+    setVideoFrameReview(lectureState, 'passed', '');
+    writeCourseState(state);
+    return;
+  }
+
+  console.log('  Video frame QA still failing after repair; marking needs-review at finalize.');
+  findings.slice(0, MAX_VIDEO_FRAME_FINDINGS).forEach(finding => console.log(`    - ${finding}`));
+  setVideoFrameReview(lectureState, 'needs-review', joinReviewNotes(findings.map(singleLineNote)));
+  writeCourseState(state);
+}
+
+/**
+ * A video-frame repair edits index.html after resolved.html was already built,
+ * leaving the viewer playing the stale broken copy. Re-resolve when the index
+ * is newer than its resolved sibling (skipped while frame QA still fails).
+ */
+async function reresolveIfIndexNewer(
+  folderPath: string,
+  lectureState: LectureState,
+  state: CourseState,
+  options: RunCourseOptions
+): Promise<void> {
+  if (lectureState.videoFrameReview === 'needs-review') return;
+  const indexPath = findLatestIndexFile(folderPath);
+  if (!indexPath) return;
+  const resolvedPath = resolvedSiblingPathForIndex(indexPath);
+  if (existsSync(resolvedPath) && statSync(resolvedPath).mtimeMs >= statSync(indexPath).mtimeMs) return;
+
+  console.log('  Resolved HTML is stale after video repair; re-resolving...');
+  lectureState.status = 'resolving';
+  writeCourseState(state);
+  try {
+    await spawnResolve(indexPath, {
+      ttsVoice: options.ttsVoice,
+      ttsSpeed: options.ttsSpeed
+    });
+    lectureState.mp4Path = '';
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    console.log(`  Re-resolve failed: ${message}. Viewer may play a stale resolved copy.`);
+  }
+}
+
+function storedFindingsForRepairPractice(
+  lectureState: LectureState,
+  kind: PracticeKind,
+  runOptions: RunCourseOptions
+): string[] | undefined {
+  if (runOptions.repairPractice !== lectureState.slug) return undefined;
+  const notes = kind === 'interactive'
+    ? lectureState.interactiveReviewNotes.trim()
+    : lectureState.gameReviewNotes.trim();
+  const status = kind === 'interactive'
+    ? lectureState.interactiveReview
+    : lectureState.gameReview;
+  if (status !== 'needs-review' || !notes) return undefined;
+  const findings = splitStoredReviewNotes(notes);
+  if (findings.length === 0) return undefined;
+  if (filterRepairableFindings(findings).length === 0) return undefined;
+  return findings;
 }
 
 async function runPracticePhase(
@@ -479,42 +822,73 @@ async function runPracticePhase(
 
   const interactivePath = path.join(folderPath, INTERACTIVE_PRACTICE_REL);
   const gamePath = path.join(folderPath, GAME_PRACTICE_REL);
+  const interactiveStagePath = path.join(folderPath, INTERACTIVE_STAGE_REL);
+  const gameStagePath = path.join(folderPath, GAME_STAGE_REL);
   const regenAll = Boolean(options.forceLecture);
+  const adaptive = plan.adaptivePath === true;
 
-  if (needsInteractive && (regenAll || !existsSync(interactivePath))) {
+  if (needsInteractive && (regenAll || (adaptive ? !existsSync(interactiveStagePath) : !existsSync(interactivePath)))) {
+    if (adaptive) {
+      const interactiveSpec = resolveInteractiveSpec(planned.lecture);
+      if (interactiveSpec) {
+        seedAdaptiveStageScaffold({
+          folderPath,
+          kind: 'interactive',
+          spec: interactiveSpec,
+          title: lectureState.title,
+          objective: lectureState.objective,
+          forceOverwrite: regenAll
+        });
+      }
+    }
     console.log(`  Generating ${INTERACTIVE_PRACTICE_REL}...`);
     const taskMessage = buildInteractiveTaskMessage(plan, planned.lecture, planned.moduleTitle, indexPath);
     try {
       await runAgentTask({
         workspaceDir: folderPath,
         taskMessage,
-        maxTurns: options.maxPracticeTurns ?? 40,
+        maxTurns: defaultMaxPracticeTurns(plan, options.maxPracticeTurns),
         model: options.model,
+        enableGetimgTool: getimgToolEnabledForPlan(plan),
         timeoutMinutes: options.lectureTimeoutMinutes ?? 20,
         onCost: makeCostRecorder(lectureState, state)
       });
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
-      setPracticeReview(lectureState, 'interactive', 'needs-review', `generation failed: ${message}`);
+      setPracticeReview(lectureState, 'interactive', 'needs-review', singleLineNote(`generation failed: ${message}`));
       writeCourseState(state);
     }
   }
 
-  if (needsGame && (regenAll || !existsSync(gamePath))) {
+  if (needsGame && (regenAll || (adaptive ? !existsSync(gameStagePath) : !existsSync(gamePath)))) {
+    if (adaptive) {
+      const gameSpec = resolveGameSpec(planned.lecture);
+      if (gameSpec) {
+        seedAdaptiveStageScaffold({
+          folderPath,
+          kind: 'game',
+          spec: gameSpec,
+          title: lectureState.title,
+          objective: lectureState.objective,
+          forceOverwrite: regenAll
+        });
+      }
+    }
     console.log(`  Generating ${GAME_PRACTICE_REL}...`);
     const taskMessage = buildGameTaskMessage(plan, planned.lecture, planned.moduleTitle, indexPath);
     try {
       await runAgentTask({
         workspaceDir: folderPath,
         taskMessage,
-        maxTurns: options.maxPracticeTurns ?? 40,
+        maxTurns: defaultMaxPracticeTurns(plan, options.maxPracticeTurns),
         model: options.model,
+        enableGetimgTool: getimgToolEnabledForPlan(plan),
         timeoutMinutes: options.lectureTimeoutMinutes ?? 20,
         onCost: makeCostRecorder(lectureState, state)
       });
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
-      setPracticeReview(lectureState, 'game', 'needs-review', `generation failed: ${message}`);
+      setPracticeReview(lectureState, 'game', 'needs-review', singleLineNote(`generation failed: ${message}`));
       writeCourseState(state);
     }
   }
@@ -534,6 +908,7 @@ async function runPracticePhase(
   if (needsInteractive && lectureState.interactiveReview !== 'passed' && interactiveSpec) {
     console.log(`  Reviewing ${INTERACTIVE_PRACTICE_REL}...`);
     await reviewOnePracticeFile({
+      plan,
       lectureState,
       state,
       folderPath,
@@ -542,13 +917,16 @@ async function runPracticePhase(
       specText: formatInteractiveSpec(interactiveSpec),
       spec: interactiveSpec,
       runOptions: options,
-      allowRepair: true
+      storedFindings: storedFindingsForRepairPractice(lectureState, 'interactive', options)
     });
+  } else if (options.repairPractice === lectureState.slug && needsInteractive && lectureState.interactiveReview === 'passed') {
+    console.log(`  ${INTERACTIVE_PRACTICE_REL}: practice review already passed; nothing to repair (use --force-lecture to regenerate).`);
   }
 
   if (needsGame && lectureState.gameReview !== 'passed' && gameSpec) {
     console.log(`  Reviewing ${GAME_PRACTICE_REL}...`);
     await reviewOnePracticeFile({
+      plan,
       lectureState,
       state,
       folderPath,
@@ -557,8 +935,10 @@ async function runPracticePhase(
       specText: formatGameSpec(gameSpec),
       spec: gameSpec,
       runOptions: options,
-      allowRepair: true
+      storedFindings: storedFindingsForRepairPractice(lectureState, 'game', options)
     });
+  } else if (options.repairPractice === lectureState.slug && needsGame && lectureState.gameReview === 'passed') {
+    console.log(`  ${GAME_PRACTICE_REL}: practice review already passed; nothing to repair (use --force-lecture to regenerate).`);
   }
 }
 
@@ -566,11 +946,17 @@ function finalizeLectureStatus(lectureState: LectureState) {
   const practiceFailed =
     (lectureState.formats.includes('interactive') && lectureState.interactiveReview === 'needs-review') ||
     (lectureState.formats.includes('game') && lectureState.gameReview === 'needs-review');
-  if (practiceFailed) {
+  const videoFrameFailed = lectureState.videoFrameReview === 'needs-review';
+  if (practiceFailed || videoFrameFailed) {
     lectureState.status = 'needs-review';
     lectureState.error = [
-      lectureState.interactiveReviewNotes && `interactive: ${lectureState.interactiveReviewNotes}`,
-      lectureState.gameReviewNotes && `game: ${lectureState.gameReviewNotes}`
+      videoFrameFailed && lectureState.videoFrameReviewNotes
+        ? `video frame: ${lectureState.videoFrameReviewNotes.replace(/\n/g, '; ')}`
+        : '',
+      lectureState.interactiveReviewNotes &&
+        `interactive: ${lectureState.interactiveReviewNotes.replace(/\n/g, '; ')}`,
+      lectureState.gameReviewNotes &&
+        `game: ${lectureState.gameReviewNotes.replace(/\n/g, '; ')}`
     ].filter(Boolean).join(' | ');
     return;
   }
@@ -591,6 +977,39 @@ async function runOneLecture(
 
   const folderName = lectureState.folderName || lectureFolderName(lectureState.order, lectureState.slug);
   const folderPath = lectureFolderPath(plan.slug, folderName);
+  let videoFrameQaRanThisInvocation = false;
+
+  if (options.repairPractice === lectureState.slug) {
+    const indexPath = findLatestIndexFile(folderPath);
+    if (options.dryRun) {
+      console.log(`\n--- ${lectureState.title} (practice repair only) ---\nFolder: ${folderPath}\n`);
+      if (planned.lecture.formats.includes('interactive')) {
+        console.log(`Review/repair: ${INTERACTIVE_PRACTICE_REL}`);
+      }
+      if (planned.lecture.formats.includes('game')) {
+        console.log(`Review/repair: ${GAME_PRACTICE_REL}`);
+      }
+      return;
+    }
+    if (!indexPath) {
+      lectureState.status = 'failed';
+      lectureState.error = 'Video index missing; cannot repair practice without existing lecture artifacts';
+      writeCourseState(state);
+      return;
+    }
+    if (plan.adaptivePath && lectureState.videoFrameReview === 'needs-review') {
+      await runVideoFrameQaPhase(plan, lectureState, state, folderPath, options);
+      videoFrameQaRanThisInvocation = true;
+      await reresolveIfIndexNewer(folderPath, lectureState, state, options);
+    }
+    lectureState.status = 'reviewing';
+    writeCourseState(state);
+    await runPracticePhase(plan, state, lectureState, planned, folderPath, indexPath, options);
+    finalizeLectureStatus(lectureState);
+    writeCourseState(state);
+    return;
+  }
+
   const existingIndex = findLatestIndexFile(folderPath);
   const videoAlreadyRendered = Boolean(lectureState.mp4Path && existsSync(lectureState.mp4Path));
   const resolvedReady = hasResolvedHtml(folderPath);
@@ -676,6 +1095,7 @@ async function runOneLecture(
     lectureState.interactiveReviewNotes = '';
     lectureState.gameReview = 'not-required';
     lectureState.gameReviewNotes = '';
+    setVideoFrameReview(lectureState, 'not-required', '');
     lectureState.mp4Path = '';
   }
 
@@ -723,6 +1143,8 @@ async function runOneLecture(
         taskMessage,
         maxTurns: options.maxTurns ?? 60,
         model: options.model,
+        skills: plan.adaptivePath ? [...ADAPTIVE_VIDEO_SKILL] : undefined,
+        enableGetimgTool: getimgToolEnabledForPlan(plan),
         timeoutMinutes: options.lectureTimeoutMinutes ?? 20,
         onCost: makeCostRecorder(lectureState, state)
       });
@@ -733,7 +1155,7 @@ async function runOneLecture(
       return;
     }
 
-    indexPath = findIndexFile(folderPath);
+    indexPath = findLatestIndexFile(folderPath);
     cleanupLegacyTopLevelPracticeFiles(folderPath);
     if (!indexPath) {
       lectureState.status = 'failed';
@@ -744,7 +1166,13 @@ async function runOneLecture(
 
     if (!options.skipScriptReview) {
       await runScriptReviewPhase(plan, planned, lectureState, state, folderPath, options);
-      indexPath = findIndexFile(folderPath) ?? indexPath;
+      indexPath = findLatestIndexFile(folderPath) ?? indexPath;
+    }
+
+    if (plan.adaptivePath) {
+      await runVideoFrameQaPhase(plan, lectureState, state, folderPath, options);
+      videoFrameQaRanThisInvocation = true;
+      indexPath = findLatestIndexFile(folderPath) ?? indexPath;
     }
 
     lectureState.status = 'resolving';
@@ -786,6 +1214,16 @@ async function runOneLecture(
     return;
   }
 
+  if (
+    plan.adaptivePath &&
+    lectureState.videoFrameReview === 'needs-review' &&
+    indexPath &&
+    !videoFrameQaRanThisInvocation
+  ) {
+    await runVideoFrameQaPhase(plan, lectureState, state, folderPath, options);
+    await reresolveIfIndexNewer(folderPath, lectureState, state, options);
+  }
+
   await runPracticePhase(plan, state, lectureState, planned, folderPath, indexPath, options);
 
   finalizeLectureStatus(lectureState);
@@ -823,17 +1261,41 @@ export async function runCourse(options: RunCourseOptions) {
     return state;
   }
 
+  const selectedPending =
+    options.repairPractice || options.forceLecture
+      ? pending
+      : options.nodeLimit
+        ? pending.slice(0, options.nodeLimit)
+        : pending;
+  const selectedSlugs = new Set(selectedPending.map(lecture => lecture.slug));
+
   printPlanSummary(plan);
   const actionLabel = options.renderOnly ? 'render' : 'generate';
-  console.log(`\nLectures to ${actionLabel}: ${pending.map(l => l.slug).join(', ')}`);
+  const unitLabel = plan.adaptivePath ? 'Nodes' : 'Lectures';
+  const unitLabelSingular = plan.adaptivePath ? 'Node' : 'Lecture';
+  console.log(`\n${unitLabel} to ${actionLabel}: ${selectedPending.map(l => l.slug).join(', ')}`);
+  if (selectedPending.length < pending.length) {
+    console.log(`Batch limit: ${selectedPending.length}/${pending.length} pending node(s) selected.`);
+  }
   if (!options.renderOnly) {
     console.log(`Budget: $${state.budgetUsd.toFixed(2)} (spent so far: $${state.spentUsd.toFixed(2)})`);
   }
 
   if (!options.dryRun) {
+    if (!options.renderOnly && !options.repairPractice) {
+      const estimatedCost = estimateLecturesCostUsd(selectedPending);
+      const remainingBudget = state.budgetUsd - state.spentUsd;
+      if (estimatedCost > remainingBudget) {
+        console.log(
+          `Warning: estimated cost for selected batch (~$${estimatedCost.toFixed(2)}) exceeds remaining budget $${remainingBudget.toFixed(2)}; generation will stop at the budget cap.`
+        );
+      }
+    }
     const confirmMessage = options.renderOnly
-      ? `Render MP4 for ${pending.length} lecture(s) from existing resolved HTML?`
-      : `Start generation for ${pending.length} lecture(s)? Estimated ~$${estimateCourseCostUsd(plan).toFixed(2)}.`;
+      ? `Render MP4 for ${selectedPending.length} ${unitLabelSingular.toLowerCase()}(s) from existing resolved HTML?`
+      : options.repairPractice
+        ? `Re-run practice QA/repair for ${selectedPending[0]?.title ?? options.repairPractice}? Video artifacts will be kept; video frame check is re-run when flagged.`
+      : `Start generation for ${selectedPending.length} ${unitLabelSingular.toLowerCase()}(s)? Estimated full-course cost is ~$${estimateCourseCostUsd(plan).toFixed(2)}.`;
     const ok = await confirm(confirmMessage, options.yes);
     if (!ok) {
       console.log('Cancelled.');
@@ -843,6 +1305,7 @@ export async function runCourse(options: RunCourseOptions) {
 
   for (const lectureState of state.lectures) {
     if (!shouldRunLecture(lectureState, plan, options)) continue;
+    if (!selectedSlugs.has(lectureState.slug)) continue;
 
     if (
       !options.renderOnly &&
@@ -859,7 +1322,7 @@ export async function runCourse(options: RunCourseOptions) {
       break;
     }
 
-    console.log(`\n=== Lecture ${lectureState.order}: ${lectureState.title} ===`);
+    console.log(`\n=== ${unitLabelSingular} ${lectureState.order}: ${lectureState.title} ===`);
     await runOneLecture(plan, state, lectureState, options);
 
     if (!options.renderOnly && state.spentUsd >= state.budgetUsd && lectureState.status !== 'done') {
@@ -879,6 +1342,47 @@ export async function runCourse(options: RunCourseOptions) {
   return state;
 }
 
+const IN_PROGRESS_LECTURE_STATUSES = new Set<LectureState['status']>([
+  'generating',
+  'resolving',
+  'rendering',
+  'generating-practice',
+  'reviewing'
+]);
+
+export function lectureSlugFromJobArgs(args: string[]) {
+  for (const flag of ['--force-lecture', '--repair-practice']) {
+    const index = args.indexOf(flag);
+    if (index >= 0) {
+      const slug = String(args[index + 1] || '').trim();
+      if (slug) return slug;
+    }
+  }
+  return undefined;
+}
+
+export function resetInterruptedLectures(
+  courseSlug: string,
+  options: { lectureSlug?: string; reason?: string } = {},
+) {
+  const state = readCourseState(courseSlug);
+  const reason = options.reason ?? 'Stopped by user';
+  let changed = false;
+
+  for (const lecture of state.lectures) {
+    if (options.lectureSlug && lecture.slug !== options.lectureSlug) continue;
+    if (!IN_PROGRESS_LECTURE_STATUSES.has(lecture.status)) continue;
+    lecture.status = 'failed';
+    lecture.error = reason;
+    changed = true;
+  }
+
+  if (changed) {
+    writeCourseState(state);
+  }
+  return changed;
+}
+
 export function printCourseStatus(courseSlug: string) {
   const plan = readCoursePlan(courseSlug);
   const state = readCourseState(courseSlug);
@@ -892,11 +1396,24 @@ export function printCourseStatus(courseSlug: string) {
     if (lecture.formats.includes('game') && lecture.gameReview !== 'not-required') {
       reviews.push(`game=${lecture.gameReview}`);
     }
+    if (lecture.videoFrameReview !== 'not-required') {
+      reviews.push(`videoFrame=${lecture.videoFrameReview}`);
+    }
     const reviewSuffix = reviews.length > 0 ? ` [${reviews.join(', ')}]` : '';
     console.log(`  [${lecture.status}] ${lecture.order}. ${lecture.title} (attempts=${lecture.attempts}, cost=$${lecture.costUsd.toFixed(2)})${reviewSuffix}`);
     if (lecture.error) console.log(`    error: ${lecture.error.split('\n')[0]}`);
-    if (lecture.interactiveReviewNotes) console.log(`    interactive QA: ${lecture.interactiveReviewNotes.split(';')[0]}`);
-    if (lecture.gameReviewNotes) console.log(`    game QA: ${lecture.gameReviewNotes.split(';')[0]}`);
+    if (lecture.interactiveReviewNotes) {
+      const firstFinding = splitStoredReviewNotes(lecture.interactiveReviewNotes)[0];
+      if (firstFinding) console.log(`    interactive QA: ${firstFinding}`);
+    }
+    if (lecture.gameReviewNotes) {
+      const firstFinding = splitStoredReviewNotes(lecture.gameReviewNotes)[0];
+      if (firstFinding) console.log(`    game QA: ${firstFinding}`);
+    }
+    if (lecture.videoFrameReviewNotes) {
+      const firstFinding = splitStoredReviewNotes(lecture.videoFrameReviewNotes)[0];
+      if (firstFinding) console.log(`    video frame QA: ${firstFinding}`);
+    }
     if (lecture.mp4Path && existsSync(lecture.mp4Path)) console.log(`    mp4: ${lecture.mp4Path}`);
   }
   console.log(`\nSpent: $${state.spentUsd.toFixed(2)} / $${state.budgetUsd.toFixed(2)}`);

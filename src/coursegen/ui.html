@@ -367,7 +367,6 @@
 
     function appendLog(line) {
       state.logLines.push(line);
-      if (state.logLines.length > 4000) state.logLines.splice(0, state.logLines.length - 3000);
       renderLog();
     }
 
@@ -772,11 +771,28 @@
     els.refreshCoursesBtn.addEventListener('click', loadCourses);
     els.newCourseBtn.addEventListener('click', showPlanForm);
 
+    async function restoreLatestJob() {
+      try {
+        const { jobs } = await api('/api/jobs');
+        const latest = state.selectedSlug
+          ? jobs.find(job => job.courseSlug === state.selectedSlug) || jobs[0]
+          : jobs[0];
+        if (!latest?.log?.length) return;
+        state.activeJobId = latest.id;
+        setLog(latest.log);
+        els.stopJobBtn.disabled = latest.status !== 'running';
+        if (latest.status === 'running') startPolling();
+      } catch {
+        // ignore restore errors on boot
+      }
+    }
+
     async function boot() {
       try {
         await loadMeta();
         await loadCourses();
         showPlanForm();
+        await restoreLatestJob();
       } catch (error) {
         els.heroPanel.innerHTML = `<div class="empty">Failed to connect: ${escapeHtml(error.message)}</div>`;
       }

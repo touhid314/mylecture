@@ -95,7 +95,8 @@ Plan options:
   --scope <text>           Narrow the unit scope
   --audience <level>       Override inferred learner level
   --intent <name>          Override inferred learning intent
-  --lectures <n>           Target lecture count (default 12, max 30)
+  --lectures <n>           Non-adaptive target lecture count; adaptive maximum node cap if supplied
+  --adaptive               Plan a complete Duolingo-style adaptive skill graph (2-3 min nodes, video+interactive)
   --budget <usd>           Budget cap for later run (default 5)
   --model <name>           Override AGENT_MODEL
   --dry-run                Print prompts only
@@ -120,6 +121,8 @@ Run / resume options:
   --lecture-timeout <min>  Kill hung agent generation after N minutes (resolve/render not covered) (default 20)
   --retry-failed           Retry failed lectures only
   --force-lecture <slug>   Regenerate one lecture (ignores budget/attempt caps)
+  --repair-practice <slug> Re-run practice QA/repair for one lecture (keeps video)
+  --node-limit <n>         Generate only the next N pending nodes from the planned course
   --render                 Render MP4 after resolve (default: resolve-only)
   --tts-voice <voice>      Narration voice (default american-male-3)
   --tts-speed <speed>
@@ -177,10 +180,13 @@ async function main() {
         audience: audienceOverride,
         intent: intentOverride,
         scope: flagString(flags, 'scope') || undefined,
-        maxLectures: flagIntegerRange(flags, 'lectures', 12, 1, 30),
+        maxLectures: flags.lectures !== undefined
+          ? flagIntegerRange(flags, 'lectures', flagBool(flags, 'adaptive') ? 80 : 12, 1, flagBool(flags, 'adaptive') ? 120 : 30)
+          : undefined,
         model: flagString(flags, 'model') || undefined,
         dryRun: flagBool(flags, 'dry-run'),
-        budgetUsd: flagPositiveNumber(flags, 'budget', 5)
+        budgetUsd: flagPositiveNumber(flags, 'budget', 5),
+        adaptive: flagBool(flags, 'adaptive')
       });
       return;
     }
@@ -211,6 +217,11 @@ async function main() {
     }
 
     if (command === 'run' || command === 'resume') {
+      const forceLecture = flagString(flags, 'force-lecture') || undefined;
+      const repairPractice = flagString(flags, 'repair-practice') || undefined;
+      if (forceLecture && repairPractice) {
+        throw new Error('Use either --force-lecture or --repair-practice, not both.');
+      }
       await runCourse({
         courseSlug,
         yes: flagBool(flags, 'yes'),
@@ -221,7 +232,11 @@ async function main() {
         skipScriptReview: flagBool(flags, 'skip-script-review'),
         lectureTimeoutMinutes: flagPositiveNumber(flags, 'lecture-timeout', 20),
         retryFailed: command === 'resume' || flagBool(flags, 'retry-failed'),
-        forceLecture: flagString(flags, 'force-lecture') || undefined,
+        forceLecture,
+        repairPractice,
+        nodeLimit: flags['node-limit'] !== undefined
+          ? flagIntegerRange(flags, 'node-limit', 1, 1, 120)
+          : undefined,
         ttsVoice: flagString(flags, 'tts-voice') || undefined,
         ttsSpeed: flagString(flags, 'tts-speed') || undefined,
         model: flagString(flags, 'model') || undefined,

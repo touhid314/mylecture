@@ -3,6 +3,9 @@ import path from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { chromium, type Page } from 'playwright';
 import { LLM_Model } from '../../packages/lecture-agent/src/llm_model.ts';
+import { collectInteractionFindings, analyzeInteractionDom, collectInteractionDomSnapshot } from './interaction-qa.ts';
+import { collectReadabilityIssues, formatReadabilityIssue } from './readability-qa.ts';
+import { collectShellWalkFindings } from './shell-qa.ts';
 import type { GameSpec, InteractiveSpec } from './types.ts';
 
 const PROMPTS_DIR = path.join(import.meta.dirname, 'prompts');
@@ -16,101 +19,60 @@ export type ScreenshotCaptureResult = {
   screenshotPaths: string[];
   pageErrors: string[];
   readabilityFindings: string[];
+  interactionFindings: string[];
 };
 
-// Computed typography requirements enforced by automated QA. Keep aligned with
-// prompts/interactive-practice.md.
-const MIN_VISIBLE_TEXT_PX = 14;
-const MIN_BODY_TEXT_PX = 16;
-const MAX_FINDINGS_PER_CATEGORY = 3;
+type ReviewViewport = {
+  name: string;
+  width: number;
+  height: number;
+  isMobile?: boolean;
+};
+
+// Typography thresholds live in readability-qa.ts (shared with shell e2e tests).
 
 async function collectReadabilityFindings(page: Page, context: string): Promise<string[]> {
-  const findings = await page.evaluate(({ minVisibleTextPx, minBodyTextPx, maxFindingsPerCategory }: { minVisibleTextPx: number; minBodyTextPx: number; maxFindingsPerCategory: number }) => {
-    const issues: string[] = [];
-    const de = document.documentElement;
-    const body = document.body;
-    if (!body) return issues;
-
-    if (de.scrollWidth > de.clientWidth + 2 || body.scrollWidth > de.clientWidth + 2) {
-      issues.push(`page overflows horizontally (content ${Math.max(de.scrollWidth, body.scrollWidth)}px wide, viewport ${de.clientWidth}px)`);
-    }
-    if (de.scrollHeight > de.clientHeight + 2 || body.scrollHeight > de.clientHeight + 2) {
-      issues.push(`page overflows vertically (content ${Math.max(de.scrollHeight, body.scrollHeight)}px tall, viewport ${de.clientHeight}px)`);
-    }
-
-    const internalScroll: string[] = [];
-    const ignoreScrollSelector = 'html, body, pre, code, textarea, select, option, .katex-mathml, .katex-mathml *';
-    const allElements = Array.from(body.querySelectorAll<HTMLElement>('*'));
-    for (const el of allElements) {
-      if (el.matches(ignoreScrollSelector)) continue;
-      const style = getComputedStyle(el);
-      if (style.display === 'none' || style.visibility === 'hidden' || Number(style.opacity) === 0) continue;
-      const rect = el.getBoundingClientRect();
-      if (rect.width <= 0 || rect.height <= 0) continue;
-      if (rect.bottom < 0 || rect.top > de.clientHeight || rect.right < 0 || rect.left > de.clientWidth) continue;
-
-      const verticalOverflow = el.scrollHeight - el.clientHeight;
-      const horizontalOverflow = el.scrollWidth - el.clientWidth;
-      const clipsOrScrollsY = style.overflowY !== 'visible';
-      const clipsOrScrollsX = style.overflowX !== 'visible';
-      if (verticalOverflow > 4 && clipsOrScrollsY) {
-        const label = el.id
-          ? `#${el.id}`
-          : `${el.tagName.toLowerCase()}${Array.from(el.classList).slice(0, 2).map(name => `.${name}`).join('')}`;
-        internalScroll.push(`${label} has internal vertical overflow (${el.scrollHeight}px content, ${el.clientHeight}px visible)`);
-      }
-      if (horizontalOverflow > 4 && clipsOrScrollsX) {
-        const label = el.id
-          ? `#${el.id}`
-          : `${el.tagName.toLowerCase()}${Array.from(el.classList).slice(0, 2).map(name => `.${name}`).join('')}`;
-        internalScroll.push(`${label} has internal horizontal overflow (${el.scrollWidth}px content, ${el.clientWidth}px visible)`);
-      }
-    }
-    for (const item of internalScroll.slice(0, maxFindingsPerCategory)) {
-      issues.push(`internal scroll/clipping: ${item}`);
-    }
-
-    const tiny: string[] = [];
-    const undersizedBody: string[] = [];
-    const seen = new Set<Element>();
-    const walker = document.createTreeWalker(body, NodeFilter.SHOW_TEXT);
-    const controlSelector = 'button, input, select, textarea, [role="tab"], [data-activity-tab], .badge, .chip, .tag, .axis, .tick, .caption, .label, svg';
-    const bodySelector = 'p, li, #activity-instructions, #activity-stage, #activity-controls, main, aside, section, article, .prompt, .instructions, .feedback, .question, .card';
-
-    while (walker.nextNode()) {
-      const text = (walker.currentNode.textContent || '').replace(/\s+/g, ' ').trim();
-      if (text.length < 3) continue;
-      const el = walker.currentNode.parentElement;
-      if (!el || seen.has(el)) continue;
-      seen.add(el);
-      const style = getComputedStyle(el);
-      if (style.display === 'none' || style.visibility === 'hidden' || Number(style.opacity) === 0) continue;
-      const rect = el.getBoundingClientRect();
-      if (rect.width <= 0 || rect.height <= 0) continue;
-      if (rect.bottom < 0 || rect.top > de.clientHeight || rect.right < 0 || rect.left > de.clientWidth) continue;
-      const fontSize = Number.parseFloat(style.fontSize);
-      if (!Number.isFinite(fontSize)) continue;
-      const controlLike = Boolean(el.closest(controlSelector));
-      const bodyLike = text.length >= 18 && !controlLike && Boolean(el.closest(bodySelector));
-      if (fontSize < minVisibleTextPx) {
-        tiny.push(`"${text.slice(0, 40)}" renders at ${fontSize.toFixed(1)}px`);
-      } else if (fontSize < minBodyTextPx && bodyLike) {
-        undersizedBody.push(`"${text.slice(0, 40)}" renders at ${fontSize.toFixed(1)}px`);
-      }
-    }
-    for (const item of tiny.slice(0, maxFindingsPerCategory)) {
-      issues.push(`text below ${minVisibleTextPx}px minimum: ${item}`);
-    }
-    for (const item of undersizedBody.slice(0, maxFindingsPerCategory)) {
-      issues.push(`body/prompt text below ${minBodyTextPx}px target: ${item}`);
-    }
-    return issues;
-  }, { minVisibleTextPx: MIN_VISIBLE_TEXT_PX, minBodyTextPx: MIN_BODY_TEXT_PX, maxFindingsPerCategory: MAX_FINDINGS_PER_CATEGORY });
-  return findings.map(finding => `[${context}] ${finding}`);
+  const issues = await collectReadabilityIssues(page);
+  return issues.map(issue => formatReadabilityIssue(issue, context));
 }
 
-function loadRubricPrompt() {
-  return readFileSync(path.join(PROMPTS_DIR, 'practice-rubric.md'), 'utf8').trim();
+const REVIEW_VIEWPORTS: ReviewViewport[] = [
+  { name: 'desktop', width: 1280, height: 720 },
+  { name: 'phone', width: 390, height: 844, isMobile: true }
+];
+
+const PRACTICE_RUBRIC = readFileSync(path.join(PROMPTS_DIR, 'practice-rubric.md'), 'utf8').trim();
+
+export function validatePracticeHtmlStructure(html: string): string[] {
+  const findings: string[] = [];
+  const lower = html.toLowerCase();
+  const headClose = lower.indexOf('</head>');
+  const bodyOpen = lower.indexOf('<body');
+
+  if (headClose >= 0) {
+    const beforeHeadClose = lower.slice(0, headClose);
+    const lastStyleOpen = beforeHeadClose.lastIndexOf('<style');
+    const lastStyleClose = beforeHeadClose.lastIndexOf('</style>');
+    if (lastStyleOpen >= 0 && lastStyleOpen > lastStyleClose) {
+      findings.push(
+        'HTML structure error: missing closing </style> tag before </head>, causing the browser to parse the body as CSS and render a blank page.'
+      );
+    }
+
+    const lastScriptOpen = beforeHeadClose.lastIndexOf('<script');
+    const lastScriptClose = beforeHeadClose.lastIndexOf('</script>');
+    if (lastScriptOpen >= 0 && lastScriptOpen > lastScriptClose) {
+      findings.push(
+        'HTML structure error: missing closing </script> tag before </head>, causing the browser to parse later markup as script and potentially render a blank page.'
+      );
+    }
+  }
+
+  if (bodyOpen < 0) {
+    findings.push('HTML structure error: missing <body> tag, so the practice page may not render its learner UI.');
+  }
+
+  return findings;
 }
 
 function formatSpecForRubric(kind: 'interactive' | 'game', spec: InteractiveSpec | GameSpec) {
@@ -123,7 +85,8 @@ function formatSpecForRubric(kind: 'interactive' | 'game', spec: InteractiveSpec
       `learnerAction: ${game.learnerAction || 'Not specified'}`,
       `controls: ${(game.controls || []).join('; ') || 'Not specified'}`,
       `feedback: ${game.feedback || 'Not specified'}`,
-      `successCriterion: ${game.successCriterion}`
+      `successCriterion: ${game.successCriterion}`,
+      `pacing: ${game.pacing ?? 'steady'} (timer seconds come from shell config — do not invent raw durations)`
     ].join('\n');
   }
   const interactive = spec as InteractiveSpec;
@@ -140,6 +103,37 @@ function formatSpecForRubric(kind: 'interactive' | 'game', spec: InteractiveSpec
   return `Type: interactive\nActivity count: ${interactive.activities.length}\n${activities.join('\n')}`;
 }
 
+async function collectShellInteractionFindings(
+  page: Page,
+  viewportName: string,
+  walkOptions?: { onAdvancedToItem2?: () => Promise<void> }
+): Promise<string[]> {
+  const findings: string[] = [];
+  findings.push(...await collectShellWalkFindings(page, `${viewportName} shell walk`, walkOptions));
+  const domSnapshot = await collectInteractionDomSnapshot(page);
+  findings.push(
+    ...analyzeInteractionDom(domSnapshot).map(finding => `[${viewportName} stage DOM] ${finding}`)
+  );
+  return findings;
+}
+
+function formatReadabilityFinding(finding: string, isShellPage: boolean): string {
+  if (finding.includes('[shell-chrome]')) {
+    return `Responsive readability check: ${finding}. Shell chrome QA failure (coursegen bug, not repairable by the practice agent): fix in src/coursegen/activity-shell (shell.css / shell.js), not in stage.js.`;
+  }
+  if (isShellPage) {
+    return `Responsive readability check: ${finding}. Fix stage content or stage.css inside #activity-stage / #shell-stage-inner — remove or defer content (explanations in checkAnswer.explanation); never shrink text below readability floors.`;
+  }
+  return `Responsive readability check: ${finding}. Fix by reducing content, compacting chrome, switching to a one-column/touch layout, or splitting steps — never shrink text below readability floors.`;
+}
+
+function formatInteractionFinding(finding: string): string {
+  const isShellFinding = /shell walk\]|stage DOM\]/i.test(finding);
+  if (isShellFinding) {
+    return `Interaction check: ${finding}. Fix stage.js: wire response controls with ctx.setResponse, implement renderItem and checkAnswer consistently, and remove answer leakage before submit.`;
+  }
+  return `Interaction check: ${finding}. Fix by wiring click/tap handlers for every described action, hiding filled placement markers, and showing drop previews only while an item is selected or dragged.`;
+}
 async function dismissStartOverlay(page: Page) {
   const startButton = page.getByRole('button', {
     name: /^(start|begin|continue|got it|close|dismiss|let'?s go|play|try|start .*)/i
@@ -157,6 +151,79 @@ async function dismissStartOverlay(page: Page) {
   }
 }
 
+async function captureViewportScreenshots(
+  page: Page,
+  htmlPath: string,
+  outDir: string,
+  viewport: ReviewViewport
+): Promise<{ screenshotPaths: string[]; readabilityFindings: string[]; interactionFindings: string[] }> {
+  const screenshotPaths: string[] = [];
+  const readabilityFindings: string[] = [];
+  const interactionFindings: string[] = [];
+
+  await page.setViewportSize({ width: viewport.width, height: viewport.height });
+  await page.goto(pathToFileURL(htmlPath).href, { waitUntil: 'load', timeout: 30000 });
+  await page.waitForTimeout(800);
+
+  const shellVersion = await page.evaluate(() => document.documentElement.getAttribute('data-shell-version'));
+
+  const mainPath = path.join(outDir, `${viewport.name}-screen-main.png`);
+  await page.screenshot({ path: mainPath, fullPage: false });
+  screenshotPaths.push(mainPath);
+
+  await dismissStartOverlay(page);
+  const activePath = path.join(outDir, `${viewport.name}-screen-active.png`);
+  await page.screenshot({ path: activePath, fullPage: false });
+  screenshotPaths.push(activePath);
+  readabilityFindings.push(...await collectReadabilityFindings(page, `${viewport.name} main screen`));
+
+  if (shellVersion) {
+    const item2Path = viewport.isMobile
+      ? path.join(outDir, `${viewport.name}-screen-item-2.png`)
+      : undefined;
+    interactionFindings.push(...await collectShellInteractionFindings(page, viewport.name, item2Path
+      ? {
+          onAdvancedToItem2: async () => {
+            await page.screenshot({ path: item2Path, fullPage: false });
+            screenshotPaths.push(item2Path);
+          }
+        }
+      : undefined));
+  } else {
+    interactionFindings.push(...await collectInteractionFindings(page, `${viewport.name} interaction smoke test`));
+  }
+
+  const tabSelectors = [
+    '[data-activity-tab]',
+    '.tab-button',
+    'button[role="tab"]',
+    '#activity-header button',
+    '.activity-tab'
+  ];
+
+  let tabs = [];
+  for (const selector of tabSelectors) {
+    tabs = await page.$$(selector);
+    if (tabs.length > 1) break;
+  }
+
+  const maxTabs = Math.min(tabs.length, viewport.isMobile ? 2 : 4);
+  for (let index = 0; index < maxTabs; index += 1) {
+    try {
+      await tabs[index].click();
+      await page.waitForTimeout(500);
+      const tabPath = path.join(outDir, `${viewport.name}-screen-tab-${index}.png`);
+      await page.screenshot({ path: tabPath, fullPage: false });
+      screenshotPaths.push(tabPath);
+      readabilityFindings.push(...await collectReadabilityFindings(page, `${viewport.name} tab ${index + 1}`));
+    } catch {
+      // ignore tab click failures
+    }
+  }
+
+  return { screenshotPaths, readabilityFindings, interactionFindings };
+}
+
 export async function capturePracticeScreenshots(htmlPath: string, outDir: string): Promise<ScreenshotCaptureResult> {
   mkdirSync(outDir, { recursive: true });
   const browser = await chromium.launch({
@@ -165,59 +232,30 @@ export async function capturePracticeScreenshots(htmlPath: string, outDir: strin
   const screenshotPaths: string[] = [];
   const pageErrors: string[] = [];
   const readabilityFindings: string[] = [];
+  const interactionFindings: string[] = [];
 
   try {
-    const page = await browser.newPage({
-      viewport: { width: 1280, height: 720 }
-    });
+    const page = await browser.newPage();
     page.on('pageerror', err => {
       pageErrors.push(err instanceof Error ? err.message : String(err));
     });
-    await page.goto(pathToFileURL(htmlPath).href, { waitUntil: 'load', timeout: 30000 });
-    await page.waitForTimeout(800);
 
-    const mainPath = path.join(outDir, 'screen-main.png');
-    await page.screenshot({ path: mainPath, fullPage: false });
-    screenshotPaths.push(mainPath);
-
-    await dismissStartOverlay(page);
-    const activePath = path.join(outDir, 'screen-active.png');
-    await page.screenshot({ path: activePath, fullPage: false });
-    screenshotPaths.push(activePath);
-    readabilityFindings.push(...await collectReadabilityFindings(page, 'main screen'));
-
-    const tabSelectors = [
-      '[data-activity-tab]',
-      '.tab-button',
-      'button[role="tab"]',
-      '#activity-header button',
-      '.activity-tab'
-    ];
-
-    let tabs = [];
-    for (const selector of tabSelectors) {
-      tabs = await page.$$(selector);
-      if (tabs.length > 1) break;
-    }
-
-    const maxTabs = Math.min(tabs.length, 4);
-    for (let index = 0; index < maxTabs; index += 1) {
-      try {
-        await tabs[index].click();
-        await page.waitForTimeout(500);
-        const tabPath = path.join(outDir, `screen-tab-${index}.png`);
-        await page.screenshot({ path: tabPath, fullPage: false });
-        screenshotPaths.push(tabPath);
-        readabilityFindings.push(...await collectReadabilityFindings(page, `tab ${index + 1}`));
-      } catch {
-        // ignore tab click failures
-      }
+    for (const viewport of REVIEW_VIEWPORTS) {
+      const result = await captureViewportScreenshots(page, htmlPath, outDir, viewport);
+      screenshotPaths.push(...result.screenshotPaths);
+      readabilityFindings.push(...result.readabilityFindings);
+      interactionFindings.push(...result.interactionFindings);
     }
   } finally {
     await browser.close();
   }
 
-  return { screenshotPaths, pageErrors, readabilityFindings: [...new Set(readabilityFindings)] };
+  return {
+    screenshotPaths,
+    pageErrors: [...new Set(pageErrors)],
+    readabilityFindings: [...new Set(readabilityFindings)],
+    interactionFindings: [...new Set(interactionFindings)]
+  };
 }
 
 function normalizeRubricResponse(raw: unknown): RubricResult {
@@ -235,6 +273,16 @@ function normalizeRubricResponse(raw: unknown): RubricResult {
   return { passed, findings };
 }
 
+const HTML_SOURCE_MAX_CHARS = 60_000;
+
+function loadHtmlSourceForRubric(htmlPath: string): string {
+  const full = readFileSync(htmlPath, 'utf8');
+  if (full.length <= HTML_SOURCE_MAX_CHARS) {
+    return full;
+  }
+  return `${full.slice(0, HTML_SOURCE_MAX_CHARS)}\n[truncated: showing first ${HTML_SOURCE_MAX_CHARS} of ${full.length} characters]`;
+}
+
 export async function reviewPracticeWithRubric(options: {
   objective: string;
   htmlPath: string;
@@ -243,22 +291,31 @@ export async function reviewPracticeWithRubric(options: {
   screenshotDir: string;
   model?: string;
 }): Promise<RubricResult> {
-  const { screenshotPaths, pageErrors, readabilityFindings } = await capturePracticeScreenshots(options.htmlPath, options.screenshotDir);
-  if (pageErrors.length > 0) {
-    return { passed: false, findings: [`Page JavaScript error: ${pageErrors[0]}`] };
+  const htmlSource = readFileSync(options.htmlPath, 'utf8');
+  const isShellPage = htmlSource.includes('data-shell-version');
+  const staticFindings = validatePracticeHtmlStructure(htmlSource);
+  if (staticFindings.length > 0) {
+    return { passed: false, findings: staticFindings };
   }
+
+  const { screenshotPaths, pageErrors, readabilityFindings, interactionFindings } =
+    await capturePracticeScreenshots(options.htmlPath, options.screenshotDir);
   if (screenshotPaths.length === 0) {
     return { passed: false, findings: ['Could not capture screenshots'] };
   }
-  if (readabilityFindings.length > 0) {
-    // Fail before the LLM rubric: these are objective violations, and fixing them
-    // changes the layout enough that a rubric pass now would be wasted.
-    return {
-      passed: false,
-      findings: readabilityFindings.map(finding =>
-        `Readability check (1280x720): ${finding}. Fix by reducing content, compacting chrome, or splitting steps.`
-      )
-    };
+
+  const combined: string[] = [];
+  for (const error of pageErrors) {
+    combined.push(`Page JavaScript error: ${error}`);
+  }
+  combined.push(
+    ...readabilityFindings.map(finding => formatReadabilityFinding(finding, isShellPage))
+  );
+  combined.push(
+    ...interactionFindings.map(finding => formatInteractionFinding(finding))
+  );
+  if (combined.length > 0) {
+    return { passed: false, findings: combined };
   }
 
   const model = options.model || process.env.AGENT_MODEL;
@@ -266,12 +323,15 @@ export async function reviewPracticeWithRubric(options: {
     return { passed: false, findings: ['No model configured for practice QA (set AGENT_MODEL)'] };
   }
 
-  const llm = new LLM_Model(model, loadRubricPrompt(), null, true);
+  const llm = new LLM_Model(model, PRACTICE_RUBRIC, null, true);
 
   const userPrompt = [
     `Learning objective: ${options.objective}`,
     '',
-    formatSpecForRubric(options.kind, options.spec)
+    formatSpecForRubric(options.kind, options.spec),
+    '',
+    '--- page HTML source ---',
+    loadHtmlSourceForRubric(options.htmlPath)
   ].join('\n');
 
   const attachments = screenshotPaths.map(screenshotPath => ({

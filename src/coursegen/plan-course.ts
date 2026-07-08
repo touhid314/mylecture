@@ -2,10 +2,12 @@ import { existsSync, readFileSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { LLM_Model } from '../../packages/lecture-agent/src/llm_model.ts';
+import { formatCategoriesForPlanner } from './categories.ts';
 import { courseStatePath, ensureCourseDir } from './paths.ts';
 import { estimateCourseCostUsd, printPlanSummary } from './lecture-prompt.ts';
-import { writeCoursePlan, writeCourseState } from './state.ts';
-import { initialCourseState, validateCoursePlan } from './types.ts';
+import { buildSkillGraphFromPlan } from './skill-graph.ts';
+import { writeCoursePlan, writeCourseState, writeSkillGraph } from './state.ts';
+import { initialCourseState, validateAdaptiveCoursePlan, validateCoursePlan, validateSkillGraph } from './types.ts';
 import type { Audience, CoursePlan, LearningIntent } from './types.ts';
 
 export type PlanCourseOptions = {
@@ -17,13 +19,26 @@ export type PlanCourseOptions = {
   model?: string;
   dryRun?: boolean;
   budgetUsd?: number;
+  adaptive?: boolean;
 };
 
-function plannerPromptPath() {
-  return path.join(path.dirname(fileURLToPath(import.meta.url)), 'prompts', 'planner.md');
+const DEFAULT_NON_ADAPTIVE_MAX_LECTURES = 12;
+const DEFAULT_ADAPTIVE_MAX_NODES = 80;
+
+function plannerPromptPath(adaptive: boolean) {
+  const fileName = adaptive ? 'planner-adaptive.md' : 'planner.md';
+  return path.join(path.dirname(fileURLToPath(import.meta.url)), 'prompts', fileName);
 }
 
-function buildPlannerUserPrompt(options: PlanCourseOptions) {
+function isAdaptiveTopic(topic: string) {
+  return /\b(algebra|adaptive|skill path|duolingo|pre-algebra)\b/i.test(topic);
+}
+
+function useAdaptivePlanner(options: PlanCourseOptions) {
+  return options.adaptive === true || (options.intent === 'practice' && isAdaptiveTopic(options.topic));
+}
+
+function buildPlannerUserPrompt(options: PlanCourseOptions, adaptive: boolean) {
   const lines = [
     `Topic: ${options.topic}`,
     options.audience
@@ -34,7 +49,16 @@ function buildPlannerUserPrompt(options: PlanCourseOptions) {
       : 'Learning intent: choose the best catalog placement for this topic'
   ];
   if (options.scope) lines.push(`Scope: ${options.scope}`);
-  if (options.maxLectures) lines.push(`Target lecture count: ${options.maxLectures}`);
+  if (adaptive) {
+    lines.push('Planning mode: map the complete adaptive skill graph needed to teach the scoped subject, not a generation batch.');
+    if (options.maxLectures) {
+      lines.push(`Maximum node cap: ${options.maxLectures}`);
+    }
+  } else if (options.maxLectures) {
+    lines.push(`Target lecture count: ${options.maxLectures}`);
+  }
+  lines.push('Catalog categories (choose exactly one categoryId):');
+  lines.push(formatCategoriesForPlanner());
   lines.push('Return the course plan JSON only.');
   return lines.join('\n');
 }
@@ -72,9 +96,10 @@ export function serializePlannerResponse(response: unknown) {
 }
 
 export async function planCourse(options: PlanCourseOptions): Promise<CoursePlan> {
-  const systemPrompt = readFileSync(plannerPromptPath(), 'utf8');
-  const userPrompt = buildPlannerUserPrompt(options);
-  const maxLectures = options.maxLectures ?? 12;
+  const adaptive = useAdaptivePlanner(options);
+  const systemPrompt = readFileSync(plannerPromptPath(adaptive), 'utf8');
+  const userPrompt = buildPlannerUserPrompt(options, adaptive);
+  const maxLectures = options.maxLectures ?? (adaptive ? DEFAULT_ADAPTIVE_MAX_NODES : DEFAULT_NON_ADAPTIVE_MAX_LECTURES);
 
   if (options.dryRun) {
     console.log('--- Planner system prompt ---\n');
@@ -100,9 +125,18 @@ export async function planCourse(options: PlanCourseOptions): Promise<CoursePlan
     rawResponse = await llm.generate(prompt, null, null, null, null, true, false);
     try {
       const parsed = normalizePlannerResponse(rawResponse);
-      const plan = validateCoursePlan(parsed, { maxLectures });
+      const plan = adaptive
+        ? validateAdaptiveCoursePlan({ ...parsed, adaptivePath: true }, { maxLectures })
+        : validateCoursePlan(parsed, { maxLectures });
       ensureCourseDir(plan.slug);
       writeCoursePlan(plan);
+      if (adaptive || plan.adaptivePath) {
+        const skillGraph = buildSkillGraphFromPlan(plan);
+        validateSkillGraph(skillGraph, plan);
+        const skillGraphFile = writeSkillGraph(skillGraph);
+        console.log(`Saved: gens/courses/${plan.slug}/skillGraph.json (${skillGraph.skills.length} skills)`);
+        console.log(`Skill graph: ${skillGraphFile}`);
+      }
       const statePath = courseStatePath(plan.slug);
       if (!existsSync(statePath)) {
         writeCourseState(initialCourseState(plan, options.budgetUsd ?? 5));

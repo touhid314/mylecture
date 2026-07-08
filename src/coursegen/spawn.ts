@@ -89,12 +89,14 @@ export type SpawnAgentOptions = {
   taskMessage: string;
   maxTurns: number;
   model?: string;
+  skills?: string[];
+  enableGetimgTool?: boolean;
   onStdout?: (chunk: string) => void;
   onStderr?: (chunk: string) => void;
   onSpawn?: (child: ReturnType<typeof spawn>, kill: () => void) => void;
 };
 
-export function spawnAgent(options: SpawnAgentOptions) {
+export function buildSpawnAgentCliArgs(options: Pick<SpawnAgentOptions, 'maxTurns' | 'model' | 'skills' | 'enableGetimgTool'>): string[] {
   const cliPath = locateAgentCli();
   const model = options.model || process.env.AGENT_MODEL || '';
   if (!model) {
@@ -107,6 +109,19 @@ export function spawnAgent(options: SpawnAgentOptions) {
     '--max-turns', String(options.maxTurns),
     '--new-session'
   ];
+  if (options.enableGetimgTool === true) {
+    args.push('--enable-getimg');
+  } else if (options.enableGetimgTool === false) {
+    args.push('--disable-getimg');
+  }
+  for (const skill of options.skills ?? []) {
+    args.push('--skill', skill);
+  }
+  return args;
+}
+
+export function spawnAgent(options: SpawnAgentOptions) {
+  const args = buildSpawnAgentCliArgs(options);
 
   let childProc: ReturnType<typeof spawn> | null = null;
   const env = {

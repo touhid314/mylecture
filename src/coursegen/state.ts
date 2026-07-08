@@ -1,8 +1,8 @@
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
-import type { CoursePlan, CourseState, LectureState } from './types.ts';
+import type { CoursePlan, CourseState, LectureState, SkillGraph } from './types.ts';
 import { DEFAULT_LEARNING_INTENT, isLearningIntent } from './types.ts';
-import { coursePlanPath, courseStatePath } from './paths.ts';
+import { coursePlanPath, courseStatePath, skillGraphPath } from './paths.ts';
 
 function normalizeCoursePlan(raw: CoursePlan): CoursePlan {
   return {
@@ -17,7 +17,9 @@ function normalizeLectureState(raw: LectureState): LectureState {
     interactiveReview: raw.interactiveReview ?? 'not-required',
     interactiveReviewNotes: raw.interactiveReviewNotes ?? '',
     gameReview: raw.gameReview ?? 'not-required',
-    gameReviewNotes: raw.gameReviewNotes ?? ''
+    gameReviewNotes: raw.gameReviewNotes ?? '',
+    videoFrameReview: raw.videoFrameReview ?? 'not-required',
+    videoFrameReviewNotes: raw.videoFrameReviewNotes ?? ''
   };
 }
 
@@ -56,5 +58,20 @@ export function writeCourseState(state: CourseState) {
   mkdirSync(path.dirname(filePath), { recursive: true });
   state.updatedAt = new Date().toISOString();
   writeFileSync(filePath, `${JSON.stringify(state, null, 2)}\n`, 'utf8');
+  return filePath;
+}
+
+export function readSkillGraph(courseSlug: string): SkillGraph {
+  const filePath = skillGraphPath(courseSlug);
+  if (!existsSync(filePath)) {
+    throw new Error(`Skill graph not found: ${filePath}`);
+  }
+  return JSON.parse(readFileSync(filePath, 'utf8')) as SkillGraph;
+}
+
+export function writeSkillGraph(graph: SkillGraph) {
+  const filePath = skillGraphPath(graph.courseSlug);
+  mkdirSync(path.dirname(filePath), { recursive: true });
+  writeFileSync(filePath, `${JSON.stringify(graph, null, 2)}\n`, 'utf8');
   return filePath;
 }

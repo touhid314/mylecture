@@ -2,7 +2,7 @@ import { existsSync, readFileSync, readdirSync } from 'node:fs';
 import path from 'node:path';
 import { LLM_Model } from '../../packages/lecture-agent/src/llm_model.ts';
 import { isIndexHtmlName } from './paths.ts';
-import type { Audience, LearningIntent } from './types.ts';
+import type { Audience, LearningIntent, PlannedLecture } from './types.ts';
 
 const PROMPTS_DIR = path.join(import.meta.dirname, 'prompts');
 
@@ -111,6 +111,10 @@ export async function reviewScriptWithRubric(options: {
   intent: LearningIntent;
   durationMinutes: number;
   courseContext?: string;
+  adaptiveSkill?: Pick<
+    PlannedLecture,
+    'prerequisites' | 'assumes' | 'teaches' | 'commonMistakes' | 'remediationTargets' | 'enrichmentTargets'
+  >;
   model?: string;
 }): Promise<ScriptReviewResult> {
   const collected = collectScriptText(options.folderPath);
@@ -130,6 +134,17 @@ export async function reviewScriptWithRubric(options: {
     `Audience level: ${options.audience}`,
     `Learning intent: ${options.intent}`,
     `Target duration: ${options.durationMinutes} minutes`,
+    options.adaptiveSkill
+      ? [
+          'Adaptive skill-node context:',
+          `- prerequisites: ${(options.adaptiveSkill.prerequisites ?? []).join('; ') || 'none'}`,
+          `- assumes: ${(options.adaptiveSkill.assumes ?? []).join('; ') || 'not specified'}`,
+          `- teaches: ${(options.adaptiveSkill.teaches ?? []).join('; ') || 'not specified'}`,
+          `- commonMistakes: ${(options.adaptiveSkill.commonMistakes ?? []).join('; ') || 'not specified'}`,
+          `- remediationTargets: ${(options.adaptiveSkill.remediationTargets ?? []).join('; ') || 'none'}`,
+          `- enrichmentTargets: ${(options.adaptiveSkill.enrichmentTargets ?? []).join('; ') || 'none'}`
+        ].join('\n')
+      : '',
     options.courseContext ? `Course context:\n${options.courseContext}` : '',
     collected.source === 'html'
       ? 'Note: no script.md was found; the narration below is embedded in raw HTML. Review only the narration text values.'
@@ -146,19 +161,28 @@ export async function reviewScriptWithRubric(options: {
 export function buildScriptRepairMessage(options: {
   objective: string;
   findings: string[];
+  adaptive?: boolean;
 }) {
   return [
-    'A narration-quality review of this lecture found that the script reads like a textbook summary instead of a teacher guiding a learner. Revise the narration to fix the findings below.',
+    options.adaptive
+      ? 'A narration-quality review of this adaptive skill node found issues with portability, focus, or spoken teaching quality. Revise the narration to fix the findings below.'
+      : 'A narration-quality review of this lecture found that the script reads like a textbook summary instead of a teacher guiding a learner. Revise the narration to fix the findings below.',
     `Learning objective: ${options.objective}`,
     '',
     '--- findings to fix ---',
     ...options.findings.map(finding => `- ${finding}`),
     '',
     'Rules for the revision:',
-    '- Update BOTH the script*.md files and the matching narration strings inside every index*.html video plan, keeping them consistent with each other.',
+    '- Update the narration strings inside every index*.html video plan (that is what is rendered and spoken). script.md is a drafting artifact and may be updated optionally but must not be the only file changed.',
     '- Keep the same visuals, scene structure, segment ids, and audio file names. Change narration text only, unless a finding explicitly requires a small visual timing tweak.',
     '- Keep total narration word count close to the original (about 150 words per minute of video).',
     '- Keep the rigor and terminology level of the original; fix cadence, motivation, and engagement, not the content depth.',
-    '- Do not add filler enthusiasm or decorative anecdotes; every revised beat must still serve the learning objective.'
-  ].join('\n');
+    '- Do not add filler enthusiasm or decorative anecdotes; every revised beat must still serve the learning objective.',
+    options.adaptive
+      ? '- Adaptive node: keep the video in a single index.html only — do not split into index2.html or additional scene files.'
+      : '',
+    options.adaptive
+      ? '- Keep the lesson portable: do not mention previous/next lessons, lesson numbers, course order, or anything that would be wrong if the learner reached this node through a diagnostic, review, or remediation detour.'
+      : ''
+  ].filter(Boolean).join('\n');
 }
