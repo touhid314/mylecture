@@ -21,7 +21,7 @@ export type UploadAttachment = {
     mimeType: string;
 };
 
-const UPLOAD_MIME_BY_EXT: Record<string, string> = {
+export const UPLOAD_MIME_BY_EXT: Record<string, string> = {
     ".png": "image/png",
     ".jpg": "image/jpeg",
     ".jpeg": "image/jpeg",

@@ -60,7 +60,12 @@ export const TOOL_REGISTRY: ToolRegistryEntry[] = [
         type: "function",
         name: "read",
         active: true,
-        description: "Read a UTF-8 text file from the workspace. The output contains line numbers prepended in the format `<line_number>: <line_content>` for reference. These line numbers are not present in the actual file.",
+        description: `Read a UTF-8 text file from the workspace. 
+        The output contains line numbers prepended in the format '<line_number>: <line_content>' for reference. 
+        These line numbers are not present in the actual file. 
+        You can also read image file with this tool. 
+        In case of an image read the image is just attached to your context in the turn, however the image will be removed from the context in the later turn. 
+        **You MUST read an image before you overlay(draw/highlight etc.) anything on image.**`,
         parameters: {
             type: "object",
             properties: {

@@ -60,7 +60,7 @@ export const loggerStorage = new AsyncLocalStorage<(text: string) => void>();
 
 import { LLM_Model } from './llm_model.js';
 import { log_llm_request, start_new_llm_log_session } from './llm_prompt_logger.js';
-import { build_prompt, extract_upload_attachments, type UploadAttachment } from './prompt_builder.js';
+import { build_prompt, extract_upload_attachments, type UploadAttachment, UPLOAD_MIME_BY_EXT } from './prompt_builder.js';
 import { extractTokenUsage } from './token_tracker.js';
 import {
     BASE_DIR,
@@ -694,6 +694,26 @@ export class GeminiAgentSession {
                             response: payload
                         }
                     });
+
+                    if (name === "read" && !result.startsWith("ERROR:")) {
+                        const filePath = argumentsObj.path || "";
+                        const ext = path.extname(filePath).toLowerCase();
+                        const isImage = ['.png', '.jpg', '.jpeg', '.webp', '.bmp'].includes(ext);
+                        if (isImage) {
+                            try {
+                                const absolutePath = resolve_workspace_path(filePath, this.workspaceDir);
+                                const mimeType = UPLOAD_MIME_BY_EXT[ext] || "image/png";
+                                const attachmentPart = await this.upload_attachment_part({
+                                    path: absolutePath,
+                                    mimeType: mimeType,
+                                    kind: "image"
+                                });
+                                response_parts.push(attachmentPart);
+                            } catch (e: any) {
+                                console.error("[WARN] Failed to upload image attachment in read tool:", e);
+                            }
+                        }
+                    }
                 }
 
                 this.contents.push({ role: "user", parts: response_parts });
@@ -701,6 +721,7 @@ export class GeminiAgentSession {
 
             return `Stopped after ${max_turns} tool loop(s). Ask me to continue if needed.`;
         } finally {
+            remove_temporary_read_attachments(this.contents);
             compact_gemini_turn(this.contents);
         }
     }
@@ -881,6 +902,16 @@ function get_or_create_agent_session(model: string, skills: string[] | null = nu
         };
     }
     return activeAgentSession.session;
+}
+
+function remove_temporary_read_attachments(contents: any[]): void {
+    for (const msg of contents) {
+        if (!msg || !msg.parts) continue;
+        const hasFunctionResponse = msg.parts.some((p: any) => p.functionResponse);
+        if (hasFunctionResponse) {
+            msg.parts = msg.parts.filter((p: any) => !p.fileData);
+        }
+    }
 }
 
 function compact_gemini_turn(contents: any[]): void {
