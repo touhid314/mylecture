@@ -417,8 +417,8 @@ function openFolder(filePath) {
 
 // Workspace directories are dynamically set and managed via active pointers at the top of the file
 
-function agentUploadRoot() {
-  return path.resolve(rootDir, 'packages/lecture-agent/.tmp/uploads');
+function agentUploadRoot(agentClientId = 'default') {
+  return path.resolve(agentWorkspaceRoot(agentClientId), 'uploads');
 }
 
 function agentProfilesRoot() {
@@ -498,7 +498,7 @@ function receiveRequestBody(request) {
   });
 }
 
-async function saveAgentUploads(request) {
+async function saveAgentUploads(request, agentClientId = 'default') {
   const contentType = request.headers['content-type'] || '';
   if (!String(contentType).toLowerCase().startsWith('multipart/form-data')) {
     throw new Error('Upload must use multipart/form-data.');
@@ -509,7 +509,7 @@ async function saveAgentUploads(request) {
   const files = parts.filter(part => part.name === 'files' && part.filename);
   if (files.length === 0) throw new Error('No files were uploaded.');
 
-  const uploadDir = agentUploadRoot();
+  const uploadDir = agentUploadRoot(agentClientId);
   mkdirSync(uploadDir, { recursive: true });
   const saved = [];
 
@@ -518,10 +518,7 @@ async function saveAgentUploads(request) {
     if (!isSupportedAgentUpload(originalName)) {
       throw new Error(`Unsupported attachment type: ${originalName}`);
     }
-    const ext = path.extname(originalName);
-    const stem = path.basename(originalName, ext).slice(0, 80) || 'attachment';
-    const targetName = `${Date.now()}-${Math.random().toString(16).slice(2)}-${stem}${ext}`;
-    const targetPath = path.join(uploadDir, targetName);
+    const targetPath = path.join(uploadDir, originalName);
     writeFileSync(targetPath, file.data);
     saved.push({
       name: originalName,
@@ -1503,8 +1500,9 @@ const server = createServer(async (request, response) => {
         sendJson(response, 405, { error: 'Method not allowed' });
         return;
       }
-      getAgentState(requestUrl.searchParams.get('agentClientId'));
-      const files = await saveAgentUploads(request);
+      const clientId = requestUrl.searchParams.get('agentClientId') || 'default';
+      getAgentState(clientId);
+      const files = await saveAgentUploads(request, clientId);
       sendJson(response, 200, { ok: true, files });
     } catch (error) {
       sendJson(response, 400, { error: error.message });
@@ -1544,7 +1542,9 @@ const server = createServer(async (request, response) => {
           }
 
           if (agentState.pendingNewSession || !agentState.currentWorkspace) {
-            createNewSessionWorkspace(agentState.id);
+            if (!agentState.currentWorkspace) {
+              createNewSessionWorkspace(agentState.id);
+            }
             agentState.pendingNewSession = false;
           }
 

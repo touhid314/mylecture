@@ -1,0 +1,18 @@
+# Core dependencies for img2fig
+doclayout-yolo
+pdf2image
+opencv-python
+torch
+python-dotenv
+
+# TTS & Social integrations
+requests
+openai
+google-genai
+google-generativeai
+numpy
+scipy
+onnxruntime
+huggingface_hub
+misaki
+soundfile

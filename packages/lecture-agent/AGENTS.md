@@ -32,7 +32,7 @@ src/
   mylecture-profiles/
 
 workspace/agent-workspace/       Default editable workspace for generated lectures.
-.tmp/uploads/                    IDE-saved uploaded attachments.
+workspace/agent-workspace/uploads/ IDE-saved uploaded attachments.
 ```
 
 ## How The Agent Is Used
@@ -141,7 +141,7 @@ Flow:
 ```text
 viewer drag/drop, picker, or paste
   -> POST /agent-upload
-  -> saved under packages/lecture-agent/.tmp/uploads/
+  -> saved under packages/lecture-agent/workspace/agent-workspace/uploads/
   -> viewer appends hidden [(attachment: absolute_path)] directives
   -> prompt_builder extracts supported attachments
   -> provider path uploads files separately from text prompt

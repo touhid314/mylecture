@@ -212,7 +212,7 @@ The IDE chat hides that syntax from the user:
 3. `src/ide-server.ts` saves files under:
 
    ```text
-   packages/lecture-agent/.tmp/uploads/
+   packages/lecture-agent/workspace/agent-workspace/uploads/
    ```
 
 4. Server returns absolute file paths.

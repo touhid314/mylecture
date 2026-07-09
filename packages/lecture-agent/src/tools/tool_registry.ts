@@ -13,6 +13,7 @@ import { tool_mkdir, compact_mkdir } from './mkdir.js';
 import { tool_list_dir, compact_list_dir } from './list_dir.js';
 import { tool_del, compact_del } from './del.js';
 import { tool_getimg, compact_getimg } from './getimg.js';
+import { tool_pdf2fig, compact_pdf2fig } from './pdf2fig.js';
 import { should_validate_contract, validate_index_html_contract } from './utils/html_contract.js';
 export { line_count } from './utils/text_stats.js';
 import { DEFAULT_WORKSPACE_DIR } from '../workspace.js';
@@ -241,6 +242,26 @@ export const TOOL_REGISTRY: ToolRegistryEntry[] = [
         },
         execute: (args, workspaceDir) => tool_getimg(args, workspaceDir),
         compact: compact_getimg,
+    },
+    {
+        type: "function",
+        name: "pdf2fig",
+        active: true,
+        description: `Use this tool to extract figures and tables from a PDF file in the workspace and save them as cropped images.
+        Figures/tables are saved as 'pdf2fig/figure_x.png', 'pdf2fig/table_x.png' where x is the figure/table number in the PDF.
+        You can directly access these images from this relative path.
+        Example: 'pdf2fig/figure_1.png', 'pdf2fig/table_3.png'.
+        `,
+        parameters: {
+            type: "object",
+            properties: {
+                pdfPath: { type: "string", description: "Workspace-relative or absolute path to the PDF file." }
+            },
+            required: ["pdfPath"],
+            additionalProperties: false,
+        },
+        execute: (args, workspaceDir) => tool_pdf2fig(args.pdfPath, workspaceDir, undefined, false),
+        compact: compact_pdf2fig,
     },
 ];
 
