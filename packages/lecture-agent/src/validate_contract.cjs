@@ -411,7 +411,9 @@ async function main() {
       errors = playwrightErrors;
       mode = 'playwright';
     } catch (pwErr) {
-      // If Playwright fails or isn't installed/configured, stick with VM errors
+      // If Playwright fails or isn't installed/configured, stick with VM errors but append a diagnostic warning
+      const details = (pwErr.message || String(pwErr)).split('\n')[0].trim();
+      errors.push(`Playwright validation fallback failed: ${details}. (Run 'npx playwright install' to ensure browser binaries are downloaded)`);
     }
   }
 

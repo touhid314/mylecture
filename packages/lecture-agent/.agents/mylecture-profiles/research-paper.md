@@ -46,7 +46,12 @@ Absolute minimum font size: 28px (no text or label may go below this value under
 ## For landscape aspect ratios:
 - Keep 5% margin all around.
 
-# Transition
+# visuals
+Use heavy visuals to visualize whatever is being narrated. The index html files should be large, full of pinpoint visuals that makes the narration crystal clear with the visuals. In case of a narration giving an overview, show fast paced animations of the whole process. The beginning scene should be full of such fluid animations catching the viewer's attention. Imagine yourself like a director of a small documentary. You plan greate animation and visuals corresponding to narrations and you implement them with detail and care no matter how intricate the animations are. The html files you write are big (like 1000-2000 lines) because they contain stunning animations. If you are lazy in writing the html files with some lazy fucking  animation, I will fucking kill you. You must fucking make animations like 3blue1brown writing elaborate animations for his videos. If you are lazy with animation with some small html files, I will fucking kill your entire family you stupid dumbass.
+
+Prefer using figures/tables from the paper itself, because they are more authentic. Only don't use paper's original figure/table if they are too much cluttered and you can easily make a better visualization. 
+
+All your visualizations should be granularly synced with the narration.
 
 
 ---
@@ -64,4 +69,8 @@ Explain this paper like you are explaining to a high schooler. Make sure you inc
 
 Start straightforward with the paper title, year of publication and some good hook.
 
-After the intro give some overview of the whole lecture, like a list of what we are gonna learn.
+Throughout the lecture keep a tracker at the top of the screen showing what section of explanation we are currently in.
+
+Use the pdf2fig tool to extract figures/tables from the pdf and use them as necessary. Usually papers have some nice explanatory figures, use them to explain things nicely.
+
+Use the getimg tool to download/generate images instead of trying to make images by svg.
