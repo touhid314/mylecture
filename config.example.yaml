@@ -3,7 +3,8 @@ server:
   port: 4307
 
 agent:
-  defaultProfile: "default"
+  defaultTheme: "default"
+  defaultTeachingStyle: "default"
   generationDir: "gens"
   enableGetimgTool: false
   defaultAspectRatio: "16:9"
