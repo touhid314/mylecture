@@ -594,7 +594,8 @@ function detectProvider(voice) {
     'american-male-1',
     'american-male-2',
     'american-male-3',
-    'johnny-harris'
+    'johnny-harris',
+    'maruf'
   ]);
   if (omniVoices.has(v)) {
     return 'omnivoice';
