@@ -1881,6 +1881,7 @@ body.file-kind-mp4 .timeline-ruler {
               <option value="american-male-2"${selectedAttr('american-male-2', defaultTtsVoice)}>american-male-2 (En)</option>
               <option value="american-male-3"${selectedAttr('american-male-3', defaultTtsVoice)}>american-male-3 (En)</option>
               <option value="johnny-harris"${selectedAttr('johnny-harris', defaultTtsVoice)}>johnny-harris (En)</option>
+              <option value="maruf"${selectedAttr('maruf', defaultTtsVoice)}>maruf (En)</option>
             </optgroup>
             <optgroup label="Kokoro TTS (Local)">
               <option value="am_puck">am_puck</option>
@@ -1917,6 +1918,7 @@ body.file-kind-mp4 .timeline-ruler {
               <option value="american-male-2"${selectedAttr('american-male-2', defaultTtsVoice)}>american-male-2 (En)</option>
               <option value="american-male-3"${selectedAttr('american-male-3', defaultTtsVoice)}>american-male-3 (En)</option>
               <option value="johnny-harris"${selectedAttr('johnny-harris', defaultTtsVoice)}>johnny-harris (En)</option>
+              <option value="maruf"${selectedAttr('maruf', defaultTtsVoice)}>maruf (En)</option>
             </optgroup>
             <optgroup label="Kokoro TTS (Local)">
               <option value="am_puck">am_puck</option>
