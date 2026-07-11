@@ -12,8 +12,5 @@ build/
 workspace/outputs/
 draft.txt
 .log/
-workspace/agent-workspace/
-workspace/.active-output-folder
-
-draft/
 src/tools/lib/poppler-25.11.0/
+docs/

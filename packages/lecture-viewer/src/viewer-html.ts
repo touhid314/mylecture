@@ -1491,7 +1491,10 @@ body.fullscreen-active #agent-bar {
   min-height: 28px;
   justify-self: end;
 }
-.agent-profile-field {
+.agent-theme-field {
+  grid-column: 1 / -1;
+}
+.agent-teaching-style-field {
   grid-column: 1 / -1;
 }
 .agent-checkbox {
@@ -2095,9 +2098,15 @@ body.file-kind-mp4 .timeline-ruler {
           <input id="agent-embed-subtitle" class="agent-checkbox" type="checkbox"${embedSubtitlesChecked}>
           <span class="agent-check-label">AI embed sub</span>
         </label>
-        <label class="agent-field agent-profile-field" for="agent-profile">
-          <span class="agent-field-label">Profile</span>
-          <select id="agent-profile" class="agent-select">
+        <label class="agent-field agent-theme-field" for="agent-theme">
+          <span class="agent-field-label">Theme</span>
+          <select id="agent-theme" class="agent-select">
+            <option value="default.md">default</option>
+          </select>
+        </label>
+        <label class="agent-field agent-teaching-style-field" for="agent-teaching-style">
+          <span class="agent-field-label">Teaching Style</span>
+          <select id="agent-teaching-style" class="agent-select">
             <option value="default.md">default</option>
           </select>
         </label>
@@ -2247,7 +2256,8 @@ const agentAspectRatio = document.getElementById('agent-aspect-ratio');
 const agentGenerationLength = document.getElementById('agent-generation-length');
 const agentGenerationLengthValue = document.getElementById('agent-generation-length-value');
 const agentEmbedSubtitle = document.getElementById('agent-embed-subtitle');
-const agentProfile = document.getElementById('agent-profile');
+const agentTheme = document.getElementById('agent-theme');
+const agentTeachingStyle = document.getElementById('agent-teaching-style');
 
 const resolveOptions = document.getElementById('resolve-options');
 const resolveTtsVoice = document.getElementById('resolve-tts-voice');
@@ -4308,8 +4318,10 @@ const agentSupportedAttachmentExts = new Set([
   'mp4', 'mpeg', 'mpg', 'mov', 'avi', 'webm', 'wmv', '3gp', '3gpp', 'flv'
 ]);
 let pendingAgentAttachments = [];
-let agentProfiles = [];
-let agentDefaultProfileId = configuredDefaults.defaultProfile;
+let agentThemes = [];
+let agentDefaultThemeId = 'default.md';
+let agentTeachingStyles = [];
+let agentDefaultTeachingStyleId = 'default.md';
 
 function getFileExtension(fileName) {
   const match = String(fileName || '').toLowerCase().match(/\\.([^.]+)$/);
@@ -4507,9 +4519,13 @@ function getGenerationSettingsPrompt() {
     'generation length: ' + generationLength,
     'embed subtitle in video: ' + embedSubtitle
   ];
-  const profileContent = getSelectedAgentProfileContent();
-  if (profileContent) {
-    lines.push('profile: ' + profileContent);
+  const themeContent = getSelectedThemeContent();
+  if (themeContent) {
+    lines.push('theme: ' + themeContent);
+  }
+  const teachingStyleContent = getSelectedTeachingStyleContent();
+  if (teachingStyleContent) {
+    lines.push('teaching style: ' + teachingStyleContent);
   }
   return lines.join('\\n');
 }
@@ -4520,35 +4536,67 @@ function appendGenerationSettingsPrompt(message) {
   return base ? base + '\\n\\n' + settings : settings;
 }
 
-function getSelectedAgentProfileContent() {
-  if (!agentProfile || !agentProfile.value) return '';
-  const selected = agentProfiles.find(profile => profile.id === agentProfile.value);
+function getSelectedThemeContent() {
+  if (!agentTheme || !agentTheme.value) return '';
+  const selected = agentThemes.find(theme => theme.id === agentTheme.value);
   return selected && selected.content ? selected.content.trim() : '';
 }
 
-async function loadAgentProfiles() {
-  if (!agentProfile) return;
+function getSelectedTeachingStyleContent() {
+  if (!agentTeachingStyle || !agentTeachingStyle.value) return '';
+  const selected = agentTeachingStyles.find(style => style.id === agentTeachingStyle.value);
+  return selected && selected.content ? selected.content.trim() : '';
+}
+
+async function loadAgentThemes() {
+  if (!agentTheme) return;
   try {
-    const response = await fetch('/agent-profiles');
+    const response = await fetch('/agent-themes');
     const payload = await response.json();
-    if (!response.ok) throw new Error(payload.error || 'Failed to load profiles');
-    agentProfiles = Array.isArray(payload.profiles) ? payload.profiles : [];
-    agentDefaultProfileId = typeof payload.defaultProfileId === 'string' && payload.defaultProfileId ? payload.defaultProfileId : configuredDefaults.defaultProfile;
-    agentProfile.innerHTML = '';
-    for (const profile of agentProfiles) {
+    if (!response.ok) throw new Error(payload.error || 'Failed to load themes');
+    agentThemes = Array.isArray(payload.themes) ? payload.themes : [];
+    agentDefaultThemeId = typeof payload.defaultThemeId === 'string' && payload.defaultThemeId ? payload.defaultThemeId : 'default.md';
+    agentTheme.innerHTML = '';
+    for (const theme of agentThemes) {
       const option = document.createElement('option');
-      option.value = profile.id;
-      option.textContent = profile.name || profile.fileName || profile.id;
-      agentProfile.appendChild(option);
+      option.value = theme.id;
+      option.textContent = theme.name || theme.fileName || theme.id;
+      agentTheme.appendChild(option);
     }
-    if (agentProfiles.some(profile => profile.id === agentDefaultProfileId)) {
-      agentProfile.value = agentDefaultProfileId;
+    if (agentThemes.some(theme => theme.id === agentDefaultThemeId)) {
+      agentTheme.value = agentDefaultThemeId;
     }
   } catch (error) {
-    agentProfiles = [];
-    agentDefaultProfileId = configuredDefaults.defaultProfile;
-    agentProfile.innerHTML = '<option value="' + agentDefaultProfileId + '">' + agentDefaultProfileId.replace(/\\.md$/i, '') + '</option>';
-    appendChatMessage('Could not load profiles: ' + error.message, 'error');
+    agentThemes = [];
+    agentDefaultThemeId = 'default.md';
+    agentTheme.innerHTML = '<option value="' + agentDefaultThemeId + '">' + agentDefaultThemeId.replace(/\\.md$/i, '') + '</option>';
+    appendChatMessage('Could not load themes: ' + error.message, 'error');
+  }
+}
+
+async function loadAgentTeachingStyles() {
+  if (!agentTeachingStyle) return;
+  try {
+    const response = await fetch('/agent-teaching-styles');
+    const payload = await response.json();
+    if (!response.ok) throw new Error(payload.error || 'Failed to load teaching styles');
+    agentTeachingStyles = Array.isArray(payload.teachingStyles) ? payload.teachingStyles : [];
+    agentDefaultTeachingStyleId = typeof payload.defaultTeachingStyleId === 'string' && payload.defaultTeachingStyleId ? payload.defaultTeachingStyleId : 'default.md';
+    agentTeachingStyle.innerHTML = '';
+    for (const style of agentTeachingStyles) {
+      const option = document.createElement('option');
+      option.value = style.id;
+      option.textContent = style.name || style.fileName || style.id;
+      agentTeachingStyle.appendChild(option);
+    }
+    if (agentTeachingStyles.some(style => style.id === agentDefaultTeachingStyleId)) {
+      agentTeachingStyle.value = agentDefaultTeachingStyleId;
+    }
+  } catch (error) {
+    agentTeachingStyles = [];
+    agentDefaultTeachingStyleId = 'default.md';
+    agentTeachingStyle.innerHTML = '<option value="' + agentDefaultTeachingStyleId + '">' + agentDefaultTeachingStyleId.replace(/\\.md$/i, '') + '</option>';
+    appendChatMessage('Could not load teaching styles: ' + error.message, 'error');
   }
 }
 
@@ -4719,7 +4767,8 @@ if (agentGenerationLengthValue) {
     }
   });
 }
-loadAgentProfiles();
+loadAgentThemes();
+loadAgentTeachingStyles();
 if (agentChatSend) {
   agentChatSend.addEventListener('click', sendChat);
 }

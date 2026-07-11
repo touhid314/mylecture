@@ -13,10 +13,10 @@ import { tool_mkdir, compact_mkdir } from './mkdir.js';
 import { tool_list_dir, compact_list_dir } from './list_dir.js';
 import { tool_del, compact_del } from './del.js';
 import { tool_getimg, compact_getimg } from './getimg.js';
-import { tool_pdf2fig, compact_pdf2fig } from './pdf2fig.js';
 import { should_validate_contract, validate_index_html_contract } from './utils/html_contract.js';
 export { line_count } from './utils/text_stats.js';
 import { DEFAULT_WORKSPACE_DIR } from '../workspace.js';
+import { runScriptAgent } from '../subagents/script_agent.js';
 
 export type ToolRuntimeOptions = {
     enableGetimgTool?: boolean;
@@ -60,12 +60,7 @@ export const TOOL_REGISTRY: ToolRegistryEntry[] = [
         type: "function",
         name: "read",
         active: true,
-        description: `Read a UTF-8 text file from the workspace. 
-        The output contains line numbers prepended in the format '<line_number>: <line_content>' for reference. 
-        These line numbers are not present in the actual file. 
-        You can also read image file with this tool. 
-        In case of an image read the image is just attached to your context in the turn, however the image will be removed from the context in the later turn. 
-        **You MUST read an image before you overlay(draw/highlight etc.) anything on image.**`,
+        description: "Read a UTF-8 text file from the workspace. The output contains line numbers prepended in the format `<line_number>: <line_content>` for reference. These line numbers are not present in the actual file.",
         parameters: {
             type: "object",
             properties: {
@@ -250,23 +245,34 @@ export const TOOL_REGISTRY: ToolRegistryEntry[] = [
     },
     {
         type: "function",
-        name: "pdf2fig",
+        name: "run_script_agent",
         active: true,
-        description: `Use this tool to extract figures and tables from a PDF file in the workspace and save them as cropped images.
-        Figures/tables are saved as 'pdf2fig/figure_x.png', 'pdf2fig/table_x.png' where x is the figure/table number in the PDF.
-        You can directly access these images from this relative path.
-        Example: 'pdf2fig/figure_1.png', 'pdf2fig/table_3.png'.
-        `,
+        description: "Invoke the script_agent subagent to write a script. This will run a deterministic flow to generate answer.md and script.md in the workspace.",
         parameters: {
             type: "object",
             properties: {
-                pdfPath: { type: "string", description: "Workspace-relative or absolute path to the PDF file." }
+                topic: { type: "string", description: "The request topic of the lecture." },
+                length: { type: "string", description: "The target duration, e.g., '60s' or '2m'." },
+                theme: { type: "string", description: "The visual theme content." },
+                teachingStyle: { type: "string", description: "The teaching style content." }
             },
-            required: ["pdfPath"],
+            required: ["topic", "length", "theme", "teachingStyle"],
             additionalProperties: false,
         },
-        execute: (args, workspaceDir) => tool_pdf2fig(args.pdfPath, workspaceDir, undefined, false),
-        compact: compact_pdf2fig,
+        execute: async (args, workspaceDir) => {
+            const model = process.env.AGENT_MODEL || "gemini-3.5-flash";
+            const sessionName = process.env.TOKEN_TRACKER_SESSION_ID || null;
+            return await runScriptAgent(
+                workspaceDir,
+                args.topic,
+                args.length,
+                args.theme,
+                args.teachingStyle,
+                model,
+                sessionName
+            );
+        },
+        compact: (args, result) => ({ compactedArgs: args, compactedResult: result })
     },
 ];
 
@@ -329,6 +335,10 @@ export function tool_json_schema(options: ToolRuntimeOptions = {}): any {
         argumentsSchema.out = "workspace-relative path to save the image (e.g. 'banana.png') for getimg";
         argumentsSchema.aspect = "optional aspect ratio like '16:9' or '1:1' for getimg";
     }
+    argumentsSchema.topic = "request topic for run_script_agent";
+    argumentsSchema.length = "target duration for run_script_agent";
+    argumentsSchema.theme = "visual theme content for run_script_agent";
+    argumentsSchema.teachingStyle = "teaching style content for run_script_agent";
     return {
         note: "brief step summary for the CLI; do not include hidden chain-of-thought",
         tool: active_tool_names(options).join(" | "),
