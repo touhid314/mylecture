@@ -617,10 +617,12 @@ export class GeminiAgentSession {
     async run(task: string, max_turns: number, abortSignal?: AbortSignal): Promise<string> {
         if (abortSignal?.aborted) throw new AgentAbortError();
         this.userTasks.push(strip_ide_context_from_user_query(task));
-        const prepared_task = prepare_user_task(task, this.workspaceDir);
+        let prepared_task = prepare_user_task(task, this.workspaceDir);
         const attachments = extract_upload_attachments(task, this.workspaceDir);
         if (attachments.length > 0) {
             print_detail("attachments", format_attachment_summary(attachments), Color.BLUE);
+            const attachmentPaths = attachments.map(attachment => path.relative(this.workspaceDir, attachment.path));
+            prepared_task += `\n\n[Available workspace attachment paths: ${attachmentPaths.join(", ")}. Pass relevant paths to tools that accept attachments.]`;
         }
 
         const userParts: any[] = [{ text: prepared_task }];
@@ -788,10 +790,12 @@ class JsonFallbackAgentSession {
     async run(task: string, max_turns: number, abortSignal?: AbortSignal): Promise<string> {
         if (abortSignal?.aborted) throw new AgentAbortError();
         this.userTasks.push(strip_ide_context_from_user_query(task));
-        const prepared_task = prepare_user_task(task, this.workspaceDir);
+        let prepared_task = prepare_user_task(task, this.workspaceDir);
         const attachments = extract_upload_attachments(task, this.workspaceDir);
         if (attachments.length > 0) {
             print_detail("attachments", format_attachment_summary(attachments), Color.BLUE);
+            const attachmentPaths = attachments.map(attachment => path.relative(this.workspaceDir, attachment.path));
+            prepared_task += `\n\n[Available workspace attachment paths: ${attachmentPaths.join(", ")}. Pass relevant paths to tools that accept attachments.]`;
         }
         this.transcript.push({ role: "user", content: prepared_task });
 

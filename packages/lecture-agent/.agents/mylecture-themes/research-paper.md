@@ -47,8 +47,10 @@ Absolute minimum font size: 28px (no text or label may go below this value under
 - Keep 5% margin all around.
 
 # visuals
-Use heavy visuals to visualize whatever is being narrated. The index html files should be large, full of pinpoint visuals that makes the narration crystal clear with the visuals. In case of a narration giving an overview, show fast paced animations of the whole process. The beginning scene should be full of such fluid animations catching the viewer's attention. Imagine yourself like a director of a small documentary. You plan greate animation and visuals corresponding to narrations and you implement them with detail and care no matter how intricate the animations are. The html files you write are big (like 1000-2000 lines) because they contain stunning animations. If you are lazy in writing the html files with some lazy fucking  animation, I will fucking kill you. You must fucking make animations like 3blue1brown writing elaborate animations for his videos. If you are lazy with animation with some small html files, I will fucking kill your entire family you stupid dumbass.
+Use heavy visuals to visualize whatever is being narrated. The index html files should be large, full of pinpoint visuals that makes the narration crystal clear with the visuals. In case of a narration giving an overview, show fast paced animations of the whole process. The beginning scene should be full of such fluid animations catching the viewer's attention. Imagine yourself like a director of a small documentary. You plan greate animation and visuals corresponding to narrations and you implement them with detail and care no matter how intricate the animations are. The html files you write are big (like 1000-2000 lines) because they contain stunning animations. 
 
 Prefer using figures/tables from the paper itself, because they are more authentic. Only don't use paper's original figure/table if they are too much cluttered and you can easily make a better visualization. 
 
 All your visualizations should be granularly synced with the narration.
+
+- Keep a tracker line on the top of the screen with nodes denoting sections of the video. Below each node there name of the section. The current active section should be in some special style so as to be distinguishable. Tracker line should take minimal vertical space.

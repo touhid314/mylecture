@@ -2,7 +2,7 @@ import fs from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import { LLM_Model } from '../llm_model.js';
-import { BASE_DIR } from '../workspace.js';
+import { BASE_DIR, resolve_workspace_path } from '../workspace.js';
 import { print_step, print_detail, Color } from '../coding_agent.js';
 
 const __filename = fileURLToPath(import.meta.url);
@@ -18,8 +18,10 @@ export async function runScriptAgent(
     theme: string,
     teachingStyle: string,
     model: string,
-    tokenTrackerSessionId?: string | null
+    tokenTrackerSessionId?: string | null,
+    attachments: string[] = []
 ): Promise<string> {
+    const resolvedAttachments = attachments.map(attachment => resolve_workspace_path(attachment, workspaceDir));
     // Resolve default theme and teaching style if empty
     let activeTheme = theme;
     if (!activeTheme) {
@@ -94,7 +96,7 @@ export async function runScriptAgent(
 
     const scriptResponse = await scriptLlm.generate(
         scriptUserPrompt,
-        null, null, null, null,
+        null, null, null, resolvedAttachments,
         false, // return_json
         false  // keep_history
     );

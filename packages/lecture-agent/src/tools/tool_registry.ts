@@ -60,7 +60,7 @@ export const TOOL_REGISTRY: ToolRegistryEntry[] = [
         type: "function",
         name: "read",
         active: true,
-        description: "Read a UTF-8 text file from the workspace. The output contains line numbers prepended in the format `<line_number>: <line_content>` for reference. These line numbers are not present in the actual file.",
+        description: "Read a text file and image file from the workspace. For text file: the output contains line numbers prepended in the format `<line_number>: <line_content>` for reference. These line numbers are not present in the actual file. For image file: the image is appended in your context, so you can understand the image. ALWAYS read an image before overlaying something on it, so that you know what is where in the image.",
         parameters: {
             type: "object",
             properties: {
@@ -115,7 +115,12 @@ export const TOOL_REGISTRY: ToolRegistryEntry[] = [
             }
         
         **Very important:** If a file already exists and you need to change it, use the edits tool instead of the write tool.
-        `,
+        During edit you must maintain the html contract. 
+        If you incur these errors with an edit, I will kill you:
+        - Missing window.__VIDEO_METADATA__
+        - Missing window.__VIDEO_PLAN__
+        - Missing window.__RENDER_SECTION__
+                `,
         parameters: {
             type: "object",
             properties: {
@@ -226,7 +231,7 @@ export const TOOL_REGISTRY: ToolRegistryEntry[] = [
         type: "function",
         name: "getimg",
         active: true,
-        description: "Retrieve, search for, or generate an image. The model should plan to add images in a video at necessary places. If planning for any image, the model MUST plan it out in the VISUAL part of the script using the syntax `[(getimg:<prompt>)]`. Example: \"VISUAL: A beautiful modern dark grey 2D grid appears. An image of Einstein appears [(getimg:a portrait of einstein thinking while doing math)]. A glowing title \\\"Eigenvectors\\\" pops up.\" Before generating or editing any HTML files, the model MUST call the `getimg` tool to download the planned image. Search mode (mode='search') is the preferred method of download because it gives real downloaded images. Use generation mode (mode='gen') only when a fictitious/synthetic image is needed or when the search tool has failed to return a suitable image. Once the model has requested an image download, the agent MUST wait for the tool execution to complete and return a successful result before proceeding with code generation or completing the task.",
+        description: "Search for, or generate an image. Geneartion mode (mode='gen') is the preferred method of download. Use search mode (mode='search') when a real authentic image is needed and AI image generation variations are not tolerable.",
         parameters: {
             type: "object",
             properties: {
@@ -247,14 +252,19 @@ export const TOOL_REGISTRY: ToolRegistryEntry[] = [
         type: "function",
         name: "run_script_agent",
         active: true,
-        description: "Invoke the script_agent subagent to write a script. This will run a deterministic flow to generate answer.md and script.md in the workspace.",
+        description: "Invoke the script_agent subagent to write a script. This will run a deterministic flow to generate answer.md and script.md in the workspace. Pass any user-provided files that are relevant to the script through `attachments` so the script writer can inspect them.",
         parameters: {
             type: "object",
             properties: {
                 topic: { type: "string", description: "The request topic of the lecture." },
                 length: { type: "string", description: "The target duration, e.g., '60s' or '2m'." },
                 theme: { type: "string", description: "The visual theme content." },
-                teachingStyle: { type: "string", description: "The teaching style content." }
+                teachingStyle: { type: "string", description: "The teaching style content." },
+                attachments: {
+                    type: "array",
+                    items: { type: "string" },
+                    description: "Workspace-relative paths of image, PDF, or video files for the script writer to inspect."
+                }
             },
             required: ["topic", "length", "theme", "teachingStyle"],
             additionalProperties: false,
@@ -269,7 +279,8 @@ export const TOOL_REGISTRY: ToolRegistryEntry[] = [
                 args.theme,
                 args.teachingStyle,
                 model,
-                sessionName
+                sessionName,
+                args.attachments || []
             );
         },
         compact: (args, result) => ({ compactedArgs: args, compactedResult: result })
@@ -339,6 +350,7 @@ export function tool_json_schema(options: ToolRuntimeOptions = {}): any {
     argumentsSchema.length = "target duration for run_script_agent";
     argumentsSchema.theme = "visual theme content for run_script_agent";
     argumentsSchema.teachingStyle = "teaching style content for run_script_agent";
+    argumentsSchema.attachments = ["optional workspace-relative attachment paths for run_script_agent"];
     return {
         note: "brief step summary for the CLI; do not include hidden chain-of-thought",
         tool: active_tool_names(options).join(" | "),
