@@ -2101,13 +2101,13 @@ body.file-kind-mp4 .timeline-ruler {
         <label class="agent-field agent-theme-field" for="agent-theme">
           <span class="agent-field-label">Theme</span>
           <select id="agent-theme" class="agent-select">
-            <option value="default.md">default</option>
+            <option value="default">default</option>
           </select>
         </label>
         <label class="agent-field agent-teaching-style-field" for="agent-teaching-style">
           <span class="agent-field-label">Teaching Style</span>
           <select id="agent-teaching-style" class="agent-select">
-            <option value="default.md">default</option>
+            <option value="default">default</option>
           </select>
         </label>
       </div>
@@ -2338,7 +2338,8 @@ const configuredDefaults = ${JSON.stringify({
   renderHeight: defaultRenderViewport.height,
   aspectRatio: defaultAspectRatio,
   generationLength: defaultLengthLabel,
-  defaultProfile: agentConfig.defaultProfile || 'default.md'
+  defaultTheme: agentConfig.defaultTheme || 'default',
+  defaultTeachingStyle: agentConfig.defaultTeachingStyle || 'default'
 })};
 let userViewportOverride = false;
 let controlsHideTimer = 0;
@@ -4319,9 +4320,9 @@ const agentSupportedAttachmentExts = new Set([
 ]);
 let pendingAgentAttachments = [];
 let agentThemes = [];
-let agentDefaultThemeId = 'default.md';
+let agentDefaultThemeId = 'default';
 let agentTeachingStyles = [];
-let agentDefaultTeachingStyleId = 'default.md';
+let agentDefaultTeachingStyleId = 'default';
 
 function getFileExtension(fileName) {
   const match = String(fileName || '').toLowerCase().match(/\\.([^.]+)$/);
@@ -4555,7 +4556,7 @@ async function loadAgentThemes() {
     const payload = await response.json();
     if (!response.ok) throw new Error(payload.error || 'Failed to load themes');
     agentThemes = Array.isArray(payload.themes) ? payload.themes : [];
-    agentDefaultThemeId = typeof payload.defaultThemeId === 'string' && payload.defaultThemeId ? payload.defaultThemeId : 'default.md';
+    agentDefaultThemeId = typeof payload.defaultThemeId === 'string' && payload.defaultThemeId ? payload.defaultThemeId : 'default';
     agentTheme.innerHTML = '';
     for (const theme of agentThemes) {
       const option = document.createElement('option');
@@ -4568,7 +4569,7 @@ async function loadAgentThemes() {
     }
   } catch (error) {
     agentThemes = [];
-    agentDefaultThemeId = 'default.md';
+    agentDefaultThemeId = 'default';
     agentTheme.innerHTML = '<option value="' + agentDefaultThemeId + '">' + agentDefaultThemeId.replace(/\\.md$/i, '') + '</option>';
     appendChatMessage('Could not load themes: ' + error.message, 'error');
   }
@@ -4581,7 +4582,7 @@ async function loadAgentTeachingStyles() {
     const payload = await response.json();
     if (!response.ok) throw new Error(payload.error || 'Failed to load teaching styles');
     agentTeachingStyles = Array.isArray(payload.teachingStyles) ? payload.teachingStyles : [];
-    agentDefaultTeachingStyleId = typeof payload.defaultTeachingStyleId === 'string' && payload.defaultTeachingStyleId ? payload.defaultTeachingStyleId : 'default.md';
+    agentDefaultTeachingStyleId = typeof payload.defaultTeachingStyleId === 'string' && payload.defaultTeachingStyleId ? payload.defaultTeachingStyleId : 'default';
     agentTeachingStyle.innerHTML = '';
     for (const style of agentTeachingStyles) {
       const option = document.createElement('option');
@@ -4594,7 +4595,7 @@ async function loadAgentTeachingStyles() {
     }
   } catch (error) {
     agentTeachingStyles = [];
-    agentDefaultTeachingStyleId = 'default.md';
+    agentDefaultTeachingStyleId = 'default';
     agentTeachingStyle.innerHTML = '<option value="' + agentDefaultTeachingStyleId + '">' + agentDefaultTeachingStyleId.replace(/\\.md$/i, '') + '</option>';
     appendChatMessage('Could not load teaching styles: ' + error.message, 'error');
   }

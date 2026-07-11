@@ -440,7 +440,7 @@ function listAgentProfiles() {
     .map(entry => {
       const fullPath = path.join(profilesRoot, entry.name);
       return {
-        id: entry.name,
+        id: path.basename(entry.name, '.md'),
         name: path.basename(entry.name, path.extname(entry.name)),
         fileName: entry.name,
         content: readFileSync(fullPath, 'utf8').trim()
@@ -468,7 +468,7 @@ function listAgentThemes() {
     .map(entry => {
       const fullPath = path.join(themesRoot, entry.name);
       return {
-        id: entry.name,
+        id: path.basename(entry.name, '.md'),
         name: path.basename(entry.name, path.extname(entry.name)),
         fileName: entry.name,
         content: readFileSync(fullPath, 'utf8').trim()
@@ -496,7 +496,7 @@ function listAgentTeachingStyles() {
     .map(entry => {
       const fullPath = path.join(stylesRoot, entry.name);
       return {
-        id: entry.name,
+        id: path.basename(entry.name, '.md'),
         name: path.basename(entry.name, path.extname(entry.name)),
         fileName: entry.name,
         content: readFileSync(fullPath, 'utf8').trim()
@@ -1570,7 +1570,7 @@ const server = createServer(async (request, response) => {
   // Return optional prompt profiles loaded from the lecture-agent workspace.
   if (requestUrl.pathname === '/agent-profiles') {
     try {
-      sendJson(response, 200, { ok: true, profiles: listAgentProfiles(), defaultProfileId: appConfig.agent.defaultProfile });
+      sendJson(response, 200, { ok: true, profiles: listAgentProfiles(), defaultProfileId: appConfig.agent.defaultTheme });
     } catch (error) {
       sendJson(response, 500, { error: error.message });
     }
@@ -1580,7 +1580,7 @@ const server = createServer(async (request, response) => {
   // Return optional prompt themes
   if (requestUrl.pathname === '/agent-themes') {
     try {
-      sendJson(response, 200, { ok: true, themes: listAgentThemes(), defaultThemeId: 'default.md' });
+      sendJson(response, 200, { ok: true, themes: listAgentThemes(), defaultThemeId: appConfig.agent.defaultTheme });
     } catch (error) {
       sendJson(response, 500, { error: error.message });
     }
@@ -1590,7 +1590,7 @@ const server = createServer(async (request, response) => {
   // Return optional prompt teaching styles
   if (requestUrl.pathname === '/agent-teaching-styles') {
     try {
-      sendJson(response, 200, { ok: true, teachingStyles: listAgentTeachingStyles(), defaultTeachingStyleId: 'default.md' });
+      sendJson(response, 200, { ok: true, teachingStyles: listAgentTeachingStyles(), defaultTeachingStyleId: appConfig.agent.defaultTeachingStyle });
     } catch (error) {
       sendJson(response, 500, { error: error.message });
     }

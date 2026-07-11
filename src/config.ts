@@ -7,7 +7,8 @@ export type AppConfig = {
     port: number;
   };
   agent: {
-    defaultProfile: string;
+    defaultTheme: string;
+    defaultTeachingStyle: string;
     generationDir: string;
     enableGetimgTool: boolean;
     defaultAspectRatio: string;
@@ -32,7 +33,8 @@ const defaultConfig: AppConfig = {
     port: 4307
   },
   agent: {
-    defaultProfile: 'default',
+    defaultTheme: 'default',
+    defaultTeachingStyle: 'default',
     generationDir: 'gens',
     enableGetimgTool: false,
     defaultAspectRatio: '16:9',
@@ -104,10 +106,10 @@ function booleanValue(value: unknown, fallback: boolean): boolean {
   return typeof value === 'boolean' ? value : fallback;
 }
 
-function normalizeProfileId(value: string): string {
+function normalizeFileId(value: string, fallback: string): string {
   const trimmed = value.trim();
-  if (!trimmed) return defaultConfig.agent.defaultProfile;
-  return trimmed.toLowerCase().endsWith('.md') ? trimmed : `${trimmed}.md`;
+  if (!trimmed) return fallback;
+  return trimmed.toLowerCase().endsWith('.md') ? trimmed.slice(0, -3) : trimmed;
 }
 
 function mergeConfig(raw: Record<string, Record<string, unknown>>): AppConfig {
@@ -117,7 +119,8 @@ function mergeConfig(raw: Record<string, Record<string, unknown>>): AppConfig {
       port: Math.round(numberValue(raw.server?.port, defaultConfig.server.port, 1, 65535))
     },
     agent: {
-      defaultProfile: normalizeProfileId(stringValue(raw.agent?.defaultProfile, defaultConfig.agent.defaultProfile)),
+      defaultTheme: normalizeFileId(stringValue(raw.agent?.defaultTheme, defaultConfig.agent.defaultTheme), defaultConfig.agent.defaultTheme),
+      defaultTeachingStyle: normalizeFileId(stringValue(raw.agent?.defaultTeachingStyle, defaultConfig.agent.defaultTeachingStyle), defaultConfig.agent.defaultTeachingStyle),
       generationDir: stringValue(raw.agent?.generationDir, defaultConfig.agent.generationDir),
       enableGetimgTool: booleanValue(raw.agent?.enableGetimgTool, defaultConfig.agent.enableGetimgTool),
       defaultAspectRatio: stringValue(raw.agent?.defaultAspectRatio, defaultConfig.agent.defaultAspectRatio),
