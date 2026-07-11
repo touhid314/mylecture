@@ -16,6 +16,7 @@ import { tool_getimg, compact_getimg } from './getimg.js';
 import { should_validate_contract, validate_index_html_contract } from './utils/html_contract.js';
 export { line_count } from './utils/text_stats.js';
 import { DEFAULT_WORKSPACE_DIR } from '../workspace.js';
+import { runScriptAgent } from '../subagents/script_agent.js';
 
 export type ToolRuntimeOptions = {
     enableGetimgTool?: boolean;
@@ -242,6 +243,37 @@ export const TOOL_REGISTRY: ToolRegistryEntry[] = [
         execute: (args, workspaceDir) => tool_getimg(args, workspaceDir),
         compact: compact_getimg,
     },
+    {
+        type: "function",
+        name: "run_script_agent",
+        active: true,
+        description: "Invoke the script_agent subagent to write a script. This will run a deterministic flow to generate answer.md and script.md in the workspace.",
+        parameters: {
+            type: "object",
+            properties: {
+                topic: { type: "string", description: "The request topic of the lecture." },
+                length: { type: "string", description: "The target duration, e.g., '60s' or '2m'." },
+                theme: { type: "string", description: "The visual theme content." },
+                teachingStyle: { type: "string", description: "The teaching style content." }
+            },
+            required: ["topic", "length", "theme", "teachingStyle"],
+            additionalProperties: false,
+        },
+        execute: async (args, workspaceDir) => {
+            const model = process.env.AGENT_MODEL || "gemini-3.5-flash";
+            const sessionName = process.env.TOKEN_TRACKER_SESSION_ID || null;
+            return await runScriptAgent(
+                workspaceDir,
+                args.topic,
+                args.length,
+                args.theme,
+                args.teachingStyle,
+                model,
+                sessionName
+            );
+        },
+        compact: (args, result) => ({ compactedArgs: args, compactedResult: result })
+    },
 ];
 
 // Active tools are the only tools exposed to the model. Use this helper instead
@@ -303,6 +335,10 @@ export function tool_json_schema(options: ToolRuntimeOptions = {}): any {
         argumentsSchema.out = "workspace-relative path to save the image (e.g. 'banana.png') for getimg";
         argumentsSchema.aspect = "optional aspect ratio like '16:9' or '1:1' for getimg";
     }
+    argumentsSchema.topic = "request topic for run_script_agent";
+    argumentsSchema.length = "target duration for run_script_agent";
+    argumentsSchema.theme = "visual theme content for run_script_agent";
+    argumentsSchema.teachingStyle = "teaching style content for run_script_agent";
     return {
         note: "brief step summary for the CLI; do not include hidden chain-of-thought",
         tool: active_tool_names(options).join(" | "),

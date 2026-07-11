@@ -2,11 +2,11 @@
 Font: 
 <!-- Architects Daughter handwriting font -->
 
-&#x20; <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
 
-&#x20; <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 
-&#x20; <link href="https://fonts.googleapis.com/css2?family=Architects+Daughter\&display=swap" rel="stylesheet">
+  <link href="https://fonts.googleapis.com/css2?family=Architects+Daughter\&display=swap" rel="stylesheet">
 
 background-color: #fafafa;
 

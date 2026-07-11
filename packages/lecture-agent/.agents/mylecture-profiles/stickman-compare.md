@@ -16,37 +16,37 @@ Font size: 48px
 
 
 
-&#x20;<15% margin, no title>
+ <15% margin, no title>
 
-&#x20;--------  ---------
+ --------  ---------
 
-&#x20;|      |  |       |
+ |      |  |       |
 
-&#x20;|img x |  |img y  |
+ |img x |  |img y  |
 
-&#x20;|\_\_\_\_\_\_|  |\_\_\_\_\_\_\_|
-
-
-
-&#x20;  <subtitle here (8%)>
-
-&#x20;  --------------
+ |\_\_\_\_\_\_|  |\_\_\_\_\_\_\_|
 
 
+
+   <subtitle here (8%)>
+
+   --------------
 
 
 
 
 
-&#x20;  <big stickman here ()>
+
+
+   <big stickman here ()>
 
 
 
 
 
-&#x20; ---------------
+  ---------------
 
-&#x20; <10% bottom margin>
+  <10% bottom margin>
 
 \---------------------
 
@@ -56,67 +56,67 @@ Font size: 48px
 
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 200 240" width="100%" height="100%">
 
-&#x20; <defs>
+  <defs>
 
-&#x20;   <filter id="hand-drawn" x="-10%" y="-10%" width="120%" height="120%">
+    <filter id="hand-drawn" x="-10%" y="-10%" width="120%" height="120%">
 
-&#x20;     <feTurbulence type="fractalNoise" baseFrequency="0.04" numOctaves="2" result="noise" />
+      <feTurbulence type="fractalNoise" baseFrequency="0.04" numOctaves="2" result="noise" />
 
-&#x20;     <feDisplacementMap in="SourceGraphic" in2="noise" scale="2" xChannelSelector="R" yChannelSelector="G" />
+      <feDisplacementMap in="SourceGraphic" in2="noise" scale="2" xChannelSelector="R" yChannelSelector="G" />
 
-&#x20;   </filter>
+    </filter>
 
-&#x20; </defs>
-
-
-
-&#x20; <g filter="url(#hand-drawn)">
-
-&#x20;   <circle cx="100" cy="70" r="25" fill="none" stroke="#1a1a1a" stroke-width="3.5" />
+  </defs>
 
 
 
-&#x20;   <ellipse cx="93" cy="65" rx="5" ry="6" fill="#ffffff" stroke="#1a1a1a" stroke-width="2" />
+  <g filter="url(#hand-drawn)">
 
-&#x20;   <ellipse cx="107" cy="63" rx="5" ry="6" fill="#ffffff" stroke="#1a1a1a" stroke-width="2" />
-
-&#x20;
-
-&#x20;   <circle cx="91" cy="62" r="2.5" fill="#1a1a1a" />
-
-&#x20;   <circle cx="105" cy="60" r="2.5" fill="#1a1a1a" />
-
-&#x20;
-
-&#x20;   <path d="M 86 56 Q 92 52 97 57" fill="none" stroke="#1a1a1a" stroke-width="2" stroke-linecap="round" />
-
-&#x20;   <path d="M 102 54 Q 108 49 113 53" fill="none" stroke="#1a1a1a" stroke-width="2" stroke-linecap="round" />
+    <circle cx="100" cy="70" r="25" fill="none" stroke="#1a1a1a" stroke-width="3.5" />
 
 
 
-&#x20;   <ellipse cx="98" cy="80" rx="2.5" ry="3" fill="none" stroke="#1a1a1a" stroke-width="2" />
+    <ellipse cx="93" cy="65" rx="5" ry="6" fill="#ffffff" stroke="#1a1a1a" stroke-width="2" />
+
+    <ellipse cx="107" cy="63" rx="5" ry="6" fill="#ffffff" stroke="#1a1a1a" stroke-width="2" />
+
+ 
+
+    <circle cx="91" cy="62" r="2.5" fill="#1a1a1a" />
+
+    <circle cx="105" cy="60" r="2.5" fill="#1a1a1a" />
+
+ 
+
+    <path d="M 86 56 Q 92 52 97 57" fill="none" stroke="#1a1a1a" stroke-width="2" stroke-linecap="round" />
+
+    <path d="M 102 54 Q 108 49 113 53" fill="none" stroke="#1a1a1a" stroke-width="2" stroke-linecap="round" />
 
 
 
-&#x20;   <path d="M 100 95 L 105 155" fill="none" stroke="#1a1a1a" stroke-width="4.5" stroke-linecap="round" />
+    <ellipse cx="98" cy="80" rx="2.5" ry="3" fill="none" stroke="#1a1a1a" stroke-width="2" />
 
 
 
-&#x20;   <path d="M 101 105 L 60 85 L 30 60" fill="none" stroke="#1a1a1a" stroke-width="3.5" stroke-linecap="round" stroke-linejoin="round" />
-
-&#x20;
-
-&#x20;   <path d="M 101 105 L 125 120 L 115 140" fill="none" stroke="#1a1a1a" stroke-width="3.5" stroke-linecap="round" stroke-linejoin="round" />
+    <path d="M 100 95 L 105 155" fill="none" stroke="#1a1a1a" stroke-width="4.5" stroke-linecap="round" />
 
 
 
-&#x20;   <path d="M 105 155 L 85 195 L 75 225" fill="none" stroke="#1a1a1a" stroke-width="4.5" stroke-linecap="round" stroke-linejoin="round" />
+    <path d="M 101 105 L 60 85 L 30 60" fill="none" stroke="#1a1a1a" stroke-width="3.5" stroke-linecap="round" stroke-linejoin="round" />
 
-&#x20;
+ 
 
-&#x20;   <path d="M 105 155 L 120 190 L 135 225" fill="none" stroke="#1a1a1a" stroke-width="4.5" stroke-linecap="round" stroke-linejoin="round" />
+    <path d="M 101 105 L 125 120 L 115 140" fill="none" stroke="#1a1a1a" stroke-width="3.5" stroke-linecap="round" stroke-linejoin="round" />
 
-&#x20; </g>
+
+
+    <path d="M 105 155 L 85 195 L 75 225" fill="none" stroke="#1a1a1a" stroke-width="4.5" stroke-linecap="round" stroke-linejoin="round" />
+
+ 
+
+    <path d="M 105 155 L 120 190 L 135 225" fill="none" stroke="#1a1a1a" stroke-width="4.5" stroke-linecap="round" stroke-linejoin="round" />
+
+  </g>
 
 </svg>
 
@@ -128,67 +128,67 @@ Font size: 48px
 
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 200 240" width="100%" height="100%">
 
-&#x20; <defs>
+  <defs>
 
-&#x20;   <filter id="hand-drawn" x="-10%" y="-10%" width="120%" height="120%">
+    <filter id="hand-drawn" x="-10%" y="-10%" width="120%" height="120%">
 
-&#x20;     <feTurbulence type="fractalNoise" baseFrequency="0.04" numOctaves="2" result="noise" />
+      <feTurbulence type="fractalNoise" baseFrequency="0.04" numOctaves="2" result="noise" />
 
-&#x20;     <feDisplacementMap in="SourceGraphic" in2="noise" scale="2" xChannelSelector="R" yChannelSelector="G" />
+      <feDisplacementMap in="SourceGraphic" in2="noise" scale="2" xChannelSelector="R" yChannelSelector="G" />
 
-&#x20;   </filter>
+    </filter>
 
-&#x20; </defs>
-
-
-
-&#x20; <g filter="url(#hand-drawn)">
-
-&#x20;   <circle cx="100" cy="70" r="25" fill="none" stroke="#1a1a1a" stroke-width="3.5" />
+  </defs>
 
 
 
-&#x20;   <ellipse cx="93" cy="63" rx="5" ry="6" fill="#ffffff" stroke="#1a1a1a" stroke-width="2" />
+  <g filter="url(#hand-drawn)">
 
-&#x20;   <ellipse cx="107" cy="65" rx="5" ry="6" fill="#ffffff" stroke="#1a1a1a" stroke-width="2" />
-
-&#x20;
-
-&#x20;   <circle cx="95" cy="60" r="2.5" fill="#1a1a1a" />
-
-&#x20;   <circle cx="109" cy="62" r="2.5" fill="#1a1a1a" />
-
-&#x20;
-
-&#x20;   <path d="M 87 53 Q 92 49 98 54" fill="none" stroke="#1a1a1a" stroke-width="2" stroke-linecap="round" />
-
-&#x20;   <path d="M 103 57 Q 108 52 114 56" fill="none" stroke="#1a1a1a" stroke-width="2" stroke-linecap="round" />
+    <circle cx="100" cy="70" r="25" fill="none" stroke="#1a1a1a" stroke-width="3.5" />
 
 
 
-&#x20;   <ellipse cx="102" cy="80" rx="2.5" ry="3" fill="none" stroke="#1a1a1a" stroke-width="2" />
+    <ellipse cx="93" cy="63" rx="5" ry="6" fill="#ffffff" stroke="#1a1a1a" stroke-width="2" />
+
+    <ellipse cx="107" cy="65" rx="5" ry="6" fill="#ffffff" stroke="#1a1a1a" stroke-width="2" />
+
+ 
+
+    <circle cx="95" cy="60" r="2.5" fill="#1a1a1a" />
+
+    <circle cx="109" cy="62" r="2.5" fill="#1a1a1a" />
+
+ 
+
+    <path d="M 87 53 Q 92 49 98 54" fill="none" stroke="#1a1a1a" stroke-width="2" stroke-linecap="round" />
+
+    <path d="M 103 57 Q 108 52 114 56" fill="none" stroke="#1a1a1a" stroke-width="2" stroke-linecap="round" />
 
 
 
-&#x20;   <path d="M 100 95 L 95 155" fill="none" stroke="#1a1a1a" stroke-width="4.5" stroke-linecap="round" />
+    <ellipse cx="102" cy="80" rx="2.5" ry="3" fill="none" stroke="#1a1a1a" stroke-width="2" />
 
 
 
-&#x20;   <path d="M 99 105 L 75 120 L 85 140" fill="none" stroke="#1a1a1a" stroke-width="3.5" stroke-linecap="round" stroke-linejoin="round" />
+    <path d="M 100 95 L 95 155" fill="none" stroke="#1a1a1a" stroke-width="4.5" stroke-linecap="round" />
 
 
 
-&#x20;   <path d="M 99 105 L 140 85 L 170 60" fill="none" stroke="#1a1a1a" stroke-width="3.5" stroke-linecap="round" stroke-linejoin="round" />
+    <path d="M 99 105 L 75 120 L 85 140" fill="none" stroke="#1a1a1a" stroke-width="3.5" stroke-linecap="round" stroke-linejoin="round" />
 
 
 
-&#x20;   <path d="M 95 155 L 80 190 L 65 225" fill="none" stroke="#1a1a1a" stroke-width="4.5" stroke-linecap="round" stroke-linejoin="round" />
+    <path d="M 99 105 L 140 85 L 170 60" fill="none" stroke="#1a1a1a" stroke-width="3.5" stroke-linecap="round" stroke-linejoin="round" />
 
-&#x20;
 
-&#x20;   <path d="M 95 155 L 115 195 L 125 225" fill="none" stroke="#1a1a1a" stroke-width="4.5" stroke-linecap="round" stroke-linejoin="round" />
 
-&#x20; </g>
+    <path d="M 95 155 L 80 190 L 65 225" fill="none" stroke="#1a1a1a" stroke-width="4.5" stroke-linecap="round" stroke-linejoin="round" />
+
+ 
+
+    <path d="M 95 155 L 115 195 L 125 225" fill="none" stroke="#1a1a1a" stroke-width="4.5" stroke-linecap="round" stroke-linejoin="round" />
+
+  </g>
 
 </svg>
 
