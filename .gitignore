@@ -18,6 +18,7 @@ trash/
 task_plan.md
 *.
 gens/
-docs/research-demos/
-docs/social-logo/Gemini_Generated_Image_jj0ukujj0ukujj0u.png
+docs/
 draft.*
+.venv/
+.claude/
