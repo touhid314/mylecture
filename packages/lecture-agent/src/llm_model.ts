@@ -17,7 +17,7 @@ import OpenAI from 'openai';
 
 import { log_llm_request } from './llm_prompt_logger.js';
 import { Logger } from './logger.js';
-import { extractTokenUsage, trackTokenUsageFromResponse } from './token_tracker.js';
+import { extractTokenUsage, trackTokenUsageFromResponse, trackTokenUsage } from './token_tracker.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -1070,6 +1070,87 @@ export class LLM_Model {
             latencyMs: latency_ms,
             sessionId: this.token_tracker_session_id || undefined,
         });
+        return response;
+    }
+
+    public async generateImage(options: {
+        prompt: string;
+        aspect?: string;
+        resolution?: string;
+        purpose?: string;
+    }): Promise<any> {
+        this.logger.info(`generateImage called for model: ${this.model_name}`);
+        const started_at = now_ms();
+        let response: any;
+        const finalPurpose = options.purpose || this.token_tracker_purpose || "image_generation";
+
+        if (this.api_type === "google") {
+            const config: any = {
+                responseModalities: ["IMAGE"]
+            };
+            if (options.aspect || options.resolution) {
+                config.imageConfig = {};
+                if (options.aspect) {
+                    config.imageConfig.aspectRatio = options.aspect;
+                }
+                if (options.resolution) {
+                    config.imageConfig.imageSize = options.resolution === '0.5K' ? '512' : options.resolution;
+                }
+            }
+
+            const request = {
+                model: this.model_name,
+                contents: options.prompt,
+                config: config
+            };
+            log_llm_request("llm-model-google-image", request);
+            response = await this._client.models.generateContent(request);
+            const latency_ms = Math.round(now_ms() - started_at);
+
+            trackTokenUsage({
+                sessionId: this.token_tracker_session_id || undefined,
+                provider: "google",
+                model: this.model_name,
+                purpose: finalPurpose,
+                inputTokens: 0,
+                outputTokens: 1,
+                totalTokens: 1,
+                latencyMs: latency_ms,
+                inputModality: "standard",
+                outputModality: "image",
+            });
+        } else {
+            // OpenAI
+            let size: '1024x1024' | '1792x1024' | '1024x1792' = '1024x1792';
+            if (options.aspect === '16:9') {
+                size = '1792x1024';
+            } else if (options.aspect === '9:16') {
+                size = '1024x1792';
+            }
+
+            const request = {
+                model: this.model_name,
+                prompt: options.prompt,
+                n: 1,
+                size: size,
+            };
+            log_llm_request("llm-model-openai-image", request);
+            response = await this._client.images.generate(request);
+            const latency_ms = Math.round(now_ms() - started_at);
+
+            trackTokenUsage({
+                sessionId: this.token_tracker_session_id || undefined,
+                provider: "openai",
+                model: this.model_name,
+                purpose: finalPurpose,
+                inputTokens: 0,
+                outputTokens: 1,
+                totalTokens: 1,
+                latencyMs: latency_ms,
+                inputModality: "standard",
+                outputModality: "image",
+            });
+        }
         return response;
     }
 }

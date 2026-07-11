@@ -15,11 +15,10 @@ import fs from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import dotenv from 'dotenv';
-import { GoogleGenAI } from '@google/genai';
-import OpenAI from 'openai';
 import sharp from 'sharp';
 
 import { resolve_workspace_path } from '../workspace.js';
+import { LLM_Model } from '../llm_model.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -166,16 +165,17 @@ async function resizeTo480p(buffer: Buffer): Promise<Buffer> {
  * @returns Verification result with `fulfilled` boolean and a `reason` string.
  */
 async function watchmanImageWithGemini(
-    apiKey: string,
     prompt: string,
     imageBuffer: Buffer,
     mimeType: string = 'image/jpeg'
 ): Promise<{ fulfilled: boolean; reason: string }> {
-    const ai = new GoogleGenAI({ apiKey });
     const base64Image = imageBuffer.toString('base64');
     const watchmanModel = getWatchmanModel();
+    const modelInstance = new LLM_Model(watchmanModel);
+    modelInstance.token_tracker_session_id = process.env.TOKEN_TRACKER_SESSION_ID || null;
+    modelInstance.token_tracker_purpose = "watchman_image_verification";
 
-    const response = await ai.models.generateContent({
+    const response = await modelInstance.generateContent({
         model: watchmanModel,
         contents: [
             {
@@ -199,9 +199,15 @@ async function watchmanImageWithGemini(
                 required: ["fulfilled", "reason"]
             }
         }
-    });
+    }, "watchman_image_verification");
 
-    const text = response.text || '';
+    let text = "";
+    if (response.text) {
+        text = response.text;
+    } else if (response.candidates?.[0]?.content?.parts?.[0]?.text) {
+        text = response.candidates[0].content.parts[0].text;
+    }
+
     try {
         const result = JSON.parse(text);
         return {
@@ -226,12 +232,13 @@ async function watchmanImageWithGemini(
  * @returns Verification result containing the 1-based index of the best image or -1 if none fit.
  */
 async function watchmanMultipleImagesWithGemini(
-    apiKey: string,
     prompt: string,
     images: { buffer: Buffer; mimeType: string }[]
 ): Promise<{ bestImageIndex: number; reason: string }> {
-    const ai = new GoogleGenAI({ apiKey });
     const watchmanModel = getWatchmanModel();
+    const modelInstance = new LLM_Model(watchmanModel);
+    modelInstance.token_tracker_session_id = process.env.TOKEN_TRACKER_SESSION_ID || null;
+    modelInstance.token_tracker_purpose = "watchman_multiple_images_verification";
     const contents: any[] = [];
 
     images.forEach((img) => {
@@ -249,7 +256,7 @@ async function watchmanMultipleImagesWithGemini(
 
     contents.push(promptText);
 
-    const response = await ai.models.generateContent({
+    const response = await modelInstance.generateContent({
         model: watchmanModel,
         contents: contents,
         config: {
@@ -263,9 +270,15 @@ async function watchmanMultipleImagesWithGemini(
                 required: ["bestImageIndex", "reason"]
             }
         }
-    });
+    }, "watchman_multiple_images_verification");
 
-    const text = response.text || '';
+    let text = "";
+    if (response.text) {
+        text = response.text;
+    } else if (response.candidates?.[0]?.content?.parts?.[0]?.text) {
+        text = response.candidates[0].content.parts[0].text;
+    }
+
     try {
         const result = JSON.parse(text);
         return {
@@ -321,7 +334,7 @@ async function performWatchmanCheckForGen(options: DownloadOptions, buffer: Buff
     console.log(`[Watchman Agent] Resizing generated image to 480p...`);
     const resizedBuffer = await resizeTo480p(buffer);
     console.log(`[Watchman Agent] Asking ${getWatchmanModel()} to verify the generated image...`);
-    const verification = await watchmanImageWithGemini(googleApiKey, options.prompt, resizedBuffer, mimeType);
+    const verification = await watchmanImageWithGemini(options.prompt, resizedBuffer, mimeType);
     console.log(`[Watchman Agent] Verdict: fulfilled = ${verification.fulfilled}, reason = "${verification.reason}"`);
     if (!verification.fulfilled) {
         if (options.logWatchman) {
@@ -407,7 +420,7 @@ async function handleSearchMode(options: DownloadOptions) {
     const resizedFirstBuffer = await resizeTo480p(downloadedBuffer);
 
     console.log(`[Watchman Agent] Asking ${getWatchmanModel()} to verify image...`);
-    const verification = await watchmanImageWithGemini(apiKey, prompt, resizedFirstBuffer, mimeType);
+    const verification = await watchmanImageWithGemini(prompt, resizedFirstBuffer, mimeType);
     console.log(`[Watchman Agent] Verdict: fulfilled = ${verification.fulfilled}, reason = "${verification.reason}"`);
 
     if (verification.fulfilled) {
@@ -480,7 +493,7 @@ async function handleSearchMode(options: DownloadOptions) {
     }));
 
     console.log(`[Watchman Agent] Asking ${getWatchmanModel()} to verify the ${alternativeCandidates.length} candidate images...`);
-    const multiVerification = await watchmanMultipleImagesWithGemini(apiKey, prompt, resizedCandidates);
+    const multiVerification = await watchmanMultipleImagesWithGemini(prompt, resizedCandidates);
     console.log(`[Watchman Agent] Verdict: bestImageIndex = ${multiVerification.bestImageIndex}, reason = "${multiVerification.reason}"`);
 
     const selectedIndex = multiVerification.bestImageIndex - 1; // Convert 1-based to 0-based
@@ -511,31 +524,14 @@ async function handleGeminiImageMode(options: DownloadOptions, modelName: string
     const { prompt, out, aspect, resolution } = options;
     console.log(`[Gemini Mode] Generating image via ${modelName}...`);
 
-    const apiKey = process.env.GOOGLE_API_KEY;
-    if (!apiKey) {
-        throw new Error("GOOGLE_API_KEY environment variable is not defined.");
-    }
+    const modelInstance = new LLM_Model(modelName);
+    modelInstance.token_tracker_session_id = process.env.TOKEN_TRACKER_SESSION_ID || null;
+    modelInstance.token_tracker_purpose = "image_generation";
 
-    const ai = new GoogleGenAI({ apiKey });
-    
-    const config: any = {
-        responseModalities: ["IMAGE"]
-    };
-
-    if (aspect || resolution) {
-        config.imageConfig = {};
-        if (aspect) {
-            config.imageConfig.aspectRatio = aspect;
-        }
-        if (resolution) {
-            config.imageConfig.imageSize = resolution === '0.5K' ? '512' : resolution;
-        }
-    }
-
-    const response = await ai.models.generateContent({
-        model: modelName,
-        contents: prompt,
-        config: config
+    const response = await modelInstance.generateImage({
+        prompt,
+        aspect,
+        resolution
     });
 
     const candidate = response.candidates?.[0];
@@ -586,26 +582,13 @@ async function handleGptImageMode(options: DownloadOptions) {
     const { prompt, out, aspect } = options;
     console.log(`[gpt-image-2 Mode] Generating image via OpenAI gpt-image-2...`);
 
-    const apiKey = process.env.OPENAI_API_KEY;
-    if (!apiKey) {
-        throw new Error("OPENAI_API_KEY environment variable is not defined.");
-    }
+    const modelInstance = new LLM_Model("gpt-image-2");
+    modelInstance.token_tracker_session_id = process.env.TOKEN_TRACKER_SESSION_ID || null;
+    modelInstance.token_tracker_purpose = "image_generation";
 
-    const openai = new OpenAI({ apiKey });
-
-    // Handle aspect ratios for gpt-image-2
-    let size: '1024x1024' | '1792x1024' | '1024x1792' = '1024x1792';
-    if (aspect === '16:9') {
-        size = '1792x1024';
-    } else if (aspect === '9:16') {
-        size = '1024x1792';
-    }
-
-    const response = await openai.images.generate({
-        model: "gpt-image-2",
-        prompt: prompt,
-        n: 1,
-        size: size,
+    const response = await modelInstance.generateImage({
+        prompt,
+        aspect
     });
 
     if (!response.data || response.data.length === 0) {

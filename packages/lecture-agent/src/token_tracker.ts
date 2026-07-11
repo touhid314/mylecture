@@ -12,7 +12,7 @@ const PACKAGE_DIR = path.resolve(__dirname, '..');
 export const TOKEN_TRACKER_DIR = path.join(PACKAGE_DIR, '.log', 'token-tracker');
 export const TOKEN_TRACKER_DB_PATH = path.join(TOKEN_TRACKER_DIR, 'token_usage.db');
 
-type TokenModality = "standard" | "audio" | "video";
+type TokenModality = "standard" | "audio" | "video" | "image";
 
 type ModelCostTier = {
     maxContextTokens?: number;
@@ -29,6 +29,7 @@ type ModelCostConfig = {
     tiers: ModelCostTier[];
     batchDiscount?: number;
     cacheStoragePerMillionTokenHour?: number;
+    imageCostPerGeneration?: number;
     notes?: string;
 };
 
@@ -97,6 +98,26 @@ export const MODEL_TOKEN_COSTS_PER_MILLION: Record<string, ModelCostConfig> = {
         label: "Gemini 2.0 Flash",
         tiers: [{ input: 0.10, output: 0.40, cachedInput: 0.01 }],
         batchDiscount: 0.50,
+    },
+    "gemini-3.1-flash-lite-image": {
+        label: "Gemini 3.1 Flash Lite Image",
+        tiers: [{ input: 0, output: 0 }],
+        imageCostPerGeneration: 0.03,
+    },
+    "gemini-3.1-flash-image": {
+        label: "Gemini 3.1 Flash Image",
+        tiers: [{ input: 0, output: 0 }],
+        imageCostPerGeneration: 0.03,
+    },
+    "gemini-3-pro-image": {
+        label: "Gemini 3 Pro Image",
+        tiers: [{ input: 0, output: 0 }],
+        imageCostPerGeneration: 0.03,
+    },
+    "gpt-image-2": {
+        label: "GPT Image 2",
+        tiers: [{ input: 0, output: 0 }],
+        imageCostPerGeneration: 0.04,
     },
 };
 
@@ -241,6 +262,10 @@ export function calculateTokenCostUsd(record: Pick<TokenUsageRecord, "model" | "
     const costConfig = findCostConfig(record.model);
     if (!costConfig) {
         return null;
+    }
+
+    if (costConfig.imageCostPerGeneration !== undefined) {
+        return costConfig.imageCostPerGeneration * (record.outputTokens || 1);
     }
 
     const inputTokens = record.inputTokens || 0;
@@ -597,7 +622,14 @@ button:hover{background:#f3f6fb}
     <div class="card"><div class="label">Estimated Cost</div><div class="value" id="cost">$0.0000</div></div>
   </section>
   <section>
-    <h2>Cost By Session</h2>
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px">
+      <h2 style="margin:0">Cost By Session</h2>
+      <div style="display:flex;gap:12px;align-items:center">
+        <button id="prevSessionPage">Previous</button>
+        <span id="sessionPageDisplay" style="font-weight:500;font-size:14px;color:#4a5568">Page 1 of 1</span>
+        <button id="nextSessionPage">Next</button>
+      </div>
+    </div>
     <table><thead><tr><th>Session</th><th>Started</th><th>Calls</th><th>Uncached</th><th>Cached</th><th>Output</th><th>Total</th><th>Avg Latency</th><th>Cost</th></tr></thead><tbody id="sessions"></tbody></table>
   </section>
   <section>
@@ -628,9 +660,24 @@ const seconds = value => value == null ? "" : (Number(value) / 1000).toFixed(2) 
 let openSessions = new Set();
 let latestData = null;
 const esc = value => String(value ?? '').replace(/[&<>"']/g, ch => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[ch]));
+let currentSessionPage = 1;
+const sessionsPerPage = 10;
+
 function renderSessions(data){
+  const sessions = data.bySession || [];
   const calls = data.sessionCalls || {};
-  document.getElementById('sessions').innerHTML = (data.bySession || []).map(row => {
+  const totalPages = Math.max(Math.ceil(sessions.length / sessionsPerPage), 1);
+  if (currentSessionPage > totalPages) {
+    currentSessionPage = totalPages;
+  }
+  document.getElementById('sessionPageDisplay').textContent = 'Page ' + currentSessionPage + ' of ' + totalPages;
+  document.getElementById('prevSessionPage').disabled = currentSessionPage === 1;
+  document.getElementById('nextSessionPage').disabled = currentSessionPage === totalPages;
+
+  const startIdx = (currentSessionPage - 1) * sessionsPerPage;
+  const paginatedSessions = sessions.slice(startIdx, startIdx + sessionsPerPage);
+
+  document.getElementById('sessions').innerHTML = paginatedSessions.map(row => {
     const isOpen = openSessions.has(row.sessionId);
     const sessionCalls = calls[row.sessionId] || [];
     const parent = '<tr class="session-row" data-session="' + esc(row.sessionId) + '"><td class="mono">' + (isOpen ? 'v ' : '> ') + esc(row.sessionId) + '</td><td>' +
@@ -683,7 +730,7 @@ async function refresh(){
     fmt.format(row.outputTokens || 0) + '</td><td>' + fmt.format(row.totalTokens || 0) + '</td><td>' +
     seconds(row.avgLatencyMs) + '</td><td>' + money(row.costUsd) + '</td></tr>'
   ).join('');
-  document.getElementById('recent').innerHTML = (data.recent || []).map(row =>
+  document.getElementById('recent').innerHTML = (data.recent || []).slice(0, 15).map(row =>
     '<tr><td class="mono">' + new Date(row.createdAt).toLocaleTimeString() + '</td><td>' + row.purpose + '</td><td class="mono">' + row.model + '</td><td>' +
     fmt.format(Math.max((row.inputTokens || 0) - (row.cachedInputTokens || 0), 0)) + '</td><td>' + fmt.format(row.cachedInputTokens || 0) + '</td><td>' +
     fmt.format(row.outputTokens || 0) + '</td><td>' + fmt.format(row.totalTokens || ((row.inputTokens || 0) + (row.outputTokens || 0))) + '</td><td>' +
@@ -703,6 +750,22 @@ document.getElementById('closeCosts').onclick = () => document.getElementById('c
 document.getElementById('costModal').addEventListener('click', event => {
   if (event.target.id === 'costModal') event.currentTarget.classList.remove('open');
 });
+document.getElementById('prevSessionPage').onclick = () => {
+  if (currentSessionPage > 1) {
+    currentSessionPage--;
+    if (latestData) renderSessions(latestData);
+  }
+};
+document.getElementById('nextSessionPage').onclick = () => {
+  if (latestData) {
+    const sessions = latestData.bySession || [];
+    const totalPages = Math.ceil(sessions.length / sessionsPerPage);
+    if (currentSessionPage < totalPages) {
+      currentSessionPage++;
+      renderSessions(latestData);
+    }
+  }
+};
 refresh();
 setInterval(refresh, 1000);
 const events = new EventSource('/api/events');
