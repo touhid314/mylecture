@@ -2330,17 +2330,17 @@ let renderViewport = {
   height: ${safeInitialHeight}
 };
 const configuredDefaults = ${JSON.stringify({
-  ttsVoice: defaultTtsVoice,
-  ttsSpeed: defaultTtsSpeed,
-  fps: defaultFps,
-  renderResolution: defaultRenderResolution,
-  renderWidth: defaultRenderViewport.width,
-  renderHeight: defaultRenderViewport.height,
-  aspectRatio: defaultAspectRatio,
-  generationLength: defaultLengthLabel,
-  defaultTheme: agentConfig.defaultTheme || 'default',
-  defaultTeachingStyle: agentConfig.defaultTeachingStyle || 'default'
-})};
+    ttsVoice: defaultTtsVoice,
+    ttsSpeed: defaultTtsSpeed,
+    fps: defaultFps,
+    renderResolution: defaultRenderResolution,
+    renderWidth: defaultRenderViewport.width,
+    renderHeight: defaultRenderViewport.height,
+    aspectRatio: defaultAspectRatio,
+    generationLength: defaultLengthLabel,
+    defaultTheme: agentConfig.defaultTheme || 'default',
+    defaultTeachingStyle: agentConfig.defaultTeachingStyle || 'default'
+  })};
 let userViewportOverride = false;
 let controlsHideTimer = 0;
 let lastPlayerState = null;

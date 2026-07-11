@@ -1626,13 +1626,26 @@ const server = createServer(async (request, response) => {
           }
 
           let task = '';
+          const agentWorkspace = agentWorkspaceRoot(agentState.id);
           if (currentFile) {
-            const relPath = path.relative(rootDir, resolveInputPath(currentFile)).replaceAll(path.sep, '/');
-            task += `[Context: The user is currently viewing the file "${relPath}" in the editor. Use this as the target file if they refer to "this file", "the script", "the code", or "the HTML".]\n\n`;
+            const resolvedFile = resolveInputPath(currentFile);
+            let displayPathForAgent = '';
+            if (resolvedFile.startsWith(agentWorkspace)) {
+              displayPathForAgent = path.relative(agentWorkspace, resolvedFile).replaceAll(path.sep, '/');
+            } else {
+              displayPathForAgent = path.relative(rootDir, resolvedFile).replaceAll(path.sep, '/');
+            }
+            task += `[Context: The user is currently viewing the file "${displayPathForAgent}" in the editor. Use this as the target file if they refer to "this file", "the script", "the code", or "the HTML".]\n\n`;
           }
           if (currentDir) {
-            const relDir = path.relative(rootDir, resolveInputPath(currentDir)).replaceAll(path.sep, '/') || '.';
-            task += `[Context: The folder browser is currently in the directory "${relDir}" of the repository.]\n\n`;
+            const resolvedDir = resolveInputPath(currentDir);
+            let displayDirForAgent = '';
+            if (resolvedDir.startsWith(agentWorkspace)) {
+              displayDirForAgent = path.relative(agentWorkspace, resolvedDir).replaceAll(path.sep, '/') || '.';
+            } else {
+              displayDirForAgent = path.relative(rootDir, resolvedDir).replaceAll(path.sep, '/') || '.';
+            }
+            task += `[Context: The folder browser is currently in the directory "${displayDirForAgent}" of the repository.]\n\n`;
           }
           task += message;
 
