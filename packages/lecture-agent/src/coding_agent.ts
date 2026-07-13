@@ -515,6 +515,7 @@ export class GeminiAgentSession {
         this.toolOptions = toolOptions;
         this.llm = new LLM_Model(model);
         this.tokenTrackerSessionId = resolve_token_tracker_session_id(model, workspaceDir, tokenTrackerSessionId);
+        process.env.TOKEN_TRACKER_SESSION_ID = this.tokenTrackerSessionId;
         this.llm.token_tracker_session_id = this.tokenTrackerSessionId;
         const gemini_max_tokens = process.env.GEMINI_MAX_TOKENS;
         this.config = {
@@ -749,6 +750,7 @@ class JsonFallbackAgentSession {
             true
         );
         this.tokenTrackerSessionId = resolve_token_tracker_session_id(model, workspaceDir, tokenTrackerSessionId);
+        process.env.TOKEN_TRACKER_SESSION_ID = this.tokenTrackerSessionId;
         this.llm.token_tracker_session_id = this.tokenTrackerSessionId;
         this.transcript = [...initialHistory];
         this.userTasks = [];
@@ -1031,6 +1033,7 @@ export class ChatSession {
         this.toolOptions = toolOptions;
         this.onLog = onLog;
         this.tokenTrackerSessionId = resolve_token_tracker_session_id(model, this.workspaceDir, tokenTrackerSessionId);
+        process.env.TOKEN_TRACKER_SESSION_ID = this.tokenTrackerSessionId;
         fs.mkdirSync(this.workspaceDir, { recursive: true });
     }
 
