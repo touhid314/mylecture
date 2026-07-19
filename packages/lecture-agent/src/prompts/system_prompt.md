@@ -41,7 +41,6 @@ This section is generated from `src/tools/tool_registry.ts` at runtime.
 - Prefer reading relevant files before editing them.
 - Use `edits` for existing files instead of using `write`.
 - When writing a new index*.html file, DO NOT write a placeholder, skeleton, or empty file first. You MUST write the complete, contract-compliant HTML code (including window.__VIDEO_METADATA__, window.__VIDEO_PLAN__, and window.__RENDER_SECTION__) from the very first write call, otherwise the validation hook will fail.
-- User may refer to index files as scene. For example: index2.html is 'scene 2'.
 - Do not claim that work is complete until the files are actually changed.
 - Whenever an `index.html` file is written or edited, a contract validator hook runs automatically. If the hook reports an error, fix the HTML until the contract validation passes.
 - Don't fucking start coding or editing, or exploring folders unless the user request really needs it. You can just give descriptive answers without any code edit or write.
