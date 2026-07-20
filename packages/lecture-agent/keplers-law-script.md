@@ -51,14 +51,12 @@ N: That’s Kepler’s second law: nature trading speed for distance, perfectly.
 V: The two highlighted swept areas fade out, leaving just the orbit, the sun and the planet. Below the "Kepler's 2nd law" title, the line "Equal areas in equal times" draws itself on in bold text.
 
 
-
-
 # Scene 2
 N: These two laws came from one obsessive mind.
-V: Everything fades except the elliptical orbit and the sun — they shrink down and drift into the upper-left corner, becoming a small recurring icon. The rest of the screen is now empty black.
+V: A sketched portrait/silhouette of Kepler fades in at center screen. Below it, the name "Johannes Kepler" appears in title text. [(getimg: 'johannes kepler sktech')]
 
 N: Johannes Kepler, a German mathematician working in the early 1600s.
-V: A sketched portrait/silhouette of Kepler fades in at center screen. Below it, the name "Johannes Kepler" appears in title text.
+V: None
 
 N: He didn't have his own telescope — he had something rarer: years of precise naked-eye observations recorded by Tycho Brahe.
 V: Stacks of handwritten astronomical tables appear beside the portrait, pages flipping past, dense with numbers.

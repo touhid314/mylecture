@@ -20,27 +20,16 @@ axis labels: 34px
 small crowded labels: 30px
 big emphasis word: 126px
 
-## For portrait aspect ratio (i.e. 9:16, 3:4 etc.)
-title/headers: 84px 
-subtitle: 36px 
-main teaching text: 48px 
-labels / notes / table text: 36px
-
-- For SVG text: 
-axis labels: 39px 
-small crowded labels: 30px 
-big emphasis word: 140px
-
-Absolute minimum font size: 28px (no text or label may go below this value under any circumstance).
-
-* Use these exact CSS font-size values. Do not use clamp(), vw, vh, rem, em, transform: scale(), zoom, or responsive font sizing for text unless explicitly requested.
-
-* For SVG text, avoid scaling SVG containers in ways that change apparent text size.
-
-- Top 10% and bottom 20% should have no content, to be in fb/insta reels safezone. Make no visible border though. The background should span the full screen though.
-
-- Keep 5% margin on left and right, but again no border
-
 
 ## more
 You can use other fonts if appropriate in certain case.
+
+# padding
+- Every element (text blocks, cards, tables, shapes, images, SVGs) must have clear breathing room from its container edges and from neighboring elements — nothing should touch or crowd another element's boundary.
+- Minimum padding inside any card, box, or bordered container: 5% of that container's own width/height, or 24px, whichever is larger.
+- Minimum gap between sibling elements (columns, rows, grid items, stacked blocks): 3% of the slide width/height, or 20px, whichever is larger.
+- Text must never touch its container's edge or another element's edge. Leave at least one line-height of space between wrapped text and the nearest boundary.
+- Tables: cells need internal padding of at least 12px top/bottom and 16px left/right so text doesn't touch cell borders.
+- Icons/labels paired with text need at least 12px gap between the icon and the text baseline.
+- Respect the existing safe-zone margins above (top 10%, bottom 20%, left/right 5%) as the outermost padding for the whole slide — no element's padding calculation should push content into those zones.
+- When in doubt, add more padding rather than less; cramped or edge-touching elements are a defect.

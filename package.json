@@ -16,6 +16,7 @@
     "subtitle:burn": "node --import tsx src/subtitle-burner.ts",
     "build:viewer": "npm --prefix packages/lecture-viewer run build",
     "version:sync": "node --import tsx src/sync-versions.ts",
+    "rename:gens": "node --import tsx src/rename-gens.ts",
     "ide": "npm run version:sync && npm run build:viewer && node --import tsx src/ide-server.ts",
     "test": "npm run test:build && npm run test:render && npm run test:visual && npm run test:narration",
     "test:build": "node --import tsx src/build-plan.ts --input tests/fixtures/input-contract-test/index.html --out .render/tests/input-contract-resolved.html",

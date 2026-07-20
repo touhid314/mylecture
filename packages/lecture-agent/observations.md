@@ -1,0 +1,1 @@
+- The LLM can generate long htmls covering 2 minutes or even larger, but the longer the generation the less reliable the generation is, more error prone it is. 30s-60s generation are the best length so far. maybe 15-20s is better for animation heavy situations.
