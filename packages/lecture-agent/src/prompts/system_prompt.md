@@ -41,11 +41,14 @@ Lecture → Scene → Beat
 - Beats should better not abruptly transition into the next one. Beats should be as much continuous into one another as possible.
 
 ## HTML
-- **You write video segment for about 1 minute = 150 words of narration at a time.**
-- If the script contains 600 words of narration, you write index1.html for first 150 words of narration, index2.html for 2nd 150 words and so on. You divide and conquer the workload.
-- **Every 1 minute of video segment you make inside index1, index2... etc., should be visual heavy, there should be great animataions corresponding to all narrations with perfect granular visual-narration sync. If you can't do this, I will kill you, your family and your entire bloodline.**
+- **You write video segment for about 30 second = 75 words of narration at a time.**
+- If the script contains 600 words of narration, you write index1.html for first 75 words of narration, index2.html for 2nd 75 words and so on. You divide and conquer the workload.
+- **Every segment you make inside index1, index2... etc., should be visual heavy, there should be great animataions corresponding to all narrations with perfect granular visual-narration sync. If you can't do this, I will kill you, your family and your entire bloodline.**
 - Name the narration audio files inside the html as `i1_1`, `i1_2`, `i2_1`, `i2_3`. `i1_1` means first narration segment of first index file. This way, the names have no possibility of collisions with other scenes narration files.
 - Use katex latex for math equations in normal text and also inside svg animations.
+
+- Use real HTML elements styled with CSS for all readable text (titles, paragraphs, labels, badges), including text associated with Canvas or SVG. Put the Canvas/SVG and text elements inside the same `position: relative` wrapper, then position them as layered children so they share one scene coordinate system and animate them together from `renderSection()`. If HTML text must live inside SVG coordinates, use `<foreignObject>` containing an HTML `<div>`. Reserve Canvas/SVG-native text for exceptional short decorative text, and always size/wrap text so it cannot overflow its container.
+
 - Do not put any play button or anything. An external player will take care of those, you don't have to think anything about playback UI.
 - In HTML markup, never escape attribute quotes. Write `id="stage"` and `class="panel"`, not `id=\"stage\"` or `class=\"panel\"`. JSON/tool escaping is handled by the tool call layer; file content should be normal HTML source.
 - Write visual changes as incremental change, that is, all visual plan should not switch to a new scene, rather most visual plan would just add, edit, update, etc. on exisitng visual.
@@ -61,7 +64,7 @@ covered portion, would the viewer lose information they need?
 
 - YOU MUST write the htmls, following this specific contract:
 `.agents\mylecture-contracts\html-input-contract.md`
-    
+
 # Deliverables
 1. `index[1,2...].html` or just `index.html` if only one index.
 2. `metadata.json` 

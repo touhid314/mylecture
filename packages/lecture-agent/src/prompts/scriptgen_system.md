@@ -36,13 +36,13 @@ If a scene needs no carry-over just don't mention it.
 # Example: 
 
         # Scene 1 
-        N: A planet doesn’t orbit the sun in a perfect circle...
+        N: A planet doesn’t orbit the sun in a perfect circle,
         V: Earth moving around sun in a circular orbit. title 'Kepler's 1st law' on the upper center of the screen.
 
-        N: ...it follows an ellipse... 
+        N: it follows an ellipse,
         V: the circular orbit stretches into an ellipse smoothly. 
 
-        N: ...sometimes closer...
+        N: sometimes closer,
         V: earth moves to the part of the elliptical orbit where it is closer to the sun and the camera zooms to that part to show earth being close to the sun. 
 
         N: sometimes farther away.
@@ -51,25 +51,25 @@ If a scene needs no carry-over just don't mention it.
         N: And here’s the strange part: it doesn’t move at a constant speed.
         V: The title smoothly morphs into: "Kepler's 2nd law'. a velocity vector denoting arrow appears tangent to the earth whose length is changing as the earth orbits around the sun.
 
-        N: When it’s near the sun, it races...
+        N: When it’s near the sun, it races.
         V: The earth gets closer to the sun while the earth moves faster. The camera zooms to that part of the orbit. An anchored text appears with the earth saying "Moving Fast". 
 
-        N: When it’s far, it crawls...
+        N: When it’s far, it crawls.
         V: the camera zooms away into the original position, as the earth moves into the region furthest away from the sun and getting slower. The anchored text morphs into saying "Moving slow".
 
         N: Kepler noticed something hidden in this motion.
         V: no change
 
-        N: If you draw a line connecting the sun and the planet...
+        N: If you draw a line connecting the sun and the planet,
         V: A line draw-on from the sun to the earth.
 
-        N: ...the line sweeps out equal areas in equal time.
+        N: the line sweeps out equal areas in equal time.
         V: As the line is moving a chunk of it's equal swept area is shown highlighted for when the planet is close to the sun and also when far from the sun.
 
-        N: Let's say in january the planet is here.
+        N: Let's say in january the planet is here
         V: The planet is static and an arrow points to the planet saying 'january'
 
-        N: And after 30 days it's here. 
+        N: and after 30 days it's here. 
         V: The planet moves a bit more into it's orbit. Meanwhile the line's swept area is highlighted. At the end of the planet motion an arrow points to the planet saying 'january 30'.
 
         N: Notice the swept out area by the line.
