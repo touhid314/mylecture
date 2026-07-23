@@ -330,17 +330,50 @@ async function validateWithPlaywright(htmlPath) {
     await page.goto(pathToFileURL(htmlPath).href, { waitUntil: 'load', timeout: 5000 });
 
     const result = await page.evaluate(() => {
-      let renderError = null;
-      try {
-        if (typeof window.__RENDER_SECTION__ === 'function' && Array.isArray(window.__VIDEO_PLAN__)) {
-          for (const segment of window.__VIDEO_PLAN__) {
-            if (segment && segment.id) {
-              window.__RENDER_SECTION__(segment, 0, 0);
+      const renderErrors = [];
+      if (typeof window.__RENDER_SECTION__ === 'function' && Array.isArray(window.__VIDEO_PLAN__)) {
+        const plan = window.__VIDEO_PLAN__.filter(segment => segment && segment.id);
+        const maximumSamples = 50;
+        const samplesPerSegment = Math.max(1, Math.min(5, Math.floor(maximumSamples / Math.max(plan.length, 1))));
+        const resolvedEntries = Array.isArray(window.__RESOLVED_TIMELINE__?.videoTimeline)
+          ? window.__RESOLVED_TIMELINE__.videoTimeline
+          : [];
+        const resolvedById = new Map(resolvedEntries.map(entry => [entry.sectionId, entry]));
+        let estimatedGlobalStart = 0;
+
+        for (const segment of plan) {
+          const resolvedEntry = resolvedById.get(segment.id);
+          const narrationWords = typeof segment.text === 'string'
+            ? segment.text.trim().split(/\s+/).filter(Boolean).length
+            : 0;
+          const duration = Number(resolvedEntry?.duration)
+            || Number(segment.resolvedDuration)
+            || Number(segment.duration)
+            || (narrationWords > 0 ? Math.max(2.5, narrationWords / 2.65) : 2.5);
+          const globalStart = Number.isFinite(Number(resolvedEntry?.start))
+            ? Number(resolvedEntry.start)
+            : estimatedGlobalStart;
+          const endTime = Math.max(0, duration - (1 / 30));
+          const localTimes = samplesPerSegment === 1
+            ? [0]
+            : Array.from({ length: samplesPerSegment }, (_, index) =>
+                index === samplesPerSegment - 1
+                  ? endTime
+                  : duration * (index / (samplesPerSegment - 1))
+              );
+
+          for (const localTime of [...new Set(localTimes.map(value => Number(value.toFixed(6))))]) {
+            try {
+              window.__RENDER_SECTION__(segment, localTime, globalStart + localTime);
+            } catch (err) {
+              renderErrors.push(
+                `segment '${segment.id}' at localTime=${localTime.toFixed(3)}s: ${err.name || 'Error'}: ${err.message || err}`
+              );
+              break;
             }
           }
+          estimatedGlobalStart = globalStart + duration;
         }
-      } catch (err) {
-        renderError = `${err.name || 'Error'}: ${err.message || err}`;
       }
 
       return {
@@ -350,7 +383,7 @@ async function validateWithPlaywright(htmlPath) {
         __START_INTERACTIVE_TYPE__: typeof window.__START_INTERACTIVE__,
         __START_GAME_TYPE__: typeof window.__START_GAME__,
         __STOP_GAME_TYPE__: typeof window.__STOP_GAME__,
-        renderError
+        renderErrors
       };
     });
 
@@ -364,8 +397,8 @@ async function validateWithPlaywright(htmlPath) {
     };
 
     const errors = runChecks(windowObj);
-    if (result.renderError) {
-      errors.push(`__RENDER_SECTION__ execution failed on browser test call: ${result.renderError}`);
+    for (const renderError of result.renderErrors || []) {
+      errors.push(`__RENDER_SECTION__ execution failed during temporal sample: ${renderError}`);
     }
     if (errors.some((err) => err.startsWith('Missing window.__')) && scriptErrors.length > 0) {
       return [
@@ -404,17 +437,15 @@ async function main() {
     errors = ["VM compilation/execution failed"];
   }
 
-  // 2. If VM check found errors, fallback to Playwright to see if dynamic execution resolves them
-  if (errors.length > 0) {
-    try {
-      const playwrightErrors = await validateWithPlaywright(absolutePath);
-      errors = playwrightErrors;
-      mode = 'playwright';
-    } catch (pwErr) {
-      // If Playwright fails or isn't installed/configured, stick with VM errors but append a diagnostic warning
-      const details = (pwErr.message || String(pwErr)).split('\n')[0].trim();
-      errors.push(`Playwright validation fallback failed: ${details}. (Run 'npx playwright install' to ensure browser binaries are downloaded)`);
-    }
+  // 2. Always run the browser check. Runtime animation errors often occur only
+  // after localTime advances and cannot be detected by the lightweight VM mocks.
+  try {
+    const playwrightErrors = await validateWithPlaywright(absolutePath);
+    errors = playwrightErrors;
+    mode = 'playwright';
+  } catch (pwErr) {
+    const details = (pwErr.message || String(pwErr)).split('\n')[0].trim();
+    errors.push(`Playwright validation failed: ${details}. (Run 'npx playwright install' to ensure browser binaries are downloaded)`);
   }
 
   if (errors.length > 0) {

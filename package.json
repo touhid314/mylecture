@@ -9,6 +9,7 @@
   "type": "module",
   "scripts": {
     "agent": "tsx packages/lecture-agent/src/cli.ts",
+    "static-flow": "tsx packages/lecture-agent/src/staticflow/cli.ts",
     "chat": "tsx packages/lecture-agent/src/cli.ts --chat",
     "token-tracker": "tsx packages/lecture-agent/src/token_tracker_dashboard.ts",
     "build:plan": "node --import tsx src/build-plan.ts",
