@@ -1,10 +1,10 @@
-# Video Maker Workflow
+# LectureGen Workflow
 
-This document describes how the static video-maker pipeline is wired, from a
-CLI or IDE request to the generated `index*.html` files and the IDE's editor
-mode.
+This document describes how the static lesson-generation pipeline is wired,
+from a CLI or IDE request to video scenes, an interactive segment, a practice
+game, or any selected combination of those outputs.
 
-The video maker creates browser-authored lecture scenes. It does not render the
+LectureGen creates browser-authored lecture scenes. It does not render the
 final MP4 itself. The generated HTML files are later resolved and rendered by
 the repository's build-plan and render-video pipelines.
 
@@ -12,29 +12,35 @@ the repository's build-plan and render-video pipelines.
 
 ```mermaid
 flowchart TD
-    U[User video request] --> ENTRY{Entry point}
-    ENTRY -->|IDE| IDE["POST /video-maker/generate"]
-    ENTRY -->|CLI| CLI["src/video_maker.ts CLI"]
+    U[User learning request] --> ENTRY{Entry point}
+    ENTRY -->|IDE| IDE["POST /lecturegen/generate"]
+    ENTRY -->|CLI| CLI["src/lecturegen.ts CLI"]
 
     IDE --> WS[Use IDE-created unique generation workspace]
     CLI --> NEWWS[Create unique generation workspace]
     NEWWS --> WS
 
     WS --> PARSE[Parse request and generation settings]
-    PARSE --> INPUTS["Request + aspect ratio + length + subtitles<br/>theme + teaching style + attachments + getimg flag"]
+    PARSE --> INPUTS["Request + output flags + aspect ratio + length<br/>theme + teaching style + attachments + getimg flag"]
+    INPUTS --> VIDEO{Video selected?}
 
-    INPUTS --> ANSWER[Answer Generator LLM]
+    VIDEO -->|Yes| ANSWER[Answer Generator LLM]
     ANSWER --> ANSWERFILE["Write answer.md"]
 
     ANSWERFILE --> SCRIPT[Script Writer LLM]
-    SCRIPT --> GETIMG{getimg enabled?}
+    SCRIPT --> POLICY{getimg enabled?}
+    POLICY -->|No| STRIP[Remove image requests from script]
+    POLICY -->|Yes| SCRIPTFILE["Write script.md"]
+    STRIP --> SCRIPTFILE
 
-    GETIMG -->|No| STRIP[Remove image requests from script]
+    SCRIPTFILE --> FORK["Start selected work in parallel"]
+    FORK --> GETIMG{getimg enabled?}
     GETIMG -->|Yes| ASSETS["Asset Fetcher<br/>collect and download requested images"]
-    STRIP --> SCRIPTFILE["Write script.md"]
-    ASSETS --> SCRIPTFILE
+    GETIMG -->|No| TRIM
+    ASSETS --> TRIM["Script Trimmer<br/>split on complete N: narration beats"]
+    FORK -->|If selected| IAGEN["IAGen LLM"]
+    FORK -->|If selected| GAMEGEN["GameGen LLM"]
 
-    SCRIPTFILE --> TRIM["Script Trimmer<br/>split on complete N: narration beats"]
     TRIM --> BLOCKS["Sequential narration blocks<br/>min = ceil(max / 2)"]
 
     BLOCKS --> LOOP{For each block}
@@ -50,7 +56,15 @@ flowchart TD
 
     KEEP --> MORE{More script blocks?}
     MORE -->|Yes| LOOP
-    MORE -->|No| META["Write metadata.json"]
+    MORE -->|No| JOIN["Join selected parallel generation"]
+    IAGEN --> JOIN
+    GAMEGEN --> JOIN
+    VIDEO -->|No| DIRECT["Use request directly<br/>skip video-only stages"]
+    DIRECT -->|If selected| IAGEN
+    DIRECT -->|If selected| GAMEGEN
+    DIRECT --> JOIN
+    JOIN --> WRITEEXTRAS["Write interactive.html / game.html"]
+    WRITEEXTRAS --> META["Write metadata.json"]
 
     META --> RESULT["Return workspace, entry file,<br/>all HTML files, and completion message"]
     RESULT -->|IDE| EDITMODE["Switch client phase to edit<br/>open first index file"]
@@ -61,9 +75,9 @@ flowchart TD
 
 ### Programmatic API
 
-`generateVideo(options)` in `video_maker.ts` is the main programmatic entry
+`generateLecture(options)` in `lecturegen.ts` is the main programmatic entry
 point. The IDE calls it with an already-created generation workspace. Other
-callers may instead pass a parent workspace and let the video maker create a
+callers may instead pass a parent workspace and let LectureGen create a
 unique child directory.
 
 Important inputs include:
@@ -76,8 +90,10 @@ Important inputs include:
 - `theme`
 - `teachingStyle`
 - `attachments`
-- `embedSubtitles`
 - `enableGetimg`
+- `includeVideo`
+- `includeInteractive`
+- `includeGame`
 - optional cancellation signal, token-tracker session ID, and log callback
 
 The returned result contains:
@@ -85,40 +101,65 @@ The returned result contains:
 - the generation ID
 - the absolute workspace directory
 - the first generated HTML file as `entryFile`
-- all generated `index*.html` paths
+- all generated HTML paths
+- video-only `index*.html` paths
+- optional `interactive.html` and `game.html` paths
 - a short completion message
 
 ### CLI
 
-Running `src/video_maker.ts` directly activates the CLI control in the same
+Running `src/lecturegen.ts` directly activates the CLI control in the same
 module. It parses CLI options, creates a unique generation directory beneath
-`--workspace`, then calls the same `generateVideo()` API used by other callers.
+`--workspace`, then calls the same `generateLecture()` API used by other callers.
 
 Example:
 
 ```powershell
-npm run video-maker -- --workspace "D:\mylecture\video-generations" --length 1:30 --aspect-ratio 16:9 "Explain binary search"
+npm run lecturegen -- --workspace "D:\mylecture\video-generations" --length 1:30 --aspect-ratio 16:9 "Explain binary search"
 ```
 
 Use `--no-getimg` to prevent the script writer from requesting images and to
 skip the asset fetcher.
+
+Use `--interactive` and/or `--game` to add those outputs. Use `--no-video` to
+create only the selected standalone experience:
+
+```powershell
+npm run lecturegen -- --workspace ".\gens" --no-video --interactive --game "Teach vector addition"
+```
 
 ### IDE
 
 The viewer sends the first chat request to:
 
 ```text
-POST /video-maker/generate
+POST /lecturegen/generate
 ```
 
 The IDE server:
 
 1. Creates a unique folder under the configured `agent.generationDir`.
-2. Parses the visible request and hidden generation controls.
-3. Calls `generateVideo()` with that exact folder as `workspaceDir`.
-4. Streams video-maker logs to the IDE.
-5. Opens the returned entry HTML after successful generation.
-6. Changes that client from `generate` phase to `edit` phase.
+2. Parses the visible request, the three output checkboxes, and hidden
+   generation controls.
+3. Initializes the Image download checkbox from `agent.enableGetimgTool` in
+   `config.yaml`, then uses the checkbox value submitted with the request.
+4. Calls `generateLecture()` with that exact folder as `workspaceDir`.
+5. Streams LectureGen logs to the IDE.
+6. Opens the returned entry HTML after successful generation.
+7. Changes that client from `generate` phase to `edit` phase.
+
+The initial Image download checkbox state comes from:
+
+```yaml
+agent:
+  enableGetimgTool: true
+```
+
+Set it to `false` for an unchecked default or `true` for a checked default.
+Before sending a generation request, the user can override that default with
+the visible Image download checkbox. When unchecked, LectureGen tells the
+script writer not to request external images, strips any remaining image
+requests, and skips the asset fetcher.
 
 Later chat messages go to:
 
@@ -132,15 +173,17 @@ edits only to workspace-root `index.html` or `indexN.html` files.
 
 ## Request Parsing
 
-`parseVideoMakerRequest()` separates the user's actual request from the hidden
+`parseLectureGenRequest()` separates the user's actual request from the hidden
 settings appended by the IDE or API wrapper:
 
 ```text
-if the user query is for video generation then follow this:
+if the user query is for lecture generation then follow this:
 aspect ratio: 16:9
 generation length: 1:00
-embed subtitle in video: no
 getimg enabled: yes
+output video: yes
+output interactive: no
+output practice game: no
 theme: ...
 teaching style: ...
 ```
@@ -155,8 +198,11 @@ When the API receives attachments outside the generation directory, it copies
 them into the generation's `uploads/` folder. LLM providers receive supported
 binary attachments separately from the text prompt.
 
-If no theme or teaching style is supplied, the video maker loads the default
+If no theme or teaching style is supplied, LectureGen loads the default
 resources from `.agents/`.
+
+At least one output flag must be enabled. Video defaults to enabled for API and
+CLI compatibility; interactive and game default to disabled.
 
 ## Pipeline Stages
 
@@ -258,7 +304,6 @@ For each block, the animator receives:
 - current block number and total block count
 - current trimmed script block
 - theme and teaching style
-- subtitle setting
 - available asset descriptions
 - attachments
 - a summary of previously validated HTML files
@@ -311,6 +356,34 @@ validator output if the file still does not pass.
 The validator includes runtime sampling at multiple local times, so failures
 that appear only after an animation progresses can be detected before render.
 
+### 6. IAGen
+
+`iagen.ts` uses `prompts/iagen_system.md`. It receives the user request, aspect
+ratio, attachments, and optional script reference. Its response is plain HTML
+code written to `interactive.html`. This file has no MyLecture contract and no
+required global functions.
+
+When video and interactive output are both selected, IAGen starts immediately
+after `script.md` is written and runs concurrently with asset preparation and
+the animator loop.
+
+### 7. GameGen
+
+`gamegen.ts` uses `prompts/gamegen_system.md` with the same request and
+reference-material rules. It writes the returned HTML code to `game.html`.
+This file has no MyLecture contract or required global functions; the design
+prompt still requests a mission overlay, replay behavior, and a score capped
+at 100.
+
+When video and game output are both selected, GameGen starts immediately after
+`script.md` is written and runs concurrently with asset preparation and the
+animator loop. If IAGen is also selected, all three generation branches run
+concurrently. LectureGen joins the selected branches before writing metadata
+and returning success.
+
+When video output is disabled, stages 1 through 5 are skipped and these makers
+work directly from the request and attachments.
+
 ## Workspace Output
 
 A completed generation normally looks like:
@@ -321,6 +394,8 @@ A completed generation normally looks like:
   script.md
   metadata.json
   index.html
+  interactive.html
+  game.html
   uploads/
   assets/
 ```
@@ -348,13 +423,15 @@ description.
 
 | Module | Responsibility |
 | --- | --- |
-| `video_maker.ts` | Main orchestration, API, CLI, workspace creation, attachment copying, and final result |
+| `lecturegen.ts` | Main orchestration, API, CLI, workspace creation, attachment copying, and final result |
 | `answer_generator.ts` | Generates the educational answer |
 | `script_writer.ts` | Converts the answer into an audiovisual script |
 | `asset_fetcher.ts` | Parses, downloads, or generates requested image assets |
 | `script_trimmer.ts` | Partitions complete narration beats into bounded blocks |
 | `animator.ts` | Maintains the sequential animator session and validation/repair loop |
-| `video_maker_shared.ts` | Shared LLM session, prompt-loading, attachment, and filename helpers |
+| `iagen.ts` | Produces the standalone interactive experience |
+| `gamegen.ts` | Produces the standalone practice game |
+| `lecturegen_shared.ts` | Shared LLM session, prompt-loading, attachment, and filename helpers |
 | `prompt_builder.ts` | Inlines prompt resources and extracts attachment directives |
 | `utils/html_contract.ts` | Purifies and validates generated lecture HTML |
 | `utils/file_edits.ts` | Applies animator repair edits |
@@ -362,12 +439,12 @@ description.
 
 ## Failure and Cancellation Behavior
 
-- The static `VideoMaker` session accepts only one generation request.
-- A second request requires a new video-maker session or IDE New Chat.
-- Missing `SCRIPT_TRIMMER_CHUNK_SIZE` is an error; there is no fallback.
+- The static `LectureGen` session accepts only one generation request.
+- A second request requires a new LectureGen session or IDE New Chat.
+- Missing `SCRIPT_TRIMMER_CHUNK_SIZE` is an error when video is selected; it is
+  not read on interactive/game-only runs.
 - Missing required request/model values fail before generation.
 - A cancellation signal stops between pipeline stages and animator blocks.
-- Asset failures, invalid animator output, and exhausted validator repairs stop
-  the workflow with an error.
-- The IDE changes to edit mode only after `generateVideo()` succeeds.
-
+- Asset failures, invalid animator/interactive/game output, and exhausted
+  validator repairs stop the workflow with an error.
+- The IDE changes to edit mode only after `generateLecture()` succeeds.

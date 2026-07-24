@@ -4,13 +4,13 @@ import path from 'node:path';
 import { build_prompt } from './prompt_builder.js';
 import { LLM_Model } from './utils/llm_model.js';
 
-export type VideoMakerAttachment = {
+export type LectureGenAttachment = {
     path: string;
     kind: 'image' | 'pdf' | 'video';
     mimeType?: string;
 };
 
-export type VideoMakerLlmOptions = {
+export type LectureGenLlmOptions = {
     model: string;
     tokenTrackerSessionId?: string | null;
     promptWorkspaceDir?: string;
@@ -18,7 +18,7 @@ export type VideoMakerLlmOptions = {
 
 export function readPrompt(promptPath: string): string {
     if (!fs.existsSync(promptPath)) {
-        throw new Error(`Video-maker prompt not found: ${promptPath}`);
+        throw new Error(`LectureGen prompt not found: ${promptPath}`);
     }
     return fs.readFileSync(promptPath, 'utf8');
 }
@@ -30,11 +30,11 @@ function responseText(response: any, purpose: string): string {
 }
 
 export async function runLlm(
-    options: VideoMakerLlmOptions,
+    options: LectureGenLlmOptions,
     purpose: string,
     systemPrompt: string,
     userPrompt: string,
-    attachments: VideoMakerAttachment[] = []
+    attachments: LectureGenAttachment[] = []
 ): Promise<string> {
     const workspaceDir = options.promptWorkspaceDir || process.cwd();
     const llm = new LLM_Model(options.model, build_prompt(systemPrompt, workspaceDir));
@@ -56,12 +56,12 @@ export async function runLlm(
  * Retains complete request/response history so sequential calls have an exact,
  * cacheable prefix, matching the coding agent's within-turn behavior.
  */
-export class VideoMakerLlmSession {
+export class LectureGenLlmSession {
     private readonly llm: LLM_Model;
     private attachmentsAdded = false;
     private readonly promptWorkspaceDir: string;
 
-    constructor(options: VideoMakerLlmOptions, systemPrompt: string) {
+    constructor(options: LectureGenLlmOptions, systemPrompt: string) {
         this.promptWorkspaceDir = options.promptWorkspaceDir || process.cwd();
         this.llm = new LLM_Model(
             options.model,
@@ -73,7 +73,7 @@ export class VideoMakerLlmSession {
     async generate(
         purpose: string,
         userPrompt: string,
-        attachments: VideoMakerAttachment[] = []
+        attachments: LectureGenAttachment[] = []
     ): Promise<string> {
         this.llm.token_tracker_purpose = purpose;
         // Attach binary inputs once. They remain part of retained history; adding
@@ -96,7 +96,32 @@ export class VideoMakerLlmSession {
 export function safeRelativeFile(value: string): string {
     const normalized = value.trim().replaceAll('\\', '/').replace(/^\.\//, '');
     if (!normalized || path.posix.isAbsolute(normalized) || normalized.split('/').includes('..')) {
-        throw new Error(`Unsafe video-maker output path: ${value}`);
+        throw new Error(`Unsafe LectureGen output path: ${value}`);
     }
     return normalized;
+}
+
+export function parseSingleHtmlDocument(response: string, purpose: string): string {
+    let content = response.trim();
+    content = content.replace(/^```html\s*/i, '').replace(/\s*```$/, '').trim();
+    const openingTags = content.match(/<html\b/gi)?.length || 0;
+    const closingTags = content.match(/<\/html\s*>/gi)?.length || 0;
+    if (openingTags !== 1 || closingTags !== 1) {
+        throw new Error(`${purpose} must return exactly one complete HTML document.`);
+    }
+    const htmlStart = content.search(/<html\b/i);
+    const doctypeStart = content.search(/<!doctype\s+html/i);
+    const start = doctypeStart >= 0 && doctypeStart < htmlStart ? doctypeStart : htmlStart;
+    const endMatches = [...content.matchAll(/<\/html\s*>/gi)];
+    const finalEnd = endMatches.at(-1);
+    const end = finalEnd ? (finalEnd.index || 0) + finalEnd[0].length : -1;
+    if (start < 0 || end <= start) {
+        throw new Error(`${purpose} must return one complete HTML document ending with </html>.`);
+    }
+    const prefix = content.slice(0, start).trim();
+    const suffix = content.slice(end).trim();
+    if (prefix || suffix) {
+        throw new Error(`${purpose} returned text outside the HTML document.`);
+    }
+    return content.slice(start, end).trim();
 }

@@ -20,7 +20,7 @@ import sharp from 'sharp';
 import { build_prompt } from './prompt_builder.js';
 import { resolve_workspace_path } from './workspace.js';
 import { LLM_Model } from './utils/llm_model.js';
-import { safeRelativeFile } from './video_maker_shared.js';
+import { safeRelativeFile } from './lecturegen_shared.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);

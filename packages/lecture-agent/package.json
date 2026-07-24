@@ -7,7 +7,7 @@
   "scripts": {
     "agent": "tsx src/editor-agent/cli.ts",
     "editor-agent": "tsx src/editor-agent/cli.ts",
-    "video-maker": "tsx src/video_maker.ts",
+    "lecturegen": "tsx src/lecturegen.ts",
     "prompt-builder": "tsx src/prompt_builder.ts",
     "token-tracker": "tsx src/token-tracker/token_tracker_dashboard.ts",
     "test": "tsc --noEmit"

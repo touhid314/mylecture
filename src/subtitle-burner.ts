@@ -3,15 +3,16 @@
  * subtitle-burner.ts
  * Summer 2026, Touhidul Islam
  *
- * Burns subtitles into a rendered MP4. The script accepts an existing SRT
- * file or can generate one with a local Whisper CLI, converts the cues to ASS
- * styling, and invokes ffmpeg to produce either overlay captions or a padded
- * below-video caption layout.
+ * Burns subtitles into a rendered MP4. The script reads exact narration cues
+ * from resolved lecture HTML, accepts an existing SRT, or can generate one
+ * with a local Whisper CLI. It converts cues to ASS styling and invokes ffmpeg
+ * to produce either overlay captions or a padded below-video caption layout.
  */
 import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { spawn } from 'node:child_process';
+import { fileURLToPath } from 'node:url';
 
 const rootDir = process.cwd();
 
@@ -21,9 +22,13 @@ function parseArgs(argv) {
     input: '',
     output: '',
     srt: '',
+    resolvedHtml: [],
     autoWhisper: false,
     whisperModel: 'base',
     layout: 'overlay',
+    font: 'Arial',
+    fontSize: null,
+    bottomPercent: 8,
     belowPixels: null,
     belowAspect: '',
     belowHeightAspect: '',
@@ -37,9 +42,13 @@ function parseArgs(argv) {
     if (arg === '--input') args.input = next, i++;
     else if (arg === '--out') args.output = next, i++;
     else if (arg === '--srt') args.srt = next, i++;
+    else if (arg === '--resolved-html') args.resolvedHtml.push(next), i++;
     else if (arg === '--auto-whisper') args.autoWhisper = true;
     else if (arg === '--whisper-model') args.whisperModel = next, i++;
     else if (arg === '--layout') args.layout = String(next || '').toLowerCase(), i++;
+    else if (arg === '--font') args.font = String(next || '').trim(), i++;
+    else if (arg === '--font-size') args.fontSize = Number(next), i++;
+    else if (arg === '--bottom-percent') args.bottomPercent = Number(next), i++;
     else if (arg === '--below-pixels') args.belowPixels = Number(next), i++;
     else if (arg === '--below-aspect') args.belowAspect = next, i++;
     else if (arg === '--below-height-aspect') args.belowHeightAspect = next, i++;
@@ -54,8 +63,20 @@ function parseArgs(argv) {
 
   if (!args.input) throw new Error('--input is required');
   if (!args.output) args.output = defaultOutputPath(args.input, args.layout);
-  if (!args.srt && !args.autoWhisper) throw new Error('Provide --srt <file> or --auto-whisper');
+  if (!args.srt && !args.autoWhisper && args.resolvedHtml.length === 0) {
+    throw new Error('Provide --srt <file>, --resolved-html <file>, or --auto-whisper');
+  }
+  if ([Boolean(args.srt), args.autoWhisper, args.resolvedHtml.length > 0].filter(Boolean).length > 1) {
+    throw new Error('Use only one subtitle source: --srt, --resolved-html, or --auto-whisper');
+  }
   if (!['overlay', 'below'].includes(args.layout)) throw new Error('--layout must be overlay or below');
+  if (!args.font) throw new Error('--font must not be empty');
+  if (args.fontSize !== null && (!Number.isFinite(args.fontSize) || args.fontSize < 12 || args.fontSize > 200)) {
+    throw new Error('--font-size must be between 12 and 200');
+  }
+  if (!Number.isFinite(args.bottomPercent) || args.bottomPercent < 0 || args.bottomPercent > 50) {
+    throw new Error('--bottom-percent must be between 0 and 50');
+  }
   if (args.belowPixels !== null && (!Number.isInteger(args.belowPixels) || args.belowPixels <= 0)) {
     throw new Error('--below-pixels must be a positive integer');
   }
@@ -75,9 +96,13 @@ Options:
   --input <file>          Rendered MP4 to subtitle.
   --out <file>            Output MP4. Default: <input>-subtitled.mp4 or <input>-subtitled-below.mp4
   --srt <file>            Subtitle source.
+  --resolved-html <file>  Read exact narration text/timing from resolved HTML. Repeat for scene batches.
   --auto-whisper          Generate SRT using a local whisper CLI, then burn it.
   --whisper-model <name>  Whisper model when --auto-whisper is used. Default: base
   --layout <mode>         overlay or below. Default: overlay
+  --font <name>           Subtitle font family. Default: Arial
+  --font-size <number>    Subtitle font size in video pixels. Default: automatic
+  --bottom-percent <n>    Centered subtitle distance from frame bottom. Default: 8
   --below-pixels <n>      Caption band height for --layout below. Default: 5% of added height.
   --below-aspect <w:h>    Target output width:height for --layout below. Default: 9:16.
   --below-height-aspect <h:w>
@@ -231,15 +256,17 @@ function escapeAssText(text) {
 }
 
 // Build the ASS subtitle file used by ffmpeg's subtitles filter.
-function buildAss(cues, dimensions, layout, bandHeight) {
+function buildAss(cues, dimensions, layout, bandHeight, style = {}) {
   const { width, height } = dimensions;
-  const fontSize = layout === 'below'
+  const automaticFontSize = layout === 'below'
     ? Math.max(54, Math.min(72, Math.round((bandHeight || height * 0.125) * 0.56)))
     : Math.max(30, Math.min(62, Math.round(height * 0.036)));
+  const fontSize = style.fontSize || automaticFontSize;
   const marginV = layout === 'below'
     ? Math.max(12, Math.round((bandHeight || height * 0.125) * 0.16))
-    : Math.max(54, Math.round(height * 0.08));
+    : Math.round(height * (style.bottomPercent ?? 8) / 100);
   const marginH = Math.max(48, Math.round(width * 0.08));
+  const fontName = String(style.font || 'Arial').replace(/,/g, '');
   const positionedPrefix = layout === 'below' && dimensions.subtitleY
     ? `{\\an5\\pos(${Math.round(width / 2)},${Math.round(dimensions.subtitleY)})}`
     : '';
@@ -255,7 +282,7 @@ ScaledBorderAndShadow: yes
 
 [V4+ Styles]
 Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding
-Style: Social,Arial,${fontSize},&H30FFFFFF,&H30FFFFFF,&H70000000,&HCC000000,1,0,0,0,100,100,0,0,1,4,1,2,${marginH},${marginH},${marginV},1
+Style: Social,${fontName},${fontSize},&H30FFFFFF,&H30FFFFFF,&H70000000,&HCC000000,1,0,0,0,100,100,0,0,1,4,1,2,${marginH},${marginH},${marginV},1
 
 [Events]
 Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
@@ -328,9 +355,37 @@ async function generateWhisperSrt(inputPath, tempDir, model) {
   return expected;
 }
 
-// CLI entrypoint: get captions, generate ASS, run ffmpeg, and clean temp files.
-async function main() {
-  const args = parseArgs(process.argv.slice(2));
+// Read exact narration cues from one or more resolved lecture files.
+export function cuesFromResolvedHtml(files) {
+  const cues = [];
+  let sceneOffset = 0;
+  for (const file of files) {
+    const htmlPath = resolveProjectPath(file);
+    assertFileExists(htmlPath, 'Resolved HTML file');
+    const html = readFileSync(htmlPath, 'utf8');
+    const match = html.match(/<script\s+id=["']resolved-timeline["'][^>]*>\s*window\.__RESOLVED_TIMELINE__\s*=\s*([\s\S]*?);\s*<\/script>/i);
+    if (!match) throw new Error(`Resolved timeline not found in ${htmlPath}`);
+    const timeline = JSON.parse(match[1]);
+    const audioTimeline = Array.isArray(timeline.audioTimeline) ? timeline.audioTimeline : [];
+    for (const cue of audioTimeline) {
+      const start = sceneOffset + Number(cue.start);
+      const duration = Number(cue.duration);
+      const text = String(cue.text || '').trim();
+      if (Number.isFinite(start) && Number.isFinite(duration) && duration > 0 && text) {
+        cues.push({ start, end: start + duration, text });
+      }
+    }
+    const sceneDuration = Number(timeline.duration);
+    if (!Number.isFinite(sceneDuration) || sceneDuration <= 0) {
+      throw new Error(`Invalid resolved timeline duration in ${htmlPath}`);
+    }
+    sceneOffset += sceneDuration;
+  }
+  return cues;
+}
+
+// Burn subtitles into one rendered video.
+export async function burnSubtitles(args) {
   const inputPath = resolveProjectPath(args.input);
   const outputPath = resolveProjectPath(args.output);
   assertFileExists(inputPath, 'Input video');
@@ -339,20 +394,31 @@ async function main() {
   mkdirSync(tempDir, { recursive: true });
 
   try {
-    const srtPath = args.autoWhisper
-      ? await generateWhisperSrt(inputPath, tempDir, args.whisperModel)
-      : resolveProjectPath(args.srt);
-    assertFileExists(srtPath, 'SRT file');
-
     const sourceDimensions = await probeVideo(inputPath);
     const outputDimensions = args.layout === 'below'
       ? belowDimensions(sourceDimensions, args)
       : { ...sourceDimensions, bandHeight: 0 };
     const assPath = path.join(tempDir, 'captions.ass');
-    const cues = parseSrt(readFileSync(srtPath, 'utf8'));
-    if (!cues.length) throw new Error(`No subtitle cues found in ${srtPath}`);
+    let cues;
+    let subtitleSource;
+    if (args.resolvedHtml.length > 0) {
+      cues = cuesFromResolvedHtml(args.resolvedHtml);
+      subtitleSource = args.resolvedHtml.map(resolveProjectPath).join(', ');
+    } else {
+      const srtPath = args.autoWhisper
+        ? await generateWhisperSrt(inputPath, tempDir, args.whisperModel)
+        : resolveProjectPath(args.srt);
+      assertFileExists(srtPath, 'SRT file');
+      cues = parseSrt(readFileSync(srtPath, 'utf8'));
+      subtitleSource = srtPath;
+    }
+    if (!cues.length) throw new Error(`No subtitle cues found in ${subtitleSource}`);
 
-    writeFileSync(assPath, buildAss(cues, outputDimensions, args.layout, outputDimensions.bandHeight), 'utf8');
+    writeFileSync(assPath, buildAss(cues, outputDimensions, args.layout, outputDimensions.bandHeight, {
+      font: args.font,
+      fontSize: args.fontSize,
+      bottomPercent: args.bottomPercent
+    }), 'utf8');
     mkdirSync(path.dirname(outputPath), { recursive: true });
 
     const subtitlesFilter = `subtitles='${escapeFilterPath(assPath)}'`;
@@ -373,8 +439,9 @@ async function main() {
     ]);
 
     console.log(`Input: ${inputPath}`);
-    console.log(`Subtitles: ${srtPath}`);
+    console.log(`Subtitles: ${subtitleSource}`);
     console.log(`Layout: ${args.layout}`);
+    console.log(`Style: ${args.font}, ${args.fontSize || 'automatic'}px, ${args.bottomPercent}% from bottom, centered`);
     console.log(`Output: ${outputPath}`);
     console.log(`Output size: ${outputDimensions.width}x${outputDimensions.height}`);
   } finally {
@@ -383,7 +450,14 @@ async function main() {
   }
 }
 
-main().catch(error => {
-  console.error(error.message);
-  process.exit(1);
-});
+// CLI entrypoint: get captions, generate ASS, run ffmpeg, and clean temp files.
+async function main() {
+  await burnSubtitles(parseArgs(process.argv.slice(2)));
+}
+
+if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
+  main().catch(error => {
+    console.error(error.message);
+    process.exit(1);
+  });
+}

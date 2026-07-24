@@ -4,7 +4,7 @@ import { fileURLToPath } from 'node:url';
 
 import { tool_edits, type RangeEdit } from './utils/file_edits.js';
 import { validate_index_html_contract, purify_content_for_path } from './utils/html_contract.js';
-import { VideoMakerLlmSession, readPrompt, type VideoMakerAttachment, type VideoMakerLlmOptions } from './video_maker_shared.js';
+import { LectureGenLlmSession, readPrompt, type LectureGenAttachment, type LectureGenLlmOptions } from './lecturegen_shared.js';
 
 const moduleDir = path.dirname(fileURLToPath(import.meta.url));
 const systemPromptPath = path.resolve(moduleDir, 'prompts', 'animator_system.md');
@@ -12,11 +12,10 @@ const contractPath = path.resolve(moduleDir, '..', '.agents', 'mylecture-contrac
 
 export type PreviousHtml = { path: string; content: string };
 
-export type AnimatorInput = VideoMakerLlmOptions & {
+export type AnimatorInput = LectureGenLlmOptions & {
     request: string;
     aspectRatio: string;
     generationLength: string;
-    embedSubtitles: boolean;
     scriptBlock: string;
     blockIndex: number;
     totalBlocks: number;
@@ -25,7 +24,7 @@ export type AnimatorInput = VideoMakerLlmOptions & {
     teachingStyle: string;
     assetDescriptions: string;
     previousHtmls: PreviousHtml[];
-    attachments?: VideoMakerAttachment[];
+    attachments?: LectureGenAttachment[];
 };
 
 export type AnimatorRepairInput = AnimatorInput & {
@@ -38,13 +37,13 @@ export function animatorSystemPrompt(): string {
 }
 
 export class AnimatorSession {
-    private readonly llm: VideoMakerLlmSession;
+    private readonly llm: LectureGenLlmSession;
 
-    constructor(options: VideoMakerLlmOptions) {
-        this.llm = new VideoMakerLlmSession(options, animatorSystemPrompt());
+    constructor(options: LectureGenLlmOptions) {
+        this.llm = new LectureGenLlmSession(options, animatorSystemPrompt());
     }
 
-    generate(purpose: string, prompt: string, attachments: VideoMakerAttachment[] = []): Promise<string> {
+    generate(purpose: string, prompt: string, attachments: LectureGenAttachment[] = []): Promise<string> {
         return this.llm.generate(purpose, prompt, attachments);
     }
 }
@@ -82,7 +81,6 @@ export async function animateScriptBlock(input: AnimatorInput, session: Animator
         `Original video request: ${input.request}`,
         `Aspect ratio: ${input.aspectRatio}`,
         `Full requested generation length: ${input.generationLength}`,
-        `Embed subtitles: ${input.embedSubtitles ? 'yes' : 'no'}`,
         '',
         '# Teaching Style', input.teachingStyle,
         '',
@@ -96,7 +94,7 @@ export async function animateScriptBlock(input: AnimatorInput, session: Animator
         '',
         `Create only ${input.outputPath}. Continue coherently from the previous HTML files while implementing only this script block.`
     ].join('\n');
-    const response = await session.generate(`video_maker_animator_block_${input.blockIndex}`, userPrompt, input.attachments);
+    const response = await session.generate(`lecturegen_animator_block_${input.blockIndex}`, userPrompt, input.attachments);
     const [html] = purify_content_for_path(input.outputPath, parseAnimatorHtml(response));
     return html;
 }
@@ -136,7 +134,7 @@ export async function requestAnimatorRepair(input: AnimatorRepairInput, session:
         '',
         '# Current Script Block', input.scriptBlock
     ].join('\n');
-    const response = await session.generate(`video_maker_animator_repair_block_${input.blockIndex}`, repairPrompt, input.attachments);
+    const response = await session.generate(`lecturegen_animator_repair_block_${input.blockIndex}`, repairPrompt, input.attachments);
     return parseAnimatorEdits(response, input.outputPath);
 }
 

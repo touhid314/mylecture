@@ -170,7 +170,6 @@ The agent chat sidebar supports:
 - Aspect ratio selection.
 - Logarithmic generation length slider from `5s` to `15:00`.
 - Editable length text input; accepted examples include `90`, `90s`, `1:30`, `2m`.
-- `AI embed sub` checkbox.
 - Prompt profile dropdown loaded from markdown files.
 
 The generation controls are appended to the prompt sent to the agent, not displayed in the visible chat bubble:
@@ -179,11 +178,15 @@ The generation controls are appended to the prompt sent to the agent, not displa
 if the user query is for video generation then follow this:
 aspect ratio: <selected>
 generation length: <selected>
-embed subtitle in video: <yes/no>
 profile: <profile markdown content, only when selected>
 ```
 
 If profile is `None`, no `profile:` line is appended.
+Subtitles are not generated into lecture HTML. The Render options menu owns
+subtitle burning, including font, font size, and centered distance from the
+bottom of the frame. Its defaults come from `render.burnSubtitle`,
+`render.subtitleFont`, `render.subtitleFontSize`, and
+`render.subtitleBottomPercent` in root `config.yaml`.
 
 ## Agent Profiles
 

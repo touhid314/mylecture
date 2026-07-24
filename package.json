@@ -10,7 +10,7 @@
   "scripts": {
     "agent": "tsx packages/lecture-agent/src/editor-agent/cli.ts",
     "editor-agent": "tsx packages/lecture-agent/src/editor-agent/cli.ts",
-    "video-maker": "tsx packages/lecture-agent/src/video_maker.ts",
+    "lecturegen": "tsx packages/lecture-agent/src/lecturegen.ts",
     "prompt-builder": "tsx packages/lecture-agent/src/prompt_builder.ts",
     "chat": "tsx packages/lecture-agent/src/editor-agent/cli.ts --chat",
     "token-tracker": "tsx packages/lecture-agent/src/token-tracker/token_tracker_dashboard.ts",

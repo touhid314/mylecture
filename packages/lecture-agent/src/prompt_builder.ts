@@ -1,7 +1,7 @@
 /**
  * prompt_builder.ts
  *
- * Shared prompt-control module for both the video maker and editor agent.
+ * Shared prompt-control module for both LectureGen and the editor agent.
  *
  * Every model-bound system and user prompt passes through `build_prompt()`. It
  * resolves readable local paths wrapped in backticks, inlines text files, leaves

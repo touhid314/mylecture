@@ -65,6 +65,22 @@ export function createViewerHtml(openPath, initialWidth = 1920, initialHeight = 
   const defaultTtsVoice = String(ttsConfig.voice || 'af_heart');
   const defaultTtsSpeed = String(ttsConfig.speed || 1);
   const defaultFps = String(renderConfig.fps || 60);
+  const defaultBurnSubtitle = renderConfig.burnSubtitle === true;
+  const defaultSubtitleFont = String(renderConfig.subtitleFont || 'Arial');
+  const defaultSubtitleFontSize = Number(renderConfig.subtitleFontSize) || 48;
+  const defaultSubtitleBottomPercent = Number.isFinite(Number(renderConfig.subtitleBottomPercent))
+    ? Number(renderConfig.subtitleBottomPercent)
+    : 8;
+  const subtitleFontOptions = [...new Set([
+    defaultSubtitleFont,
+    'Arial',
+    'Inter',
+    'Verdana',
+    'Georgia',
+    'Times New Roman'
+  ])].map(font => `<option value="${escapeHtml(font)}"${selectedAttr(font, defaultSubtitleFont)}>${escapeHtml(font)}</option>`).join('');
+  const burnSubtitleChecked = defaultBurnSubtitle ? ' checked' : '';
+  const subtitleOptionsVisible = defaultBurnSubtitle ? ' class="visible"' : '';
   const defaultAspectRatio = String(agentConfig.defaultAspectRatio || '16:9');
   const defaultLengthSeconds = Number(agentConfig.defaultLengthSeconds) || 60;
   const defaultLengthSliderValue = generationSecondsToInitialSlider(defaultLengthSeconds);
@@ -75,7 +91,7 @@ export function createViewerHtml(openPath, initialWidth = 1920, initialHeight = 
     renderConfig.baseHeight || 1080
   );
   const defaultRenderResolution = `${defaultRenderViewport.width}x${defaultRenderViewport.height}`;
-  const embedSubtitlesChecked = agentConfig.embedSubtitlesByDefault ? ' checked' : '';
+  const getimgChecked = agentConfig.enableGetimgTool ? ' checked' : '';
   return `<!DOCTYPE html>
 <html lang="en">
 <head>
@@ -269,8 +285,29 @@ body.fullscreen-active #folder-sidebar {
   font-size: 11px;
 }
 .resolve-option select,
-.render-option select {
+.render-option select,
+.render-option input[type="number"] {
   width: 100%;
+}
+#render-subtitle-options {
+  display: none;
+  gap: 7px;
+  padding-top: 7px;
+  border-top: 1px solid var(--line);
+}
+#render-subtitle-options.visible {
+  display: grid;
+}
+.render-subtitle-toggle label {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  color: var(--text);
+  cursor: pointer;
+}
+.render-subtitle-toggle input {
+  width: auto;
+  margin: 0;
 }
 #job-status {
   display: none;
@@ -1491,6 +1528,31 @@ body.fullscreen-active #agent-bar {
   min-height: 28px;
   justify-self: end;
 }
+.agent-generation-toggle-group {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 12px;
+  min-width: 0;
+  flex-wrap: wrap;
+}
+.agent-output-row {
+  grid-column: 1 / -1;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  min-height: 28px;
+  flex-wrap: wrap;
+}
+.agent-output-option {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  color: var(--muted-strong);
+  font-size: 11px;
+  cursor: pointer;
+  user-select: none;
+}
 .agent-theme-field {
   grid-column: 1 / -1;
 }
@@ -1953,6 +2015,8 @@ body.file-kind-mp4 .timeline-ruler {
         <div class="render-option">
           <label for="render-fps">FPS</label>
           <select id="render-fps">
+            <option value="10"${selectedAttr('10', defaultFps)}>10</option>
+            <option value="15"${selectedAttr('15', defaultFps)}>15</option>
             <option value="24"${selectedAttr('24', defaultFps)}>24</option>
             <option value="30"${selectedAttr('30', defaultFps)}>30</option>
             <option value="60"${selectedAttr('60', defaultFps)}>60</option>
@@ -1966,6 +2030,28 @@ body.file-kind-mp4 .timeline-ruler {
             <option value="1080x1920">1080x1920</option>
             <option value="720x1280">720x1280</option>
           </select>
+        </div>
+        <div class="render-option render-subtitle-toggle">
+          <label for="render-burn-subtitle">
+            <input id="render-burn-subtitle" type="checkbox"${burnSubtitleChecked}>
+            <span>Burn subtitle</span>
+          </label>
+        </div>
+        <div id="render-subtitle-options"${subtitleOptionsVisible}>
+          <div class="render-option">
+            <label for="render-subtitle-font">Subtitle font</label>
+            <select id="render-subtitle-font">
+              ${subtitleFontOptions}
+            </select>
+          </div>
+          <div class="render-option">
+            <label for="render-subtitle-font-size">Font size</label>
+            <input id="render-subtitle-font-size" type="number" min="12" max="200" step="1" value="${escapeHtml(String(defaultSubtitleFontSize))}">
+          </div>
+          <div class="render-option">
+            <label for="render-subtitle-bottom-percent">Distance from bottom (%)</label>
+            <input id="render-subtitle-bottom-percent" type="number" min="0" max="50" step="0.5" value="${escapeHtml(String(defaultSubtitleBottomPercent))}">
+          </div>
         </div>
       </div>
     </div>
@@ -2087,10 +2173,12 @@ body.file-kind-mp4 .timeline-ruler {
             <option value="custom">Custom</option>
           </select>
         </label>
-        <label class="agent-subtitle-row">
-          <input id="agent-embed-subtitle" class="agent-checkbox" type="checkbox"${embedSubtitlesChecked}>
-          <span class="agent-check-label">AI embed sub</span>
-        </label>
+        <div class="agent-generation-toggle-group">
+          <label class="agent-subtitle-row">
+            <input id="agent-enable-getimg" class="agent-checkbox" type="checkbox"${getimgChecked}>
+            <span class="agent-check-label">Image download</span>
+          </label>
+        </div>
         <label class="agent-field agent-theme-field" for="agent-theme">
           <span class="agent-field-label">Theme</span>
           <select id="agent-theme" class="agent-select">
@@ -2103,6 +2191,20 @@ body.file-kind-mp4 .timeline-ruler {
             <option value="default">default</option>
           </select>
         </label>
+        <div class="agent-output-row" aria-label="Generation outputs">
+          <label class="agent-output-option">
+            <input id="agent-output-video" class="agent-checkbox" type="checkbox" checked>
+            <span>Video</span>
+          </label>
+          <label class="agent-output-option">
+            <input id="agent-output-interactive" class="agent-checkbox" type="checkbox">
+            <span>Interactive</span>
+          </label>
+          <label class="agent-output-option">
+            <input id="agent-output-game" class="agent-checkbox" type="checkbox">
+            <span>Practice game</span>
+          </label>
+        </div>
       </div>
       <div class="agent-composer-row">
         <input id="agent-file-input" type="file" multiple hidden accept=".png,.jpg,.jpeg,.webp,.bmp,.pdf,.mp4,.mpeg,.mpg,.mov,.avi,.webm,.wmv,.3gp,.3gpp,.flv">
@@ -2249,7 +2351,10 @@ const agentGenerationControls = document.getElementById('agent-generation-contro
 const agentAspectRatio = document.getElementById('agent-aspect-ratio');
 const agentGenerationLength = document.getElementById('agent-generation-length');
 const agentGenerationLengthValue = document.getElementById('agent-generation-length-value');
-const agentEmbedSubtitle = document.getElementById('agent-embed-subtitle');
+const agentEnableGetimg = document.getElementById('agent-enable-getimg');
+const agentOutputVideo = document.getElementById('agent-output-video');
+const agentOutputInteractive = document.getElementById('agent-output-interactive');
+const agentOutputGame = document.getElementById('agent-output-game');
 const agentTheme = document.getElementById('agent-theme');
 const agentTeachingStyle = document.getElementById('agent-teaching-style');
 let agentPhase = 'generate';
@@ -2275,6 +2380,11 @@ const renderTtsVoice = document.getElementById('render-tts-voice');
 const renderTtsSpeed = document.getElementById('render-tts-speed');
 const renderFps = document.getElementById('render-fps');
 const renderResolution = document.getElementById('render-resolution');
+const renderBurnSubtitle = document.getElementById('render-burn-subtitle');
+const renderSubtitleOptions = document.getElementById('render-subtitle-options');
+const renderSubtitleFont = document.getElementById('render-subtitle-font');
+const renderSubtitleFontSize = document.getElementById('render-subtitle-font-size');
+const renderSubtitleBottomPercent = document.getElementById('render-subtitle-bottom-percent');
 const frameWrap = document.getElementById('frame-wrap');
 const previewShell = document.getElementById('preview-shell');
 let frame = document.getElementById('preview');
@@ -2556,6 +2666,12 @@ function renderQuery() {
   params.set('fps', renderFps.value || configuredDefaults.fps);
   params.set('width', width || String(configuredDefaults.renderWidth));
   params.set('height', height || String(configuredDefaults.renderHeight));
+  params.set('burnSubtitle', renderBurnSubtitle.checked ? '1' : '0');
+  if (renderBurnSubtitle.checked) {
+    params.set('subtitleFont', renderSubtitleFont.value);
+    params.set('subtitleFontSize', renderSubtitleFontSize.value);
+    params.set('subtitleBottomPercent', renderSubtitleBottomPercent.value);
+  }
   return params.toString();
 }
 
@@ -3519,7 +3635,8 @@ async function runRender() {
     'Rendering ' + sourceName +
     ' at ' + renderFps.value + ' FPS, ' +
     renderResolution.value +
-    ', ' + renderTtsVoice.value + ' @ ' + renderTtsSpeed.value + 'x'
+    ', ' + renderTtsVoice.value + ' @ ' + renderTtsSpeed.value + 'x' +
+    (renderBurnSubtitle.checked ? ', burning subtitles' : '')
   );
   try {
     const response = await fetch('/render-file?' + renderQuery(), { method: 'POST' });
@@ -4105,6 +4222,9 @@ renderMenuToggle.addEventListener('click', event => {
 renderOptions.addEventListener('click', event => {
   event.stopPropagation();
 });
+renderBurnSubtitle.addEventListener('change', () => {
+  renderSubtitleOptions.classList.toggle('visible', renderBurnSubtitle.checked);
+});
 document.addEventListener('click', () => {
   setResolveOptionsVisible(false);
   setRenderOptionsVisible(false);
@@ -4520,12 +4640,18 @@ function commitGenerationLengthInput() {
 function getGenerationSettingsPrompt() {
   const aspectRatio = agentAspectRatio ? agentAspectRatio.value : configuredDefaults.aspectRatio;
   const generationLength = agentGenerationLength ? formatGenerationLength(sliderToGenerationSeconds(agentGenerationLength.value)) : configuredDefaults.generationLength;
-  const embedSubtitle = agentEmbedSubtitle && agentEmbedSubtitle.checked ? 'yes' : 'no';
+  const enableGetimg = agentEnableGetimg && agentEnableGetimg.checked ? 'yes' : 'no';
+  const includeVideo = !agentOutputVideo || agentOutputVideo.checked;
+  const includeInteractive = Boolean(agentOutputInteractive && agentOutputInteractive.checked);
+  const includeGame = Boolean(agentOutputGame && agentOutputGame.checked);
   const lines = [
-    'if the user query is for video generation then follow this:',
+    'if the user query is for lecture generation then follow this:',
     'aspect ratio: ' + aspectRatio,
     'generation length: ' + generationLength,
-    'embed subtitle in video: ' + embedSubtitle
+    'getimg enabled: ' + enableGetimg,
+    'output video: ' + (includeVideo ? 'yes' : 'no'),
+    'output interactive: ' + (includeInteractive ? 'yes' : 'no'),
+    'output practice game: ' + (includeGame ? 'yes' : 'no')
   ];
   const themeContent = getSelectedThemeContent();
   if (themeContent) {
@@ -4613,6 +4739,15 @@ async function sendChat() {
   const msg = agentChatInput.value.trim();
   const filesToSend = pendingAgentAttachments.slice();
   if (!msg && filesToSend.length === 0) return;
+  if (
+    agentPhase === 'generate'
+    && agentOutputVideo && !agentOutputVideo.checked
+    && agentOutputInteractive && !agentOutputInteractive.checked
+    && agentOutputGame && !agentOutputGame.checked
+  ) {
+    appendChatMessage('Select at least one output: Video, Interactive, or Practice game.', 'error');
+    return;
+  }
 
   agentChatInput.value = '';
   agentChatInput.style.height = '32px';
@@ -4649,7 +4784,7 @@ async function sendChat() {
     const uploadedFiles = await uploadAgentAttachments(filesToSend);
     uploadCompleted = true;
     const taskMessage = buildAttachmentPrompt(msg, uploadedFiles);
-    const endpoint = agentPhase === 'generate' ? '/video-maker/generate' : '/agent-chat';
+    const endpoint = agentPhase === 'generate' ? '/lecturegen/generate' : '/agent-chat';
     const response = await fetch(endpoint, {
       method: 'POST',
       headers: {

@@ -1,23 +1,25 @@
 /**
- * video_maker.ts
+ * lecturegen.ts
  *
  * Complete static video-generation control unit. This one module contains:
  *
- * - `VideoMaker`, which runs answer generation, script writing, optional image
- *   asset fetching, narration-aware script trimming, sequential animation, HTML
- *   validation/repair, and metadata writing.
- * - `generateVideo()`, the programmatic API used by the IDE.
+ * - `LectureGen`, which conditionally runs answer generation, script writing,
+ *   optional image fetching, narration-aware trimming, sequential animation,
+ *   interactive/game generation, HTML validation/repair, and metadata writing.
+ * - `generateLecture()`, the programmatic API used by the IDE.
  * - workspace and attachment helpers used by API callers.
- * - `runVideoMakerCli()`, the direct-run CLI control.
+ * - `runLectureGenCli()`, the direct-run CLI control.
  *
  * The CLI creates a unique generation folder beneath `--workspace` and writes
  * `answer.md`, `script.md`, `metadata.json`, `index*.html`, copied attachments,
  * and downloaded assets there:
  *
- *   npm run video-maker -- --workspace ".\generations" --length 2:00
+ *   npm run lecturegen -- --workspace ".\generations" --length 2:00
  *     --aspect-ratio 16:9 "Explain binary search"
  *
- * Pass `--no-getimg` to prohibit image requests and skip asset fetching.
+ * Pass `--interactive` and/or `--game` for standalone learning experiences.
+ * Pass `--no-video` to skip video-only stages, or `--no-getimg` to prohibit
+ * image requests and skip asset fetching.
  * `SCRIPT_TRIMMER_CHUNK_SIZE` is required. It sets the maximum narration words
  * per animator block; the minimum is half that value, rounded up.
  *
@@ -37,30 +39,34 @@ import { extract_upload_attachments, is_upload_supported_path } from './prompt_b
 import { generateAnswer } from './answer_generator.js';
 import { fetchAssets, formatAssetDescriptions, stripImageRequests, type AssetDescription } from './asset_fetcher.js';
 import { AnimatorSession, animateScriptBlock, validateAndRepairHtml, type PreviousHtml } from './animator.js';
+import { runGameGen } from './gamegen.js';
+import { runIAGen } from './iagen.js';
 import { getScriptTrimmerChunkSizes, trimScriptByNarration } from './script_trimmer.js';
 import { writeScript } from './script_writer.js';
-import type { VideoMakerAttachment } from './video_maker_shared.js';
+import type { LectureGenAttachment } from './lecturegen_shared.js';
 import { DEFAULT_WORKSPACE_DIR } from './workspace.js';
 
-export type VideoMakerOptions = {
+export type LectureGenOptions = {
     model: string;
     workspaceDir: string;
     tokenTrackerSessionId?: string | null;
     onLog?: (text: string) => void;
 };
 
-export type ParsedVideoMakerRequest = {
+export type ParsedLectureGenRequest = {
     request: string;
     aspectRatio: string;
     generationLength: string;
-    embedSubtitles: boolean;
     enableGetimg: boolean;
+    includeVideo: boolean;
+    includeInteractive: boolean;
+    includeGame: boolean;
     theme: string;
     teachingStyle: string;
-    attachments: VideoMakerAttachment[];
+    attachments: LectureGenAttachment[];
 };
 
-const SETTINGS_MARKER = 'if the user query is for video generation then follow this:';
+const SETTINGS_MARKER = 'if the user query is for lecture generation then follow this:';
 const ATTACHMENT_DIRECTIVE = /\s*\[\(attachment:\s*[^\]]+\)\]/gi;
 const moduleDir = path.dirname(fileURLToPath(import.meta.url));
 
@@ -69,8 +75,8 @@ function valueAfter(label: string, text: string, fallback: string): string {
     return match?.[1]?.trim() || fallback;
 }
 
-export function parseVideoMakerRequest(task: string, workspaceDir: string): ParsedVideoMakerRequest {
-    const attachments = extract_upload_attachments(task, workspaceDir) as VideoMakerAttachment[];
+export function parseLectureGenRequest(task: string, workspaceDir: string): ParsedLectureGenRequest {
+    const attachments = extract_upload_attachments(task, workspaceDir) as LectureGenAttachment[];
     const markerIndex = task.indexOf(SETTINGS_MARKER);
     const rawRequest = (markerIndex >= 0 ? task.slice(0, markerIndex) : task)
         .replace(/\[Context:[\s\S]*?\]\s*/g, '')
@@ -90,18 +96,20 @@ export function parseVideoMakerRequest(task: string, workspaceDir: string): Pars
         request: rawRequest || 'Create a lecture video using the attached material.',
         aspectRatio: valueAfter('aspect ratio', settings, '16:9'),
         generationLength: valueAfter('generation length', settings, '1:00'),
-        embedSubtitles: valueAfter('embed subtitle in video', settings, 'no').toLowerCase() === 'yes',
         enableGetimg: valueAfter('getimg enabled', settings, 'yes').toLowerCase() !== 'no',
+        includeVideo: valueAfter('output video', settings, 'yes').toLowerCase() !== 'no',
+        includeInteractive: valueAfter('output interactive', settings, 'no').toLowerCase() === 'yes',
+        includeGame: valueAfter('output practice game', settings, 'no').toLowerCase() === 'yes',
         theme,
         teachingStyle,
         attachments
     };
 }
 
-export class VideoMaker {
-    private readonly options: VideoMakerOptions;
+export class LectureGen {
+    private readonly options: LectureGenOptions;
 
-    constructor(options: VideoMakerOptions) {
+    constructor(options: LectureGenOptions) {
         this.options = options;
     }
 
@@ -112,16 +120,18 @@ export class VideoMaker {
             cancelTurn: () => { cancelled = true; },
             sendMessage: async (task: string, _unused?: unknown, signal?: AbortSignal): Promise<string> => {
                 if (used) {
-                    throw new Error('Static video generation currently supports one request per chat. Start a New Chat to generate another video.');
+                    throw new Error('Static generation currently supports one request per chat. Start a New Chat to generate another lesson.');
                 }
                 used = true;
                 cancelled = false;
                 const assertActive = () => {
-                    if (cancelled || signal?.aborted) throw new Error('Static video generation was stopped.');
+                    if (cancelled || signal?.aborted) throw new Error('Static generation was stopped.');
                 };
-                const log = (message: string) => this.options.onLog?.(`[video-maker] ${message}\n`);
-                const chunkSizes = getScriptTrimmerChunkSizes();
-                const input = parseVideoMakerRequest(task, this.options.workspaceDir);
+                const log = (message: string) => this.options.onLog?.(`[lecturegen] ${message}\n`);
+                const input = parseLectureGenRequest(task, this.options.workspaceDir);
+                if (!input.includeVideo && !input.includeInteractive && !input.includeGame) {
+                    throw new Error('Select at least one output: video, interactive, or practice game.');
+                }
                 if (!input.theme) {
                     input.theme = fs.readFileSync(path.resolve(moduleDir, '..', '.agents', 'mylecture-themes', 'default.md'), 'utf8');
                 }
@@ -135,7 +145,48 @@ export class VideoMaker {
                 };
                 fs.mkdirSync(this.options.workspaceDir, { recursive: true });
 
-                log('Generating the concept answer...');
+                type SupplementalGenerationResult = {
+                    outputPath: 'interactive.html' | 'game.html';
+                    html?: string;
+                    error?: unknown;
+                };
+                const supplementalTasks: Array<Promise<SupplementalGenerationResult>> = [];
+                const startSupplementalGeneration = (referenceMaterial?: string) => {
+                    const source = referenceMaterial ? 'script.md' : 'the user request';
+                    if (input.includeInteractive) {
+                        log(`Starting IAGen from ${source}${input.includeVideo ? ' in parallel with the video pipeline' : ''}...`);
+                        supplementalTasks.push(
+                            runIAGen({
+                                ...common,
+                                request: input.request,
+                                aspectRatio: input.aspectRatio,
+                                referenceMaterial,
+                                attachments: input.attachments
+                            })
+                                .then(html => ({ outputPath: 'interactive.html' as const, html }))
+                                .catch(error => ({ outputPath: 'interactive.html' as const, error }))
+                        );
+                    }
+                    if (input.includeGame) {
+                        log(`Starting GameGen from ${source}${input.includeVideo ? ' in parallel with the video pipeline' : ''}...`);
+                        supplementalTasks.push(
+                            runGameGen({
+                                ...common,
+                                request: input.request,
+                                aspectRatio: input.aspectRatio,
+                                referenceMaterial,
+                                attachments: input.attachments
+                            })
+                                .then(html => ({ outputPath: 'game.html' as const, html }))
+                                .catch(error => ({ outputPath: 'game.html' as const, error }))
+                        );
+                    }
+                };
+
+                let script = '';
+                if (input.includeVideo) {
+                    const chunkSizes = getScriptTrimmerChunkSizes();
+                    log('Generating the concept answer...');
                 const answer = await generateAnswer({
                     ...common,
                     request: input.request,
@@ -147,7 +198,7 @@ export class VideoMaker {
                 fs.writeFileSync(path.join(this.options.workspaceDir, 'answer.md'), answer, 'utf8');
 
                 log('Writing the audiovisual script...');
-                let script = await writeScript({
+                script = await writeScript({
                     ...common,
                     request: input.request,
                     generationLength: input.generationLength,
@@ -160,6 +211,7 @@ export class VideoMaker {
                 assertActive();
                 if (!input.enableGetimg) script = stripImageRequests(script);
                 fs.writeFileSync(path.join(this.options.workspaceDir, 'script.md'), script, 'utf8');
+                startSupplementalGeneration(script);
 
                 let assets: AssetDescription[] = [];
                 if (input.enableGetimg) {
@@ -196,7 +248,6 @@ export class VideoMaker {
                         request: input.request,
                         aspectRatio: input.aspectRatio,
                         generationLength: input.generationLength,
-                        embedSubtitles: input.embedSubtitles,
                         scriptBlock: block.content,
                         blockIndex: block.index,
                         totalBlocks: scriptBlocks.length,
@@ -218,20 +269,36 @@ export class VideoMaker {
                     );
                     previousHtmls.push({ path: outputPath, content: validHtml });
                 }
+                } else {
+                    log('Video output disabled; skipping answer, script, assets, trimmer, and animator.');
+                    startSupplementalGeneration();
+                }
+
+                const supplementalResults = await Promise.all(supplementalTasks);
+                assertActive();
+                for (const result of supplementalResults) {
+                    if (result.error) {
+                        const detail = result.error instanceof Error ? result.error.message : String(result.error);
+                        throw new Error(`${result.outputPath} generation failed: ${detail}`);
+                    }
+                    if (!result.html) throw new Error(`${result.outputPath} generation returned no HTML.`);
+                    fs.writeFileSync(path.join(this.options.workspaceDir, result.outputPath), result.html, 'utf8');
+                    log(`Finished ${result.outputPath}.`);
+                }
 
                 const title = input.request.replace(/\s+/g, ' ').trim().slice(0, 120) || 'Lecture';
                 fs.writeFileSync(path.join(this.options.workspaceDir, 'metadata.json'), JSON.stringify({
                     title,
-                    description: `An animated lecture about ${title.replace(/[.!?]+$/, '')}.`
+                    description: `A learning experience about ${title.replace(/[.!?]+$/, '')}.`
                 }, null, 2), 'utf8');
-                log('Static video generation complete.');
-                return 'Done making the video.';
+                log('Static lesson generation complete.');
+                return 'Done making the requested learning experience.';
             }
         };
     }
 }
 
-export type VideoGenerationOptions = {
+export type LectureGenerationOptions = {
     request: string;
     model: string;
     parentWorkspace?: string;
@@ -241,18 +308,23 @@ export type VideoGenerationOptions = {
     theme?: string;
     teachingStyle?: string;
     attachments?: string[];
-    embedSubtitles?: boolean;
     enableGetimg?: boolean;
+    includeVideo?: boolean;
+    includeInteractive?: boolean;
+    includeGame?: boolean;
     tokenTrackerSessionId?: string | null;
     onLog?: (text: string) => void;
     signal?: AbortSignal;
 };
 
-export type VideoGenerationResult = {
+export type LectureGenerationResult = {
     id: string;
     workspaceDir: string;
     entryFile: string;
     htmlFiles: string[];
+    videoFiles: string[];
+    interactiveFile?: string;
+    gameFile?: string;
     output: string;
 };
 
@@ -318,10 +390,16 @@ export function copyAttachmentsToGeneration(attachments: string[], generationPat
     });
 }
 
-export async function generateVideo(options: VideoGenerationOptions): Promise<VideoGenerationResult> {
+export async function generateLecture(options: LectureGenerationOptions): Promise<LectureGenerationResult> {
     const request = options.request.trim();
-    if (!request) throw new Error('A video request is required.');
+    if (!request) throw new Error('A generation request is required.');
     if (!options.model.trim()) throw new Error('A model is required.');
+    const includeVideo = options.includeVideo !== false;
+    const includeInteractive = options.includeInteractive === true;
+    const includeGame = options.includeGame === true;
+    if (!includeVideo && !includeInteractive && !includeGame) {
+        throw new Error('Select at least one output: video, interactive, or practice game.');
+    }
     if (options.workspaceDir && options.parentWorkspace) {
         throw new Error('Pass either workspaceDir or parentWorkspace, not both.');
     }
@@ -337,38 +415,60 @@ export async function generateVideo(options: VideoGenerationOptions): Promise<Vi
 
     const copiedAttachments = copyAttachmentsToGeneration(options.attachments || [], generation.path);
     const settings = [
-        'if the user query is for video generation then follow this:',
+        'if the user query is for lecture generation then follow this:',
         `aspect ratio: ${options.aspectRatio || '16:9'}`,
         `generation length: ${options.generationLength || '1:00'}`,
-        `embed subtitle in video: ${options.embedSubtitles ? 'yes' : 'no'}`,
         `getimg enabled: ${options.enableGetimg === false ? 'no' : 'yes'}`,
+        `output video: ${includeVideo ? 'yes' : 'no'}`,
+        `output interactive: ${includeInteractive ? 'yes' : 'no'}`,
+        `output practice game: ${includeGame ? 'yes' : 'no'}`,
         options.theme ? `theme: ${options.theme}` : '',
         options.teachingStyle ? `teaching style: ${options.teachingStyle}` : ''
     ].filter(Boolean).join('\n');
     const directives = copiedAttachments.map(attachment => `[(attachment: ${attachment})]`).join('\n');
     const task = [request, settings, directives].filter(Boolean).join('\n\n');
 
-    const videoMaker = new VideoMaker({
+    const lectureGen = new LectureGen({
         model: options.model,
         workspaceDir: generation.path,
         tokenTrackerSessionId: options.tokenTrackerSessionId || generation.id,
         onLog: options.onLog
     });
-    const session = videoMaker.startChat();
+    const session = lectureGen.startChat();
     const relayAbort = () => session.cancelTurn();
     options.signal?.addEventListener('abort', relayAbort, { once: true });
     try {
         const output = await session.sendMessage(task, undefined, options.signal);
-        const htmlFiles = fs.readdirSync(generation.path)
+        const videoFiles = fs.readdirSync(generation.path)
             .filter(file => /^index(?:\d+)?\.html$/i.test(file))
             .sort((a, b) => a.localeCompare(b, undefined, { numeric: true }))
             .map(file => path.join(generation.path, file));
-        if (htmlFiles.length === 0) throw new Error('Video maker completed without producing an index HTML file.');
+        const interactiveFile = fs.existsSync(path.join(generation.path, 'interactive.html'))
+            ? path.join(generation.path, 'interactive.html')
+            : undefined;
+        const gameFile = fs.existsSync(path.join(generation.path, 'game.html'))
+            ? path.join(generation.path, 'game.html')
+            : undefined;
+        if (includeVideo && videoFiles.length === 0) {
+            throw new Error('LectureGen completed without producing an index HTML file.');
+        }
+        if (includeInteractive && !interactiveFile) {
+            throw new Error('IAGen completed without producing interactive.html.');
+        }
+        if (includeGame && !gameFile) {
+            throw new Error('GameGen completed without producing game.html.');
+        }
+        const htmlFiles = [...videoFiles, ...(interactiveFile ? [interactiveFile] : []), ...(gameFile ? [gameFile] : [])];
+        const entryFile = videoFiles[0] || interactiveFile || gameFile;
+        if (!entryFile) throw new Error('Static generation completed without producing an HTML file.');
         return {
             id: generation.id,
             workspaceDir: generation.path,
-            entryFile: htmlFiles[0],
+            entryFile,
             htmlFiles,
+            videoFiles,
+            interactiveFile,
+            gameFile,
             output
         };
     } finally {
@@ -376,9 +476,9 @@ export async function generateVideo(options: VideoGenerationOptions): Promise<Vi
     }
 }
 
-function printVideoMakerHelp(): void {
+function printLectureGenHelp(): void {
     console.log(`Usage:
-  npm run video-maker -- [options] "video request"
+  npm run lecturegen -- [options] "lecture request"
 
 Options:
   --model <name>              LLM model (defaults to AGENT_MODEL)
@@ -388,12 +488,14 @@ Options:
   --theme <id-or-file>        Theme id from .agents/mylecture-themes or a Markdown file
   --teaching-style <id-or-file> Style id from .agents/mylecture-teaching-style or a Markdown file
   --attachment <file>         Image, PDF, or video input; may be repeated
+  --interactive               Also create interactive.html
+  --game                      Also create game.html
+  --no-video                  Skip answer/script/index generation
   --no-getimg                 Forbid image requests and skip the asset fetcher
-  --embed-subtitles           Request embedded subtitles
   --help                      Show this help
 
 Example:
-  npm run video-maker -- --workspace ./gens --length 2:00 --aspect-ratio 16:9 "Explain binary search"`);
+  npm run lecturegen -- --workspace ./gens --length 2:00 --aspect-ratio 16:9 "Explain binary search"`);
 }
 
 function loadResource(value: string, resourceFolder: string): string {
@@ -406,15 +508,17 @@ function loadResource(value: string, resourceFolder: string): string {
     return fs.readFileSync(target, 'utf8').trim();
 }
 
-export async function runVideoMakerCli(args = process.argv.slice(2)): Promise<void> {
+export async function runLectureGenCli(args = process.argv.slice(2)): Promise<void> {
     let model = process.env.AGENT_MODEL || '';
     let parentWorkspace = DEFAULT_WORKSPACE_DIR;
     let generationLength = '1:00';
     let aspectRatio = '16:9';
     let theme = '';
     let teachingStyle = '';
-    let embedSubtitles = false;
     let enableGetimg = true;
+    let includeVideo = true;
+    let includeInteractive = false;
+    let includeGame = false;
     const attachments: string[] = [];
     const taskParts: string[] = [];
     for (let index = 0; index < args.length; index++) {
@@ -427,7 +531,7 @@ export async function runVideoMakerCli(args = process.argv.slice(2)): Promise<vo
         switch (argument) {
             case '--help':
             case '-h':
-                printVideoMakerHelp();
+                printLectureGenHelp();
                 return;
             case '--model': model = nextValue(); break;
             case '--workspace': parentWorkspace = path.resolve(nextValue()); break;
@@ -436,9 +540,11 @@ export async function runVideoMakerCli(args = process.argv.slice(2)): Promise<vo
             case '--theme': theme = loadResource(nextValue(), 'mylecture-themes'); break;
             case '--teaching-style': teachingStyle = loadResource(nextValue(), 'mylecture-teaching-style'); break;
             case '--attachment': attachments.push(path.resolve(nextValue())); break;
+            case '--interactive': includeInteractive = true; break;
+            case '--game': includeGame = true; break;
+            case '--no-video': includeVideo = false; break;
             case '--no-getimg':
             case '--disable-getimg': enableGetimg = false; break;
-            case '--embed-subtitles': embedSubtitles = true; break;
             default:
                 if (argument.startsWith('--')) throw new Error(`Unknown option: ${argument}`);
                 taskParts.push(argument);
@@ -447,7 +553,7 @@ export async function runVideoMakerCli(args = process.argv.slice(2)): Promise<vo
     if (!model) throw new Error('AGENT_MODEL or --model is required.');
     const request = taskParts.join(' ').trim() || fs.readFileSync(0, 'utf8').trim();
     if (!request) throw new Error('Provide a video request as an argument or through stdin.');
-    const result = await generateVideo({
+    const result = await generateLecture({
         request,
         model,
         parentWorkspace,
@@ -456,15 +562,17 @@ export async function runVideoMakerCli(args = process.argv.slice(2)): Promise<vo
         theme,
         teachingStyle,
         attachments,
-        embedSubtitles,
         enableGetimg,
+        includeVideo,
+        includeInteractive,
+        includeGame,
         onLog: text => process.stderr.write(text)
     });
     process.stdout.write(`${result.output}\nGeneration folder: ${result.workspaceDir}\n`);
 }
 
 if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
-    runVideoMakerCli().catch(error => {
+    runLectureGenCli().catch(error => {
         console.error(error instanceof Error ? error.message : error);
         process.exitCode = 1;
     });

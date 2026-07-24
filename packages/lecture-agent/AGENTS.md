@@ -1,8 +1,10 @@
-# MyLecture Video Maker and Editor Agent Guide
+# MyLecture LectureGen and Editor Agent Guide
 
 This package now has two distinct responsibilities:
 
-1. The **video maker** creates a new lecture through a fixed multi-LLM pipeline.
+1. **LectureGen** creates a new lecture video, standalone interactive,
+   standalone practice game, or any selected combination through a fixed
+   multi-LLM pipeline.
 2. The **editor agent** handles follow-up requests by editing only the generated root `index*.html` files.
 
 The editor is no longer responsible for initial video generation. The former script sub-agent and `run_script_agent` tool have been removed.
@@ -13,14 +15,17 @@ Use this file as the first orientation document before changing code under `pack
 
 ```text
 First IDE request
-  -> POST /video-maker/generate
-  -> video_maker.ts
+  -> POST /lecturegen/generate
+  -> lecturegen.ts
   -> answer generator
   -> script writer
-  -> optional asset fetcher
-  -> script trimmer
-  -> sequential animator loop
-  -> validator/repair loop for each index*.html
+  -> after script.md, concurrent selected branches:
+       video branch -> optional asset fetcher -> script trimmer
+                    -> sequential animator loop
+                    -> validator/repair loop for each index*.html
+       optional IAGen -> interactive.html
+       optional GameGen -> game.html
+  -> join selected branches
   -> generation workspace
 
 Later IDE requests
@@ -37,9 +42,9 @@ The IDE uses the same unique generation folder for both phases. A New Chat reset
 
 ```text
 src/
-  video_maker.ts
-    Complete video-maker control unit.
-    Contains the orchestration class, programmatic generateVideo() API,
+  lecturegen.ts
+    Complete LectureGen control unit.
+    Contains the orchestration class, programmatic generateLecture() API,
     generation workspace helpers, attachment copying, and direct-run CLI.
 
   answer_generator.ts
@@ -59,8 +64,14 @@ src/
   animator.ts
     Generates one index HTML file at a time and repairs validator failures.
 
-  video_maker_shared.ts
-    Internal shared video-maker LLM plumbing and types. It provides prompt loading,
+  iagen.ts
+    Generates one standalone interactive.html from the request and optional script.
+
+  gamegen.ts
+    Generates one standalone game.html from the request and optional script.
+
+  lecturegen_shared.ts
+    Internal shared LectureGen LLM plumbing and types. It provides prompt loading,
     one-shot LLM calls, the retained animator LLM session, attachment types, and
     safe relative asset-path validation.
 
@@ -109,6 +120,8 @@ src/
     ansgen_system.md
     scriptgen_system.md
     animator_system.md
+    iagen_system.md
+    gamegen_system.md
     system_prompt.md
       Editor-only system prompt.
     vault/pre-user-response-prompt.md
@@ -130,7 +143,7 @@ Shared resources remain under:
 Run from the monorepo root:
 
 ```powershell
-npm run video-maker -- --workspace ".\generations" "Create a lecture about binary search"
+npm run lecturegen -- --workspace ".\generations" "Create a lecture about binary search"
 npm run editor-agent -- --workspace ".\generations\<generation-id>" "Make the title larger"
 npm run chat -- --workspace ".\generations\<generation-id>"
 npm run prompt-builder -- --workspace ".\generations\<generation-id>" "Use `notes.md`"
@@ -141,7 +154,7 @@ npm run ide
 Package-local equivalents:
 
 ```powershell
-npm run video-maker -- --workspace ".\generations" "Create a lecture about binary search"
+npm run lecturegen -- --workspace ".\generations" "Create a lecture about binary search"
 npm run editor-agent -- --workspace ".\generations\<generation-id>" "Make the title larger"
 npm run prompt-builder -- "Expand `src/prompts/animator_system.md`"
 npm test
@@ -166,30 +179,37 @@ GETIMG_MODEL="..."
 GETIMG_WATCHMAN_MODEL="..."
 ```
 
-`SCRIPT_TRIMMER_CHUNK_SIZE` is required for video generation:
+`SCRIPT_TRIMMER_CHUNK_SIZE` is required when video output is selected:
 
 - It must be a positive integer.
 - It is the maximum narration-word count per animator block.
 - The minimum block size is automatically half the maximum, rounded up.
-- Missing, empty, invalid, or non-positive values fail before any video-maker LLM call.
+- Missing, empty, invalid, or non-positive values fail before any LectureGen LLM call.
+- Interactive/game-only runs do not read this variable.
 
 Gemini models use native Gemini function calling in `editor-agent/coding_agent.ts`. Other supported model names use the JSON fallback through `utils/llm_model.ts`.
 
 ## IDE Generation and Editing Phases
 
-The root `src/ide-server.ts` imports `generateVideo()` and `EditorAgent` programmatically.
+The root `src/ide-server.ts` imports `generateLecture()` and `EditorAgent` programmatically.
 
 Important routes:
 
 ```text
-/video-maker/generate   First request in a chat; generates a new video.
+/lecturegen/generate    First request in a chat; generates selected lecture outputs.
 /agent-chat             Follow-up edit requests after generation succeeds.
 /agent-new-chat         Resets phase and allocates a new generation on next use.
 /agent-upload           Saves browser-selected attachments into the active workspace.
 /agent-state            Reports phase and current workspace.
 ```
 
-The viewer starts with:
+The viewer starts with three output checkboxes. Video is selected by default;
+Interactive and Practice game are opt-in. At least one must remain selected.
+It also exposes an Image download checkbox. Its initial state comes from
+`agent.enableGetimgTool` in root `config.yaml`, and its submitted state controls
+getimg for that generation request.
+
+The prompt starts with:
 
 ```text
 Make a video on...
@@ -197,24 +217,21 @@ Make a video on...
 
 After generation succeeds it switches to edit mode and the prompt becomes an edit request surface. Generation controls are hidden during edit mode.
 
-The IDE obtains the generation parent from `agent.generationDir` in the root configuration. It creates a unique timestamp-and-ID child folder and passes that exact folder to both `generateVideo()` and `EditorAgent`.
+The IDE obtains the generation parent from `agent.generationDir` in the root configuration. It creates a unique timestamp-and-ID child folder and passes that exact folder to both `generateLecture()` and `EditorAgent`.
 
-## Video-Maker Pipeline
+## LectureGen Pipeline
 
-`video_maker.ts` runs these stages in order:
+`lecturegen.ts` runs the selected stages in order:
 
-1. Validate required configuration, including `SCRIPT_TRIMMER_CHUNK_SIZE`.
-2. Parse the request, aspect ratio, target length, subtitle setting, theme, teaching style, and attachments.
-3. Run the answer generator and write `answer.md`.
-4. Run the script writer and write `script.md`.
-5. If image fetching is enabled, parse and fetch every requested image asset.
-6. Split the script into complete narration/visual blocks.
-7. Run one retained animator LLM session sequentially for every block.
-8. Generate exactly one `index.html` or `indexN.html` per animator call.
-9. Validate each generated file and request edits-format repairs until it passes.
-10. Write `metadata.json`.
+1. Parse the request, selected outputs, aspect ratio, target length, theme, teaching style, and attachments.
+2. If video is selected, validate `SCRIPT_TRIMMER_CHUNK_SIZE`.
+3. If video is selected, run the answer generator and write `answer.md`.
+4. Run the script writer, optional asset fetcher, script trimmer, retained animator, and validator/repair loop for selected video output.
+5. If interactive is selected, generate `interactive.html` from `script.md`, or directly from the request when video is disabled.
+6. If practice game is selected, generate `game.html` using the same reference-material rule.
+7. Write `metadata.json`.
 
-The video maker is one-shot. It does not handle edit requests.
+LectureGen is one-shot. It does not handle edit requests.
 
 ### Outputs
 
@@ -232,11 +249,16 @@ index1.html
 index2.html
 ...
 
+interactive.html  When Interactive is selected.
+game.html         When Practice game is selected.
 assets/       Only when the script requested images.
 uploads/      Copied or IDE-uploaded attachments.
 ```
 
-Do not create `interactive.html` or `game.html` in this workflow. The editor is also forbidden from creating files.
+IAGen and GameGen return only plain HTML code for their respective files. Those
+files have no MyLecture contract and require no lifecycle hooks or globals. The
+editor remains forbidden from creating files and its mutation boundary still
+permits only `index*.html`.
 
 ### Script Format and Trimming
 
@@ -260,7 +282,7 @@ The trimmer:
 
 ### Animator Context and Caching
 
-The animator generates files sequentially in one retained `VideoMakerLlmSession`.
+The animator generates files sequentially in one retained `LectureGenLlmSession`.
 
 - Each new block sees the earlier generation and repair exchanges in retained history.
 - Attachments are added once and retained instead of being duplicated on every call.
@@ -279,7 +301,7 @@ Script requests use:
 [(getimg: 'short image description', out: 'assets/descriptive-name.png')]
 ```
 
-Pass `--no-getimg` to the video-maker CLI to:
+Pass `--no-getimg` to the LectureGen CLI to:
 
 - instruct the script writer not to request images;
 - strip any image directives that still appear;
@@ -289,7 +311,7 @@ The asset fetcher supports search and AI generation internally, can run Watchman
 
 ## Editor Agent
 
-The editor agent starts only after the video maker succeeds.
+The editor agent starts only after LectureGen succeeds.
 
 Its system prompt is `src/prompts/system_prompt.md`. That prompt includes the full animator quality guidance and canonical HTML contract through backticked prompt-builder references.
 
@@ -372,11 +394,11 @@ Requirements:
 - no wall-clock animation, randomness, or unbounded asynchronous state;
 - normal HTML attributes such as `class="stage"`, never literal escaped markup quotes;
 - no informational overlap or unreadable overflow;
-- no subtitles unless explicitly requested;
+- never draw or embed subtitles in lecture HTML; subtitle burning is a render-stage IDE option;
 - collision-resistant narration IDs such as `i1_1`, `i1_2`, `i2_1`;
 - local asset paths only.
 
-The validator runs after video-maker generation and repair and after every successful editor `edits` call. It samples multiple local times in each segment to catch runtime-only failures such as invalid Canvas values that appear after time zero.
+The validator runs after LectureGen animation and repair and after every successful editor `edits` call. It samples multiple local times in each segment to catch runtime-only failures such as invalid Canvas values that appear after time zero.
 
 Do not claim completion while validation is failing.
 
@@ -420,7 +442,7 @@ Only explicit directives trigger provider upload:
 
 Backticked, quoted, and plain paths are text references only.
 
-The IDE saves uploads in the active generation workspace's `uploads/` folder. The video-maker API copies externally supplied attachments into that workspace when necessary.
+The IDE saves uploads in the active generation workspace's `uploads/` folder. The LectureGen API copies externally supplied attachments into that workspace when necessary.
 
 Gemini retains uploaded file parts in chat history. The OpenAI-compatible fallback rejects video attachments.
 
@@ -455,7 +477,7 @@ Current locations:
 
 Never create `.log` under `src/`.
 
-`LOG_FULL_LLM_PROMPT=True` enables full request logging. Token-tracker session IDs are shared across video-maker stages and the editor session for cost inspection.
+`LOG_FULL_LLM_PROMPT=True` enables full request logging. Token-tracker session IDs are shared across LectureGen stages and the editor session for cost inspection.
 
 ## Ignored and Generated Content
 
@@ -479,10 +501,10 @@ The extracted Poppler directory is intentionally ignored at its relocated path. 
 - Use `rg` for search.
 - Use `apply_patch` for manual source edits.
 - Keep TypeScript ESM imports with `.js` suffixes where existing source does.
-- Keep API and direct-run CLI controls in `video_maker.ts`; do not recreate separate video-maker API or CLI files.
+- Keep API and direct-run CLI controls in `lecturegen.ts`; do not recreate separate LectureGen API or CLI files.
 - Keep prompt-builder CLI control inside `prompt_builder.ts`.
 - Keep all image acquisition behavior inside `asset_fetcher.ts`; do not recreate `image_fetcher.ts`.
-- Keep video-maker and prompt-builder descriptions in module docstrings, not standalone Markdown files.
+- Keep LectureGen and prompt-builder descriptions in module docstrings, not standalone Markdown files.
 - Do not reintroduce the script sub-agent or `run_script_agent`.
 - Keep editor mutation restrictions in runtime code as well as prompt text.
 - When changing prompts, schemas, attachments, or final-response behavior, verify both Gemini native and JSON fallback paths.
@@ -493,7 +515,7 @@ Package checks:
 
 ```powershell
 npm test
-npm run video-maker -- --help
+npm run lecturegen -- --help
 npm run editor-agent -- --help
 npm run prompt-builder -- --help
 ```
@@ -510,6 +532,6 @@ When changing validation or generated HTML behavior, run the validator against a
 When changing viewer or IDE behavior, rebuild `packages/lecture-viewer/dist/` and verify both phases:
 
 ```text
-generate -> /video-maker/generate
+generate -> /lecturegen/generate
 edit     -> /agent-chat
 ```

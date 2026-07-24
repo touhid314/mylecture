@@ -13,7 +13,6 @@ export type AppConfig = {
     enableGetimgTool: boolean;
     defaultAspectRatio: string;
     defaultLengthSeconds: number;
-    embedSubtitlesByDefault: boolean;
   };
   tts: {
     provider: string;
@@ -24,6 +23,10 @@ export type AppConfig = {
     fps: number;
     baseWidth: number;
     baseHeight: number;
+    burnSubtitle: boolean;
+    subtitleFont: string;
+    subtitleFontSize: number;
+    subtitleBottomPercent: number;
   };
 };
 
@@ -38,8 +41,7 @@ const defaultConfig: AppConfig = {
     generationDir: 'gens',
     enableGetimgTool: false,
     defaultAspectRatio: '16:9',
-    defaultLengthSeconds: 60,
-    embedSubtitlesByDefault: false
+    defaultLengthSeconds: 60
   },
   tts: {
     provider: 'omnivoice',
@@ -49,7 +51,11 @@ const defaultConfig: AppConfig = {
   render: {
     fps: 30,
     baseWidth: 1920,
-    baseHeight: 1080
+    baseHeight: 1080,
+    burnSubtitle: false,
+    subtitleFont: 'Arial',
+    subtitleFontSize: 48,
+    subtitleBottomPercent: 8
   }
 };
 
@@ -124,8 +130,7 @@ function mergeConfig(raw: Record<string, Record<string, unknown>>): AppConfig {
       generationDir: stringValue(raw.agent?.generationDir, defaultConfig.agent.generationDir),
       enableGetimgTool: booleanValue(raw.agent?.enableGetimgTool, defaultConfig.agent.enableGetimgTool),
       defaultAspectRatio: stringValue(raw.agent?.defaultAspectRatio, defaultConfig.agent.defaultAspectRatio),
-      defaultLengthSeconds: numberValue(raw.agent?.defaultLengthSeconds, defaultConfig.agent.defaultLengthSeconds, 1),
-      embedSubtitlesByDefault: booleanValue(raw.agent?.embedSubtitlesByDefault, defaultConfig.agent.embedSubtitlesByDefault)
+      defaultLengthSeconds: numberValue(raw.agent?.defaultLengthSeconds, defaultConfig.agent.defaultLengthSeconds, 1)
     },
     tts: {
       provider: stringValue(raw.tts?.provider, defaultConfig.tts.provider),
@@ -135,7 +140,11 @@ function mergeConfig(raw: Record<string, Record<string, unknown>>): AppConfig {
     render: {
       fps: Math.round(numberValue(raw.render?.fps, defaultConfig.render.fps, 1, 240)),
       baseWidth: Math.round(numberValue(raw.render?.baseWidth, defaultConfig.render.baseWidth, 1)),
-      baseHeight: Math.round(numberValue(raw.render?.baseHeight, defaultConfig.render.baseHeight, 1))
+      baseHeight: Math.round(numberValue(raw.render?.baseHeight, defaultConfig.render.baseHeight, 1)),
+      burnSubtitle: booleanValue(raw.render?.burnSubtitle, defaultConfig.render.burnSubtitle),
+      subtitleFont: stringValue(raw.render?.subtitleFont, defaultConfig.render.subtitleFont),
+      subtitleFontSize: numberValue(raw.render?.subtitleFontSize, defaultConfig.render.subtitleFontSize, 12, 200),
+      subtitleBottomPercent: numberValue(raw.render?.subtitleBottomPercent, defaultConfig.render.subtitleBottomPercent, 0, 50)
     }
   };
 }

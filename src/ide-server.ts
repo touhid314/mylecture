@@ -14,7 +14,7 @@ import { spawn } from 'node:child_process';
 import path from 'node:path';
 import { createViewerHtml } from '../packages/lecture-viewer/src/index.ts';
 import { EditorAgent } from '../packages/lecture-agent/src/editor-agent/coding_agent.ts';
-import { generateVideo, parseVideoMakerRequest } from '../packages/lecture-agent/src/video_maker.ts';
+import { generateLecture, parseLectureGenRequest } from '../packages/lecture-agent/src/lecturegen.ts';
 import { loadAppConfig, resolveConfigPath } from './config.ts';
 
 const rootDir = process.cwd();
@@ -65,7 +65,6 @@ function getAgentState(agentClientId) {
       log: '',
       pendingNewSession: true,
       phase: 'generate',
-      enableGetimgTool: null,
       session: null
     };
     agentClientStates.set(id, state);
@@ -693,6 +692,22 @@ function normalizePositiveInteger(value, fallback, min = 1, max = Number.MAX_SAF
   return String(number);
 }
 
+function normalizeSubtitleFont(value) {
+  const font = String(value || 'Arial').trim();
+  if (!font || font.length > 80 || !/^[\p{L}\p{N} ._-]+$/u.test(font)) {
+    throw new Error('Subtitle font must be a valid font-family name.');
+  }
+  return font;
+}
+
+function normalizeSubtitleNumber(value, fallback, min, max, label) {
+  const number = value === null || value === undefined || value === '' ? fallback : Number(value);
+  if (!Number.isFinite(number) || number < min || number > max) {
+    throw new Error(`${label} must be between ${min} and ${max}.`);
+  }
+  return number;
+}
+
 function envPositiveInteger(name, fallback, min = 1, max = Number.MAX_SAFE_INTEGER) {
   const value = Number(process.env[name]);
   if (!Number.isInteger(value) || value < min || value > max) return fallback;
@@ -837,6 +852,38 @@ function buildPlanArgsForIndex(inputPath, outPath, options = {}) {
     '--speed', normalizeTtsSpeed(options.ttsSpeed),
     '--force-audio'
   ];
+}
+
+// Burn exact narration text/timing from resolved lecture files into a rendered MP4.
+async function burnRenderedSubtitles(inputPath, outputPath, resolvedFiles, options, job) {
+  const config = readAppConfig();
+  const args = [
+    '--import',
+    'tsx',
+    'src/subtitle-burner.ts',
+    '--input', inputPath,
+    '--out', outputPath,
+    '--font', normalizeSubtitleFont(options.subtitleFont || config.render.subtitleFont),
+    '--font-size', String(normalizeSubtitleNumber(options.subtitleFontSize, config.render.subtitleFontSize, 12, 200, 'Subtitle font size')),
+    '--bottom-percent', String(normalizeSubtitleNumber(options.subtitleBottomPercent, config.render.subtitleBottomPercent, 0, 50, 'Subtitle distance from bottom'))
+  ];
+  for (const resolvedFile of resolvedFiles) {
+    args.push('--resolved-html', resolvedFile);
+  }
+
+  let childProc = null;
+  try {
+    await runCapture(process.execPath, args, {
+      cwd: rootDir,
+      windowsHide: true,
+      onSpawn: (child) => {
+        childProc = child;
+        job.childProcs.add(child);
+      }
+    });
+  } finally {
+    if (childProc) job.childProcs.delete(childProc);
+  }
 }
 
 // Determine which sibling scenes belong to the same lecture render batch.
@@ -988,7 +1035,9 @@ async function renderLectureFile(filePath, options = {}, job = createRenderJob()
 
   const outPath = defaultOutputPath(inputPath);
   const framesDir = path.join(rootDir, '.render', 'server-render', `job-${job.id}`, 'frames');
-  const renderArgs = renderArgsForFile(inputPath, outPath, options, [
+  const burnSubtitle = options.burnSubtitle === true;
+  const renderOutputPath = burnSubtitle ? path.join(path.dirname(framesDir), 'unsubtitled.mp4') : outPath;
+  const renderArgs = renderArgsForFile(inputPath, renderOutputPath, options, [
     '--frames-dir', framesDir
   ]);
   let childProc = null;
@@ -1004,6 +1053,11 @@ async function renderLectureFile(filePath, options = {}, job = createRenderJob()
         job.childProcs.add(child);
       }
     });
+    if (burnSubtitle) {
+      const resolvedFile = isIndexHtmlName(basename) ? resolvedSiblingPathForIndex(inputPath) : inputPath;
+      console.log(`Burning centered subtitles into ${path.basename(outPath)}...`);
+      await burnRenderedSubtitles(renderOutputPath, outPath, [resolvedFile], options, job);
+    }
     return toViewerPath(outPath);
   } catch (error) {
     if (existsSync(outPath)) {
@@ -1114,9 +1168,15 @@ async function renderLectureBatch(inputPath, sceneFiles, options = {}, job = cre
       throw new Error('Process stopped by user');
     }
 
-    console.log(`Joining ${sceneOutputs.length} rendered scene files -> ${path.basename(outputPath)}`);
-    await concatRenderedScenes(sceneOutputs, outputPath, concatListPath);
+    const burnSubtitle = options.burnSubtitle === true;
+    const concatenatedPath = burnSubtitle ? path.join(tempDir, 'unsubtitled.mp4') : outputPath;
+    console.log(`Joining ${sceneOutputs.length} rendered scene files -> ${path.basename(concatenatedPath)}`);
+    await concatRenderedScenes(sceneOutputs, concatenatedPath, concatListPath);
     deleteIntermediateSceneRenders(sceneOutputs, outputPath);
+    if (burnSubtitle) {
+      console.log(`Burning centered subtitles into ${path.basename(outputPath)}...`);
+      await burnRenderedSubtitles(concatenatedPath, outputPath, renderSceneFiles, options, job);
+    }
     return toViewerPath(outputPath);
   } catch (error) {
     if (existsSync(outputPath)) {
@@ -1486,7 +1546,13 @@ const server = createServer(async (request, response) => {
         ttsSpeed: requestUrl.searchParams.get('ttsSpeed'),
         fps: requestUrl.searchParams.get('fps'),
         width: requestUrl.searchParams.get('width'),
-        height: requestUrl.searchParams.get('height')
+        height: requestUrl.searchParams.get('height'),
+        burnSubtitle: requestUrl.searchParams.has('burnSubtitle')
+          ? requestUrl.searchParams.get('burnSubtitle') === '1'
+          : appConfig.render.burnSubtitle,
+        subtitleFont: requestUrl.searchParams.get('subtitleFont'),
+        subtitleFontSize: requestUrl.searchParams.get('subtitleFontSize'),
+        subtitleBottomPercent: requestUrl.searchParams.get('subtitleBottomPercent')
       }, job));
 
       sendJson(response, 200, {
@@ -1610,11 +1676,11 @@ const server = createServer(async (request, response) => {
     return;
   }
 
-  // The first request uses the deterministic video-maker API. Once generation
+  // The first request uses the deterministic LectureGen API. Once generation
   // succeeds, later requests use the tool-enabled agent in index-only editor mode.
-  if (requestUrl.pathname === '/video-maker/generate' || requestUrl.pathname === '/agent-chat') {
+  if (requestUrl.pathname === '/lecturegen/generate' || requestUrl.pathname === '/agent-chat') {
     try {
-      const isGenerationRequest = requestUrl.pathname === '/video-maker/generate';
+      const isGenerationRequest = requestUrl.pathname === '/lecturegen/generate';
       let bodyData = '';
       request.on('data', chunk => { bodyData += chunk; });
       request.on('end', () => {
@@ -1674,7 +1740,7 @@ const server = createServer(async (request, response) => {
             const abortController = new AbortController();
             let isAborted = false;
             const activeGenerationJob = {
-              type: 'video-maker',
+              type: 'lecturegen',
               aborted: false,
               kill: () => {
                 isAborted = true;
@@ -1693,12 +1759,12 @@ const server = createServer(async (request, response) => {
               }
             };
             agentState.activeJob = activeGenerationJob;
-            console.log(`Starting video-maker generation in: ${agentWorkspace}`);
+            console.log(`Starting LectureGen in: ${agentWorkspace}`);
 
             (async () => {
               try {
-                const parsed = parseVideoMakerRequest(task, agentWorkspace);
-                const result = await generateVideo({
+                const parsed = parseLectureGenRequest(task, agentWorkspace);
+                const result = await generateLecture({
                   request: parsed.request,
                   model: payload.model || process.env.AGENT_MODEL || 'gemini-3.5-flash',
                   workspaceDir: agentWorkspace,
@@ -1707,7 +1773,9 @@ const server = createServer(async (request, response) => {
                   theme: parsed.theme,
                   teachingStyle: parsed.teachingStyle,
                   attachments: parsed.attachments.map(attachment => attachment.path),
-                  embedSubtitles: parsed.embedSubtitles,
+                  includeVideo: parsed.includeVideo,
+                  includeInteractive: parsed.includeInteractive,
+                  includeGame: parsed.includeGame,
                   enableGetimg: parsed.enableGetimg,
                   tokenTrackerSessionId: agentState.sessionId || path.basename(agentWorkspace),
                   signal: abortController.signal,
@@ -1736,7 +1804,7 @@ const server = createServer(async (request, response) => {
                 if (agentState.activeJob === activeGenerationJob) agentState.activeJob = null;
                 if (isAborted) return;
                 if (!response.writableEnded) {
-                  sendJson(response, 500, { error: err.message || `Video-maker generation failed: ${err}` });
+                  sendJson(response, 500, { error: err.message || `LectureGen failed: ${err}` });
                 }
               }
             })();

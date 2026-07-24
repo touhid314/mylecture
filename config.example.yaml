@@ -9,7 +9,6 @@ agent:
   enableGetimgTool: false
   defaultAspectRatio: "16:9"
   defaultLengthSeconds: 60
-  embedSubtitlesByDefault: false
 
 tts:
   provider: "omnivoice"
@@ -20,3 +19,7 @@ render:
   fps: 30
   baseWidth: 1920
   baseHeight: 1080
+  burnSubtitle: false
+  subtitleFont: "Arial"
+  subtitleFontSize: 48
+  subtitleBottomPercent: 8
