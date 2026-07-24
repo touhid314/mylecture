@@ -6,11 +6,13 @@
  * Local HTTP server for the MyLecture IDE. It serves the viewer UI, browses
  * lecture files, resolves source plans into renderable HTML, renders videos,
  * talks to the coding agent, and publishes rendered lecture folders to
- * the website package. This server is intentionally local-only on 127.0.0.1.
+ * the website package. It binds to localhost by default and can be explicitly
+ * exposed to a trusted local network with --host 0.0.0.0.
  */
 import { createReadStream, existsSync, mkdirSync, readdirSync, readFileSync, rmSync, statSync, unlinkSync, writeFileSync, watch } from 'node:fs';
 import { createServer } from 'node:http';
 import { spawn } from 'node:child_process';
+import { networkInterfaces } from 'node:os';
 import path from 'node:path';
 import { createViewerHtml } from '../packages/lecture-viewer/src/index.ts';
 import { EditorAgent } from '../packages/lecture-agent/src/editor-agent/coding_agent.ts';
@@ -168,6 +170,7 @@ function tryGetHtmlDuration(fullPath) {
 function parseArgs(argv) {
   const args = {
     port: defaultPort,
+    host: startupConfig.server.host,
     openPath: '',
     openBrowser: false,
     width: startupConfig.render.baseWidth,
@@ -181,6 +184,7 @@ function parseArgs(argv) {
     const next = argv[i + 1];
 
     if (arg === '--port') args.port = Number(next), i++;
+    else if (arg === '--host') args.host = String(next || '').trim(), i++;
     else if (arg === '--file') args.openPath = next, i++;
     else if (arg === '--width') args.width = Number(next), args.widthOverride = true, i++;
     else if (arg === '--height') args.height = Number(next), args.heightOverride = true, i++;
@@ -195,6 +199,9 @@ function parseArgs(argv) {
 
   if (!Number.isInteger(args.port) || args.port <= 0 || args.port > 65535) {
     throw new Error('--port must be a valid TCP port');
+  }
+  if (!args.host) {
+    throw new Error('--host must be a hostname or IP address');
   }
   if (!Number.isInteger(args.width) || args.width <= 0) {
     throw new Error('--width must be a positive integer');
@@ -212,6 +219,8 @@ function printHelp() {
   npm run ide -- [options]
 
 Options:
+  --host <address> Local bind address. Default: ${startupConfig.server.host}
+                   Use 0.0.0.0 to allow access from your local network
   --port <number>   Local server port. Default: ${defaultPort}
   --file <path>     HTML file to preselect in the viewer
   --width <pixels>  Preview viewport width. Default: ${startupConfig.render.baseWidth}
@@ -233,6 +242,24 @@ function openBrowser(url) {
     windowsHide: true
   });
   child.unref();
+}
+
+// Return URLs that humans can actually open. A wildcard bind address is
+// replaced by localhost and each active non-internal IPv4 interface.
+function getServerUrls(host, port) {
+  if (host !== '0.0.0.0') {
+    return [`http://${host}:${port}/`];
+  }
+
+  const urls = new Set([`http://127.0.0.1:${port}/`]);
+  for (const addresses of Object.values(networkInterfaces())) {
+    for (const address of addresses || []) {
+      if (address.family === 'IPv4' && !address.internal) {
+        urls.add(`http://${address.address}:${port}/`);
+      }
+    }
+  }
+  return [...urls];
 }
 
 // Static file MIME types used by /files and /lecture-viewer routes.
@@ -1388,7 +1415,8 @@ const viewerState = {
 
 // If another IDE server is already running, pass the selected file to it instead.
 async function pushFileToExistingViewer(args) {
-  const url = new URL(`http://${startupConfig.server.host}:${args.port}/open-file`);
+  const connectionHost = args.host === '0.0.0.0' ? '127.0.0.1' : args.host;
+  const url = new URL(`http://${connectionHost}:${args.port}/open-file`);
   url.searchParams.set('file', args.openPath);
   url.searchParams.set('width', String(args.width));
   url.searchParams.set('height', String(args.height));
@@ -2094,10 +2122,12 @@ server.on('error', error => {
   process.exit(1);
 });
 
-// Bind only to localhost; this IDE server is not intended for network exposure.
-server.listen(args.port, startupConfig.server.host, () => {
+server.listen(args.port, args.host, () => {
   const encodedFile = args.openPath ? `?file=${encodeURIComponent(args.openPath)}` : '';
-  const url = `http://${startupConfig.server.host}:${args.port}/${encodedFile}`;
-  console.log(`IDE server running at ${url}`);
-  if (args.openBrowser) openBrowser(url);
+  const urls = getServerUrls(args.host, args.port);
+  console.log(`IDE server running at:\n${urls.map((url) => `  ${url}`).join('\n')}`);
+  if (args.host === '0.0.0.0') {
+    console.warn('LAN access is enabled. Only use this on a trusted network; the IDE has no authentication.');
+  }
+  if (args.openBrowser) openBrowser(`${urls[0]}${encodedFile}`);
 });

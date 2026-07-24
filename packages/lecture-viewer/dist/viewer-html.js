@@ -86,7 +86,10 @@ export function createViewerHtml(openPath, initialWidth = 1920, initialHeight = 
 <html lang="en">
 <head>
 <meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
 <title>Render HTML Viewer</title>
 <style>
 /* Local IDE shell styling. The generated page has no external CSS dependency. */
@@ -129,6 +132,18 @@ body.agent-collapsed {
 body.fullscreen-active {
   grid-template-columns: 1fr;
   grid-template-rows: 1fr;
+}
+body.pseudo-fullscreen {
+  position: fixed !important;
+  top: 0 !important;
+  left: 0 !important;
+  right: 0 !important;
+  bottom: 0 !important;
+  width: 100% !important;
+  height: 100% !important;
+  height: 100dvh !important;
+  z-index: 99999 !important;
+  overflow: hidden !important;
 }
 #folder-sidebar {
   grid-column: 1;
@@ -3863,22 +3878,38 @@ async function handlePublishSubmit(event) {
 }
 
 function isFullscreenActive() {
-  return Boolean(document.fullscreenElement);
+  return Boolean(
+    document.fullscreenElement ||
+    document.webkitFullscreenElement ||
+    document.body.classList.contains('pseudo-fullscreen')
+  );
 }
 
+let lastTouchTime = 0;
+
 // Fullscreen keeps the preview dominant while briefly revealing controls on input.
-function showFullscreenControls() {
+function showFullscreenControls(duration = 3000) {
   if (!isFullscreenActive()) return;
   document.body.classList.add('controls-visible');
   clearTimeout(controlsHideTimer);
   controlsHideTimer = setTimeout(() => {
     document.body.classList.remove('controls-visible');
-  }, 1200);
+  }, duration);
 }
 
 function hideFullscreenControls() {
   if (!isFullscreenActive()) return;
   document.body.classList.remove('controls-visible');
+  clearTimeout(controlsHideTimer);
+}
+
+function toggleFullscreenControls() {
+  if (!isFullscreenActive()) return;
+  if (document.body.classList.contains('controls-visible')) {
+    hideFullscreenControls();
+  } else {
+    showFullscreenControls(3500);
+  }
 }
 
 function updateFullscreenState() {
@@ -3895,10 +3926,50 @@ function updateFullscreenState() {
 
 async function toggleFullscreen() {
   try {
-    if (isFullscreenActive()) await document.exitFullscreen();
-    else await document.documentElement.requestFullscreen();
+    if (isFullscreenActive()) {
+      if (document.body.classList.contains('pseudo-fullscreen')) {
+        document.body.classList.remove('pseudo-fullscreen');
+        updateFullscreenState();
+      } else if (document.exitFullscreen) {
+        await document.exitFullscreen();
+      } else if (document.webkitExitFullscreen) {
+        await document.webkitExitFullscreen();
+      } else {
+        document.body.classList.remove('pseudo-fullscreen');
+        updateFullscreenState();
+      }
+    } else {
+      const docEl = document.documentElement;
+      let nativeSuccess = false;
+      if (docEl.requestFullscreen) {
+        try {
+          await docEl.requestFullscreen();
+          nativeSuccess = true;
+        } catch (err) {
+          // Native fullscreen call failed (e.g. non-secure HTTP context or browser policy)
+        }
+      } else if (docEl.webkitRequestFullscreen) {
+        try {
+          await docEl.webkitRequestFullscreen();
+          nativeSuccess = true;
+        } catch (err) {
+          // WebKit native fullscreen failed
+        }
+      }
+
+      if (!nativeSuccess && !isFullscreenActive()) {
+        document.body.classList.add('pseudo-fullscreen');
+        updateFullscreenState();
+      }
+    }
   } catch (error) {
-    setStatus(error.message || 'Fullscreen failed');
+    if (!isFullscreenActive()) {
+      document.body.classList.add('pseudo-fullscreen');
+      updateFullscreenState();
+    } else {
+      document.body.classList.remove('pseudo-fullscreen');
+      updateFullscreenState();
+    }
   }
 }
 
@@ -4316,9 +4387,20 @@ viewportPreset.addEventListener('change', event => {
 });
 fullscreenButton.addEventListener('click', toggleFullscreen);
 document.addEventListener('fullscreenchange', updateFullscreenState);
+document.addEventListener('webkitfullscreenchange', updateFullscreenState);
+document.addEventListener('touchstart', event => {
+  if (!isFullscreenActive()) return;
+  lastTouchTime = Date.now();
+  if (controls && controls.contains(event.target)) {
+    showFullscreenControls(4000);
+    return;
+  }
+  toggleFullscreenControls();
+}, { passive: true });
 document.addEventListener('mousemove', event => {
   if (!isFullscreenActive()) return;
-  if (event.clientY >= window.innerHeight - 92) showFullscreenControls();
+  if (Date.now() - lastTouchTime < 1000) return;
+  if (event.clientY >= window.innerHeight - 92) showFullscreenControls(2000);
   else hideFullscreenControls();
 });
 document.addEventListener('keydown', handleViewerShortcut, true);
@@ -4341,6 +4423,9 @@ window.addEventListener('resize', () => {
   if (currentScenesList.length > 0) {
     updateScenePanel(currentScenesList);
   }
+});
+window.addEventListener('orientationchange', () => {
+  setTimeout(resizePreview, 150);
 });
 
 if (timelineRuler) {

@@ -198,6 +198,13 @@ class LecturePlayer {
         this.listeners = new Map();
         this.loadToken = 0;
         this.state = this.createInitialState();
+        this.audioCache = new Map();
+        this.audioBufferCache = new Map();
+        this.audioCtx = null;
+        this.gainNode = null;
+        this.activeSource = null;
+        this.audioSourceStartTime = 0;
+        this.audioSourceOffset = 0;
         this.boundFrameLoad = () => this.handleFrameLoad();
         this.iframe.addEventListener('load', this.boundFrameLoad);
     }
@@ -328,6 +335,7 @@ class LecturePlayer {
             this.nativeVideo = null;
         }
         this.stopAudio();
+        this.clearAudioCache();
         this.stopLiveTts();
         cancelAnimationFrame(this.state.raf);
         this.state = this.createInitialState();
@@ -424,6 +432,7 @@ class LecturePlayer {
             this.state.metadata = metadata;
             this.state.timeline = timeline;
             this.state.audioTimeline = audioTimeline;
+            this.preloadAudioTimeline();
             this.state.subtitleTimeline = subtitleTimeline;
             this.state.interactiveTimeline = interactiveTimeline;
             this.state.gameTimeline = gameTimeline;
@@ -483,12 +492,33 @@ class LecturePlayer {
         this.applyVolume();
         this.emit('statechange', this.snapshot());
     }
+    getAudioContext() {
+        if (!this.audioCtx && typeof window !== 'undefined') {
+            const AudioCtxClass = window.AudioContext || window.webkitAudioContext;
+            if (AudioCtxClass) {
+                try {
+                    this.audioCtx = new AudioCtxClass();
+                    this.gainNode = this.audioCtx.createGain();
+                    this.gainNode.connect(this.audioCtx.destination);
+                }
+                catch (e) { }
+            }
+        }
+        return this.audioCtx;
+    }
     applyVolume() {
         const volume = Math.max(0, Math.min(1, Number(this.state.volume) || 0));
         const muted = Boolean(this.state.muted || volume <= 0);
+        const effectiveVolume = muted ? 0 : volume;
         if (this.nativeVideo) {
             this.nativeVideo.volume = volume;
             this.nativeVideo.muted = muted;
+        }
+        if (this.gainNode && this.audioCtx) {
+            try {
+                this.gainNode.gain.setValueAtTime(effectiveVolume, this.audioCtx.currentTime);
+            }
+            catch (e) { }
         }
         if (this.state.audio) {
             this.state.audio.volume = volume;
@@ -535,11 +565,100 @@ class LecturePlayer {
     audioUrl(src) {
         return new URL(src, this.iframe.contentWindow.location.href).href;
     }
-    stopAudio() {
-        if (!this.state.audio)
+    clearAudioCache() {
+        if (this.activeSource) {
+            try {
+                this.activeSource.stop();
+                this.activeSource.disconnect();
+            }
+            catch (e) { }
+            this.activeSource = null;
+        }
+        if (this.audioCache) {
+            this.audioCache.forEach(audio => {
+                try {
+                    audio.pause();
+                    audio.src = '';
+                }
+                catch (e) { }
+            });
+            this.audioCache.clear();
+        }
+        this.audioBufferCache.clear();
+    }
+    preloadAudioTimeline() {
+        this.clearAudioCache();
+        if (!Array.isArray(this.state.audioTimeline))
             return;
-        this.state.audio.pause();
-        this.state.audio = null;
+        const ctx = this.getAudioContext();
+        for (const cue of this.state.audioTimeline) {
+            if (!cue || !cue.src)
+                continue;
+            const url = this.audioUrl(cue.src);
+            if (this.audioBufferCache.has(url))
+                continue;
+            try {
+                if (ctx) {
+                    fetch(url)
+                        .then(res => {
+                        if (!res.ok)
+                            throw new Error('Fetch failed');
+                        return res.arrayBuffer();
+                    })
+                        .then(arrayBuf => ctx.decodeAudioData(arrayBuf))
+                        .then(decodedBuf => {
+                        this.audioBufferCache.set(url, decodedBuf);
+                    })
+                        .catch(() => {
+                        if (!this.audioCache.has(url)) {
+                            const audio = new Audio(url);
+                            audio.preload = 'auto';
+                            audio.load();
+                            this.audioCache.set(url, audio);
+                        }
+                    });
+                }
+                else {
+                    const audio = new Audio(url);
+                    audio.preload = 'auto';
+                    audio.load();
+                    this.audioCache.set(url, audio);
+                }
+            }
+            catch (e) {
+                // Ignore preload errors
+            }
+        }
+    }
+    primeAudioCache() {
+        const ctx = this.getAudioContext();
+        if (ctx && ctx.state === 'suspended') {
+            ctx.resume().catch(() => { });
+        }
+        if (this.audioCache) {
+            this.audioCache.forEach(audio => {
+                if (audio.readyState === 0) {
+                    audio.load();
+                }
+            });
+        }
+    }
+    stopAudio() {
+        if (this.activeSource) {
+            try {
+                this.activeSource.stop();
+                this.activeSource.disconnect();
+            }
+            catch (e) { }
+            this.activeSource = null;
+        }
+        if (this.state.audio) {
+            try {
+                this.state.audio.pause();
+            }
+            catch (e) { }
+            this.state.audio = null;
+        }
         this.state.audioCue = null;
     }
     stopLiveTts() {
@@ -601,29 +720,63 @@ class LecturePlayer {
             return;
         }
         this.stopLiveTts();
-        const offset = this.state.time - cue.start;
+        const offset = Math.max(0, this.state.time - cue.start);
+        const url = this.audioUrl(cue.src);
         if (this.state.audioCue !== cue) {
             this.stopAudio();
             this.state.audioCue = cue;
-            this.state.audio = new Audio(this.audioUrl(cue.src));
-            this.state.audio.addEventListener('error', () => {
+            const ctx = this.getAudioContext();
+            const decodedBuf = this.audioBufferCache.get(url);
+            if (ctx && decodedBuf) {
+                try {
+                    const source = ctx.createBufferSource();
+                    source.buffer = decodedBuf;
+                    source.playbackRate.value = this.speed;
+                    source.connect(this.gainNode);
+                    source.onended = () => {
+                        if (this.activeSource === source) {
+                            this.activeSource = null;
+                        }
+                    };
+                    this.applyVolume();
+                    source.start(0, offset);
+                    this.activeSource = source;
+                    this.audioSourceStartTime = ctx.currentTime;
+                    this.audioSourceOffset = offset;
+                    return;
+                }
+                catch (err) {
+                    // Fallback to HTML5 Audio element if Web Audio start fails
+                }
+            }
+            let audioObj = this.audioCache.get(url);
+            if (!audioObj) {
+                audioObj = new Audio(url);
+                audioObj.preload = 'auto';
+                this.audioCache.set(url, audioObj);
+            }
+            this.state.audio = audioObj;
+            this.state.audio.onerror = () => {
                 this.state.audioFailures.add(this.audioCueKey(cue));
                 this.stopAudio();
                 this.syncLiveTts();
-            }, { once: true });
+            };
             this.state.audio.playbackRate = this.speed;
             this.applyVolume();
-            this.state.audio.currentTime = Math.max(0, offset);
+            this.state.audio.currentTime = offset;
             this.state.audio.play().catch(() => this.setStatus('Audio blocked until play is clicked again'));
             return;
         }
-        this.state.audio.playbackRate = this.speed;
-        this.applyVolume();
-        if (Math.abs(this.state.audio.currentTime - offset) > 0.22) {
-            this.state.audio.currentTime = Math.max(0, offset);
+        if (this.activeSource) {
+            this.activeSource.playbackRate.value = this.speed;
+            this.applyVolume();
         }
-        if (this.state.audio.paused) {
-            this.state.audio.play().catch(() => this.setStatus('Audio blocked until play is clicked again'));
+        else if (this.state.audio) {
+            this.state.audio.playbackRate = this.speed;
+            this.applyVolume();
+            if (this.state.audio.paused) {
+                this.state.audio.play().catch(() => this.setStatus('Audio blocked until play is clicked again'));
+            }
         }
     }
     renderAt(time) {
@@ -684,9 +837,25 @@ class LecturePlayer {
     tick(now) {
         if (!this.state.playing)
             return;
-        // Playback time is derived from wall-clock elapsed time rather than adding
-        // frame deltas, which avoids drift when frames are delayed.
-        const nextTime = this.state.startTime + ((now - this.state.startedAt) / 1000) * this.speed;
+        let nextTime;
+        const activeCue = this.activeAudioCue();
+        if (this.activeSource && this.audioCtx && activeCue) {
+            // Web Audio API Master Clock: Sub-millisecond hardware sample precision
+            const elapsedAudio = (this.audioCtx.currentTime - this.audioSourceStartTime) * this.speed;
+            nextTime = activeCue.start + this.audioSourceOffset + elapsedAudio;
+            this.state.startedAt = now;
+            this.state.startTime = nextTime;
+        }
+        else if (this.state.audio && !this.state.audio.paused && activeCue && typeof this.state.audio.currentTime === 'number' && !isNaN(this.state.audio.currentTime)) {
+            // HTML5 Audio Master Clock fallback
+            nextTime = activeCue.start + (this.state.audio.currentTime * this.speed);
+            this.state.startedAt = now;
+            this.state.startTime = nextTime;
+        }
+        else {
+            // Wall-clock fallback for visual-only segments or during buffer loading
+            nextTime = this.state.startTime + ((now - this.state.startedAt) / 1000) * this.speed;
+        }
         this.renderAt(nextTime);
         if (this.state.time >= this.state.duration) {
             this.state.playing = false;
@@ -701,6 +870,7 @@ class LecturePlayer {
     play() {
         if (!this.state.loaded)
             return;
+        this.primeAudioCache();
         if (this.nativeVideo) {
             if (this.state.time >= this.state.duration) {
                 this.nativeVideo.currentTime = 0;

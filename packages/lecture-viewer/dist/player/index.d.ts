@@ -80,6 +80,7 @@ declare class LecturePlayer {
     setSpeed(speed: any): void;
     setVolume(volume: any, options?: {}): void;
     setMuted(muted: any): void;
+    getAudioContext(): any;
     applyVolume(): void;
     setSubtitlesEnabled(enabled: any): void;
     setLiveTtsEnabled(enabled: any): void;
@@ -87,6 +88,9 @@ declare class LecturePlayer {
     activeAudioCue(): any;
     audioCueKey(cue: any): any;
     audioUrl(src: any): string;
+    clearAudioCache(): void;
+    preloadAudioTimeline(): void;
+    primeAudioCache(): void;
     stopAudio(): void;
     stopLiveTts(): void;
     selectLiveTtsVoice(): SpeechSynthesisVoice;

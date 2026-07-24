@@ -71,6 +71,10 @@ node --import tsx src/ide-server.ts
 ```
 
 The default IDE URL is `http://127.0.0.1:4307/`. If that port is busy, pass `-- --port <port>`.
+The server remains localhost-only by default. To access it from another device
+on a trusted local network, pass `-- --host 0.0.0.0`; startup output lists the
+LAN URLs. The IDE has no authentication, so do not expose it on an untrusted
+network.
 
 ## Environment
 
