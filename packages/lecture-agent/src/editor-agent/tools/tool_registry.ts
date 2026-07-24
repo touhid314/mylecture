@@ -177,18 +177,18 @@ function is_tool_enabled(tool: ToolRegistryEntry, options: ToolRuntimeOptions = 
     return true;
 }
 
-function isIndexHtmlPath(value: unknown): boolean {
+function isAllowedHtmlPath(value: unknown): boolean {
     if (typeof value !== 'string') return false;
     const normalized = value.trim().replaceAll('\\', '/').replace(/^\.\//, '');
-    return !normalized.includes('/') && /^index(?:\d+)?\.html$/i.test(normalized);
+    return !normalized.includes('/') && /\.html$/i.test(normalized);
 }
 
 function enforceEditorMutationBoundary(name: string, argumentsObj: any, options: ToolRuntimeOptions): string | null {
     void options;
     if (name === 'edits') {
-        return isIndexHtmlPath(argumentsObj.path)
+        return isAllowedHtmlPath(argumentsObj.path)
             ? null
-            : 'ERROR: Lecture editor may only edit workspace-root index.html/indexN.html files.';
+            : 'ERROR: Lecture editor may only edit workspace-root HTML files (e.g. index.html, indexN.html, interactive.html, game.html).';
     }
     return null;
 }

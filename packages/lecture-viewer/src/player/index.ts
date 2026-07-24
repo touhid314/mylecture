@@ -540,7 +540,7 @@ class LecturePlayer {
           this.audioCtx = new AudioCtxClass();
           this.gainNode = this.audioCtx.createGain();
           this.gainNode.connect(this.audioCtx.destination);
-        } catch (e) {}
+        } catch (e) { }
       }
     }
     return this.audioCtx;
@@ -558,7 +558,7 @@ class LecturePlayer {
     if (this.gainNode && this.audioCtx) {
       try {
         this.gainNode.gain.setValueAtTime(effectiveVolume, this.audioCtx.currentTime);
-      } catch (e) {}
+      } catch (e) { }
     }
     if (this.state.audio) {
       this.state.audio.volume = volume;
@@ -615,7 +615,7 @@ class LecturePlayer {
       try {
         this.activeSource.stop();
         this.activeSource.disconnect();
-      } catch (e) {}
+      } catch (e) { }
       this.activeSource = null;
     }
     if (this.audioCache) {
@@ -623,7 +623,7 @@ class LecturePlayer {
         try {
           audio.pause();
           audio.src = '';
-        } catch (e) {}
+        } catch (e) { }
       });
       this.audioCache.clear();
     }
@@ -674,7 +674,7 @@ class LecturePlayer {
   primeAudioCache() {
     const ctx = this.getAudioContext();
     if (ctx && ctx.state === 'suspended') {
-      ctx.resume().catch(() => {});
+      ctx.resume().catch(() => { });
     }
     if (this.audioCache) {
       this.audioCache.forEach(audio => {
@@ -690,13 +690,13 @@ class LecturePlayer {
       try {
         this.activeSource.stop();
         this.activeSource.disconnect();
-      } catch (e) {}
+      } catch (e) { }
       this.activeSource = null;
     }
     if (this.state.audio) {
       try {
         this.state.audio.pause();
-      } catch (e) {}
+      } catch (e) { }
       this.state.audio = null;
     }
     this.state.audioCue = null;
@@ -781,7 +781,7 @@ class LecturePlayer {
           source.buffer = decodedBuf;
           source.playbackRate.value = this.speed;
           source.connect(this.gainNode);
-          
+
           source.onended = () => {
             if (this.activeSource === source) {
               this.activeSource = null;
