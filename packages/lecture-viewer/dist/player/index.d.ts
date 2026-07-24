@@ -74,6 +74,7 @@ declare class LecturePlayer {
     };
     setStatus(message: any): void;
     load(src: any): Promise<unknown>;
+    prepareForFrameSwap(src: any): void;
     resetForLoad(): void;
     handleFrameLoad(): void;
     setSpeed(speed: any): void;

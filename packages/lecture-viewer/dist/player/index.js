@@ -280,13 +280,7 @@ class LecturePlayer {
             throw new Error('load requires a source.');
         // Loading a new iframe source invalidates pending ready/error listeners from
         // earlier loads; loadToken lets the finally block identify stale completions.
-        const previousVolume = this.state.volume;
-        const previousMuted = this.state.muted;
-        this.pause();
-        this.resetForLoad();
-        this.state.src = src;
-        this.state.volume = previousVolume;
-        this.state.muted = previousMuted;
+        this.prepareForFrameSwap(src);
         const token = ++this.loadToken;
         const loaded = new Promise((resolve, reject) => {
             const offReady = this.on('ready', state => {
@@ -312,10 +306,23 @@ class LecturePlayer {
                 return;
         }
     }
+    prepareForFrameSwap(src) {
+        if (!src)
+            throw new Error('prepareForFrameSwap requires a source.');
+        const previousVolume = this.state.volume;
+        const previousMuted = this.state.muted;
+        this.pause();
+        this.resetForLoad();
+        this.state.src = src;
+        this.state.volume = previousVolume;
+        this.state.muted = previousMuted;
+    }
     resetForLoad() {
         // MP4 previews install native video handlers, while HTML previews use the
         // custom requestAnimationFrame loop below. Reset both paths before loading.
         if (this.nativeVideo) {
+            this.nativeVideo.onplay = null;
+            this.nativeVideo.onpause = null;
             this.nativeVideo.ontimeupdate = null;
             this.nativeVideo.onended = null;
             this.nativeVideo = null;

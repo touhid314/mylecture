@@ -2136,7 +2136,7 @@ body.file-kind-mp4 .timeline-ruler {
     <div class="agent-header">
       <div class="agent-title">Lecture Agent</div>
       <div style="display: flex; align-items: center; gap: 8px;">
-        <button id="agent-new-chat" class="agent-new-chat-btn" type="button" title="New Chat">New Chat</button>
+        <button id="agent-new-chat" class="agent-new-chat-btn" type="button" title="New Lecture">New Lecture</button>
         <span class="agent-status-tag">Standby</span>
       </div>
     </div>
@@ -3450,7 +3450,10 @@ async function swapToPreloadedScene(nextPath, shouldPlay = true) {
     return;
   }
   
-  player.pause();
+  // Clear all playback state before adopting the already-loaded iframe. In
+  // particular, this detaches a previous native MP4 element so play() cannot
+  // rewind and restart its audio after the visual frame has changed.
+  player.prepareForFrameSwap(nextPath);
   frame.removeEventListener('load', player.boundFrameLoad);
   
   frame.style.display = 'none';
@@ -4155,7 +4158,9 @@ player.on('ended', async () => {
   if (currentIndex > -1 && currentIndex < currentScenesList.length - 1) {
     const nextScene = currentScenesList[currentIndex + 1];
     setStatus('Auto-advancing to ' + nextScene.name + '...');
-    await swapToPreloadedScene(nextScene.path);
+    // Interactive and game files are destinations, not zero-duration media.
+    // Load/start them, but do not continue the timed player's play loop.
+    await swapToPreloadedScene(nextScene.path, !nextScene.isNonTime);
   }
 });
 
@@ -4403,12 +4408,17 @@ function getLatestStepFromLog(logText) {
   return '';
 }
 
-function showThinking() {
+function showThinking(statusText = 'Agent is starting...') {
   if (!agentBody) return;
   const bubble = document.createElement('div');
   bubble.className = 'thinking-bubble';
   bubble.id = 'agent-thinking';
-  bubble.innerHTML = '<span>Agent is starting...</span><div class="dot-flashing"></div>';
+  const label = document.createElement('span');
+  label.textContent = statusText;
+  bubble.append(label);
+  const dots = document.createElement('div');
+  dots.className = 'dot-flashing';
+  bubble.append(dots);
   agentBody.appendChild(bubble);
   agentBody.scrollTop = agentBody.scrollHeight;
 }
@@ -4728,6 +4738,7 @@ async function sendChat() {
   if (!agentChatInput || !agentChatSend) return;
   const msg = agentChatInput.value.trim();
   const filesToSend = pendingAgentAttachments.slice();
+  const requestPhase = agentPhase;
   if (!msg && filesToSend.length === 0) return;
   if (
     agentPhase === 'generate'
@@ -4750,12 +4761,12 @@ async function sendChat() {
   agentChatSend.style.display = 'none';
   if (agentChatStop) agentChatStop.style.display = 'block';
   if (agentStatusTag) {
-    agentStatusTag.textContent = 'Thinking';
+    agentStatusTag.textContent = requestPhase === 'generate' ? 'Generating' : 'Thinking';
     agentStatusTag.style.background = 'rgba(255, 214, 10, 0.15)';
     agentStatusTag.style.color = '#ffd60a';
   }
   
-  showThinking();
+  showThinking(requestPhase === 'generate' ? 'Generating' : 'Agent is starting...');
   let uploadCompleted = filesToSend.length === 0;
 
   let logPollInterval = setInterval(async () => {
@@ -4763,18 +4774,20 @@ async function sendChat() {
       const logRes = await fetch('/agent-log?agentClientId=' + encodeURIComponent(agentClientId));
       const logData = await logRes.json();
       const latestStep = getLatestStepFromLog(logData.log);
-      if (latestStep) {
+      if (requestPhase !== 'generate' && latestStep) {
         updateThinkingStatus(latestStep);
       }
     } catch (e) {}
   }, 800);
 
   try {
-    updateThinkingStatus(filesToSend.length > 0 ? 'Uploading attachments...' : 'Agent is starting...');
+    if (requestPhase !== 'generate') {
+      updateThinkingStatus(filesToSend.length > 0 ? 'Uploading attachments...' : 'Agent is starting...');
+    }
     const uploadedFiles = await uploadAgentAttachments(filesToSend);
     uploadCompleted = true;
     const taskMessage = buildAttachmentPrompt(msg, uploadedFiles);
-    const endpoint = agentPhase === 'generate' ? '/lecturegen/generate' : '/agent-chat';
+    const endpoint = requestPhase === 'generate' ? '/lecturegen/generate' : '/agent-chat';
     const response = await fetch(endpoint, {
       method: 'POST',
       headers: {

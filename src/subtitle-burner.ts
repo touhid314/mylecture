@@ -282,7 +282,7 @@ ScaledBorderAndShadow: yes
 
 [V4+ Styles]
 Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding
-Style: Social,${fontName},${fontSize},&H30FFFFFF,&H30FFFFFF,&H70000000,&HCC000000,1,0,0,0,100,100,0,0,1,4,1,2,${marginH},${marginH},${marginV},1
+Style: Social,${fontName},${fontSize},&H4DFFFFFF,&H4DFFFFFF,&H70000000,&HCC000000,1,0,0,0,100,100,0,0,1,4,1,2,${marginH},${marginH},${marginV},1
 
 [Events]
 Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
