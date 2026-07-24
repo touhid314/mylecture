@@ -13,5 +13,6 @@ workspace/outputs/
 draft.txt
 .log/
 src/tools/lib/poppler-25.11.0/
+src/editor-agent/tools/lib/poppler-25.11.0/
 docs/
 graphify-out/

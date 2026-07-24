@@ -6,7 +6,7 @@
  */
 import fs from 'fs';
 import path from 'path';
-import { resolve_workspace_path, DEFAULT_WORKSPACE_DIR } from '../workspace.js';
+import { resolve_workspace_path, DEFAULT_WORKSPACE_DIR } from '../../workspace.js';
 
 export function tool_del(paths: string[], workspaceDir: string = DEFAULT_WORKSPACE_DIR): string {
     if (!Array.isArray(paths)) {

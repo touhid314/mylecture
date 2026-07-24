@@ -13,7 +13,8 @@ import { createServer } from 'node:http';
 import { spawn } from 'node:child_process';
 import path from 'node:path';
 import { createViewerHtml } from '../packages/lecture-viewer/src/index.ts';
-import { LectureAgent } from '../packages/lecture-agent/src/coding_agent.ts';
+import { EditorAgent } from '../packages/lecture-agent/src/editor-agent/coding_agent.ts';
+import { generateVideo, parseVideoMakerRequest } from '../packages/lecture-agent/src/video_maker.ts';
 import { loadAppConfig, resolveConfigPath } from './config.ts';
 
 const rootDir = process.cwd();
@@ -63,6 +64,7 @@ function getAgentState(agentClientId) {
       activeJob: null,
       log: '',
       pendingNewSession: true,
+      phase: 'generate',
       enableGetimgTool: null,
       session: null
     };
@@ -423,7 +425,7 @@ function agentUploadRoot(agentClientId = 'default') {
 
 function agentProfilesRoot() {
   const workspaceProfilesRoot = path.resolve(rootDir, 'packages/lecture-agent/.agents/mylecture-profiles');
-  if (existsSync(path.resolve(rootDir, 'packages/lecture-agent/src/coding_agent.ts'))) {
+  if (existsSync(path.resolve(rootDir, 'packages/lecture-agent/src/editor-agent/coding_agent.ts'))) {
     return workspaceProfilesRoot;
   }
   return path.resolve(rootDir, '../lecture-agent/.agents/mylecture-profiles');
@@ -451,7 +453,7 @@ function listAgentProfiles() {
 
 function agentThemesRoot() {
   const workspaceThemesRoot = path.resolve(rootDir, 'packages/lecture-agent/.agents/mylecture-themes');
-  if (existsSync(path.resolve(rootDir, 'packages/lecture-agent/src/coding_agent.ts'))) {
+  if (existsSync(path.resolve(rootDir, 'packages/lecture-agent/src/editor-agent/coding_agent.ts'))) {
     return workspaceThemesRoot;
   }
   return path.resolve(rootDir, '../lecture-agent/.agents/mylecture-themes');
@@ -479,7 +481,7 @@ function listAgentThemes() {
 
 function agentTeachingStylesRoot() {
   const workspaceStylesRoot = path.resolve(rootDir, 'packages/lecture-agent/.agents/mylecture-teaching-style');
-  if (existsSync(path.resolve(rootDir, 'packages/lecture-agent/src/coding_agent.ts'))) {
+  if (existsSync(path.resolve(rootDir, 'packages/lecture-agent/src/editor-agent/coding_agent.ts'))) {
     return workspaceStylesRoot;
   }
   return path.resolve(rootDir, '../lecture-agent/.agents/mylecture-teaching-style');
@@ -1541,11 +1543,22 @@ const server = createServer(async (request, response) => {
       agentState.currentWorkspace = '';
       agentState.sessionId = '';
       agentState.pendingNewSession = true;
+      agentState.phase = 'generate';
       agentState.session = null;
       sendJson(response, 200, { ok: true });
     } catch (error) {
       sendJson(response, 500, { error: error.message });
     }
+    return;
+  }
+
+  if (requestUrl.pathname === '/agent-state') {
+    const agentState = getAgentState(requestUrl.searchParams.get('agentClientId'));
+    sendJson(response, 200, {
+      ok: true,
+      phase: agentState.phase,
+      workspace: agentState.currentWorkspace || ''
+    });
     return;
   }
 
@@ -1597,9 +1610,11 @@ const server = createServer(async (request, response) => {
     return;
   }
 
-  // Send the user's message plus current IDE context to the coding agent.
-  if (requestUrl.pathname === '/agent-chat') {
+  // The first request uses the deterministic video-maker API. Once generation
+  // succeeds, later requests use the tool-enabled agent in index-only editor mode.
+  if (requestUrl.pathname === '/video-maker/generate' || requestUrl.pathname === '/agent-chat') {
     try {
+      const isGenerationRequest = requestUrl.pathname === '/video-maker/generate';
       let bodyData = '';
       request.on('data', chunk => { bodyData += chunk; });
       request.on('end', () => {
@@ -1609,10 +1624,6 @@ const server = createServer(async (request, response) => {
           const currentFile = payload.currentFile || '';
           const currentDir = payload.currentDir || '';
           const agentState = getAgentState(payload.agentClientId || requestUrl.searchParams.get('agentClientId'));
-          const enableGetimgTool = typeof payload.enableGetimgTool === 'boolean'
-            ? payload.enableGetimgTool
-            : appConfig.agent.enableGetimgTool === true;
-
           if (!message) {
             sendJson(response, 400, { error: 'Missing message parameter.' });
             return;
@@ -1623,6 +1634,15 @@ const server = createServer(async (request, response) => {
               createNewSessionWorkspace(agentState.id);
             }
             agentState.pendingNewSession = false;
+          }
+
+          if (isGenerationRequest && agentState.phase !== 'generate') {
+            sendJson(response, 409, { error: 'This chat already has a generated video. Start a New Chat to generate another one.' });
+            return;
+          }
+          if (!isGenerationRequest && agentState.phase !== 'edit') {
+            sendJson(response, 409, { error: 'Generate the video before sending edit requests.' });
+            return;
           }
 
           let task = '';
@@ -1649,23 +1669,91 @@ const server = createServer(async (request, response) => {
           }
           task += message;
 
-          if (agentState.session && agentState.enableGetimgTool !== enableGetimgTool) {
-            agentState.session = null;
+          if (isGenerationRequest) {
+            agentState.log = '';
+            const abortController = new AbortController();
+            let isAborted = false;
+            const activeGenerationJob = {
+              type: 'video-maker',
+              aborted: false,
+              kill: () => {
+                isAborted = true;
+                activeGenerationJob.aborted = true;
+                abortController.abort();
+                if (agentState.activeJob === activeGenerationJob) agentState.activeJob = null;
+                if (!response.writableEnded) {
+                  sendJson(response, 200, {
+                    ok: true,
+                    stopped: true,
+                    output: '',
+                    mode: 'generate',
+                    workspace: agentWorkspace
+                  });
+                }
+              }
+            };
+            agentState.activeJob = activeGenerationJob;
+            console.log(`Starting video-maker generation in: ${agentWorkspace}`);
+
+            (async () => {
+              try {
+                const parsed = parseVideoMakerRequest(task, agentWorkspace);
+                const result = await generateVideo({
+                  request: parsed.request,
+                  model: payload.model || process.env.AGENT_MODEL || 'gemini-3.5-flash',
+                  workspaceDir: agentWorkspace,
+                  generationLength: parsed.generationLength,
+                  aspectRatio: parsed.aspectRatio,
+                  theme: parsed.theme,
+                  teachingStyle: parsed.teachingStyle,
+                  attachments: parsed.attachments.map(attachment => attachment.path),
+                  embedSubtitles: parsed.embedSubtitles,
+                  enableGetimg: parsed.enableGetimg,
+                  tokenTrackerSessionId: agentState.sessionId || path.basename(agentWorkspace),
+                  signal: abortController.signal,
+                  onLog: text => {
+                    agentState.log += text;
+                    process.stderr.write(text);
+                  }
+                });
+                if (agentState.activeJob === activeGenerationJob) agentState.activeJob = null;
+                if (isAborted) return;
+                agentState.phase = 'edit';
+                agentState.session = null;
+                viewerState.version++;
+                viewerState.path = result.entryFile;
+                if (!response.writableEnded) {
+                  sendJson(response, 200, {
+                    ok: true,
+                    output: result.output.trim(),
+                    mode: 'edit',
+                    workspace: result.workspaceDir,
+                    path: result.entryFile,
+                    files: result.htmlFiles
+                  });
+                }
+              } catch (err: any) {
+                if (agentState.activeJob === activeGenerationJob) agentState.activeJob = null;
+                if (isAborted) return;
+                if (!response.writableEnded) {
+                  sendJson(response, 500, { error: err.message || `Video-maker generation failed: ${err}` });
+                }
+              }
+            })();
+            return;
           }
 
           if (!agentState.session) {
-            const agent = new LectureAgent({
+            const agent = new EditorAgent({
               model: payload.model || process.env.AGENT_MODEL || "gemini-3.5-flash",
               workspaceDir: agentWorkspaceRoot(agentState.id),
               tokenTrackerSessionId: agentState.sessionId || path.basename(agentWorkspaceRoot(agentState.id)),
-              enableGetimgTool,
               onLog: (text) => {
                 agentState.log += text;
                 process.stderr.write(text);
               }
             });
             agentState.session = agent.startChat();
-            agentState.enableGetimgTool = enableGetimgTool;
           }
 
           agentState.log = ''; // Reset log buffer for this turn

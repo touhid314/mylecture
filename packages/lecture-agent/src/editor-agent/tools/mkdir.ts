@@ -5,7 +5,7 @@
  * Prevents creation of directories outside workspace boundaries.
  */
 import fs from 'fs';
-import { resolve_workspace_path } from '../workspace.js';
+import { resolve_workspace_path } from '../../workspace.js';
 
 export function tool_mkdir(dirPath: string, workspaceDir?: string): string {
     try {

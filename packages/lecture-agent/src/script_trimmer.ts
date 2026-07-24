@@ -14,6 +14,28 @@ type ScriptBeat = {
 const NARRATION_PATTERN = /^\s*N:\s*(.*)$/i;
 const SCENE_PATTERN = /^\s*#\s*Scene\b.*$/i;
 
+export type ScriptTrimmerChunkSizes = {
+    maximumNarrationWords: number;
+    minimumNarrationWords: number;
+};
+
+export function getScriptTrimmerChunkSizes(
+    configuredValue = process.env.SCRIPT_TRIMMER_CHUNK_SIZE
+): ScriptTrimmerChunkSizes {
+    const normalized = configuredValue?.replace(/['"]/g, '').trim();
+    if (!normalized) {
+        throw new Error('SCRIPT_TRIMMER_CHUNK_SIZE is required and must be a positive integer.');
+    }
+    const maximumNarrationWords = Number(normalized);
+    if (!Number.isInteger(maximumNarrationWords) || maximumNarrationWords <= 0) {
+        throw new Error('SCRIPT_TRIMMER_CHUNK_SIZE must be a positive integer.');
+    }
+    return {
+        maximumNarrationWords,
+        minimumNarrationWords: Math.ceil(maximumNarrationWords / 2)
+    };
+}
+
 export function countNarrationWords(text: string): number {
     return text.match(/[\p{L}\p{N}]+(?:['’\-][\p{L}\p{N}]+)*/gu)?.length || 0;
 }
@@ -118,8 +140,8 @@ function findPartition(
 
 export function trimScriptByNarration(
     script: string,
-    maximumNarrationWords = 75,
-    minimumNarrationWords = 30
+    maximumNarrationWords = getScriptTrimmerChunkSizes().maximumNarrationWords,
+    minimumNarrationWords = Math.ceil(maximumNarrationWords / 2)
 ): ScriptBlock[] {
     if (!Number.isInteger(maximumNarrationWords) || maximumNarrationWords <= 0) {
         throw new Error('maximumNarrationWords must be a positive integer.');

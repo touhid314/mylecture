@@ -10,12 +10,12 @@ import path from 'path';
 import { spawnSync } from 'child_process';
 import { fileURLToPath } from 'url';
 
-import { DEFAULT_WORKSPACE_DIR, resolve_workspace_path } from '../../workspace.js';
+import { DEFAULT_WORKSPACE_DIR, resolve_workspace_path } from '../workspace.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
-const CONTRACT_VALIDATOR_JS = path.join(__dirname, '..', '..', 'validate_contract.cjs');
+const CONTRACT_VALIDATOR_JS = path.join(__dirname, '..', 'validate_contract.cjs');
 const PROTECTED_HTML_BLOCK_PATTERN = /(<(?:script|style)\b[^>]*>[\s\S]*?<\/(?:script|style)>)/gi;
 const HTML_TAG_PATTERN = /<[^<>]*>/g;
 

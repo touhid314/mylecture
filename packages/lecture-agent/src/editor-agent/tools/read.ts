@@ -7,7 +7,7 @@
 import fs from 'fs';
 import path from 'path';
 
-import { resolve_workspace_path } from '../workspace.js';
+import { resolve_workspace_path } from '../../workspace.js';
 
 export function tool_read(filePath: string, workspaceDir?: string): string {
     const target = resolve_workspace_path(filePath, workspaceDir);

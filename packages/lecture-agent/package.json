@@ -3,12 +3,14 @@
   "version": "1.0.0",
   "description": "TypeScript implementation of coding agent",
   "type": "module",
-  "main": "src/coding_agent.ts",
+  "main": "src/editor-agent/coding_agent.ts",
   "scripts": {
-    "agent": "tsx src/cli.ts",
-    "static-flow": "tsx src/staticflow/cli.ts",
-    "token-tracker": "tsx src/token_tracker_dashboard.ts",
-    "test": "tsx src/upload_smoke_test.ts && tsx src/workspace_sync_smoke_test.ts"
+    "agent": "tsx src/editor-agent/cli.ts",
+    "editor-agent": "tsx src/editor-agent/cli.ts",
+    "video-maker": "tsx src/video_maker.ts",
+    "prompt-builder": "tsx src/prompt_builder.ts",
+    "token-tracker": "tsx src/token-tracker/token_tracker_dashboard.ts",
+    "test": "tsc --noEmit"
   },
   "dependencies": {
     "@google/genai": "*",

@@ -7,9 +7,9 @@
 import fs from 'fs';
 import path from 'path';
 
-import { resolve_workspace_path } from '../workspace.js';
-import { purify_content_for_path } from './utils/html_contract.js';
-import { text_stats } from './utils/text_stats.js';
+import { resolve_workspace_path } from '../../workspace.js';
+import { purify_content_for_path } from '../../utils/html_contract.js';
+import { text_stats } from '../../utils/text_stats.js';
 
 export function tool_write(filePath: string, content: string, workspaceDir?: string): string {
     const target = resolve_workspace_path(filePath, workspaceDir);

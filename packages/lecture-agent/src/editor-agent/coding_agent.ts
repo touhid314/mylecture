@@ -7,7 +7,7 @@
  *
  * ### Programmatic API:
  *
- * 1. **LectureAgent** (Class)
+ * 1. **EditorAgent** (Class)
  *    The core entry point. Configured with LLM models, sandbox workspaces, and skills.
  *    - `constructor(config: AgentConfig)`
  *    - `startChat(initialHistory?: ChatMessage[]): ChatSession` - Starts a multi-turn chat.
@@ -33,7 +33,7 @@
  *
  * ### Programmatic API:
  *
- * 1. **LectureAgent** (Class)
+ * 1. **EditorAgent** (Class)
  *    The core entry point. Configured with LLM models, sandbox workspaces, and skills.
  *    - `constructor(config: AgentConfig)`
  *    - `startChat(initialHistory?: ChatMessage[]): ChatSession` - Starts a multi-turn chat.
@@ -58,16 +58,16 @@ import dotenv from 'dotenv';
 import { AsyncLocalStorage } from 'node:async_hooks';
 export const loggerStorage = new AsyncLocalStorage<(text: string) => void>();
 
-import { LLM_Model } from './llm_model.js';
-import { log_llm_request, start_new_llm_log_session } from './llm_prompt_logger.js';
-import { build_prompt, extract_upload_attachments, type UploadAttachment, UPLOAD_MIME_BY_EXT } from './prompt_builder.js';
-import { extractTokenUsage } from './token_tracker.js';
+import { LLM_Model } from '../utils/llm_model.js';
+import { log_llm_request, start_new_llm_log_session } from '../utils/llm_prompt_logger.js';
+import { build_prompt, extract_upload_attachments, type UploadAttachment, UPLOAD_MIME_BY_EXT } from '../prompt_builder.js';
+import { extractTokenUsage } from '../token-tracker/token_tracker.js';
 import {
     BASE_DIR,
     WORKSPACE_DIR,
     DEFAULT_WORKSPACE_DIR,
     resolve_workspace_path,
-} from './workspace.js';
+} from '../workspace.js';
 import {
     type ToolRuntimeOptions,
     build_function_response_payload,
@@ -82,8 +82,8 @@ import {
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
-const PROMPT_PATH = path.join(__dirname, 'prompts', 'system_prompt.md');
-const PRE_USER_RESPONSE_PROMPT_PATH = path.join(__dirname, 'prompts', 'pre-user-response-prompt.md');
+const PROMPT_PATH = path.join(__dirname, '..', 'prompts', 'system_prompt.md');
+const PRE_USER_RESPONSE_PROMPT_PATH = path.join(__dirname, '..', 'prompts', 'vault', 'pre-user-response-prompt.md');
 
 const USE_COLOR = !process.env.NO_COLOR;
 
@@ -127,8 +127,8 @@ type PreUserResponseContext = {
 function build_pre_user_response_context(rawUserQueries: string[]): PreUserResponseContext {
     const userQueriesOnly = rawUserQueries.map(query => String(query));
     return {
-        systemInstruction: load_pre_user_response_prompt(),
-        userPrompt: JSON.stringify(userQueriesOnly, null, 2)
+        systemInstruction: build_prompt(load_pre_user_response_prompt()),
+        userPrompt: build_prompt(JSON.stringify(userQueriesOnly, null, 2))
     };
 }
 
@@ -239,8 +239,8 @@ function build_skill_context(skills: string[] | null, workspaceDir: string = DEF
     return loaded.join("\n\n---\n\n");
 }
 
-function build_system_instructions(skills: string[] | null, workspaceDir: string = DEFAULT_WORKSPACE_DIR, toolOptions: ToolRuntimeOptions = {}): string {
-    const system_prompt = build_prompt(inject_available_tools(load_system_prompt(), toolOptions), workspaceDir);
+function build_system_instructions(skills: string[] | null, workspaceDir: string = DEFAULT_WORKSPACE_DIR, toolOptions: ToolRuntimeOptions = {}, customSystemPrompt?: string): string {
+    const system_prompt = build_prompt(inject_available_tools(customSystemPrompt || load_system_prompt(), toolOptions), workspaceDir);
     const skill_context = build_skill_context(skills, workspaceDir);
     const base_prompt = system_prompt;
     if (!skill_context) {
@@ -343,8 +343,13 @@ function chat_prompt(): string {
     return `\n${Color.BOLD}${Color.GREEN}You>${Color.RESET} `;
 }
 
-function build_agent_prompt(task: string, transcript: any[], toolOptions: ToolRuntimeOptions = {}): string {
-    return [
+function build_agent_prompt(
+    task: string,
+    transcript: any[],
+    toolOptions: ToolRuntimeOptions = {},
+    workspaceDir: string = DEFAULT_WORKSPACE_DIR
+): string {
+    return build_prompt([
         "User task:",
         task,
         "Conversation so far:",
@@ -357,7 +362,7 @@ function build_agent_prompt(task: string, transcript: any[], toolOptions: ToolRu
         "When the work is complete and you are ready to answer the user, return this done shape:",
         JSON.stringify(DONE_JSON_SCHEMA, null, 2),
         "Do not wrap the JSON in Markdown.",
-    ].join("\n\n");
+    ].join("\n\n"), workspaceDir);
 }
 
 function normalize_model_response(response: any): any {
@@ -509,7 +514,7 @@ export class GeminiAgentSession {
     private toolOptions: ToolRuntimeOptions;
     private tokenTrackerSessionId: string;
 
-    constructor(model: string, workspaceDir: string, skills: string[] | null = null, initialHistory: any[] = [], toolOptions: ToolRuntimeOptions = {}, tokenTrackerSessionId?: string | null) {
+    constructor(model: string, workspaceDir: string, skills: string[] | null = null, initialHistory: any[] = [], toolOptions: ToolRuntimeOptions = {}, tokenTrackerSessionId?: string | null, customSystemPrompt?: string) {
         this.model = model;
         this.workspaceDir = workspaceDir;
         this.toolOptions = toolOptions;
@@ -519,7 +524,7 @@ export class GeminiAgentSession {
         this.llm.token_tracker_session_id = this.tokenTrackerSessionId;
         const gemini_max_tokens = process.env.GEMINI_MAX_TOKENS;
         this.config = {
-            systemInstruction: build_system_instructions(skills, workspaceDir, toolOptions),
+            systemInstruction: build_system_instructions(skills, workspaceDir, toolOptions, customSystemPrompt),
             tools: [{ functionDeclarations: gemini_function_declarations(toolOptions) }],
             automaticFunctionCalling: { disable: true },
             toolConfig: {
@@ -739,13 +744,13 @@ class JsonFallbackAgentSession {
     private toolOptions: ToolRuntimeOptions;
     private tokenTrackerSessionId: string;
 
-    constructor(model: string, workspaceDir: string, skills: string[] | null = null, initialHistory: any[] = [], toolOptions: ToolRuntimeOptions = {}, tokenTrackerSessionId?: string | null) {
+    constructor(model: string, workspaceDir: string, skills: string[] | null = null, initialHistory: any[] = [], toolOptions: ToolRuntimeOptions = {}, tokenTrackerSessionId?: string | null, customSystemPrompt?: string) {
         this.model = model;
         this.workspaceDir = workspaceDir;
         this.toolOptions = toolOptions;
         this.llm = new LLM_Model(
             model,
-            build_system_instructions(skills, workspaceDir, toolOptions),
+            build_system_instructions(skills, workspaceDir, toolOptions, customSystemPrompt),
             null,
             true
         );
@@ -806,7 +811,7 @@ class JsonFallbackAgentSession {
                 print_step(step, "asking model for next action", Color.MAGENTA);
                 this.llm.token_tracker_purpose = `step_${step}_next_action`;
                 const response = await this.llm.generate(
-                    build_agent_prompt(prepared_task, this.transcript, this.toolOptions),
+                    build_agent_prompt(prepared_task, this.transcript, this.toolOptions, this.workspaceDir),
                     null,
                     null,
                     null,
@@ -876,11 +881,11 @@ class JsonFallbackAgentSession {
     }
 }
 
-function create_agent_session(model: string, workspaceDir: string, skills: string[] | null = null, initialHistory: any[] = [], toolOptions: ToolRuntimeOptions = {}, tokenTrackerSessionId?: string | null): any {
+function create_agent_session(model: string, workspaceDir: string, skills: string[] | null = null, initialHistory: any[] = [], toolOptions: ToolRuntimeOptions = {}, tokenTrackerSessionId?: string | null, customSystemPrompt?: string): any {
     if (model.toLowerCase().includes("gemini")) {
-        return new GeminiAgentSession(model, workspaceDir, skills, initialHistory, toolOptions, tokenTrackerSessionId);
+        return new GeminiAgentSession(model, workspaceDir, skills, initialHistory, toolOptions, tokenTrackerSessionId, customSystemPrompt);
     }
-    return new JsonFallbackAgentSession(model, workspaceDir, skills, initialHistory, toolOptions, tokenTrackerSessionId);
+    return new JsonFallbackAgentSession(model, workspaceDir, skills, initialHistory, toolOptions, tokenTrackerSessionId, customSystemPrompt);
 }
 
 type ActiveAgentSession = {
@@ -894,7 +899,6 @@ function agent_session_key(model: string, skills: string[] | null, toolOptions: 
     return JSON.stringify({
         model,
         skills: skills || [],
-        enableGetimgTool: toolOptions.enableGetimgTool === true,
         workspaceDir
     });
 }
@@ -989,7 +993,7 @@ export interface AgentConfig {
     workspaceDir: string;
     skills?: string[] | null;
     maxTurns?: number;
-    enableGetimgTool?: boolean;
+    systemPrompt?: string;
     tokenTrackerSessionId?: string | null;
     onLog?: (text: string) => void;
 }
@@ -1011,6 +1015,7 @@ export class ChatSession {
     private totalOutputTokens: number = 0;
     private onLog?: (text: string) => void;
     private toolOptions: ToolRuntimeOptions;
+    private systemPrompt?: string;
     private activeAbortController: AbortController | null = null;
     private turnSequence: number = 0;
     private tokenTrackerSessionId: string;
@@ -1023,7 +1028,8 @@ export class ChatSession {
         maxTurns: number = 500,
         toolOptions: ToolRuntimeOptions = {},
         tokenTrackerSessionId?: string | null,
-        onLog?: (text: string) => void
+        onLog?: (text: string) => void,
+        systemPrompt?: string
     ) {
         this.model = model;
         this.workspaceDir = path.resolve(workspaceDir);
@@ -1032,6 +1038,7 @@ export class ChatSession {
         this.maxTurns = maxTurns;
         this.toolOptions = toolOptions;
         this.onLog = onLog;
+        this.systemPrompt = systemPrompt;
         this.tokenTrackerSessionId = resolve_token_tracker_session_id(model, this.workspaceDir, tokenTrackerSessionId);
         process.env.TOKEN_TRACKER_SESSION_ID = this.tokenTrackerSessionId;
         fs.mkdirSync(this.workspaceDir, { recursive: true });
@@ -1063,7 +1070,7 @@ export class ChatSession {
     async sendMessage(prompt: string, maxTurns?: number, abortSignal?: AbortSignal): Promise<string> {
         const turnsLimit = maxTurns !== undefined ? maxTurns : this.maxTurns;
         const historyBeforeTurn = [...this.history];
-        const session = create_agent_session(this.model, this.workspaceDir, this.skills, historyBeforeTurn, this.toolOptions, this.tokenTrackerSessionId);
+        const session = create_agent_session(this.model, this.workspaceDir, this.skills, historyBeforeTurn, this.toolOptions, this.tokenTrackerSessionId, this.systemPrompt);
         const turnId = ++this.turnSequence;
         this.history = this.stoppedTurnHistory(session, historyBeforeTurn, prompt);
         const turnAbortController = new AbortController();
@@ -1127,7 +1134,7 @@ export class ChatSession {
     }
 }
 
-export class LectureAgent {
+export class EditorAgent {
     private config: AgentConfig;
 
     constructor(config: AgentConfig) {
@@ -1145,9 +1152,10 @@ export class LectureAgent {
             this.config.skills,
             initialHistory || [],
             this.config.maxTurns,
-            { enableGetimgTool: this.config.enableGetimgTool === true },
+            {},
             this.config.tokenTrackerSessionId,
-            this.config.onLog
+            this.config.onLog,
+            this.config.systemPrompt
         );
     }
 
@@ -1193,7 +1201,16 @@ async function run_session_with_timing(session: any, task: string, max_turns: nu
     }
 }
 
-export async function run_agent(task: string, model: string, max_turns: number, skills: string[] | null = null, enableGetimgTool: boolean = false, workspaceDir: string = DEFAULT_WORKSPACE_DIR): Promise<string> {
-    const session = get_or_create_agent_session(model, skills, { enableGetimgTool }, workspaceDir);
+export async function run_agent(
+    task: string,
+    model: string,
+    max_turns: number,
+    skills: string[] | null = null,
+    workspaceDir: string = DEFAULT_WORKSPACE_DIR
+): Promise<string> {
+    const session = get_or_create_agent_session(model, skills, {}, workspaceDir);
     return await run_session_with_timing(session, task, max_turns);
 }
+
+// Compatibility alias for callers that have not yet adopted the explicit name.
+export { EditorAgent as LectureAgent };

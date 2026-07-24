@@ -1,14 +1,14 @@
 /**
- * packages/lecture-agent/src/tools/getimg.ts
+ * packages/lecture-agent/src/asset_fetcher.ts
  *
  * Programmatic API, CLI tool, and Agent Tool to search for or generate images.
  *
  * Programmatic API:
- *   import { downloadImage } from './getimg.js';
+ *   import { downloadImage } from './asset_fetcher.js';
  *   await downloadImage({ prompt: '...', mode: 'gen', ... });
  *
  * CLI Usage:
- *   npx tsx packages/lecture-agent/src/tools/getimg.ts --prompt "your prompt" --mode [search|gen] [options]
+ *   npx tsx packages/lecture-agent/src/asset_fetcher.ts --prompt "your prompt" --mode [search|gen] [options]
  */
 
 import fs from 'fs';
@@ -17,8 +17,10 @@ import { fileURLToPath } from 'url';
 import dotenv from 'dotenv';
 import sharp from 'sharp';
 
-import { resolve_workspace_path } from '../workspace.js';
-import { LLM_Model } from '../llm_model.js';
+import { build_prompt } from './prompt_builder.js';
+import { resolve_workspace_path } from './workspace.js';
+import { LLM_Model } from './utils/llm_model.js';
+import { safeRelativeFile } from './video_maker_shared.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -184,9 +186,9 @@ async function watchmanImageWithGemini(
                     mimeType: mimeType
                 }
             },
-            `User request: "${prompt}"\n\nVerify if this image fulfills the user's request. Return a JSON object with:
+            build_prompt(`User request: "${prompt}"\n\nVerify if this image fulfills the user's request. Return a JSON object with:
 - "fulfilled" (boolean): true if the image is a high-quality, relevant image that properly fulfills the user request. false if it has errors, irrelevant subject, watermark, or doesn't match the query.
-- "reason" (string): brief explanation of your choice.`
+- "reason" (string): brief explanation of your choice.`)
         ],
         config: {
             responseMimeType: "application/json",
@@ -254,7 +256,7 @@ async function watchmanMultipleImagesWithGemini(
 - "bestImageIndex" (number): the 1-based index of the best image that fulfills the request (e.g. 1, 2, 3, etc.), or -1 if none of them are suitable.
 - "reason" (string): explanation of your choice.`;
 
-    contents.push(promptText);
+    contents.push(build_prompt(promptText));
 
     const response = await modelInstance.generateContent({
         model: watchmanModel,
@@ -529,7 +531,7 @@ async function handleGeminiImageMode(options: DownloadOptions, modelName: string
     modelInstance.token_tracker_purpose = "image_generation";
 
     const response = await modelInstance.generateImage({
-        prompt,
+        prompt: build_prompt(prompt, path.dirname(out)),
         aspect,
         resolution
     });
@@ -587,7 +589,7 @@ async function handleGptImageMode(options: DownloadOptions) {
     modelInstance.token_tracker_purpose = "image_generation";
 
     const response = await modelInstance.generateImage({
-        prompt,
+        prompt: build_prompt(prompt, path.dirname(out)),
         aspect
     });
 
@@ -678,7 +680,7 @@ export async function downloadImage(options: DownloadOptions): Promise<void> {
 function printHelp() {
     console.log(`
 Usage:
-  npx tsx packages/lecture-agent/src/tools/getimg.ts --prompt <prompt> [options]
+  npx tsx packages/lecture-agent/src/asset_fetcher.ts --prompt <prompt> [options]
 
 Required:
   -p, --prompt <string>       The search query or AI generation prompt.
@@ -861,4 +863,86 @@ export function compact_getimg(args: any, result: string): { compactedArgs: any;
         },
         compactedResult: result
     };
+}
+
+export type AssetDescription = {
+    prompt: string;
+    path: string;
+    width: number | null;
+    height: number | null;
+    format: string | null;
+    bytes: number;
+};
+
+const NAMED_GETIMG_PATTERN = /\[\(getimg:\s*(?:'([^']*)'|"([^"]*)")\s*,\s*out:\s*(?:'([^']*)'|"([^"]*)")\s*\)\]/gi;
+const LEGACY_GETIMG_PATTERN = /\[\(getimg:\s*(?:'([^']*)'|"([^"]*)")\s*\)\]/gi;
+
+function assetSlug(value: string): string {
+    return value.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '').slice(0, 60) || 'image';
+}
+
+export function collectImageRequests(script: string): Array<{ prompt: string; path: string }> {
+    const requests: Array<{ prompt: string; path: string }> = [];
+    const occupied = new Set<string>();
+
+    for (const match of script.matchAll(NAMED_GETIMG_PATTERN)) {
+        const prompt = (match[1] || match[2]).trim();
+        const relativePath = safeRelativeFile(match[3] || match[4]);
+        const key = relativePath.toLowerCase();
+        if (occupied.has(key)) throw new Error(`Duplicate requested asset filename: ${relativePath}`);
+        occupied.add(key);
+        requests.push({ prompt, path: relativePath });
+    }
+
+    for (const match of script.matchAll(LEGACY_GETIMG_PATTERN)) {
+        const prompt = (match[1] || match[2]).trim();
+        const base = assetSlug(prompt);
+        let relativePath = `assets/${base}.png`;
+        let suffix = 2;
+        while (occupied.has(relativePath.toLowerCase())) relativePath = `assets/${base}-${suffix++}.png`;
+        occupied.add(relativePath.toLowerCase());
+        requests.push({ prompt, path: relativePath });
+    }
+    return requests;
+}
+
+export function stripImageRequests(script: string): string {
+    return script
+        .replace(NAMED_GETIMG_PATTERN, '[Use a code-drawn visual; external images are disabled.]')
+        .replace(LEGACY_GETIMG_PATTERN, '[Use a code-drawn visual; external images are disabled.]');
+}
+
+export async function fetchAssets(script: string, workspaceDir: string): Promise<AssetDescription[]> {
+    const descriptions: AssetDescription[] = [];
+    for (const request of collectImageRequests(script)) {
+        const absolutePath = path.resolve(workspaceDir, request.path);
+        const workspaceRoot = path.resolve(workspaceDir);
+        if (absolutePath !== workspaceRoot && !absolutePath.startsWith(workspaceRoot + path.sep)) {
+            throw new Error(`Asset path escapes workspace: ${request.path}`);
+        }
+        fs.mkdirSync(path.dirname(absolutePath), { recursive: true });
+        await downloadImage({
+            prompt: request.prompt,
+            mode: 'search',
+            out: absolutePath,
+            watchman: false
+        });
+        const metadata = await sharp(absolutePath).metadata();
+        descriptions.push({
+            prompt: request.prompt,
+            path: request.path.replaceAll('\\', '/'),
+            width: metadata.width ?? null,
+            height: metadata.height ?? null,
+            format: metadata.format ?? null,
+            bytes: fs.statSync(absolutePath).size
+        });
+    }
+    return descriptions;
+}
+
+export function formatAssetDescriptions(assets: AssetDescription[]): string {
+    if (assets.length === 0) return 'No external image assets were requested by the script.';
+    return assets.map(asset =>
+        `- ${asset.path}: ${asset.width || '?'}x${asset.height || '?'} ${asset.format || 'image'}, ${asset.bytes} bytes; requested as "${asset.prompt}"`
+    ).join('\n');
 }

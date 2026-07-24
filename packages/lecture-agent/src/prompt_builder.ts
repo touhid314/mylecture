@@ -1,9 +1,23 @@
 /**
  * prompt_builder.ts
  *
- * Provides utilities to parse and build system/user prompts. Handles automatic
- * inlining of backticked local files, extracts attachment directives (like images,
- * PDFs, and videos), and prepares attachment metadata for the LLM upload pipeline.
+ * Shared prompt-control module for both the video maker and editor agent.
+ *
+ * Every model-bound system and user prompt passes through `build_prompt()`. It
+ * resolves readable local paths wrapped in backticks, inlines text files, leaves
+ * binary files for the attachment pipeline, and removes hidden attachment
+ * directives from model-visible text.
+ *
+ * This module also contains its own direct-run CLI control. Importing the module
+ * has no CLI side effects; the control runs only when this file is executed:
+ *
+ *   npm run --silent prompt-builder -- --workspace "D:\path\to\workspace" "Use `notes.md`"
+ *   Get-Content .\prompt.txt -Raw |
+ *     npm run --silent prompt-builder -- --workspace "D:\path\to\workspace"
+ *
+ * The CLI emits only the expanded prompt on stdout. Help and errors use stderr.
+ * The module intentionally lives directly under `src/` because it is shared
+ * application infrastructure, not an editor-only utility.
  */
 import fs from 'fs';
 import path from 'path';
@@ -153,4 +167,64 @@ export function extract_upload_attachments(promptText: string, workspaceDir: str
         attachments.push({ path: resolvedPath, kind, mimeType });
     }
     return attachments;
+}
+
+function print_prompt_builder_help(): void {
+    process.stderr.write([
+        'Usage:',
+        '  npm run prompt-builder -- [--workspace <directory>] "prompt text"',
+        '  Get-Content prompt.txt | npm run prompt-builder -- --workspace <directory>',
+        '',
+        'Prints exactly the text produced by the prompt builder after attachment',
+        'directives are removed and readable backticked file paths are inlined.',
+        ''
+    ].join('\n'));
+}
+
+export function parse_prompt_builder_cli_args(
+    argv: string[]
+): { prompt: string; workspaceDir: string; help: boolean } {
+    const promptParts: string[] = [];
+    let workspaceDir = process.cwd();
+    let help = false;
+
+    for (let index = 0; index < argv.length; index++) {
+        const argument = argv[index];
+        if (argument === '--help' || argument === '-h') {
+            help = true;
+            continue;
+        }
+        if (argument === '--workspace') {
+            const value = argv[++index];
+            if (!value) throw new Error('Missing value for --workspace.');
+            workspaceDir = path.resolve(value);
+            continue;
+        }
+        if (argument.startsWith('--')) throw new Error(`Unknown option: ${argument}`);
+        promptParts.push(argument);
+    }
+
+    if (help) return { prompt: '', workspaceDir, help };
+    const argumentPrompt = promptParts.join(' ').trim();
+    const prompt = argumentPrompt || (process.stdin.isTTY ? '' : fs.readFileSync(0, 'utf8'));
+    if (!prompt.trim()) throw new Error('Provide prompt text as an argument or through stdin.');
+    return { prompt, workspaceDir, help };
+}
+
+export function run_prompt_builder_cli(argv = process.argv.slice(2)): void {
+    const { prompt, workspaceDir, help } = parse_prompt_builder_cli_args(argv);
+    if (help) {
+        print_prompt_builder_help();
+        return;
+    }
+    process.stdout.write(build_prompt(prompt, workspaceDir));
+}
+
+if (process.argv[1] && path.resolve(process.argv[1]) === __filename) {
+    try {
+        run_prompt_builder_cli();
+    } catch (error) {
+        process.stderr.write(`Error: ${error instanceof Error ? error.message : String(error)}\n`);
+        process.exitCode = 1;
+    }
 }

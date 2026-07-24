@@ -1,22 +1,24 @@
 import fs from 'node:fs';
 import path from 'node:path';
 
-import { LLM_Model } from '../llm_model.js';
+import { build_prompt } from './prompt_builder.js';
+import { LLM_Model } from './utils/llm_model.js';
 
-export type StaticFlowAttachment = {
+export type VideoMakerAttachment = {
     path: string;
     kind: 'image' | 'pdf' | 'video';
     mimeType?: string;
 };
 
-export type StaticFlowLlmOptions = {
+export type VideoMakerLlmOptions = {
     model: string;
     tokenTrackerSessionId?: string | null;
+    promptWorkspaceDir?: string;
 };
 
 export function readPrompt(promptPath: string): string {
     if (!fs.existsSync(promptPath)) {
-        throw new Error(`Static-flow prompt not found: ${promptPath}`);
+        throw new Error(`Video-maker prompt not found: ${promptPath}`);
     }
     return fs.readFileSync(promptPath, 'utf8');
 }
@@ -28,17 +30,18 @@ function responseText(response: any, purpose: string): string {
 }
 
 export async function runLlm(
-    options: StaticFlowLlmOptions,
+    options: VideoMakerLlmOptions,
     purpose: string,
     systemPrompt: string,
     userPrompt: string,
-    attachments: StaticFlowAttachment[] = []
+    attachments: VideoMakerAttachment[] = []
 ): Promise<string> {
-    const llm = new LLM_Model(options.model, systemPrompt);
+    const workspaceDir = options.promptWorkspaceDir || process.cwd();
+    const llm = new LLM_Model(options.model, build_prompt(systemPrompt, workspaceDir));
     llm.token_tracker_session_id = options.tokenTrackerSessionId || null;
     llm.token_tracker_purpose = purpose;
     const response = await llm.generate(
-        userPrompt,
+        build_prompt(userPrompt, workspaceDir),
         null,
         null,
         null,
@@ -53,19 +56,24 @@ export async function runLlm(
  * Retains complete request/response history so sequential calls have an exact,
  * cacheable prefix, matching the coding agent's within-turn behavior.
  */
-export class StaticFlowLlmSession {
+export class VideoMakerLlmSession {
     private readonly llm: LLM_Model;
     private attachmentsAdded = false;
+    private readonly promptWorkspaceDir: string;
 
-    constructor(options: StaticFlowLlmOptions, systemPrompt: string) {
-        this.llm = new LLM_Model(options.model, systemPrompt);
+    constructor(options: VideoMakerLlmOptions, systemPrompt: string) {
+        this.promptWorkspaceDir = options.promptWorkspaceDir || process.cwd();
+        this.llm = new LLM_Model(
+            options.model,
+            build_prompt(systemPrompt, this.promptWorkspaceDir)
+        );
         this.llm.token_tracker_session_id = options.tokenTrackerSessionId || null;
     }
 
     async generate(
         purpose: string,
         userPrompt: string,
-        attachments: StaticFlowAttachment[] = []
+        attachments: VideoMakerAttachment[] = []
     ): Promise<string> {
         this.llm.token_tracker_purpose = purpose;
         // Attach binary inputs once. They remain part of retained history; adding
@@ -73,7 +81,7 @@ export class StaticFlowLlmSession {
         const currentAttachments = this.attachmentsAdded ? [] : attachments;
         if (currentAttachments.length > 0) this.attachmentsAdded = true;
         const response = await this.llm.generate(
-            userPrompt,
+            build_prompt(userPrompt, this.promptWorkspaceDir),
             null,
             null,
             null,
@@ -88,7 +96,7 @@ export class StaticFlowLlmSession {
 export function safeRelativeFile(value: string): string {
     const normalized = value.trim().replaceAll('\\', '/').replace(/^\.\//, '');
     if (!normalized || path.posix.isAbsolute(normalized) || normalized.split('/').includes('..')) {
-        throw new Error(`Unsafe static-flow output path: ${value}`);
+        throw new Error(`Unsafe video-maker output path: ${value}`);
     }
     return normalized;
 }

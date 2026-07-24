@@ -9,8 +9,8 @@ import fs from 'fs';
 import path from 'path';
 
 import { resolve_workspace_path } from '../workspace.js';
-import { purify_content_for_path } from './utils/html_contract.js';
-import { text_stats } from './utils/text_stats.js';
+import { purify_content_for_path } from './html_contract.js';
+import { text_stats } from './text_stats.js';
 
 export interface RangeEdit {
     lines: [number, number?]; // [a, b] to replace/delete, [a] to insert after, [0] to insert at top

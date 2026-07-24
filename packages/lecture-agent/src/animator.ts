@@ -2,17 +2,17 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-import { tool_edits, type RangeEdit } from '../tools/edits.js';
-import { validate_index_html_contract, purify_content_for_path } from '../tools/utils/html_contract.js';
-import { StaticFlowLlmSession, readPrompt, type StaticFlowAttachment, type StaticFlowLlmOptions } from './shared.js';
+import { tool_edits, type RangeEdit } from './utils/file_edits.js';
+import { validate_index_html_contract, purify_content_for_path } from './utils/html_contract.js';
+import { VideoMakerLlmSession, readPrompt, type VideoMakerAttachment, type VideoMakerLlmOptions } from './video_maker_shared.js';
 
 const moduleDir = path.dirname(fileURLToPath(import.meta.url));
-const systemPromptPath = path.resolve(moduleDir, 'animator_system.md');
-const contractPath = path.resolve(moduleDir, '..', '..', '.agents', 'mylecture-contracts', 'html-input-contract.md');
+const systemPromptPath = path.resolve(moduleDir, 'prompts', 'animator_system.md');
+const contractPath = path.resolve(moduleDir, '..', '.agents', 'mylecture-contracts', 'html-input-contract.md');
 
 export type PreviousHtml = { path: string; content: string };
 
-export type AnimatorInput = StaticFlowLlmOptions & {
+export type AnimatorInput = VideoMakerLlmOptions & {
     request: string;
     aspectRatio: string;
     generationLength: string;
@@ -25,7 +25,7 @@ export type AnimatorInput = StaticFlowLlmOptions & {
     teachingStyle: string;
     assetDescriptions: string;
     previousHtmls: PreviousHtml[];
-    attachments?: StaticFlowAttachment[];
+    attachments?: VideoMakerAttachment[];
 };
 
 export type AnimatorRepairInput = AnimatorInput & {
@@ -33,18 +33,18 @@ export type AnimatorRepairInput = AnimatorInput & {
     validatorOutput: string;
 };
 
-function animatorSystemPrompt(): string {
+export function animatorSystemPrompt(): string {
     return `${readPrompt(systemPromptPath)}\n\n# Canonical HTML Input Contract\n${readPrompt(contractPath)}`;
 }
 
 export class AnimatorSession {
-    private readonly llm: StaticFlowLlmSession;
+    private readonly llm: VideoMakerLlmSession;
 
-    constructor(options: StaticFlowLlmOptions) {
-        this.llm = new StaticFlowLlmSession(options, animatorSystemPrompt());
+    constructor(options: VideoMakerLlmOptions) {
+        this.llm = new VideoMakerLlmSession(options, animatorSystemPrompt());
     }
 
-    generate(purpose: string, prompt: string, attachments: StaticFlowAttachment[] = []): Promise<string> {
+    generate(purpose: string, prompt: string, attachments: VideoMakerAttachment[] = []): Promise<string> {
         return this.llm.generate(purpose, prompt, attachments);
     }
 }
@@ -96,7 +96,7 @@ export async function animateScriptBlock(input: AnimatorInput, session: Animator
         '',
         `Create only ${input.outputPath}. Continue coherently from the previous HTML files while implementing only this script block.`
     ].join('\n');
-    const response = await session.generate(`staticflow_animator_block_${input.blockIndex}`, userPrompt, input.attachments);
+    const response = await session.generate(`video_maker_animator_block_${input.blockIndex}`, userPrompt, input.attachments);
     const [html] = purify_content_for_path(input.outputPath, parseAnimatorHtml(response));
     return html;
 }
@@ -136,7 +136,7 @@ export async function requestAnimatorRepair(input: AnimatorRepairInput, session:
         '',
         '# Current Script Block', input.scriptBlock
     ].join('\n');
-    const response = await session.generate(`staticflow_animator_repair_block_${input.blockIndex}`, repairPrompt, input.attachments);
+    const response = await session.generate(`video_maker_animator_repair_block_${input.blockIndex}`, repairPrompt, input.attachments);
     return parseAnimatorEdits(response, input.outputPath);
 }
 

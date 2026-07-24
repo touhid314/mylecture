@@ -1,19 +1,19 @@
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-import { runLlm, readPrompt, type StaticFlowAttachment, type StaticFlowLlmOptions } from './shared.js';
+import { runLlm, readPrompt, type VideoMakerAttachment, type VideoMakerLlmOptions } from './video_maker_shared.js';
 
 const moduleDir = path.dirname(fileURLToPath(import.meta.url));
-const systemPromptPath = path.resolve(moduleDir, '..', 'prompts', 'scriptgen_system.md');
+const systemPromptPath = path.resolve(moduleDir, 'prompts', 'scriptgen_system.md');
 
-export type ScriptWriterInput = StaticFlowLlmOptions & {
+export type ScriptWriterInput = VideoMakerLlmOptions & {
     request: string;
     generationLength: string;
     answer: string;
     theme: string;
     teachingStyle: string;
     enableGetimg: boolean;
-    attachments?: StaticFlowAttachment[];
+    attachments?: VideoMakerAttachment[];
 };
 
 export async function writeScript(input: ScriptWriterInput): Promise<string> {
@@ -43,5 +43,5 @@ export async function writeScript(input: ScriptWriterInput): Promise<string> {
         '',
         input.answer
     ].join('\n');
-    return runLlm(input, 'staticflow_script_writer', systemPrompt, userPrompt, input.attachments);
+    return runLlm(input, 'video_maker_script_writer', systemPrompt, userPrompt, input.attachments);
 }

@@ -7,7 +7,7 @@ import { fileURLToPath } from 'url';
 const require = createRequire(import.meta.url);
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
-const PACKAGE_DIR = path.resolve(__dirname, '..');
+const PACKAGE_DIR = path.resolve(__dirname, '..', '..');
 
 export const TOKEN_TRACKER_DIR = path.join(PACKAGE_DIR, '.log', 'token-tracker');
 export const TOKEN_TRACKER_DB_PATH = path.join(TOKEN_TRACKER_DIR, 'token_usage.db');

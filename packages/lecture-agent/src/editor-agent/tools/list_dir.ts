@@ -5,7 +5,7 @@
  * Resolves paths and formats output with entry types (FILE, DIR, OTHER).
  */
 import fs from 'fs';
-import { resolve_workspace_path } from '../workspace.js';
+import { resolve_workspace_path } from '../../workspace.js';
 
 export function tool_list_dir(dirPath?: string, workspaceDir?: string): string {
     try {

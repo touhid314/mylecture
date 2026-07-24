@@ -7,7 +7,7 @@
  */
 import { spawnSync } from 'child_process';
 
-import { DEFAULT_WORKSPACE_DIR } from '../workspace.js';
+import { DEFAULT_WORKSPACE_DIR } from '../../workspace.js';
 
 export function tool_cmd(command: string, timeout_seconds: number = 30, workspaceDir: string = DEFAULT_WORKSPACE_DIR): string {
     const lowered_command = command.toLowerCase().trim();

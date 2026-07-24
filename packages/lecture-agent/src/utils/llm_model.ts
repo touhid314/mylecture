@@ -17,7 +17,7 @@ import OpenAI from 'openai';
 
 import { log_llm_request } from './llm_prompt_logger.js';
 import { Logger } from './logger.js';
-import { extractTokenUsage, trackTokenUsageFromResponse, trackTokenUsage } from './token_tracker.js';
+import { extractTokenUsage, trackTokenUsageFromResponse, trackTokenUsage } from '../token-tracker/token_tracker.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);

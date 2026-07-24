@@ -8,7 +8,7 @@ import { spawn } from 'child_process';
 import fs from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
-import { resolve_workspace_path } from '../workspace.js';
+import { resolve_workspace_path } from '../../workspace.js';
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 /**
@@ -17,9 +17,9 @@ const __dirname = path.dirname(__filename);
 function resolvePythonExe(): string {
     const searchPaths = [
         // Repository root .venv
-        path.resolve(__dirname, '../../../../.venv'),
+        path.resolve(__dirname, '../../../../../.venv'),
         // Package local .venv
-        path.resolve(__dirname, '../../.venv'),
+        path.resolve(__dirname, '../../../.venv'),
     ];
     for (const venvDir of searchPaths) {
         const pythonExe = process.platform === 'win32'
@@ -119,7 +119,7 @@ if (isMain) {
     const savePageImg = args.includes('--savepageimg') || args.includes('--save-page-img');
 
     if (!pdfPath) {
-        console.error('Usage: node --import tsx packages/lecture-agent/src/tools/pdf2fig.ts --pdf <path_to_pdf> [--output <output_dir>] [--savepageimg]');
+        console.error('Usage: node --import tsx packages/lecture-agent/src/editor-agent/tools/pdf2fig.ts --pdf <path_to_pdf> [--output <output_dir>] [--savepageimg]');
         process.exit(1);
     }
     console.log(`Testing tool_pdf2fig with PDF: ${pdfPath}`);

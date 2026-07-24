@@ -9,41 +9,14 @@ import path from 'path';
 import readline from 'readline';
 import { fileURLToPath } from 'url';
 import {
-    LectureAgent,
+    EditorAgent,
     reset_agent_session,
     run_agent,
     available_skills,
     Color,
     print_detail
 } from './coding_agent.js';
-import { DEFAULT_WORKSPACE_DIR } from './workspace.js';
-
-function loadConfigEnableGetimgDefault(): boolean {
-    let dir = path.dirname(fileURLToPath(import.meta.url));
-    while (dir && dir !== path.parse(dir).root) {
-        const configPath = path.join(dir, 'config.yaml');
-        if (fs.existsSync(configPath)) {
-            const content = fs.readFileSync(configPath, 'utf8');
-            let section = "";
-            for (const rawLine of content.split(/\r?\n/)) {
-                const line = rawLine.replace(/\s+#.*$/, '').trimEnd();
-                if (!line.trim() || line.trimStart().startsWith('#')) continue;
-                const sectionMatch = line.match(/^([A-Za-z0-9_-]+):\s*$/);
-                if (sectionMatch) {
-                    section = sectionMatch[1];
-                    continue;
-                }
-                const fieldMatch = line.match(/^\s+enableGetimgTool:\s*(.*?)\s*$/);
-                if (section === "agent" && fieldMatch) {
-                    return fieldMatch[1].trim().toLowerCase() === "true";
-                }
-            }
-            return false;
-        }
-        dir = path.dirname(dir);
-    }
-    return false;
-}
+import { DEFAULT_WORKSPACE_DIR } from '../workspace.js';
 
 function askQuestion(query: string): Promise<string> {
     const rl = readline.createInterface({
@@ -60,16 +33,36 @@ function chat_prompt(): string {
     return `\n${Color.BOLD}${Color.GREEN}You>${Color.RESET} `;
 }
 
-async function run_chat(model: string, max_turns: number, skills: string[] | null = null, enableGetimgTool: boolean = false): Promise<void> {
+function printHelp(): void {
+    console.log(`Usage:
+  npm run editor-agent -- [options] "edit request"
+  npm run editor-agent -- --chat --workspace <generation-folder>
+
+Options:
+  --workspace <directory>  Generation workspace containing index*.html
+  --model <name>           LLM model (defaults to AGENT_MODEL)
+  --max-turns <number>     Maximum tool loops (default: 500)
+  --skill <name-or-file>   Optional editor skill; may be repeated
+  --chat                   Start a persistent editing chat
+  --new-session            Reset retained in-memory session state
+  --list-skills            List available skills
+  --help                   Show this help`);
+}
+
+async function run_chat(
+    model: string,
+    max_turns: number,
+    skills: string[] | null = null,
+    workspaceDir: string = DEFAULT_WORKSPACE_DIR
+): Promise<void> {
     reset_agent_session();
 
     // In chat CLI mode, we use the default workspace directory
-    const agent = new LectureAgent({
+    const agent = new EditorAgent({
         model,
-        workspaceDir: DEFAULT_WORKSPACE_DIR,
+        workspaceDir,
         skills,
-        maxTurns: max_turns,
-        enableGetimgTool
+        maxTurns: max_turns
     });
 
     const session = agent.startChat();
@@ -95,7 +88,6 @@ async function run_chat(model: string, max_turns: number, skills: string[] | nul
 
 function parseCommandLineArgs() {
     const args = process.argv.slice(2);
-    const defaultEnableGetimgTool = loadConfigEnableGetimgDefault();
     const result = {
         task: [] as string[],
         chat: false,
@@ -103,14 +95,18 @@ function parseCommandLineArgs() {
         listSkills: false,
         model: process.env.AGENT_MODEL || "",
         maxTurns: 500,
-        enableGetimgTool: defaultEnableGetimgTool,
+        workspaceDir: DEFAULT_WORKSPACE_DIR,
+        help: false,
         newSession: (process.env.AGENT_NEW_SESSION || "").replace(/['"]/g, "").trim().toLowerCase() === "true"
     };
 
     let i = 0;
     while (i < args.length) {
         const arg = args[i];
-        if (arg === '--chat') {
+        if (arg === '--help' || arg === '-h') {
+            result.help = true;
+            i++;
+        } else if (arg === '--chat') {
             result.chat = true;
             i++;
         } else if (arg === '--new-session') {
@@ -119,18 +115,19 @@ function parseCommandLineArgs() {
         } else if (arg === '--list-skills') {
             result.listSkills = true;
             i++;
-        } else if (arg === '--getimg' || arg === '--enable-getimg') {
-            result.enableGetimgTool = true;
-            i++;
-        } else if (arg === '--no-getimg' || arg === '--disable-getimg') {
-            result.enableGetimgTool = false;
-            i++;
         } else if (arg === '--skill') {
             if (i + 1 < args.length) {
                 result.skill.push(args[i + 1]);
                 i += 2;
             } else {
                 throw new Error("Missing value for --skill");
+            }
+        } else if (arg === '--workspace') {
+            if (i + 1 < args.length) {
+                result.workspaceDir = path.resolve(args[i + 1]);
+                i += 2;
+            } else {
+                throw new Error("Missing value for --workspace");
             }
         } else if (arg === '--model') {
             if (i + 1 < args.length) {
@@ -154,7 +151,7 @@ function parseCommandLineArgs() {
         }
     }
 
-    if (!result.model && !result.listSkills) {
+    if (!result.model && !result.listSkills && !result.help) {
         throw new Error("AGENT_MODEL environment variable or --model flag must be specified.");
     }
 
@@ -170,6 +167,11 @@ async function run() {
         process.exit(1);
     }
 
+    if (parsed.help) {
+        printHelp();
+        return;
+    }
+
     if (parsed.listSkills) {
         for (const skill of available_skills()) {
             console.log(skill);
@@ -182,7 +184,7 @@ async function run() {
     }
 
     if (parsed.chat) {
-        await run_chat(parsed.model, parsed.maxTurns, parsed.skill, parsed.enableGetimgTool);
+        await run_chat(parsed.model, parsed.maxTurns, parsed.skill, parsed.workspaceDir);
         process.exit(0);
     }
 
@@ -200,7 +202,7 @@ async function run() {
         process.exit(1);
     }
 
-    const result = await run_agent(task, parsed.model, parsed.maxTurns, parsed.skill, parsed.enableGetimgTool);
+    const result = await run_agent(task, parsed.model, parsed.maxTurns, parsed.skill, parsed.workspaceDir);
     process.stdout.write(result + '\n', () => {
         setTimeout(() => {
             process.exit(0);

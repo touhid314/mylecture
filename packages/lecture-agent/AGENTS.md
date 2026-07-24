@@ -1,71 +1,157 @@
-# MyLecture Lecture Agent Guide
+# MyLecture Video Maker and Editor Agent Guide
 
-This package contains the TypeScript coding agent used by MyLecture IDE. The agent writes and edits lecture deliverables inside its own workspace, while the IDE server in the repository root launches it, streams logs, uploads attachments, archives output folders, and previews/resolves/renders the generated HTML.
+This package now has two distinct responsibilities:
 
-Use this file as the first orientation document before changing code in `packages/lecture-agent`.
+1. The **video maker** creates a new lecture through a fixed multi-LLM pipeline.
+2. The **editor agent** handles follow-up requests by editing only the generated root `index*.html` files.
 
-## Package Layout
+The editor is no longer responsible for initial video generation. The former script sub-agent and `run_script_agent` tool have been removed.
+
+Use this file as the first orientation document before changing code under `packages/lecture-agent`.
+
+## Current Architecture
+
+```text
+First IDE request
+  -> POST /video-maker/generate
+  -> video_maker.ts
+  -> answer generator
+  -> script writer
+  -> optional asset fetcher
+  -> script trimmer
+  -> sequential animator loop
+  -> validator/repair loop for each index*.html
+  -> generation workspace
+
+Later IDE requests
+  -> POST /agent-chat
+  -> editor-agent/coding_agent.ts
+  -> read existing index*.html
+  -> apply edits only to root index*.html
+  -> validator hook
+```
+
+The IDE uses the same unique generation folder for both phases. A New Chat resets the phase so the next message generates a new video in a new folder.
+
+## Source Layout
 
 ```text
 src/
-  cli.ts                         CLI entrypoint for one-shot and chat mode.
-  coding_agent.ts                Main agent sessions, tool loop, Gemini native path, JSON fallback path.
-  llm_model.ts                   Provider wrapper used by the JSON fallback/OpenAI-compatible path.
-  prompt_builder.ts              Prompt preparation, backticked file inlining, attachment directive parsing.
-  workspace.ts                   Env loading and workspace path resolution.
-  llm_prompt_logger.ts           Optional full prompt/request logging.
-  tools/
-    index.ts                     Tool dispatcher and response compaction.
-    read.ts write.ts edits.ts    Workspace file tools.
-    mkdir.ts list_dir.ts del.ts  Workspace directory tools.
-    cmd.ts                       Source exists, but `cmd` is not exposed in normal schemas.
-    utils/schemas.ts             Tool schemas for Gemini native function calling and JSON fallback.
-    utils/html_contract.ts       Auto-validates lecture HTML writes/edits.
-  prompts/
-    system_prompt.md             Runtime system prompt for lecture generation.
-    pre-user-response-prompt.md  Final response isolation prompt.
+  video_maker.ts
+    Complete video-maker control unit.
+    Contains the orchestration class, programmatic generateVideo() API,
+    generation workspace helpers, attachment copying, and direct-run CLI.
 
+  answer_generator.ts
+    One-shot answer-generation LLM stage.
+
+  script_writer.ts
+    One-shot audiovisual script-writing LLM stage.
+
+  asset_fetcher.ts
+    Parses script image requests and contains all image search, generation,
+    download, Watchman verification, metadata inspection, and direct-run controls.
+    There is no separate image_fetcher module.
+
+  script_trimmer.ts
+    Splits complete N:/V: beats into narration-sized animator blocks.
+
+  animator.ts
+    Generates one index HTML file at a time and repairs validator failures.
+
+  video_maker_shared.ts
+    Internal shared video-maker LLM plumbing and types. It provides prompt loading,
+    one-shot LLM calls, the retained animator LLM session, attachment types, and
+    safe relative asset-path validation.
+
+  prompt_builder.ts
+    Shared prompt expansion, attachment parsing, and its direct-run CLI control.
+    There is no separate prompt-builder CLI file.
+
+  workspace.ts
+    Environment loading and workspace-path enforcement.
+
+  validate_contract.cjs
+    HTML contract validator, including temporal render sampling.
+
+  editor-agent/
+    cli.ts
+      One-shot and persistent-chat editor CLI.
+    coding_agent.ts
+      Editor agent sessions, Gemini native tools, JSON fallback, history
+      compaction, attachment handling, and final-response isolation.
+    tools/
+      tool_registry.ts
+        Authoritative editor tool schemas, dispatch, compaction, mutation
+        boundary, and validator hook.
+      read.ts
+      list_dir.ts
+      Dormant/utility implementations may exist, but only registry-active tools
+      are exposed to the editor.
+
+  utils/
+    llm_model.ts
+      Provider wrapper for Gemini and OpenAI-compatible models.
+    llm_prompt_logger.ts
+      Optional full LLM request logging.
+    file_edits.ts
+      Shared range-edit implementation used by animator repair and editor edits.
+    html_contract.ts
+      Shared HTML purification and validator wrapper.
+    text_stats.ts
+    logger.ts
+
+  token-tracker/
+    token_tracker.ts
+    token_tracker_dashboard.ts
+
+  prompts/
+    ansgen_system.md
+    scriptgen_system.md
+    animator_system.md
+    system_prompt.md
+      Editor-only system prompt.
+    vault/pre-user-response-prompt.md
+      Isolated final-response prompt.
+```
+
+Shared resources remain under:
+
+```text
 .agents/
   mylecture-contracts/html-input-contract.md
   mylecture-themes/
   mylecture-teaching-style/
   mylecture-profiles/
-
-workspace/agent-workspace/       Default editable workspace for generated lectures.
-workspace/agent-workspace/uploads/ IDE-saved uploaded attachments.
 ```
 
-## How The Agent Is Used
+## Main Commands
 
-Run from the monorepo root unless a command says otherwise:
+Run from the monorepo root:
 
 ```powershell
-npm run agent -- "Create a short lecture about binary search"
-npm run chat
+npm run video-maker -- --workspace ".\generations" "Create a lecture about binary search"
+npm run editor-agent -- --workspace ".\generations\<generation-id>" "Make the title larger"
+npm run chat -- --workspace ".\generations\<generation-id>"
+npm run prompt-builder -- --workspace ".\generations\<generation-id>" "Use `notes.md`"
+npm run token-tracker
 npm run ide
 ```
 
-Package-local commands:
+Package-local equivalents:
 
 ```powershell
-npm run agent -- "Create a short lecture about binary search"
+npm run video-maker -- --workspace ".\generations" "Create a lecture about binary search"
+npm run editor-agent -- --workspace ".\generations\<generation-id>" "Make the title larger"
+npm run prompt-builder -- "Expand `src/prompts/animator_system.md`"
 npm test
 ```
 
-Important root commands:
-
-```powershell
-npx tsc --noEmit
-npm test
-npm run build:plan -- --input path\to\index.html --out path\to\resolved.html
-npm run render:video -- --html path\to\index.html --out output.mp4
-```
-
-`npm run ide` is the normal local UI flow. It builds the viewer, starts `src/ide-server.ts` from the repo root, then sends chat requests to this package as a child process.
+`npm run agent` is retained as an alias for the editor agent. It does not generate a new video.
 
 ## Environment
 
-Root `.env` is loaded by walking upward from `src/workspace.ts`.
+The package loads the nearest `.env` while walking upward from `src/workspace.ts`.
 
 Common variables:
 
@@ -73,81 +159,252 @@ Common variables:
 GOOGLE_API_KEY="..."
 OPENAI_API_KEY="..."
 AGENT_MODEL="gemini-3.5-flash"
-AGENT_WORKSPACE="optional absolute workspace override"
-AGENT_WORKSPACE_DIR="optional absolute workspace override"
+AGENT_WORKSPACE="optional editor workspace override"
+SCRIPT_TRIMMER_CHUNK_SIZE="75"
 LOG_FULL_LLM_PROMPT="True"
+GETIMG_MODEL="..."
+GETIMG_WATCHMAN_MODEL="..."
 ```
 
-Gemini models use native Gemini function calling in `coding_agent.ts`. Non-Gemini models use the JSON fallback path through `llm_model.ts`.
+`SCRIPT_TRIMMER_CHUNK_SIZE` is required for video generation:
 
-## Workspace Boundaries
+- It must be a positive integer.
+- It is the maximum narration-word count per animator block.
+- The minimum block size is automatically half the maximum, rounded up.
+- Missing, empty, invalid, or non-positive values fail before any video-maker LLM call.
 
-The agent's default editable workspace is:
+Gemini models use native Gemini function calling in `editor-agent/coding_agent.ts`. Other supported model names use the JSON fallback through `utils/llm_model.ts`.
+
+## IDE Generation and Editing Phases
+
+The root `src/ide-server.ts` imports `generateVideo()` and `EditorAgent` programmatically.
+
+Important routes:
 
 ```text
-packages/lecture-agent/workspace/agent-workspace/
+/video-maker/generate   First request in a chat; generates a new video.
+/agent-chat             Follow-up edit requests after generation succeeds.
+/agent-new-chat         Resets phase and allocates a new generation on next use.
+/agent-upload           Saves browser-selected attachments into the active workspace.
+/agent-state            Reports phase and current workspace.
 ```
 
-Workspace tools resolve all tool paths relative to the active workspace and reject escapes. Generated lecture files should be written at the workspace root unless the user asks for a folder.
-
-Prompt building may read selected local files from broader known locations when the user references them, but normal tool operations must stay inside the workspace.
-
-Do not treat ignored output directories as source:
+The viewer starts with:
 
 ```text
-workspace/agent-workspace/
-.tmp/
-node_modules/
+Make a video on...
 ```
 
-## Runtime Tool Contract
+After generation succeeds it switches to edit mode and the prompt becomes an edit request surface. Generation controls are hidden during edit mode.
 
-The exposed tools are defined in `src/tools/utils/schemas.ts`:
+The IDE obtains the generation parent from `agent.generationDir` in the root configuration. It creates a unique timestamp-and-ID child folder and passes that exact folder to both `generateVideo()` and `EditorAgent`.
+
+## Video-Maker Pipeline
+
+`video_maker.ts` runs these stages in order:
+
+1. Validate required configuration, including `SCRIPT_TRIMMER_CHUNK_SIZE`.
+2. Parse the request, aspect ratio, target length, subtitle setting, theme, teaching style, and attachments.
+3. Run the answer generator and write `answer.md`.
+4. Run the script writer and write `script.md`.
+5. If image fetching is enabled, parse and fetch every requested image asset.
+6. Split the script into complete narration/visual blocks.
+7. Run one retained animator LLM session sequentially for every block.
+8. Generate exactly one `index.html` or `indexN.html` per animator call.
+9. Validate each generated file and request edits-format repairs until it passes.
+10. Write `metadata.json`.
+
+The video maker is one-shot. It does not handle edit requests.
+
+### Outputs
+
+Each generation folder contains:
+
+```text
+answer.md
+script.md
+metadata.json
+index.html
+
+or, for multiple blocks:
+
+index1.html
+index2.html
+...
+
+assets/       Only when the script requested images.
+uploads/      Copied or IDE-uploaded attachments.
+```
+
+Do not create `interactive.html` or `game.html` in this workflow. The editor is also forbidden from creating files.
+
+### Script Format and Trimming
+
+The script uses complete scene/beat structures:
+
+```text
+# Scene 1
+N: Narration cue.
+V: Associated visual cue.
+```
+
+Only `N:` narration words count toward chunk size. Visual descriptions, scene headings, and other text do not count.
+
+The trimmer:
+
+- never splits a narration/visual beat;
+- targets the configured minimum-to-maximum range;
+- rebalances the final chunk to avoid a tiny tail;
+- prefers an oversized block over an undersized final block when beat boundaries make a perfect partition impossible;
+- permits one short block only when the entire script is shorter than the configured minimum.
+
+### Animator Context and Caching
+
+The animator generates files sequentially in one retained `VideoMakerLlmSession`.
+
+- Each new block sees the earlier generation and repair exchanges in retained history.
+- Attachments are added once and retained instead of being duplicated on every call.
+- The stable growing request prefix allows provider prompt caching.
+- Previous HTML is summarized in the newest user message because its complete generation remains in retained history.
+
+The answer generator and script writer remain separate one-shot LLM calls because they use different system prompts.
+
+### Asset Fetching
+
+All asset behavior lives in `asset_fetcher.ts`.
+
+Script requests use:
+
+```text
+[(getimg: 'short image description', out: 'assets/descriptive-name.png')]
+```
+
+Pass `--no-getimg` to the video-maker CLI to:
+
+- instruct the script writer not to request images;
+- strip any image directives that still appear;
+- skip the asset-fetching stage.
+
+The asset fetcher supports search and AI generation internally, can run Watchman verification, and records local path, dimensions, format, and byte size for the animator.
+
+## Editor Agent
+
+The editor agent starts only after the video maker succeeds.
+
+Its system prompt is `src/prompts/system_prompt.md`. That prompt includes the full animator quality guidance and canonical HTML contract through backticked prompt-builder references.
+
+The editor may:
+
+- read workspace files;
+- list the workspace when necessary;
+- edit existing workspace-root `index.html` or `indexN.html`.
+
+The editor may not:
+
+- generate a lecture;
+- invoke a script sub-agent;
+- create or delete files or directories;
+- fetch images;
+- edit `answer.md`, `script.md`, `metadata.json`, assets, uploads, audio, resolved HTML, or rendered outputs;
+- edit nested or non-index HTML paths.
+
+The restriction is enforced by `editor-agent/tools/tool_registry.ts`, not merely by the prompt.
+
+### Active Editor Tools
+
+The active registry tools are:
 
 ```text
 read
-write
 edits
-mkdir
 list_dir
-del
 ```
 
-`cmd.ts` is present in source for old/experimental behavior, but it is not part of the normal registered schema. Do not assume the runtime model can call it.
+`cmd` exists but is inactive and is not exposed in native Gemini declarations, JSON fallback schemas, or the generated tool section.
 
-Tool rules that matter:
-
-- Use `write` only to create a file.
-- Use `edits` for existing files or follow-up changes.
-- Batch known edits to the same file into one `edits` call.
-- `read` output contains line numbers for reference only; those numbers are not part of the file.
-- `edits` line numbers refer to the original file state before that edit call.
-- HTML contract validation runs after successful writes/edits to relevant `index*.html` files; fix validation failures before claiming completion.
-
-When adding a new tool:
-
-1. Implement it under `src/tools/`.
-2. Add its schema to `src/tools/utils/schemas.ts`.
-3. Register dispatch and compaction in `src/tools/index.ts`.
-4. Update `src/prompts/system_prompt.md` so the JSON fallback path and model guidance know about it.
-5. Run `npx tsc --noEmit` and the relevant smoke tests.
-
-## Attachment Handling
-
-IDE uploads are handled by the root IDE server, not directly by browser-to-model code.
-
-Flow:
+The `edits` runtime accepts only workspace-root names matching:
 
 ```text
-viewer drag/drop, picker, or paste
-  -> POST /agent-upload
-  -> saved under packages/lecture-agent/workspace/agent-workspace/uploads/
-  -> viewer appends hidden [(attachment: absolute_path)] directives
-  -> prompt_builder extracts supported attachments
-  -> provider path uploads files separately from text prompt
+index.html
+index1.html
+index2.html
+...
 ```
 
-Supported attachment extensions:
+### Edit Semantics
+
+`read` returns line-numbered text; the line numbers are not part of the file.
+
+`edits` ranges refer to the original file state at the start of that tool call:
+
+```text
+[a, b]  Replace or delete inclusive lines a through b.
+[a]     Insert after line a.
+[0]     Insert before line 1.
+```
+
+Batch compatible edits to one file in one call. Avoid overlapping ranges.
+
+## HTML Contract and Validation
+
+The canonical contract is:
+
+```text
+.agents/mylecture-contracts/html-input-contract.md
+```
+
+Typical globals:
+
+```js
+window.__VIDEO_METADATA__ = {
+  contractVersion: "0.2",
+  title: "Lecture Title",
+  aspectRatio: "16:9"
+};
+
+window.__VIDEO_PLAN__ = [];
+window.__RENDER_SECTION__ = function renderSection(segment, localTime, globalTime) {};
+```
+
+Requirements:
+
+- deterministic state driven by `localTime` and `globalTime`;
+- no wall-clock animation, randomness, or unbounded asynchronous state;
+- normal HTML attributes such as `class="stage"`, never literal escaped markup quotes;
+- no informational overlap or unreadable overflow;
+- no subtitles unless explicitly requested;
+- collision-resistant narration IDs such as `i1_1`, `i1_2`, `i2_1`;
+- local asset paths only.
+
+The validator runs after video-maker generation and repair and after every successful editor `edits` call. It samples multiple local times in each segment to catch runtime-only failures such as invalid Canvas values that appear after time zero.
+
+Do not claim completion while validation is failing.
+
+## Prompt Builder
+
+`src/prompt_builder.ts` is shared infrastructure and contains its own direct-run CLI control.
+
+Every model-bound system and user prompt should pass through `build_prompt()`.
+
+It:
+
+- resolves readable local paths wrapped in backticks;
+- inlines UTF-8 text files;
+- leaves supported binary files for provider upload;
+- removes hidden attachment directives from model-visible text;
+- extracts image, PDF, and video attachment metadata.
+
+Run it directly to inspect the expanded prompt:
+
+```powershell
+npm run --silent prompt-builder -- --workspace "D:\path\to\workspace" "Use `notes.md`"
+```
+
+There is no separate prompt-builder CLI module or prompt-builder Markdown documentation file. Keep its operational description in the module docstring.
+
+## Attachments
+
+Supported uploads:
 
 ```text
 images: .png, .jpg, .jpeg, .webp, .bmp
@@ -155,139 +412,104 @@ documents: .pdf
 videos: .mp4, .mpeg, .mpg, .mov, .avi, .webm, .wmv, .3gp, .3gpp, .flv
 ```
 
-Only explicit directives like this trigger binary upload:
+Only explicit directives trigger provider upload:
 
 ```text
 [(attachment: C:\absolute\path\to\file.png)]
 ```
 
-Backticked paths, quoted paths, and plain paths are text references only. Binary file contents are not pasted into the prompt.
+Backticked, quoted, and plain paths are text references only.
 
-Current session behavior:
+The IDE saves uploads in the active generation workspace's `uploads/` folder. The video-maker API copies externally supplied attachments into that workspace when necessary.
 
-- Gemini native function-calling uploads each attachment through the Gemini Files API and keeps the resulting `fileData` parts in retained chat history so follow-up turns can keep discussing the same image/PDF/video.
-- The JSON fallback path stores attachment metadata in message history and re-uploads from local disk when needed.
-- OpenAI-compatible fallback rejects video attachments; use a Gemini model for video input.
+Gemini retains uploaded file parts in chat history. The OpenAI-compatible fallback rejects video attachments.
 
-## Final Response Isolation
+## Final-Response Isolation
 
-The working agent sees operational context: system prompts, tool outputs, paths, file contents, logs, and generated code. The user-facing final response must stay isolated.
+The working editor sees tools, file contents, hidden context, operational prompts, and validation output. It must not directly produce the final user-facing answer.
 
-`coding_agent.ts` enforces this by generating final user responses through `pre-user-response-prompt.md`, using the raw user queries with IDE context stripped. Preserve this boundary when changing agent loop behavior.
+The boundary is:
 
-## Lecture Deliverable Contract
+1. The working editor calls `prepare_user_response`.
+2. Runtime strips IDE context from raw user queries.
+3. A separate LLM call uses `src/prompts/vault/pre-user-response-prompt.md`.
+4. The final-response call does not receive the working transcript, tool output, generated HTML, or workspace paths.
 
-Generated lecture work normally follows this sequence inside the workspace root:
+Preserve this isolation for both Gemini native and JSON fallback paths.
 
-```text
-answer.md        Simple text-only chatbot-style answer.
-script.md        Full AV script.
-index1.html      First lecture segment.
-index2.html      Additional segment when needed.
-...
-interactive.html Only if explicitly requested.
-game.html        Only if explicitly requested.
-```
+## Logging and Token Tracking
 
-Use `script.md`, not the misspelled `scrip.md`.
-
-Script format:
+All file-based logs belong under:
 
 ```text
-AUDIO: One narration sentence.
-VISUAL: Incremental visual action that supports that sentence.
+packages/lecture-agent/.log/
 ```
 
-Narration planning:
-
-- About 150 words of audio narration equals about 1 minute of video.
-- Split longer lectures into `index1.html`, `index2.html`, etc. by minute-scale segment.
-- Keep scene continuity. Do not switch to a totally new visual scene for every sentence.
-- Visuals should be deterministic and driven by the contract timing values, not wall-clock time.
-
-HTML requirements:
-
-- Follow `.agents/mylecture-contracts/html-input-contract.md`.
-- Default aspect ratio is `16:9` unless the IDE/user specifies otherwise.
-- Use the dark theme guidance in `.agents/mylecture-themes/dark-theme.md` unless instructed otherwise.
-- Do not embed subtitles unless explicitly requested.
-- Use KaTeX for math when appropriate.
-- In HTML source, write normal attributes like `class="stage"`, not escaped quotes like `class=\"stage\"`.
-- Avoid overflow, overlap, unstable layout, and animations that change based on real time or randomness.
-
-Audio IDs should be collision-resistant across scene files, for example:
+Current locations:
 
 ```text
-s1_1, s1_2, s2_1, s2_2
+.log/current-session.json
+.log/session-*/                 Full LLM request logs when enabled.
+.log/token-tracker/token_usage.db
 ```
 
-## Interactive And Game Files
+Never create `.log` under `src/`.
 
-Only create `interactive.html` or `game.html` when the user explicitly asks for an interactive or game.
+`LOG_FULL_LLM_PROMPT=True` enables full request logging. Token-tracker session IDs are shared across video-maker stages and the editor session for cost inspection.
 
-Interactive:
+## Ignored and Generated Content
 
-- Full-screen HTML.
-- Clear interaction affordances.
-- Large readable UI.
-- Use the same topic as the lecture unless the user says otherwise.
-
-Game:
-
-- Full-screen HTML.
-- Clear mission overlay at the start.
-- Score out of 100.
-- Game mechanics must teach or reinforce the requested topic.
-
-## Prompt Resources
-
-Shared prompt resources live under `.agents/`.
-
-Profiles:
+Do not treat these as source:
 
 ```text
-.agents/mylecture-profiles/*.md
+.log/
+workspace/
+.tmp/
+dist/
+node_modules/
+src/editor-agent/tools/lib/poppler-25.11.0/
 ```
 
-The IDE loads these and appends the selected profile content to the hidden agent prompt. If profile is `None`, nothing is appended.
+The extracted Poppler directory is intentionally ignored at its relocated path. Do not add its thousands of extracted files to Git.
 
-Contracts and themes:
-
-```text
-.agents/mylecture-contracts/html-input-contract.md
-.agents/mylecture-themes/dark-theme.md
-.agents/mylecture-themes/light-theme.md
-.agents/mylecture-teaching-style/default.md
-```
-
-Keep these files small and explicit. They are consumed by prompt-building/runtime behavior and by future agents.
-
-## Development Guidance
+## Development Rules
 
 - Read relevant files before editing.
-- Prefer current local patterns over new abstractions.
-- Keep changes scoped; this package is used interactively by the IDE.
-- Do not revert unrelated local changes.
-- Use `rg` for searching.
-- Use `apply_patch` for manual edits.
-- Keep TypeScript ESM imports with `.js` suffixes where the existing code does.
-- When changing schemas, prompt behavior, attachment parsing, or final response behavior, consider both Gemini native and JSON fallback paths.
+- Preserve unrelated user changes in the working tree.
+- Use `rg` for search.
+- Use `apply_patch` for manual source edits.
+- Keep TypeScript ESM imports with `.js` suffixes where existing source does.
+- Keep API and direct-run CLI controls in `video_maker.ts`; do not recreate separate video-maker API or CLI files.
+- Keep prompt-builder CLI control inside `prompt_builder.ts`.
+- Keep all image acquisition behavior inside `asset_fetcher.ts`; do not recreate `image_fetcher.ts`.
+- Keep video-maker and prompt-builder descriptions in module docstrings, not standalone Markdown files.
+- Do not reintroduce the script sub-agent or `run_script_agent`.
+- Keep editor mutation restrictions in runtime code as well as prompt text.
+- When changing prompts, schemas, attachments, or final-response behavior, verify both Gemini native and JSON fallback paths.
 
-Verification expectations:
+## Verification
 
-```powershell
-npx tsc --noEmit
-npm --prefix packages/lecture-agent test
-```
-
-Run broader root tests when changes touch generated HTML contracts, render/build integration, or IDE behavior:
+Package checks:
 
 ```powershell
 npm test
+npm run video-maker -- --help
+npm run editor-agent -- --help
+npm run prompt-builder -- --help
 ```
 
-When editing viewer UI or IDE server behavior outside this package, follow the root repository guide and rebuild the viewer:
+Root checks:
 
 ```powershell
+npx tsc --noEmit -p tsconfig.json
 npm --prefix packages/lecture-viewer run build
+```
+
+When changing validation or generated HTML behavior, run the validator against a known-good contract fixture and a known-bad runtime fixture.
+
+When changing viewer or IDE behavior, rebuild `packages/lecture-viewer/dist/` and verify both phases:
+
+```text
+generate -> /video-maker/generate
+edit     -> /agent-chat
 ```

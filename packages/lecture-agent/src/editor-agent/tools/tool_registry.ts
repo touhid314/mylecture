@@ -6,21 +6,14 @@
  * model schemas, prompt tool listings, or JSON fallback examples.
  */
 import { tool_read, compact_read } from './read.js';
-import { tool_write, compact_write } from './write.js';
-import { tool_edits, compact_edits } from './edits.js';
+import { tool_edits, compact_edits } from '../../utils/file_edits.js';
 import { tool_cmd, compact_cmd } from './cmd.js';
-import { tool_mkdir, compact_mkdir } from './mkdir.js';
 import { tool_list_dir, compact_list_dir } from './list_dir.js';
-import { tool_del, compact_del } from './del.js';
-import { tool_getimg, compact_getimg } from './getimg.js';
-import { should_validate_contract, validate_index_html_contract } from './utils/html_contract.js';
-export { line_count } from './utils/text_stats.js';
-import { DEFAULT_WORKSPACE_DIR } from '../workspace.js';
-import { runScriptAgent } from '../subagents/script_agent.js';
+import { should_validate_contract, validate_index_html_contract } from '../../utils/html_contract.js';
+export { line_count } from '../../utils/text_stats.js';
+import { DEFAULT_WORKSPACE_DIR } from '../../workspace.js';
 
-export type ToolRuntimeOptions = {
-    enableGetimgTool?: boolean;
-};
+export type ToolRuntimeOptions = Record<string, never>;
 
 // Tool implementations stay in their own files. This registry is the only place
 // that decides whether those implementations are visible to the model.
@@ -74,23 +67,6 @@ export const TOOL_REGISTRY: ToolRegistryEntry[] = [
     },
     {
         type: "function",
-        name: "write",
-        active: true,
-        description: "Write a complete UTF-8 text file in the workspace. Use this only to create a file; after a file exists, use `edits` for updates.",
-        parameters: {
-            type: "object",
-            properties: {
-                path: { type: "string", description: "Workspace-relative file path." },
-                content: { type: "string", description: "Complete file content." },
-            },
-            required: ["path", "content"],
-            additionalProperties: false,
-        },
-        execute: (args, workspaceDir) => tool_write(args.path, args.content, workspaceDir),
-        compact: compact_write,
-    },
-    {
-        type: "function",
         name: "edits",
         active: true,
         description: `Apply one or more range-based edits (replacements, insertions, deletions) to an existing file. 
@@ -116,7 +92,7 @@ export const TOOL_REGISTRY: ToolRegistryEntry[] = [
         
         **Very important:** If a file already exists and you need to change it, use the edits tool instead of the write tool.
         During edit you must maintain the html contract. 
-        If you incur these errors with an edit, I will kill you:
+        Never introduce any of these errors:
         - Missing window.__VIDEO_METADATA__
         - Missing window.__VIDEO_PLAN__
         - Missing window.__RENDER_SECTION__
@@ -177,22 +153,6 @@ export const TOOL_REGISTRY: ToolRegistryEntry[] = [
     },
     {
         type: "function",
-        name: "mkdir",
-        active: true,
-        description: "Create a new directory in the workspace, recursively by default.",
-        parameters: {
-            type: "object",
-            properties: {
-                path: { type: "string", description: "Workspace-relative directory path." }
-            },
-            required: ["path"],
-            additionalProperties: false,
-        },
-        execute: (args, workspaceDir) => tool_mkdir(args.path, workspaceDir),
-        compact: compact_mkdir,
-    },
-    {
-        type: "function",
         name: "list_dir",
         active: true,
         description: "List the contents of a directory in the workspace, indicating files and folders.",
@@ -207,92 +167,30 @@ export const TOOL_REGISTRY: ToolRegistryEntry[] = [
         execute: (args, workspaceDir) => tool_list_dir(args.path, workspaceDir),
         compact: compact_list_dir,
     },
-    {
-        type: "function",
-        name: "del",
-        active: true,
-        description: "Delete one or more files or directories in the workspace. The workspace root cannot be deleted.",
-        parameters: {
-            type: "object",
-            properties: {
-                paths: {
-                    type: "array",
-                    description: "List of workspace-relative files or directories to delete.",
-                    items: { type: "string" }
-                }
-            },
-            required: ["paths"],
-            additionalProperties: false,
-        },
-        execute: (args, workspaceDir) => tool_del(args.paths, workspaceDir),
-        compact: compact_del,
-    },
-    {
-        type: "function",
-        name: "getimg",
-        active: true,
-        description: "Search for, or generate an image. Geneartion mode (mode='gen') is the preferred method of download. Use search mode (mode='search') when a real authentic image is needed and AI image generation variations are not tolerable.",
-        parameters: {
-            type: "object",
-            properties: {
-                prompt: { type: "string", description: "Search query or AI generation prompt description." },
-                mode: { type: "string", enum: ["search", "gen"], description: "Use 'search' to search the web, 'gen' to generate using AI." },
-                out: { type: "string", description: "Workspace-relative output file path (e.g. 'banana.png' or 'images/banana.png')." },
-                aspect: { type: "string", description: "Optional aspect ratio for AI generation (e.g., '1:1', '16:9', '9:16', '4:3', '3:2')." },
-                resolution: { type: "string", enum: ["0.5K", "512", "1K", "2K", "4K"], description: "Optional resolution tier for Gemini generations." },
-                watchman: { type: "boolean", description: "Whether to verify the image content with the LLM Watchman agent. Default is true." },
-            },
-            required: ["prompt", "mode", "out"],
-            additionalProperties: false,
-        },
-        execute: (args, workspaceDir) => tool_getimg(args, workspaceDir),
-        compact: compact_getimg,
-    },
-    {
-        type: "function",
-        name: "run_script_agent",
-        active: true,
-        description: "Invoke the script_agent subagent to write a script. This will run a deterministic flow to generate answer.md and script.md in the workspace. Pass any user-provided files that are relevant to the script through `attachments` so the script writer can inspect them.",
-        parameters: {
-            type: "object",
-            properties: {
-                topic: { type: "string", description: "The request topic of the lecture." },
-                length: { type: "string", description: "The target duration, e.g., '60s' or '2m'." },
-                theme: { type: "string", description: "The visual theme content." },
-                teachingStyle: { type: "string", description: "The teaching style content." },
-                attachments: {
-                    type: "array",
-                    items: { type: "string" },
-                    description: "Workspace-relative paths of image, PDF, or video files for the script writer to inspect."
-                }
-            },
-            required: ["topic", "length", "theme", "teachingStyle"],
-            additionalProperties: false,
-        },
-        execute: async (args, workspaceDir) => {
-            const model = process.env.AGENT_MODEL || "gemini-3.5-flash";
-            const sessionName = process.env.TOKEN_TRACKER_SESSION_ID || null;
-            return await runScriptAgent(
-                workspaceDir,
-                args.topic,
-                args.length,
-                args.theme,
-                args.teachingStyle,
-                model,
-                sessionName,
-                args.attachments || []
-            );
-        },
-        compact: (args, result) => ({ compactedArgs: args, compactedResult: result })
-    },
 ];
 
 // Active tools are the only tools exposed to the model. Use this helper instead
 // of filtering TOOL_REGISTRY at call sites so inactive behavior stays uniform.
 function is_tool_enabled(tool: ToolRegistryEntry, options: ToolRuntimeOptions = {}): boolean {
+    void options;
     if (!tool.active) return false;
-    if (tool.name === 'getimg') return options.enableGetimgTool === true;
     return true;
+}
+
+function isIndexHtmlPath(value: unknown): boolean {
+    if (typeof value !== 'string') return false;
+    const normalized = value.trim().replaceAll('\\', '/').replace(/^\.\//, '');
+    return !normalized.includes('/') && /^index(?:\d+)?\.html$/i.test(normalized);
+}
+
+function enforceEditorMutationBoundary(name: string, argumentsObj: any, options: ToolRuntimeOptions): string | null {
+    void options;
+    if (name === 'edits') {
+        return isIndexHtmlPath(argumentsObj.path)
+            ? null
+            : 'ERROR: Lecture editor may only edit workspace-root index.html/indexN.html files.';
+    }
+    return null;
 }
 
 export function active_tools(options: ToolRuntimeOptions = {}): ToolRegistryEntry[] {
@@ -330,9 +228,7 @@ export function tool_declarations(options: ToolRuntimeOptions = {}): any[] {
 // same active registry entries.
 export function tool_json_schema(options: ToolRuntimeOptions = {}): any {
     const argumentsSchema: any = {
-        path: "workspace-relative path for read/write/edits/mkdir/list_dir",
-        paths: "array of workspace-relative paths to delete for del",
-        content: "complete file content for write",
+        path: "workspace-relative path for read/edits/list_dir",
         edits: [
             {
                 lines: [12, 14], // [a, b] to replace/delete inclusive; [a] to insert after; [0] to insert at top
@@ -340,17 +236,6 @@ export function tool_json_schema(options: ToolRuntimeOptions = {}): any {
             }
         ],
     };
-    if (options.enableGetimgTool === true) {
-        argumentsSchema.prompt = "search query or AI generation prompt for getimg";
-        argumentsSchema.mode = "search | gen for getimg";
-        argumentsSchema.out = "workspace-relative path to save the image (e.g. 'banana.png') for getimg";
-        argumentsSchema.aspect = "optional aspect ratio like '16:9' or '1:1' for getimg";
-    }
-    argumentsSchema.topic = "request topic for run_script_agent";
-    argumentsSchema.length = "target duration for run_script_agent";
-    argumentsSchema.theme = "visual theme content for run_script_agent";
-    argumentsSchema.teachingStyle = "teaching style content for run_script_agent";
-    argumentsSchema.attachments = ["optional workspace-relative attachment paths for run_script_agent"];
     return {
         note: "brief step summary for the CLI; do not include hidden chain-of-thought",
         tool: active_tool_names(options).join(" | "),
@@ -369,6 +254,8 @@ export async function execute_tool(name: string, argumentsObj: any, workspaceDir
     }
 
     try {
+        const boundaryError = enforceEditorMutationBoundary(name, argumentsObj, options);
+        if (boundaryError) return boundaryError;
         return await execute_registered_tool(name, argumentsObj, workspaceDir, options);
     } catch (exc: any) {
         return `ERROR: ${exc.name || 'Error'}: ${exc.message || exc}`;

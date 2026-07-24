@@ -2064,18 +2064,11 @@ body.file-kind-mp4 .timeline-ruler {
         <span class="agent-status-tag">Standby</span>
       </div>
     </div>
-    <div class="agent-body">
-      <div class="agent-placeholder-card">
-        <div class="agent-placeholder-title">Agent Panel</div>
-        <div class="agent-placeholder-desc">
-          This panel is a placeholder for the Lecture Agent. You will be able to interact with the agent to edit and refine your script, visuals, or code here soon.
-        </div>
-      </div>
-    </div>
+    <div class="agent-body"></div>
 
     <div class="agent-input-area">
       <div id="agent-attachment-list" class="agent-attachment-list"></div>
-      <div class="agent-generation-controls">
+      <div id="agent-generation-controls" class="agent-generation-controls">
         <div class="agent-field agent-length-field">
           <label class="agent-field-label" for="agent-generation-length">Len</label>
           <div class="agent-range-row">
@@ -2118,7 +2111,7 @@ body.file-kind-mp4 .timeline-ruler {
             <path d="M21.44 11.05 12 20.49a6 6 0 0 1-8.49-8.49l9.9-9.9a4 4 0 0 1 5.66 5.66l-9.9 9.9a2 2 0 1 1-2.83-2.83l8.49-8.49"></path>
           </svg>
         </button>
-        <textarea id="agent-chat-input" class="agent-input" placeholder="Ask agent to build/edit..."></textarea>
+        <textarea id="agent-chat-input" class="agent-input" placeholder="Make a video on..."></textarea>
         <button id="agent-chat-send" class="agent-send-btn" type="button">Send</button>
         <button id="agent-chat-stop" class="agent-stop-btn" type="button" style="display: none;">Stop</button>
       </div>
@@ -2252,12 +2245,24 @@ const agentInputArea = document.querySelector('.agent-input-area');
 const agentUploadButton = document.getElementById('agent-upload-btn');
 const agentFileInput = document.getElementById('agent-file-input');
 const agentAttachmentList = document.getElementById('agent-attachment-list');
+const agentGenerationControls = document.getElementById('agent-generation-controls');
 const agentAspectRatio = document.getElementById('agent-aspect-ratio');
 const agentGenerationLength = document.getElementById('agent-generation-length');
 const agentGenerationLengthValue = document.getElementById('agent-generation-length-value');
 const agentEmbedSubtitle = document.getElementById('agent-embed-subtitle');
 const agentTheme = document.getElementById('agent-theme');
 const agentTeachingStyle = document.getElementById('agent-teaching-style');
+let agentPhase = 'generate';
+
+function setAgentPhase(phase) {
+  agentPhase = phase === 'edit' ? 'edit' : 'generate';
+  if (agentChatInput) {
+    agentChatInput.placeholder = agentPhase === 'edit' ? 'Edit the video...' : 'Make a video on...';
+  }
+  if (agentGenerationControls) {
+    agentGenerationControls.style.display = agentPhase === 'edit' ? 'none' : '';
+  }
+}
 
 const resolveOptions = document.getElementById('resolve-options');
 const resolveTtsVoice = document.getElementById('resolve-tts-voice');
@@ -4429,7 +4434,9 @@ function buildAttachmentPrompt(message, uploadedFiles) {
   if (!task && uploadedFiles.length > 0) {
     task = 'Please use the attached file(s).';
   }
-  task = appendGenerationSettingsPrompt(task);
+  if (agentPhase === 'generate') {
+    task = appendGenerationSettingsPrompt(task);
+  }
   for (const file of uploadedFiles) {
     task += '\\n[(attachment: ' + file.path + ')]';
   }
@@ -4642,7 +4649,8 @@ async function sendChat() {
     const uploadedFiles = await uploadAgentAttachments(filesToSend);
     uploadCompleted = true;
     const taskMessage = buildAttachmentPrompt(msg, uploadedFiles);
-    const response = await fetch('/agent-chat', {
+    const endpoint = agentPhase === 'generate' ? '/video-maker/generate' : '/agent-chat';
+    const response = await fetch(endpoint, {
       method: 'POST',
       headers: {
         'content-type': 'application/json'
@@ -4664,6 +4672,12 @@ async function sendChat() {
     
     if (payload.workspace) {
       currentBrowserFolder = payload.workspace;
+    }
+    if (payload.mode) {
+      setAgentPhase(payload.mode);
+    }
+    if (payload.path) {
+      setCurrentFile(payload.path);
     }
     if (!payload.stopped) {
       appendChatMessage(payload.output || 'Done.', 'agent');
@@ -4798,8 +4812,8 @@ if (agentNewChat) {
         if (!response.ok) throw new Error(payload.error || 'Failed to start new chat');
         if (agentBody) {
           agentBody.innerHTML = '';
-          appendChatMessage("Hello! I am your Lecture Agent. I can make great lecture videos, interactive demonstrations, and games. What would you like to build today?", "agent");
         }
+        setAgentPhase('generate');
       } catch (error) {
         appendChatMessage('Error starting new chat: ' + error.message, 'error');
       }
@@ -4810,8 +4824,8 @@ if (agentNewChat) {
 // Initial boot: hydrate state, load the requested file, and start server polling.
 if (agentBody) {
   agentBody.innerHTML = '';
-  appendChatMessage("Hello! I am your Lecture Agent. I can make great lecture videos, interactive demonstrations, and games. What would you like to build today?", "agent");
 }
+setAgentPhase('generate');
 
 setCurrentFile(currentFilePath);
 resizePreview();

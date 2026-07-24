@@ -11,8 +11,8 @@ import { fileURLToPath } from 'url';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
-const BASE_DIR = path.resolve(__dirname, '..');
-const LOG_DIR = path.join(BASE_DIR, '.log');
+const PACKAGE_DIR = path.resolve(__dirname, '..', '..');
+const LOG_DIR = path.join(PACKAGE_DIR, '.log');
 const SESSION_STATE_PATH = path.join(LOG_DIR, 'current-session.json');
 
 function new_logger_session_id(): string {
