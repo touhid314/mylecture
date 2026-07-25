@@ -17,6 +17,9 @@
  *   npm run lecturegen -- --workspace ".\generations" --length 2:00
  *     --aspect-ratio 16:9 "Explain binary search"
  *
+ * Coursegen passes `--workspace-dir` to write into an exact lecture folder
+ * (no nested unique generation folder).
+ *
  * Pass `--interactive` and/or `--game` for standalone learning experiences.
  * Pass `--no-video` to skip video-only stages, or `--no-getimg` to prohibit
  * image requests and skip asset fetching.
@@ -484,6 +487,7 @@ function printLectureGenHelp(): void {
 Options:
   --model <name>              LLM model (defaults to AGENT_MODEL)
   --workspace <directory>     Parent workspace for a unique generation folder
+  --workspace-dir <directory> Exact generation folder (no nested unique folder; used by coursegen)
   --length <value>            Generation length, e.g. 90s, 2:00, 2m (default: 1:00)
   --aspect-ratio <ratio>      Output aspect ratio (default: 16:9)
   --theme <id-or-file>        Theme id from .agents/mylecture-themes or a Markdown file
@@ -512,6 +516,8 @@ function loadResource(value: string, resourceFolder: string): string {
 export async function runLectureGenCli(args = process.argv.slice(2)): Promise<void> {
     let model = process.env.AGENT_MODEL || '';
     let parentWorkspace = DEFAULT_WORKSPACE_DIR;
+    let workspaceDir = '';
+    let parentWorkspaceSet = false;
     let generationLength = '1:00';
     let aspectRatio = '16:9';
     let theme = '';
@@ -535,7 +541,11 @@ export async function runLectureGenCli(args = process.argv.slice(2)): Promise<vo
                 printLectureGenHelp();
                 return;
             case '--model': model = nextValue(); break;
-            case '--workspace': parentWorkspace = path.resolve(nextValue()); break;
+            case '--workspace':
+                parentWorkspace = path.resolve(nextValue());
+                parentWorkspaceSet = true;
+                break;
+            case '--workspace-dir': workspaceDir = path.resolve(nextValue()); break;
             case '--length': generationLength = nextValue(); break;
             case '--aspect-ratio': aspectRatio = nextValue(); break;
             case '--theme': theme = loadResource(nextValue(), 'mylecture-themes'); break;
@@ -552,12 +562,15 @@ export async function runLectureGenCli(args = process.argv.slice(2)): Promise<vo
         }
     }
     if (!model) throw new Error('AGENT_MODEL or --model is required.');
+    if (workspaceDir && parentWorkspaceSet) {
+        throw new Error('Pass either --workspace-dir or --workspace, not both.');
+    }
     const request = taskParts.join(' ').trim() || fs.readFileSync(0, 'utf8').trim();
     if (!request) throw new Error('Provide a video request as an argument or through stdin.');
     const result = await generateLecture({
         request,
         model,
-        parentWorkspace,
+        ...(workspaceDir ? { workspaceDir } : { parentWorkspace }),
         generationLength,
         aspectRatio,
         theme,

@@ -918,8 +918,13 @@
       const advanced = readAdvanced();
 
       if (action === 'run') {
-        const renderNote = advanced.render ? ' Then render MP4.' : '';
-        if (!confirm(`Regenerate "${title}" (${slug})? This ignores attempt/budget caps.${renderNote}`)) return;
+        const renderNote = advanced.render ? '\n\nThen it will also render MP4.' : '';
+        if (!confirm(
+          `FULL REGEN for "${title}" (${slug})?\n\n` +
+          `This deletes existing index.html, resolved.html, audio, and MP4 for this lecture, then regenerates from scratch.\n\n` +
+          `It ignores attempt/budget caps. Use Render if you only want MP4 from existing resolved HTML.` +
+          renderNote
+        )) return;
         const command = state.summary?.state ? 'resume' : 'run';
         await startJob(buildJobBody(advanced, { forceLecture: slug, command }));
         return;
