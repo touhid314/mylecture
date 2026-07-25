@@ -40,16 +40,31 @@ export async function runLlm(
     const llm = new LLM_Model(options.model, build_prompt(systemPrompt, workspaceDir));
     llm.token_tracker_session_id = options.tokenTrackerSessionId || null;
     llm.token_tracker_purpose = purpose;
-    const response = await llm.generate(
-        build_prompt(userPrompt, workspaceDir),
-        null,
-        null,
-        null,
-        attachments,
-        false,
-        false
-    );
-    return responseText(response, purpose);
+    const maxAttempts = 3;
+    let lastError: any = null;
+
+    for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+        try {
+            const response = await llm.generate(
+                build_prompt(userPrompt, workspaceDir),
+                null,
+                null,
+                null,
+                attachments,
+                false,
+                false
+            );
+            return responseText(response, purpose);
+        } catch (err: any) {
+            lastError = err;
+            console.warn(`[LectureGen LLM] ${purpose} attempt ${attempt}/${maxAttempts} failed: ${err.message || err}`);
+            if (attempt < maxAttempts) {
+                await new Promise(resolve => setTimeout(resolve, 2000 * attempt));
+            }
+        }
+    }
+
+    throw new Error(`${purpose} failed after ${maxAttempts} attempts: ${lastError?.message || lastError}`);
 }
 
 /**
@@ -79,17 +94,33 @@ export class LectureGenLlmSession {
         // Attach binary inputs once. They remain part of retained history; adding
         // them to every new user message would duplicate them and disrupt caching.
         const currentAttachments = this.attachmentsAdded ? [] : attachments;
-        if (currentAttachments.length > 0) this.attachmentsAdded = true;
-        const response = await this.llm.generate(
-            build_prompt(userPrompt, this.promptWorkspaceDir),
-            null,
-            null,
-            null,
-            currentAttachments,
-            false,
-            true
-        );
-        return responseText(response, purpose);
+        const maxAttempts = 3;
+        let lastError: any = null;
+
+        for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+            try {
+                const response = await this.llm.generate(
+                    build_prompt(userPrompt, this.promptWorkspaceDir),
+                    null,
+                    null,
+                    null,
+                    currentAttachments,
+                    false,
+                    true
+                );
+                const text = responseText(response, purpose);
+                if (currentAttachments.length > 0) this.attachmentsAdded = true;
+                return text;
+            } catch (err: any) {
+                lastError = err;
+                console.warn(`[LectureGen LLM] ${purpose} attempt ${attempt}/${maxAttempts} failed: ${err.message || err}`);
+                if (attempt < maxAttempts) {
+                    await new Promise(resolve => setTimeout(resolve, 2000 * attempt));
+                }
+            }
+        }
+
+        throw new Error(`${purpose} failed after ${maxAttempts} attempts: ${lastError?.message || lastError}`);
     }
 }
 
