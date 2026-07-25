@@ -18,6 +18,8 @@ export type IAGenInput = LectureGenLlmOptions & {
     aspectRatio: string;
     referenceMaterial?: string;
     attachments?: LectureGenAttachment[];
+    /** Path used for purify / naming (default interactive.html). */
+    outputPath?: string;
 };
 
 export async function runIAGen(input: IAGenInput): Promise<string> {
@@ -27,18 +29,20 @@ export async function runIAGen(input: IAGenInput): Promise<string> {
     const attachmentNames = (input.attachments || [])
         .map(attachment => `- ${path.basename(attachment.path)} (${attachment.kind})`)
         .join('\n') || 'None.';
+    const outputPath = input.outputPath || 'interactive.html';
     const userPrompt = [
         '# User Request',
         input.request,
         '',
         `Target aspect ratio: ${input.aspectRatio}`,
+        `Output path: ${outputPath}`,
         '',
         '# Supplied Attachments',
         attachmentNames,
         '',
         ...reference,
         '',
-        'Create the single standalone interactive.html document now.'
+        `Create the single standalone HTML document for ${outputPath} now.`
     ].join('\n');
     const response = await runLlm(
         input,
@@ -48,7 +52,7 @@ export async function runIAGen(input: IAGenInput): Promise<string> {
         input.attachments
     );
     const [html] = purify_content_for_path(
-        'interactive.html',
+        outputPath,
         parseSingleHtmlDocument(response, 'IAGen')
     );
     return html;
