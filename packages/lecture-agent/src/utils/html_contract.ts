@@ -16,6 +16,7 @@ const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
 const CONTRACT_VALIDATOR_JS = path.join(__dirname, '..', 'validate_contract.cjs');
+const PRACTICE_VALIDATOR_JS = path.join(__dirname, '..', 'validate_practice_page.cjs');
 const PROTECTED_HTML_BLOCK_PATTERN = /(<(?:script|style)\b[^>]*>[\s\S]*?<\/(?:script|style)>)/gi;
 const HTML_TAG_PATTERN = /<[^<>]*>/g;
 
@@ -28,6 +29,12 @@ export function should_validate_contract(name: string, argumentsObj: any): boole
         return false;
     }
 
+    const normalized = filePath.replace(/\\/g, '/').toLowerCase();
+    if (normalized.endsWith('activities/interactive/index.html') ||
+        normalized.endsWith('activities/game/index.html')) {
+        return false;
+    }
+
     const filename = path.basename(filePath).toLowerCase();
     if (!filename.startsWith("index") || !filename.endsWith(".html")) {
         return false;
@@ -35,6 +42,20 @@ export function should_validate_contract(name: string, argumentsObj: any): boole
 
     const suffix = filename.substring(5, filename.length - 5);
     return suffix === "" || /^\d+$/.test(suffix);
+}
+
+export function should_validate_practice_page(name: string, argumentsObj: any): boolean {
+    if (!["write", "edits"].includes(name) || !argumentsObj || typeof argumentsObj !== 'object') {
+        return false;
+    }
+    const filePath = argumentsObj.path;
+    if (typeof filePath !== 'string') {
+        return false;
+    }
+
+    const normalized = filePath.replace(/\\/g, '/').toLowerCase();
+    return normalized.endsWith('activities/interactive/index.html') ||
+        normalized.endsWith('activities/game/index.html');
 }
 
 export function purify_html_markup_escapes(content: string): [string, number] {
@@ -105,5 +126,35 @@ export function validate_index_html_contract(filePath: string, workspaceDir: str
         return `HTML contract validation failed for ${filePath} (exit ${completed.status}): ${combined || 'unknown validation error'}`;
     } catch (exc: any) {
         return `HTML contract validation skipped: ${exc.name || 'Error'}: ${exc.message || exc}`;
+    }
+}
+
+export function validate_practice_page_contract(filePath: string, workspaceDir: string = DEFAULT_WORKSPACE_DIR): string {
+    const target = resolve_workspace_path(filePath, workspaceDir);
+    if (!fs.existsSync(PRACTICE_VALIDATOR_JS)) {
+        return `Practice readability validation skipped: validator not found at ${PRACTICE_VALIDATOR_JS}`;
+    }
+
+    if (!fs.existsSync(target)) {
+        return `Practice readability validation failed for ${filePath}: file not found`;
+    }
+
+    try {
+        const completed = spawnSync(process.execPath, [PRACTICE_VALIDATOR_JS, target], {
+            cwd: workspaceDir,
+            encoding: 'utf8',
+            timeout: 30000
+        });
+
+        const stdout = (completed.stdout || "").trim();
+        const stderr = (completed.stderr || "").trim();
+        const combined = [stderr, stdout].filter(Boolean).join('\n').trim();
+
+        if (completed.status === 0) {
+            return stdout || `Practice readability validation passed for ${filePath}`;
+        }
+        return `Practice readability validation failed for ${filePath} (exit ${completed.status}): ${combined || 'unknown validation error'}`;
+    } catch (exc: any) {
+        return `Practice readability validation skipped: ${exc.name || 'Error'}: ${exc.message || exc}`;
     }
 }

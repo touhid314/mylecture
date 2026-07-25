@@ -675,6 +675,7 @@ function detectProvider(voice) {
   if (!v) return 'kokoro';
 
   const omniVoices = new Set([
+    'mike',
     'american-male-1',
     'american-male-2',
     'american-male-3',

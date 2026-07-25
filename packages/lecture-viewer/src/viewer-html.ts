@@ -1967,6 +1967,7 @@ body.file-kind-mp4 .timeline-ruler {
           <label for="resolve-tts-voice">TTS voice</label>
           <select id="resolve-tts-voice">
             <optgroup label="OmniVoice TTS (Local)">
+              <option value="mike"${selectedAttr('mike', defaultTtsVoice)}>mike (En)</option>
               <option value="american-male-1"${selectedAttr('american-male-1', defaultTtsVoice)}>american-male-1 (En)</option>
               <option value="american-male-2"${selectedAttr('american-male-2', defaultTtsVoice)}>american-male-2 (En)</option>
               <option value="american-male-3"${selectedAttr('american-male-3', defaultTtsVoice)}>american-male-3 (En)</option>
@@ -2004,6 +2005,7 @@ body.file-kind-mp4 .timeline-ruler {
           <label for="render-tts-voice">TTS voice</label>
           <select id="render-tts-voice">
             <optgroup label="OmniVoice TTS (Local)">
+              <option value="mike"${selectedAttr('mike', defaultTtsVoice)}>mike (En)</option>
               <option value="american-male-1"${selectedAttr('american-male-1', defaultTtsVoice)}>american-male-1 (En)</option>
               <option value="american-male-2"${selectedAttr('american-male-2', defaultTtsVoice)}>american-male-2 (En)</option>
               <option value="american-male-3"${selectedAttr('american-male-3', defaultTtsVoice)}>american-male-3 (En)</option>

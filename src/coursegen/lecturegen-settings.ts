@@ -1,0 +1,40 @@
+/**
+ * LectureGen settings-block text for coursegen prompts.
+ * Kept in coursegen so we do not patch packages/lecture-agent lecturegen on this branch.
+ * Marker string must match packages/lecture-agent/src/lecturegen.ts SETTINGS_MARKER.
+ */
+
+export const SETTINGS_MARKER =
+  'if the user query is for lecture generation then follow this:';
+
+export function buildLectureGenSettingsText(options: {
+  aspectRatio?: string;
+  generationLength?: string;
+  embedSubtitle?: boolean;
+  enableGetimg?: boolean;
+  includeVideo?: boolean;
+  includeInteractive?: boolean;
+  includeGame?: boolean;
+  theme?: string;
+  teachingStyle?: string;
+  profile?: string;
+}): string {
+  const includeVideo = options.includeVideo !== false;
+  const includeInteractive = options.includeInteractive === true;
+  const includeGame = options.includeGame === true;
+  return [
+    SETTINGS_MARKER,
+    `aspect ratio: ${options.aspectRatio || '16:9'}`,
+    `generation length: ${options.generationLength || '1:00'}`,
+    `embed subtitle in video: ${options.embedSubtitle === true ? 'yes' : 'no'}`,
+    `getimg enabled: ${options.enableGetimg === false ? 'no' : 'yes'}`,
+    `output video: ${includeVideo ? 'yes' : 'no'}`,
+    `output interactive: ${includeInteractive ? 'yes' : 'no'}`,
+    `output practice game: ${includeGame ? 'yes' : 'no'}`,
+    options.theme ? `theme: ${options.theme}` : '',
+    options.teachingStyle ? `teaching style: ${options.teachingStyle}` : '',
+    options.profile ? `profile: ${options.profile}` : ''
+  ]
+    .filter(Boolean)
+    .join('\n');
+}

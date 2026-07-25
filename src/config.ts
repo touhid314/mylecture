@@ -47,7 +47,7 @@ const defaultConfig: AppConfig = {
   },
   tts: {
     provider: 'omnivoice',
-    voice: 'american-male-1',
+    voice: 'mike',
     speed: 1
   },
   render: {
