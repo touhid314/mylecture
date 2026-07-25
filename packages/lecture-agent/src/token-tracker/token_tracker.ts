@@ -34,6 +34,13 @@ type ModelCostConfig = {
 };
 
 export const MODEL_TOKEN_COSTS_PER_MILLION: Record<string, ModelCostConfig> = {
+    "gemini-3.6-flash": {
+        label: "Gemini 3.6 Flash",
+        contextWindow: "1M",
+        tiers: [{ input: 1.50, output: 7.50, cachedInput: 0.15 }],
+        batchDiscount: 0.50,
+        cacheStoragePerMillionTokenHour: 1.00,
+    },
     "gemini-3.5-flash": {
         label: "Gemini 3.5 Flash",
         contextWindow: "1M",

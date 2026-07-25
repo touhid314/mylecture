@@ -448,16 +448,9 @@ Gemini retains uploaded file parts in chat history. The OpenAI-compatible fallba
 
 ## Final-Response Isolation
 
-The working editor sees tools, file contents, hidden context, operational prompts, and validation output. It must not directly produce the final user-facing answer.
+## Final Response Handling
 
-The boundary is:
-
-1. The working editor calls `prepare_user_response`.
-2. Runtime strips IDE context from raw user queries.
-3. A separate LLM call uses `src/prompts/vault/pre-user-response-prompt.md`.
-4. The final-response call does not receive the working transcript, tool output, generated HTML, or workspace paths.
-
-Preserve this isolation for both Gemini native and JSON fallback paths.
+When the editor agent completes its HTML edits, it summarizes its changes directly. No intermediate `prepare_user_response` tool signal is required.
 
 ## Logging and Token Tracking
 

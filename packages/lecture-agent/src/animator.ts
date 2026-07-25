@@ -48,10 +48,33 @@ export class AnimatorSession {
     }
 }
 
+export function getAnimatorMaxPreviousHtmls(
+    configuredValue = process.env.ANIMATOR_MAX_PREVIOUS_HTMLS
+): number {
+    const raw = configuredValue?.replace(/['"]/g, '').trim();
+    if (raw === undefined || raw === null || raw === '') {
+        throw new Error('ANIMATOR_MAX_PREVIOUS_HTMLS environment variable is missing or empty. It must be a non-negative integer (e.g. 2, 0).');
+    }
+    const num = Number(raw);
+    if (!Number.isInteger(num) || num < 0) {
+        throw new Error('ANIMATOR_MAX_PREVIOUS_HTMLS must be a non-negative integer (e.g. 0, 1, 2).');
+    }
+    return num;
+}
+
+export function slicePreviousHtmls(
+    previousHtmls: PreviousHtml[],
+    maxCount = getAnimatorMaxPreviousHtmls()
+): PreviousHtml[] {
+    if (maxCount === 0) return [];
+    return previousHtmls.slice(-maxCount);
+}
+
 function formatPreviousHtmlSummary(previousHtmls: PreviousHtml[]): string {
-    if (previousHtmls.length === 0) return 'No previous HTML files. This is the first segment.';
+    const sliced = slicePreviousHtmls(previousHtmls);
+    if (sliced.length === 0) return 'No previous HTML files. This is the first segment or previous HTML context is disabled.';
     return [
-        `Validated files: ${previousHtmls.map(file => file.path).join(', ')}`,
+        `Validated files kept in context (${sliced.length}): ${sliced.map(file => file.path).join(', ')}`,
         'Their complete generation and repair exchanges are retained earlier in this conversation. All requested edits were applied and each listed file passed the validator.'
     ].join('\n');
 }

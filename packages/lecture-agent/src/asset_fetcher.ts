@@ -62,6 +62,46 @@ function getWatchmanModel(): string {
     return cleanEnvValue(process.env.GETIMG_WATCHMAN_MODEL) || 'gemini-2.5-flash';
 }
 
+export function getWatchmanConfigFromYaml(): boolean {
+    if (process.env.GETIMG_WATCHMAN !== undefined) {
+        const val = cleanEnvValue(process.env.GETIMG_WATCHMAN).toLowerCase();
+        if (val === 'false' || val === '0' || val === 'no') return false;
+        if (val === 'true' || val === '1' || val === 'yes') return true;
+    }
+
+    let dir = __dirname;
+    while (dir && dir !== path.parse(dir).root) {
+        const configPath = path.join(dir, 'config.yaml');
+        if (fs.existsSync(configPath)) {
+            try {
+                const content = fs.readFileSync(configPath, 'utf8');
+                let section = '';
+                for (const rawLine of content.split(/\r?\n/)) {
+                    const line = rawLine.replace(/\s+#.*$/, '').trimEnd();
+                    if (!line.trim() || line.trimStart().startsWith('#')) continue;
+
+                    const sectionMatch = line.match(/^([A-Za-z0-9_-]+):\s*$/);
+                    if (sectionMatch) {
+                        section = sectionMatch[1];
+                        continue;
+                    }
+
+                    const fieldMatch = line.match(/^\s+getimgwatchman:\s*(.*?)\s*$/);
+                    if ((section === 'agent' || !section) && fieldMatch) {
+                        const val = fieldMatch[1].trim().toLowerCase();
+                        if (val === 'false' || val === '0' || val === 'no') return false;
+                        if (val === 'true' || val === '1' || val === 'yes') return true;
+                    }
+                }
+            } catch (e) {
+                // ignore
+            }
+        }
+        dir = path.dirname(dir);
+    }
+    return true;
+}
+
 /**
  * Options configuration for the image downloader.
  */
@@ -634,7 +674,11 @@ async function handleGptImageMode(options: DownloadOptions) {
  * @param options - Parameters for the downloader/generator.
  */
 export async function downloadImage(options: DownloadOptions): Promise<void> {
-    const { mode, model, out, resolution } = options;
+    const effectiveOptions: DownloadOptions = {
+        ...options,
+        watchman: options.watchman !== undefined ? options.watchman : getWatchmanConfigFromYaml()
+    };
+    const { mode, model, out, resolution } = effectiveOptions;
 
     if (mode === 'gen') {
         const selectedModel = model || getDefaultGetimgModel();
@@ -650,16 +694,16 @@ export async function downloadImage(options: DownloadOptions): Promise<void> {
 
         switch (selectedModel) {
             case 'gemini-flash-lite':
-                await handleGeminiImageMode(options, 'gemini-3.1-flash-lite-image');
+                await handleGeminiImageMode(effectiveOptions, 'gemini-3.1-flash-lite-image');
                 break;
             case 'gemini-flash':
-                await handleGeminiImageMode(options, 'gemini-3.1-flash-image');
+                await handleGeminiImageMode(effectiveOptions, 'gemini-3.1-flash-image');
                 break;
             case 'gemini-pro':
-                await handleGeminiImageMode(options, 'gemini-3-pro-image');
+                await handleGeminiImageMode(effectiveOptions, 'gemini-3-pro-image');
                 break;
             case 'gpt-image-2':
-                await handleGptImageMode(options);
+                await handleGptImageMode(effectiveOptions);
                 break;
         }
     } else {
@@ -670,7 +714,7 @@ export async function downloadImage(options: DownloadOptions): Promise<void> {
         if (resolution !== undefined) {
             console.warn("Warning: --resolution is ignored when --mode is 'search'.");
         }
-        await handleSearchMode(options);
+        await handleSearchMode(effectiveOptions);
     }
 }
 
@@ -719,7 +763,7 @@ async function main() {
     let width: number | undefined;
     let height: number | undefined;
     let aspect: string | undefined;
-    let watchman = true;
+    let watchman: boolean | undefined;
     let logWatchman = false;
 
     if (args.includes('--help') || args.includes('-h') && args.length === 1) {
@@ -729,6 +773,8 @@ async function main() {
 
     if (args.includes('--no-verify') || args.includes('--no-watchman')) {
         watchman = false;
+    } else if (args.includes('--watchman')) {
+        watchman = true;
     }
 
     if (args.includes('--log-watchman')) {
@@ -839,7 +885,7 @@ export async function tool_getimg(args: {
             height: args.height,
             aspect: args.aspect,
             resolution: args.resolution,
-            watchman: args.watchman !== false, // default to true
+            watchman: args.watchman !== undefined ? args.watchman : getWatchmanConfigFromYaml(),
             logWatchman: args.logWatchman === true // default to false
         });
 
@@ -872,6 +918,8 @@ export type AssetDescription = {
     height: number | null;
     format: string | null;
     bytes: number;
+    status?: 'downloaded' | 'failed';
+    error?: string;
 };
 
 const NAMED_GETIMG_PATTERN = /\[\(getimg:\s*(?:'([^']*)'|"([^"]*)")\s*,\s*out:\s*(?:'([^']*)'|"([^"]*)")\s*\)\]/gi;
@@ -921,28 +969,49 @@ export async function fetchAssets(script: string, workspaceDir: string): Promise
             throw new Error(`Asset path escapes workspace: ${request.path}`);
         }
         fs.mkdirSync(path.dirname(absolutePath), { recursive: true });
-        await downloadImage({
-            prompt: request.prompt,
-            mode: 'search',
-            out: absolutePath,
-            watchman: false
-        });
-        const metadata = await sharp(absolutePath).metadata();
-        descriptions.push({
-            prompt: request.prompt,
-            path: request.path.replaceAll('\\', '/'),
-            width: metadata.width ?? null,
-            height: metadata.height ?? null,
-            format: metadata.format ?? null,
-            bytes: fs.statSync(absolutePath).size
-        });
+        try {
+            await downloadImage({
+                prompt: request.prompt,
+                mode: 'search',
+                out: absolutePath,
+                watchman: getWatchmanConfigFromYaml()
+            });
+            const metadata = await sharp(absolutePath).metadata();
+            descriptions.push({
+                prompt: request.prompt,
+                path: request.path.replaceAll('\\', '/'),
+                width: metadata.width ?? null,
+                height: metadata.height ?? null,
+                format: metadata.format ?? null,
+                bytes: fs.statSync(absolutePath).size,
+                status: 'downloaded'
+            });
+        } catch (e: any) {
+            console.warn(`[Asset Fetcher] Warning: Could not retrieve/verify asset for "${request.prompt}": ${e.message || e}`);
+            if (fs.existsSync(absolutePath)) {
+                try { fs.unlinkSync(absolutePath); } catch {}
+            }
+            descriptions.push({
+                prompt: request.prompt,
+                path: request.path.replaceAll('\\', '/'),
+                width: null,
+                height: null,
+                format: null,
+                bytes: 0,
+                status: 'failed',
+                error: e.message || String(e)
+            });
+        }
     }
     return descriptions;
 }
 
 export function formatAssetDescriptions(assets: AssetDescription[]): string {
     if (assets.length === 0) return 'No external image assets were requested by the script.';
-    return assets.map(asset =>
-        `- ${asset.path}: ${asset.width || '?'}x${asset.height || '?'} ${asset.format || 'image'}, ${asset.bytes} bytes; requested as "${asset.prompt}"`
-    ).join('\n');
+    return assets.map(asset => {
+        if (asset.status === 'failed' || asset.bytes === 0) {
+            return `- ${asset.path}: [FAILED TO DOWNLOAD/VERIFY: ${asset.error || 'Verification failed'}]. DO NOT USE THIS ASSET FILE. Construct the visual using code (SVG/Canvas/CSS) instead for requested prompt "${asset.prompt}".`;
+        }
+        return `- ${asset.path}: ${asset.width || '?'}x${asset.height || '?'} ${asset.format || 'image'}, ${asset.bytes} bytes; requested as "${asset.prompt}"`;
+    }).join('\n');
 }

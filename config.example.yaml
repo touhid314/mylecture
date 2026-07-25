@@ -7,6 +7,7 @@ agent:
   defaultTeachingStyle: "default"
   generationDir: "gens"
   enableGetimgTool: false
+  getimgwatchman: true
   defaultAspectRatio: "16:9"
   defaultLengthSeconds: 60
 

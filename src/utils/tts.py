@@ -558,7 +558,10 @@ def _run_kokoro_onnxruntime(text: str, output_path: Path, voice: str, speed: flo
     available = ort.get_available_providers()
     primary_provider = providers[0][0] if isinstance(providers[0], (tuple, list)) else providers[0]
     if primary_provider not in available:
-        raise RuntimeError(f"ONNX Runtime provider {primary_provider} is not available. Available: {available}")
+        if DEFAULT_KOKORO_STRICT_GPU:
+            raise RuntimeError(f"ONNX Runtime provider {primary_provider} is not available. Available: {available}")
+        log.warning(f"ONNX Runtime provider {primary_provider} is not available ({available}). Falling back to CPUExecutionProvider.")
+        providers = ["CPUExecutionProvider"]
 
     # Cache Inference Session
     sess_key = (str(model_path), tuple(_hashable_provider_entry(p) for p in providers))
@@ -567,7 +570,7 @@ def _run_kokoro_onnxruntime(text: str, output_path: Path, voice: str, speed: flo
     sess = _ONNX_SESSIONS[sess_key]
 
     active = sess.get_providers()
-    if requested_device == "cuda" and (not active or active[0] != "CUDAExecutionProvider"):
+    if requested_device == "cuda" and DEFAULT_KOKORO_STRICT_GPU and (not active or active[0] != "CUDAExecutionProvider"):
         raise RuntimeError(f"CUDAExecutionProvider was requested but session providers are {active}")
 
     if DEFAULT_KOKORO_STRICT_GPU:

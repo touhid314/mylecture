@@ -11,6 +11,7 @@ export type AppConfig = {
     defaultTeachingStyle: string;
     generationDir: string;
     enableGetimgTool: boolean;
+    getimgwatchman: boolean;
     defaultAspectRatio: string;
     defaultLengthSeconds: number;
   };
@@ -40,6 +41,7 @@ const defaultConfig: AppConfig = {
     defaultTeachingStyle: 'default',
     generationDir: 'gens',
     enableGetimgTool: false,
+    getimgwatchman: true,
     defaultAspectRatio: '16:9',
     defaultLengthSeconds: 60
   },
@@ -129,6 +131,7 @@ function mergeConfig(raw: Record<string, Record<string, unknown>>): AppConfig {
       defaultTeachingStyle: normalizeFileId(stringValue(raw.agent?.defaultTeachingStyle, defaultConfig.agent.defaultTeachingStyle), defaultConfig.agent.defaultTeachingStyle),
       generationDir: stringValue(raw.agent?.generationDir, defaultConfig.agent.generationDir),
       enableGetimgTool: booleanValue(raw.agent?.enableGetimgTool, defaultConfig.agent.enableGetimgTool),
+      getimgwatchman: booleanValue(raw.agent?.getimgwatchman, defaultConfig.agent.getimgwatchman),
       defaultAspectRatio: stringValue(raw.agent?.defaultAspectRatio, defaultConfig.agent.defaultAspectRatio),
       defaultLengthSeconds: numberValue(raw.agent?.defaultLengthSeconds, defaultConfig.agent.defaultLengthSeconds, 1)
     },

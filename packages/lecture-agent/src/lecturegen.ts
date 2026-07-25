@@ -38,7 +38,7 @@ import { fileURLToPath } from 'node:url';
 import { extract_upload_attachments, is_upload_supported_path } from './prompt_builder.js';
 import { generateAnswer } from './answer_generator.js';
 import { fetchAssets, formatAssetDescriptions, stripImageRequests, type AssetDescription } from './asset_fetcher.js';
-import { AnimatorSession, animateScriptBlock, validateAndRepairHtml, type PreviousHtml } from './animator.js';
+import { AnimatorSession, animateScriptBlock, getAnimatorMaxPreviousHtmls, slicePreviousHtmls, validateAndRepairHtml, type PreviousHtml } from './animator.js';
 import { runGameGen } from './gamegen.js';
 import { runIAGen } from './iagen.js';
 import { getScriptTrimmerChunkSizes, trimScriptByNarration } from './script_trimmer.js';
@@ -186,6 +186,7 @@ export class LectureGen {
                 let script = '';
                 if (input.includeVideo) {
                     const chunkSizes = getScriptTrimmerChunkSizes();
+                    getAnimatorMaxPreviousHtmls();
                     log('Generating the concept answer...');
                 const answer = await generateAnswer({
                     ...common,
@@ -255,7 +256,7 @@ export class LectureGen {
                         theme: input.theme,
                         teachingStyle: input.teachingStyle,
                         assetDescriptions,
-                        previousHtmls: [...previousHtmls],
+                        previousHtmls: slicePreviousHtmls(previousHtmls),
                         attachments: input.attachments
                     };
                     const generatedHtml = await animateScriptBlock(animatorInput, animatorSession);

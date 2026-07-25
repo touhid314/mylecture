@@ -652,21 +652,13 @@ class LecturePlayer {
               this.audioBufferCache.set(url, decodedBuf);
             })
             .catch(() => {
-              if (!this.audioCache.has(url)) {
-                const audio = new Audio(url);
-                audio.preload = 'auto';
-                audio.load();
-                this.audioCache.set(url, audio);
-              }
+              this.state.audioFailures.add(this.audioCueKey(cue));
             });
         } else {
-          const audio = new Audio(url);
-          audio.preload = 'auto';
-          audio.load();
-          this.audioCache.set(url, audio);
+          this.state.audioFailures.add(this.audioCueKey(cue));
         }
       } catch (e) {
-        // Ignore preload errors
+        this.state.audioFailures.add(this.audioCueKey(cue));
       }
     }
   }
@@ -712,11 +704,15 @@ class LecturePlayer {
   selectLiveTtsVoice() {
     if (!('speechSynthesis' in window)) return null;
     const voices = window.speechSynthesis.getVoices();
+    if (!Array.isArray(voices) || voices.length === 0) return null;
+
     const enGbVoices = voices.filter(voice => String(voice.lang || '').toLowerCase().startsWith('en-gb'));
-    return enGbVoices.find(voice => /female|woman|zira|susan|serena|sonia|hazel|libby/i.test(voice.name)) ||
-      enGbVoices[0] ||
-      voices.find(voice => /female|woman|zira|susan|serena|sonia|hazel|libby/i.test(voice.name)) ||
-      null;
+    const enVoices = voices.filter(voice => String(voice.lang || '').toLowerCase().startsWith('en'));
+    const pool = enGbVoices.length > 0 ? enGbVoices : (enVoices.length > 0 ? enVoices : voices);
+
+    return pool.find(voice => /female|woman|zira|susan|serena|sonia|hazel|libby|jenny|aria/i.test(voice.name)) ||
+      pool.find(voice => /male|man|david|mark|george/i.test(voice.name)) ||
+      pool[0];
   }
 
   syncLiveTts() {
@@ -741,8 +737,13 @@ class LecturePlayer {
     this.state.speechSegmentKey = key;
     const utterance = new SpeechSynthesisUtterance(text);
     const voice = this.selectLiveTtsVoice();
-    utterance.lang = 'en-GB';
-    if (voice) utterance.voice = voice;
+    if (voice) {
+      utterance.voice = voice;
+      utterance.lang = voice.lang || 'en-GB';
+    } else {
+      utterance.lang = 'en-GB';
+    }
+
     utterance.rate = Math.max(0.5, Math.min(2, this.speed));
     utterance.volume = this.state.muted ? 0 : Math.max(0, Math.min(1, Number(this.state.volume) || 0));
     utterance.onerror = () => {
