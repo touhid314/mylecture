@@ -15,6 +15,7 @@ import os from 'node:os';
 import { existsSync, mkdirSync, readFileSync, statSync, writeFileSync, unlinkSync } from 'node:fs';
 import path from 'node:path';
 import { pathToFileURL } from 'node:url';
+import { normalizeTtsText } from './tts-normalize.ts';
 
 const rootDir = process.cwd();
 
@@ -251,7 +252,7 @@ async function generateAudio({ text, outputPath, provider, voice, speed }) {
     env: {
       ...process.env,
       PROJECT_ROOT: rootDir,
-      TTS_TEXT: text,
+      TTS_TEXT: normalizeTtsText(text),
       TTS_OUTPUT: outputPath,
       TTS_PROVIDER: provider,
       TTS_VOICE: voice,
