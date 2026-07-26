@@ -83,3 +83,5 @@ katex.render("\\begin{bmatrix} a & b \\\\ c & d \\end{bmatrix}", eq1, { throwOnE
 // inside renderSection(segment, localTime, globalTime):
 eq1.style.opacity = Math.min(localTime / 0.8, 1.0);
 ```
+# more
+- Don't use AI like neon glow unless very necessary.

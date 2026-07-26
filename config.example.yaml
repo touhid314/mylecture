@@ -9,11 +9,11 @@ agent:
   enableGetimgTool: false
   getimgwatchman: true
   defaultAspectRatio: "16:9"
-  defaultLengthSeconds: 60
+  defaultLengthSeconds: 120
 
 tts:
   provider: "omnivoice"
-  voice: "mike"
+  voice: "maruf"
   speed: 1.0
 
 render:

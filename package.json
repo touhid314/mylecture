@@ -44,6 +44,7 @@
   },
   "dependencies": {
     "kokoro-js": "^1.2.1",
+    "pdfjs-dist": "^6.1.200",
     "three": "^0.184.0"
   }
 }

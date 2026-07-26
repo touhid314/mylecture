@@ -117,9 +117,25 @@ export async function animateScriptBlock(input: AnimatorInput, session: Animator
         '',
         `Create only ${input.outputPath}. Continue coherently from the previous HTML files while implementing only this script block.`
     ].join('\n');
-    const response = await session.generate(`lecturegen_animator_block_${input.blockIndex}`, userPrompt, input.attachments);
-    const [html] = purify_content_for_path(input.outputPath, parseAnimatorHtml(response));
-    return html;
+
+    const maxAttempts = 3;
+    let lastError: any = null;
+
+    for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+        try {
+            const response = await session.generate(`lecturegen_animator_block_${input.blockIndex}`, userPrompt, input.attachments);
+            const [html] = purify_content_for_path(input.outputPath, parseAnimatorHtml(response));
+            return html;
+        } catch (err: any) {
+            lastError = err;
+            console.warn(`[Animator] Block ${input.blockIndex} (${input.outputPath}) attempt ${attempt}/${maxAttempts} failed: ${err.message || err}`);
+            if (attempt < maxAttempts) {
+                await new Promise(resolve => setTimeout(resolve, 2000 * attempt));
+            }
+        }
+    }
+
+    throw new Error(`Failed to generate ${input.outputPath} after ${maxAttempts} attempts: ${lastError?.message || lastError}`);
 }
 
 function lineNumbered(content: string): string {
