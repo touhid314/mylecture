@@ -2,18 +2,24 @@
 Unified TTS helpers.
 
 Single public API:
-    tts(text, provider, voice, output_path, speed)
+    tts(text, provider, voice, output_path, speed, alignment, alignment_output_path)
+
+All providers write WAV files. Cloud providers generate speech remotely;
+Kokoro and OmniVoice generate speech locally.
 
 Providers available via this module:
 1) openai
    - Provider key: "openai"
-   - Model is required via OPENAI_TTS_MODEL.
+   - Model and default voice are required via OPENAI_TTS_MODEL and
+     OPENAI_TTS_VOICE.
    - Available voices:
      alloy, ash, ballad, coral, cedar, echo, fable, marin, nova,
      onyx, sage, shimmer, verse
 
 2) google (Gemini TTS)
    - Provider keys: "google", "gemini" (alias)
+   - Model and default voice are required via GOOGLE_TTS_MODEL and
+     GOOGLE_TTS_VOICE.
    - Allowed models in this module:
      gemini-3-flash-preview-tts
      gemini-3-flash-lite-preview-tts
@@ -31,8 +37,11 @@ Providers available via this module:
 
 3) kokoro (local via ONNX Runtime CUDA, with kokoro-js fallback)
    - Provider key: "kokoro"
-   - Model and engine are required via KOKORO_MODEL and KOKORO_ENGINE.
+   - Model, engine, voice, device, dtype, phonemizer, and worker settings are
+     configured through the KOKORO_* environment variables below.
    - Set KOKORO_ENGINE=kokoro-js to force the old Node.js path.
+   - Long text is split at sentence boundaries and synthesized in parallel
+     before the resulting WAV chunks are concatenated.
    - Available voices (from installed kokoro-js package):
      af_heart, af_alloy, af_aoede, af_bella, af_jessica, af_kore,
      af_nicole, af_nova, af_river, af_sarah, af_sky,
@@ -41,19 +50,41 @@ Providers available via this module:
      bf_emma, bf_isabella, bf_alice, bf_lily,
      bm_george, bm_lewis, bm_daniel, bm_fable
 
-Note:
-- ElevenLabs TTS exists in this repo as a separate utility
-  (src/utils/tts_11labs.py) and is not part of this unified tts(...) API.
+4) omnivoice (local zero-shot voice cloning)
+   - Provider key: "omnivoice"
+   - Loads k2-fsa/OmniVoice with PyTorch on CUDA when available, otherwise CPU.
+   - Voice names resolve to folders under <project>/voices, case-insensitively.
+   - Each voice folder must contain a reference WAV and may contain a reference
+     transcript TXT file.
+   - Defaults to voice "american-male-1" and speed 0.85.
+   - Automatically selects Bengali when the input contains Bengali Unicode
+     characters; otherwise it selects English.
+   - Writes 24 kHz WAV through soundfile.
+
+5) elevenlabs
+   - Provider keys: "elevenlabs", "11labs" (alias)
+   - API key and model are required via ELEVENLABS_API_KEY and
+     ELEVENLABS_TTS_MODEL. There is no model fallback.
+   - Voice is an ElevenLabs voice ID.
+   - Voice selection order is: explicit voice argument, ELEVENLABS_TTS_VOICE,
+     ELEVENLABS_VOICE_ID, then the built-in Will voice.
+   - Requests 24 kHz signed 16-bit PCM and wraps it in a WAV container without
+     audio transcoding.
+   - Optional alignment writes normalized character timings and derived word
+     start/end timings to JSON.
 """
 
 from __future__ import annotations
 
+import argparse
+import base64
 import os
 import json
 import re
 import site
 import subprocess
 import sys
+import unicodedata
 
 if hasattr(sys.stdout, "reconfigure"):
     sys.stdout.reconfigure(encoding="utf-8")
@@ -65,6 +96,10 @@ import time
 import wave
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
+from typing import Any
+from urllib.error import HTTPError, URLError
+from urllib.parse import quote, urlencode
+from urllib.request import Request, urlopen
 
 from dotenv import load_dotenv
 
@@ -133,6 +168,13 @@ _ALLOWED_GEMINI_MODELS = {
     "gemini-3-pro-tts",
     "gemini-2.5-flash-preview-tts",
 }
+
+DEFAULT_ELEVENLABS_MODEL = _require_env("ELEVENLABS_TTS_MODEL")
+DEFAULT_ELEVENLABS_VOICE = os.getenv(
+    "ELEVENLABS_TTS_VOICE",
+    os.getenv("ELEVENLABS_VOICE_ID", "bIHbv24MWmeRgasZH58o"),
+).strip()  # Will
+ELEVENLABS_OUTPUT_FORMAT = "pcm_24000"
 
 DEFAULT_KOKORO_MODEL = _require_env("KOKORO_MODEL")
 DEFAULT_KOKORO_VOICE = _require_env("KOKORO_DEFAULT_VOICE")
@@ -253,6 +295,157 @@ def _save_wave(filename: str, pcm: bytes, channels: int = 1, rate: int = 24000, 
         wf.setsampwidth(sample_width)
         wf.setframerate(rate)
         wf.writeframes(pcm)
+
+
+def _elevenlabs_word_alignment(character_alignment: dict[str, Any]) -> list[dict[str, Any]]:
+    """Derive punctuation-excluding word boundaries from character timings."""
+    characters = character_alignment.get("characters")
+    starts = character_alignment.get("character_start_times_seconds")
+    ends = character_alignment.get("character_end_times_seconds")
+    if not all(isinstance(values, list) for values in (characters, starts, ends)):
+        raise RuntimeError("ElevenLabs returned incomplete character alignment data.")
+    if not (len(characters) == len(starts) == len(ends)):
+        raise RuntimeError("ElevenLabs returned mismatched character alignment arrays.")
+
+    def _is_word_character(value: str) -> bool:
+        return any(unicodedata.category(part)[0] in {"L", "M", "N"} for part in value)
+
+    words: list[dict[str, Any]] = []
+    current_characters: list[str] = []
+    current_start: float | None = None
+    current_end: float | None = None
+
+    def _finish_word() -> None:
+        nonlocal current_characters, current_start, current_end
+        if not current_characters:
+            return
+        words.append(
+            {
+                "word": "".join(current_characters),
+                "start_seconds": current_start,
+                "end_seconds": current_end,
+            }
+        )
+        current_characters = []
+        current_start = None
+        current_end = None
+
+    for index, (character, start, end) in enumerate(zip(characters, starts, ends)):
+        character = str(character)
+        next_character = str(characters[index + 1]) if index + 1 < len(characters) else ""
+        is_internal_joiner = (
+            character in {"'", "\N{RIGHT SINGLE QUOTATION MARK}", "-"}
+            and bool(current_characters)
+            and _is_word_character(next_character)
+        )
+        if not _is_word_character(character) and not is_internal_joiner:
+            _finish_word()
+            continue
+        if current_start is None:
+            current_start = float(start)
+        current_characters.append(character)
+        current_end = float(end)
+
+    _finish_word()
+    return words
+
+
+def _run_elevenlabs(
+    text: str,
+    output_path: Path,
+    voice: str,
+    speed: float,
+    alignment: bool,
+    alignment_output_path: str | None,
+) -> None:
+    """
+    Request 24 kHz PCM from ElevenLabs and write WAV plus optional timing JSON.
+
+    The PCM is placed in a WAV container locally; it is not decoded, resampled,
+    or transcoded. Alignment uses normalized character timing when available and
+    falls back to timing for the original text.
+    """
+    endpoint = (
+        "https://api.elevenlabs.io/v1/text-to-speech/"
+        + quote(voice, safe="")
+    )
+    if alignment:
+        endpoint += "/with-timestamps"
+    endpoint += "?" + urlencode({"output_format": ELEVENLABS_OUTPUT_FORMAT})
+
+    request = Request(
+        endpoint,
+        data=json.dumps(
+            {
+                "text": text,
+                "model_id": DEFAULT_ELEVENLABS_MODEL,
+                "voice_settings": {"speed": speed},
+            }
+        ).encode("utf-8"),
+        headers={
+            "Accept": "application/json" if alignment else "application/octet-stream",
+            "Content-Type": "application/json",
+            "xi-api-key": _require_env("ELEVENLABS_API_KEY"),
+        },
+        method="POST",
+    )
+
+    try:
+        with urlopen(request, timeout=120) as response:
+            response_body = response.read()
+            request_id = response.headers.get("request-id")
+            character_cost = response.headers.get("character-cost")
+    except HTTPError as exc:
+        detail = exc.read().decode("utf-8", errors="replace")
+        try:
+            detail = json.dumps(json.loads(detail), ensure_ascii=False)
+        except json.JSONDecodeError:
+            detail = detail[:1000]
+        raise RuntimeError(f"ElevenLabs request failed ({exc.code}): {detail}") from exc
+    except URLError as exc:
+        raise RuntimeError(f"Could not reach ElevenLabs: {exc.reason}") from exc
+
+    if not alignment:
+        _save_wave(str(output_path), response_body, rate=24000)
+        return
+
+    try:
+        response_json = json.loads(response_body)
+        audio_bytes = base64.b64decode(response_json["audio_base64"], validate=True)
+    except (json.JSONDecodeError, KeyError, TypeError, ValueError) as exc:
+        raise RuntimeError("ElevenLabs returned an invalid timing response.") from exc
+
+    _save_wave(str(output_path), audio_bytes, rate=24000)
+    chosen_alignment = (
+        response_json.get("normalized_alignment") or response_json.get("alignment")
+    )
+    if not isinstance(chosen_alignment, dict):
+        raise RuntimeError("ElevenLabs returned no alignment data.")
+
+    timing_path = (
+        Path(alignment_output_path)
+        if alignment_output_path
+        else output_path.with_suffix(".alignment.json")
+    )
+    timing_path.parent.mkdir(parents=True, exist_ok=True)
+    timing_data = {
+        "text": text,
+        "alignment_source": (
+            "normalized_alignment"
+            if response_json.get("normalized_alignment")
+            else "alignment"
+        ),
+        "voice_id": voice,
+        "model_id": DEFAULT_ELEVENLABS_MODEL,
+        "request_id": request_id,
+        "character_cost": character_cost,
+        "words": _elevenlabs_word_alignment(chosen_alignment),
+        "characters": chosen_alignment,
+    }
+    timing_path.write_text(
+        json.dumps(timing_data, ensure_ascii=False, indent=2) + "\n",
+        encoding="utf-8",
+    )
 
 
 def _concat_wavs(input_paths: list[Path], output_path: Path) -> None:
@@ -775,6 +968,7 @@ _OMNIVOICE_MODEL = None
 
 
 def _get_omnivoice_model():
+    """Load and cache OmniVoice on CUDA when available, otherwise on CPU."""
     global _OMNIVOICE_MODEL
     if _OMNIVOICE_MODEL is None:
         import torch
@@ -791,9 +985,15 @@ def _get_omnivoice_model():
 
 
 def _run_omnivoice(text: str, output_path: Path, voice: str, speed: float) -> None:
+    """
+    Clone a local reference voice with OmniVoice and write a 24 kHz WAV.
+
+    ``voice`` names a directory under ``<project>/voices``. The directory must
+    contain a reference WAV and may contain a TXT transcript for that audio.
+    """
     import soundfile as sf
 
-    # 1. Resolve voice files
+    # Resolve the requested reference-voice folder case-insensitively.
     voices_root = PROJECT_ROOT / "voices"
     voice_dir = voices_root / voice
     if not voice_dir.is_dir():
@@ -809,7 +1009,7 @@ def _run_omnivoice(text: str, output_path: Path, voice: str, speed: float) -> No
         else:
             raise RuntimeError(f"OmniVoice voice directory not found: {voice_dir}")
 
-    # Find first .wav and first .txt
+    # Use the first reference WAV and, when present, its TXT transcript.
     ref_audio = None
     ref_text = None
 
@@ -826,18 +1026,18 @@ def _run_omnivoice(text: str, output_path: Path, voice: str, speed: float) -> No
     if not ref_audio:
         raise RuntimeError(f"No reference .wav file found in voice directory: {voice_dir}")
 
-    # 2. Determine target language (Bengali if Bengali characters are present, else English)
+    # OmniVoice is currently routed to Bengali or English from the input script.
     has_bengali = any('\u0980' <= char <= '\u09ff' for char in text)
     language = "Bengali" if has_bengali else "English"
 
-    # Prepare spacing for punctuation if English
+    # Match the punctuation spacing expected by the English OmniVoice tokenizer.
     if language.lower() in ["english", "en"]:
         for punc in [".", ",", "?", "!"]:
             text = text.replace(f" {punc}", f" {punc}").replace(punc, f" {punc}")
             if ref_text:
                 ref_text = ref_text.replace(f" {punc}", f" {punc}").replace(punc, f" {punc}")
 
-    # 3. Load model and run
+    # The cached model avoids repeating the expensive local model load.
     model = _get_omnivoice_model()
 
     gen_kwargs = {
@@ -868,31 +1068,65 @@ def tts(
     voice: str | None = None,
     output_path: str | None = None,
     speed: float | None = None,
+    alignment: bool = False,
+    alignment_output_path: str | None = None,
 ) -> str:
     """
     Generate speech audio and return the output file path.
 
     Args:
         text: Input text to synthesize.
-        provider: One of "openai", "google", "gemini", "kokoro".
-        voice: Provider voice name/id. If omitted, provider default is used.
+        provider: One of "openai", "google", "gemini", "kokoro",
+            "omnivoice", "elevenlabs", or "11labs".
+        voice: Provider voice name, voice ID, or local reference-voice folder.
+            If omitted, the provider default is used.
         output_path: Output WAV file path or directory. If omitted, a timestamped
-            file is created in provider-specific default output directories.
-        speed: Optional speaking speed. Currently applied only for provider="kokoro".
-            Must be greater than 0.
+            WAV is created in the provider-specific default output directory.
+            A path without a ".wav" suffix is treated as a directory.
+        speed: Optional speaking speed. Applied to Kokoro, OmniVoice, and
+            ElevenLabs and ignored by OpenAI and Google. Defaults to 1.0 for
+            Kokoro and ElevenLabs and 0.85 for OmniVoice. Must be greater than 0.
+        alignment: For ElevenLabs only, request timing data and write normalized
+            character alignment plus derived word start/end timings to JSON.
+        alignment_output_path: Optional ElevenLabs alignment JSON path. Defaults
+            to the audio path with an ".alignment.json" suffix.
 
-    Provider voices:
+    Returns:
+        The generated WAV path as a string.
+
+    Raises:
+        ValueError: If text, provider, speed, or alignment options are invalid.
+        RuntimeError: If required configuration is missing or synthesis fails.
+
+    Provider configuration and voices:
         openai:
+            Uses OPENAI_TTS_MODEL and OPENAI_TTS_VOICE. An explicit voice
+            overrides the configured default.
+
             alloy, ash, ballad, coral, cedar, echo, fable, marin, nova,
             onyx, sage, shimmer, verse
+
         google/gemini:
+            Uses GOOGLE_TTS_MODEL and GOOGLE_TTS_VOICE. An explicit voice
+            overrides the configured default.
+
             Accepts Google prebuilt voice_name values (catalog may change).
             Common names include Achernar, Achird, Algenib, Algieba, Alnilam,
             Aoede, Autonoe, Callirrhoe, Charon, Despina, Enceladus, Erinome,
             Fenrir, Gacrux, Iapetus, Kore, Laomedeia, Leda, Orus, Puck,
             Pulcherrima, Rasalgethi, Sadachbia, Sadaltager, Schedar, Sulafat,
             Umbriel, Vindemiatrix, Zephyr, Zubenelgenubi.
+
+        elevenlabs/11labs:
+            Requires ELEVENLABS_API_KEY and ELEVENLABS_TTS_MODEL. Accepts an
+            ElevenLabs voice ID. Voice selection order is the explicit voice,
+            ELEVENLABS_TTS_VOICE, ELEVENLABS_VOICE_ID, then the built-in
+            Will voice. Alignment is available only for this provider.
+
         kokoro:
+            Uses the configured KOKORO_* model, engine, device, phonemizer, and
+            default voice settings.
+
             af_heart, af_alloy, af_aoede, af_bella, af_jessica, af_kore,
             af_nicole, af_nova, af_river, af_sarah, af_sky,
             am_adam, am_echo, am_eric, am_fenrir, am_liam, am_michael,
@@ -901,6 +1135,13 @@ def tts(
             bm_george, bm_lewis, bm_daniel, bm_fable
 
             kokoro voices demo: https://gregr.org/tts-samples/
+
+        omnivoice:
+            Accepts the name of a folder under <project>/voices. That folder
+            must contain a reference WAV and may contain its transcript as TXT.
+            Folder lookup is case-insensitive. Defaults to
+            "american-male-1". Input containing Bengali Unicode characters is
+            synthesized as Bengali; all other input is synthesized as English.
     """
     clean_text = (text or "").strip()
     if not clean_text:
@@ -909,8 +1150,23 @@ def tts(
     chosen_provider = (provider or "openai").strip().lower()
     if chosen_provider == "gemini":
         chosen_provider = "google"
-    if chosen_provider not in {"openai", "google", "kokoro", "omnivoice"}:
-        raise ValueError("provider must be one of: openai, google, gemini, kokoro, omnivoice")
+    if chosen_provider == "11labs":
+        chosen_provider = "elevenlabs"
+    if chosen_provider not in {
+        "openai",
+        "google",
+        "kokoro",
+        "omnivoice",
+        "elevenlabs",
+    }:
+        raise ValueError(
+            "provider must be one of: openai, google, gemini, kokoro, "
+            "omnivoice, elevenlabs, 11labs"
+        )
+    if alignment and chosen_provider != "elevenlabs":
+        raise ValueError("alignment is supported only for provider='elevenlabs'")
+    if alignment_output_path and not alignment:
+        raise ValueError("alignment_output_path requires alignment=True")
 
     out_path = _resolve_output_path(output_path, chosen_provider)
     log.info(f"TTS provider={chosen_provider} -> {out_path}")
@@ -958,6 +1214,30 @@ def tts(
         _save_wave(str(out_path), pcm_data)
         return str(out_path)
 
+    if chosen_provider == "elevenlabs":
+        chosen_voice = (voice or DEFAULT_ELEVENLABS_VOICE).strip()
+        if not chosen_voice:
+            raise ValueError(
+                "Set an ElevenLabs voice ID with voice=, "
+                "ELEVENLABS_TTS_VOICE, or ELEVENLABS_VOICE_ID."
+            )
+        chosen_speed = float(speed) if speed is not None else 1.0
+        if chosen_speed <= 0:
+            raise ValueError("speed must be greater than 0")
+        log.info(
+            f"ElevenLabs config model={DEFAULT_ELEVENLABS_MODEL} "
+            f"voice={chosen_voice} speed={chosen_speed} alignment={alignment}"
+        )
+        _run_elevenlabs(
+            clean_text,
+            out_path,
+            chosen_voice,
+            chosen_speed,
+            alignment,
+            alignment_output_path,
+        )
+        return str(out_path)
+
     if chosen_provider == "kokoro":
         chosen_voice = (voice or DEFAULT_KOKORO_VOICE).strip()
         chosen_speed = float(speed) if speed is not None else 1.0
@@ -980,7 +1260,7 @@ def tts(
         return str(out_path)
 
 
-if __name__ == "__main__":
+def _legacy_sample() -> None:
     sample = """
 When we want to add data to a Red-Black tree, we don’t just throw a node in and hope for the best. We follow a very, very specific strategy to ensure the tree remains balanced without, you know... causing a massive structural headache.
 So, let's talk about the first rule: The Red Insertion Policy. Whenever you insert a new pair into the tree, you follow the standard binary search tree path until you find the correct spot. But—and here is the critical rule—you must always color the new node red.
@@ -989,3 +1269,77 @@ If you insert a black node, you immediately violate that second rule. I repeat, 
 However, if you insert a red node, you don’t change the black node count at all! The only rule you risk breaking is the "no consecutive red nodes" rule. This is a local problem. It only happens right where you inserted the node, and as we’ll see, local problems are much, much easier to patch up.
 """
     print(tts(sample, provider="kokoro", voice="am_liam", output_path="outputs/tts/kokoro_sample.wav", speed=0.9))
+
+
+def _parse_cli_args(argv: list[str] | None = None) -> argparse.Namespace:
+    parser = argparse.ArgumentParser(
+        description=(
+            "Generate WAV speech with OpenAI, Google, Kokoro, OmniVoice, "
+            "or ElevenLabs."
+        )
+    )
+    parser.add_argument("--text", required=True, help="Text to synthesize.")
+    parser.add_argument(
+        "--provider",
+        default="openai",
+        help=(
+            "Provider: openai, google/gemini, kokoro, omnivoice, "
+            "or elevenlabs/11labs (default: openai)."
+        ),
+    )
+    parser.add_argument(
+        "--voice",
+        default=None,
+        help="Provider voice name/ID or OmniVoice reference-folder name.",
+    )
+    parser.add_argument("--output", default=None, help="Output WAV path or directory.")
+    parser.add_argument(
+        "--speed",
+        type=float,
+        default=None,
+        help="Kokoro, OmniVoice, or ElevenLabs speaking speed.",
+    )
+    parser.add_argument(
+        "--alignment",
+        action="store_true",
+        help="For ElevenLabs, save word and character timing JSON.",
+    )
+    parser.add_argument(
+        "--alignment-output",
+        default=None,
+        help="ElevenLabs alignment JSON path.",
+    )
+    return parser.parse_args(argv)
+
+
+def main(argv: list[str] | None = None) -> int:
+    args = _parse_cli_args(argv)
+    started_at = time.perf_counter()
+    try:
+        audio_path = tts(
+            args.text,
+            provider=args.provider,
+            voice=args.voice,
+            output_path=args.output,
+            speed=args.speed,
+            alignment=args.alignment,
+            alignment_output_path=args.alignment_output,
+        )
+    except (RuntimeError, ValueError) as exc:
+        print(f"Error: {exc}", file=sys.stderr)
+        return 1
+
+    print(audio_path)
+    if args.alignment:
+        timing_path = (
+            Path(args.alignment_output)
+            if args.alignment_output
+            else Path(audio_path).with_suffix(".alignment.json")
+        )
+        print(timing_path)
+    print(f"Generation time: {time.perf_counter() - started_at:.3f}s")
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
