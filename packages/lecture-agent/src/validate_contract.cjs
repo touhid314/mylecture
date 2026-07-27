@@ -322,7 +322,9 @@ async function validateWithPlaywright(htmlPath) {
     args: ['--allow-file-access-from-files']
   });
   try {
-    const page = await browser.newPage();
+    const page = await browser.newPage({
+      viewport: { width: 1920, height: 1080 }
+    });
     const scriptErrors = [];
     page.on('pageerror', (err) => {
       scriptErrors.push(`${err.name || 'Error'}: ${err.message || err}`);
@@ -331,6 +333,114 @@ async function validateWithPlaywright(htmlPath) {
 
     const result = await page.evaluate(() => {
       const renderErrors = [];
+      const layoutErrors = [];
+      const seenLayoutErrors = new Set();
+
+      function visibleTextLeaves() {
+        return Array.from(document.querySelectorAll('body *')).flatMap((element) => {
+          if (element.closest('[data-layout-check="ignore"]')) return [];
+
+          const textNodes = Array.from(element.childNodes)
+            .filter(node => node.nodeType === Node.TEXT_NODE && node.textContent?.trim());
+          const text = textNodes
+            .map(node => node.textContent || '')
+            .join(' ')
+            .replace(/\s+/g, ' ')
+            .trim();
+          if (!text) return [];
+
+          let opacity = 1;
+          let current = element;
+          while (current && current !== document.documentElement) {
+            const style = getComputedStyle(current);
+            if (style.display === 'none' || style.visibility === 'hidden') return [];
+            opacity *= Number(style.opacity) || 0;
+            current = current.parentElement;
+          }
+          if (opacity < 0.6) return [];
+
+          const textRects = textNodes.flatMap((node) => {
+            const range = document.createRange();
+            range.selectNodeContents(node);
+            return Array.from(range.getClientRects());
+          });
+          if (textRects.length === 0) return [];
+
+          const bounds = {
+            left: Math.min(...textRects.map(rect => rect.left)),
+            top: Math.min(...textRects.map(rect => rect.top)),
+            right: Math.max(...textRects.map(rect => rect.right)),
+            bottom: Math.max(...textRects.map(rect => rect.bottom))
+          };
+          let left = Math.max(0, bounds.left);
+          let top = Math.max(0, bounds.top);
+          let right = Math.min(window.innerWidth, bounds.right);
+          let bottom = Math.min(window.innerHeight, bounds.bottom);
+
+          for (let parent = element.parentElement; parent; parent = parent.parentElement) {
+            const style = getComputedStyle(parent);
+            if (/(hidden|clip|auto|scroll)/.test(`${style.overflow} ${style.overflowX} ${style.overflowY}`)) {
+              const clip = parent.getBoundingClientRect();
+              left = Math.max(left, clip.left);
+              top = Math.max(top, clip.top);
+              right = Math.min(right, clip.right);
+              bottom = Math.min(bottom, clip.bottom);
+            }
+          }
+
+          if (right - left < 12 || bottom - top < 8) return [];
+          const label = element.id
+            ? `#${element.id}`
+            : `${element.tagName.toLowerCase()}${element.classList.length ? `.${element.classList[0]}` : ''}`;
+          const ownStyle = getComputedStyle(element);
+          const transparentBackground = ownStyle.backgroundImage === 'none'
+            && (ownStyle.backgroundColor === 'transparent' || ownStyle.backgroundColor === 'rgba(0, 0, 0, 0)');
+          return [{
+            element,
+            transparentBackground,
+            label,
+            text: text.slice(0, 48),
+            left,
+            top,
+            right,
+            bottom
+          }];
+        });
+      }
+
+      function recordObviousTextOverlap(segment, localTime) {
+        if (layoutErrors.length >= 5) return;
+        const items = visibleTextLeaves();
+        for (let i = 0; i < items.length; i++) {
+          for (let j = i + 1; j < items.length; j++) {
+            const a = items[i];
+            const b = items[j];
+            if (a.element.contains(b.element) || b.element.contains(a.element)) continue;
+            if (!a.transparentBackground || !b.transparentBackground) continue;
+            if (/^[\d.,%+-]+$/.test(a.text) && /^[\d.,%+-]+$/.test(b.text)) continue;
+
+            const overlapWidth = Math.min(a.right, b.right) - Math.max(a.left, b.left);
+            const overlapHeight = Math.min(a.bottom, b.bottom) - Math.max(a.top, b.top);
+            if (overlapWidth < 24 || overlapHeight < 12) continue;
+
+            const overlapArea = overlapWidth * overlapHeight;
+            const smallerArea = Math.min(
+              (a.right - a.left) * (a.bottom - a.top),
+              (b.right - b.left) * (b.bottom - b.top)
+            );
+            if (overlapArea / smallerArea < 0.2) continue;
+
+            const key = `${segment.id}|${a.label}|${a.text}|${b.label}|${b.text}`;
+            if (seenLayoutErrors.has(key)) continue;
+            seenLayoutErrors.add(key);
+            layoutErrors.push(
+              `segment '${segment.id}' at localTime=${localTime.toFixed(3)}s: ${a.label} ("${a.text}") overlaps ${b.label} ("${b.text}") by ${Math.round(overlapWidth)}x${Math.round(overlapHeight)}px`
+            );
+            if (layoutErrors.length >= 5) return;
+          }
+        }
+      }
+
       if (typeof window.__RENDER_SECTION__ === 'function' && Array.isArray(window.__VIDEO_PLAN__)) {
         const plan = window.__VIDEO_PLAN__.filter(segment => segment && segment.id);
         const maximumSamples = 50;
@@ -365,6 +475,7 @@ async function validateWithPlaywright(htmlPath) {
           for (const localTime of [...new Set(localTimes.map(value => Number(value.toFixed(6))))]) {
             try {
               window.__RENDER_SECTION__(segment, localTime, globalStart + localTime);
+              recordObviousTextOverlap(segment, localTime);
             } catch (err) {
               renderErrors.push(
                 `segment '${segment.id}' at localTime=${localTime.toFixed(3)}s: ${err.name || 'Error'}: ${err.message || err}`
@@ -383,7 +494,8 @@ async function validateWithPlaywright(htmlPath) {
         __START_INTERACTIVE_TYPE__: typeof window.__START_INTERACTIVE__,
         __START_GAME_TYPE__: typeof window.__START_GAME__,
         __STOP_GAME_TYPE__: typeof window.__STOP_GAME__,
-        renderErrors
+        renderErrors,
+        layoutErrors
       };
     });
 
@@ -399,6 +511,9 @@ async function validateWithPlaywright(htmlPath) {
     const errors = runChecks(windowObj);
     for (const renderError of result.renderErrors || []) {
       errors.push(`__RENDER_SECTION__ execution failed during temporal sample: ${renderError}`);
+    }
+    for (const layoutError of result.layoutErrors || []) {
+      errors.push(`Temporal layout check failed: ${layoutError}`);
     }
     if (errors.some((err) => err.startsWith('Missing window.__')) && scriptErrors.length > 0) {
       return [

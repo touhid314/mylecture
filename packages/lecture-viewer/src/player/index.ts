@@ -5,6 +5,8 @@
  * This module owns playback state, timeline derivation, audio/subtitle sync,
  * viewport detection, and the event API consumed by the IDE/website shells.
  */
+import { normalizeTtsText } from './tts-normalize.js';
+
 export const lectureViewerVersion = '0.2';
 
 // Factory wrapper keeps the public API stable even if the backing class changes.
@@ -735,7 +737,7 @@ class LecturePlayer {
 
     this.stopLiveTts();
     this.state.speechSegmentKey = key;
-    const utterance = new SpeechSynthesisUtterance(text);
+    const utterance = new SpeechSynthesisUtterance(normalizeTtsText(text));
     const voice = this.selectLiveTtsVoice();
     if (voice) {
       utterance.voice = voice;

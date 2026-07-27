@@ -9,7 +9,7 @@
  * the website package. It binds to localhost by default and can be explicitly
  * exposed to a trusted local network with --host 0.0.0.0.
  */
-import { createReadStream, existsSync, mkdirSync, readdirSync, readFileSync, rmSync, statSync, unlinkSync, writeFileSync, watch } from 'node:fs';
+import { createReadStream, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync, unlinkSync, writeFileSync, watch } from 'node:fs';
 import { createServer } from 'node:http';
 import { spawn } from 'node:child_process';
 import { networkInterfaces } from 'node:os';
@@ -299,6 +299,28 @@ function sendJson(response, status, payload) {
   sendText(response, status, JSON.stringify(payload), 'application/json; charset=utf-8');
 }
 
+function readJsonBody(request, maxBytes = 128 * 1024) {
+  return new Promise((resolve, reject) => {
+    let body = '';
+    request.setEncoding('utf8');
+    request.on('data', chunk => {
+      body += chunk;
+      if (Buffer.byteLength(body, 'utf8') > maxBytes) {
+        reject(new Error('Request body is too large.'));
+        request.destroy();
+      }
+    });
+    request.on('end', () => {
+      try {
+        resolve(body ? JSON.parse(body) : {});
+      } catch {
+        reject(new Error('Request body must be valid JSON.'));
+      }
+    });
+    request.on('error', reject);
+  });
+}
+
 // Normalize user-provided paths while allowing absolute Windows paths from the UI.
 function resolveInputPath(inputPath) {
   let cleaned = String(inputPath || '').trim();
@@ -334,7 +356,7 @@ function listFolderFiles(filePath) {
 
   const folderPath = path.dirname(resolvedPath);
   const files = readdirSync(folderPath, { withFileTypes: true })
-    .filter(entry => entry.isFile())
+    .filter(entry => entry.isFile() && entry.name !== '.mylecture-tts-overrides.json')
     .map(entry => {
       const fullPath = path.join(folderPath, entry.name);
       const stat = statSync(fullPath);
@@ -646,6 +668,236 @@ function resolvedSiblingPathForIndex(filePath) {
   return siblingPath(filePath, `resolved${suffix}.html`);
 }
 
+function sourceSiblingPathForLecture(filePath) {
+  const resolvedPath = resolveInputPath(filePath);
+  const basename = path.basename(resolvedPath);
+  if (isIndexHtmlName(basename)) return resolvedPath;
+  if (isResolvedHtmlName(basename)) {
+    const suffix = basename.slice('resolved'.length, -'.html'.length);
+    return siblingPath(resolvedPath, `index${suffix}.html`);
+  }
+  throw new Error('Narration editing is only available for source or resolved HTML files.');
+}
+
+function saveTtsOverride(sourcePath, sectionId, text, ttsText) {
+  const overridesPath = path.join(path.dirname(sourcePath), '.mylecture-tts-overrides.json');
+  let payload = { version: 1, files: {} };
+  if (existsSync(overridesPath)) {
+    try {
+      const existing = JSON.parse(readFileSync(overridesPath, 'utf8'));
+      if (existing && typeof existing === 'object') payload = existing;
+    } catch (error) {
+      throw new Error(`Could not read existing narration edits: ${error.message}`);
+    }
+  }
+  if (!payload.files || typeof payload.files !== 'object') payload.files = {};
+  const sourceName = path.basename(sourcePath);
+  if (!payload.files[sourceName] || typeof payload.files[sourceName] !== 'object') {
+    payload.files[sourceName] = {};
+  }
+  payload.version = 1;
+  payload.files[sourceName][sectionId] = { text, ttsText };
+  writeFileSync(overridesPath, `${JSON.stringify(payload, null, 2)}\n`, 'utf8');
+  return overridesPath;
+}
+
+function escapeHtmlText(value) {
+  return String(value)
+    .replaceAll('&', '&amp;')
+    .replaceAll('<', '&lt;')
+    .replaceAll('>', '&gt;');
+}
+
+function replaceVisibleHtmlText(source, oldText, newText) {
+  const encodedOldText = escapeHtmlText(oldText);
+  const encodedNewText = escapeHtmlText(newText);
+  let replacements = 0;
+  const protectedBlocks = source.split(/(<(?:script|style)\b[\s\S]*?<\/(?:script|style)>)/gi);
+
+  const updated = protectedBlocks.map(block => {
+    if (/^<(?:script|style)\b/i.test(block)) return block;
+    return block.replace(/>([^<]*)</g, (match, textContent) => {
+      let nextText = textContent;
+      for (const candidate of new Set([oldText, encodedOldText])) {
+        if (!candidate) continue;
+        const count = nextText.split(candidate).length - 1;
+        if (count > 0) {
+          nextText = nextText.split(candidate).join(encodedNewText);
+          replacements += count;
+        }
+      }
+      return `>${nextText}<`;
+    });
+  }).join('');
+
+  return { source: updated, replacements };
+}
+
+function decodeHtmlText(value) {
+  return String(value)
+    .replace(/&#(\d+);/g, (_, code) => String.fromCodePoint(Number(code)))
+    .replace(/&#x([0-9a-f]+);/gi, (_, code) => String.fromCodePoint(Number.parseInt(code, 16)))
+    .replaceAll('&nbsp;', ' ')
+    .replaceAll('&amp;', '&')
+    .replaceAll('&lt;', '<')
+    .replaceAll('&gt;', '>')
+    .replaceAll('&quot;', '"')
+    .replaceAll('&#39;', "'");
+}
+
+function visibleTextCandidatesFromHtml(source) {
+  const withoutCode = source
+    .replace(/<(?:script|style)\b[\s\S]*?<\/(?:script|style)>/gi, '')
+    .replace(/<!--[\s\S]*?-->/g, '');
+  const candidates = new Set();
+  for (const match of withoutCode.matchAll(/>([^<]+)</g)) {
+    const text = decodeHtmlText(match[1]).replace(/\s+/g, ' ').trim();
+    if (text && text.length <= 500) candidates.add(text);
+  }
+  return [...candidates].sort((a, b) =>
+    a.localeCompare(b, undefined, { numeric: true, sensitivity: 'base' })
+  );
+}
+
+function saveVisualTextEdit(sourcePath, oldText, newText) {
+  const source = readFileSync(sourcePath, 'utf8');
+  const updated = replaceVisibleHtmlText(source, oldText, newText);
+  if (updated.replacements === 0) {
+    throw new Error('That text was not found in the scene HTML. Choose it from the visible-text list or enter the exact on-screen wording.');
+  }
+  writeFileSync(sourcePath, updated.source, 'utf8');
+
+  const resolvedPath = resolvedSiblingPathForIndex(sourcePath);
+  let resolvedReplacements = 0;
+  if (existsSync(resolvedPath) && statSync(resolvedPath).isFile()) {
+    const resolved = readFileSync(resolvedPath, 'utf8');
+    const resolvedUpdate = replaceVisibleHtmlText(resolved, oldText, newText);
+    resolvedReplacements = resolvedUpdate.replacements;
+    if (resolvedReplacements > 0) {
+      writeFileSync(resolvedPath, resolvedUpdate.source, 'utf8');
+    }
+  }
+
+  const scriptPath = path.join(path.dirname(sourcePath), 'script.md');
+  let scriptReplacements = 0;
+  if (existsSync(scriptPath) && statSync(scriptPath).isFile()) {
+    const script = readFileSync(scriptPath, 'utf8');
+    scriptReplacements = script.split(oldText).length - 1;
+    if (scriptReplacements > 0) {
+      writeFileSync(scriptPath, script.split(oldText).join(newText), 'utf8');
+    }
+  }
+
+  return {
+    htmlReplacements: updated.replacements,
+    resolvedReplacements,
+    scriptReplacements,
+    resolvedPath
+  };
+}
+
+function protectedVisualEditContent(html) {
+  const metadata = html.match(/window\.__VIDEO_METADATA__\s*=\s*\{[\s\S]*?\};/);
+  const plan = html.match(/window\.__VIDEO_PLAN__\s*=\s*\[[\s\S]*?\];/);
+  return {
+    metadata: metadata?.[0] || '',
+    plan: plan?.[0] || ''
+  };
+}
+
+function assertVisualEditPreservesNarration(original, modified) {
+  const before = protectedVisualEditContent(original);
+  const after = protectedVisualEditContent(modified);
+  if (!after.metadata || !after.plan) {
+    throw new Error('The visual edit removed required video metadata or narration plan.');
+  }
+  if (before.metadata !== after.metadata || before.plan !== after.plan) {
+    throw new Error('The visual edit attempted to change narration, audio, or video metadata, so it was not applied.');
+  }
+}
+
+function scopedVisualEditorSystemPrompt(targetName) {
+  return `You are a tightly scoped MyLecture visual scene editor.
+
+# Scope
+
+- The isolated workspace contains exactly one target file: ${targetName}.
+- Read that file, implement only the user's requested visual or layout change, and edit it with the edits tool.
+- Make the smallest sufficient HTML, CSS, SVG, Canvas, or render-function change.
+- Keep every coordinate in its immediate positioned parent's local coordinate system. Never reuse 1920x1080 stage coordinates inside an inset or reduced-width container; prefer Flexbox/Grid for multi-node rows and verify equal intended edge margins.
+- Preserve all narration text, audio paths, cue IDs, cue ordering, window.__VIDEO_METADATA__, and window.__VIDEO_PLAN__ exactly.
+- Preserve timing and unrelated visual content.
+- Do not add new facts, equations, statistics, labels, citations, or other technical content.
+- Do not create files or inspect anything outside the target file.
+- Do not modify resolved HTML, audio, scripts, assets, or metadata.
+- The target must retain window.__VIDEO_METADATA__, window.__VIDEO_PLAN__, and window.__RENDER_SECTION__ and pass the HTML contract validator.
+- When the edit is complete, provide one short sentence describing it.
+
+# Available tools:
+
+# Rules:
+
+- Use read once to inspect the target, then use edits for the minimal change.
+- Do not call list_dir.
+- Do not finish until the edit has been applied.`;
+}
+
+async function runScopedVisualEdit(sourcePath, instruction, options = {}) {
+  const visualEditRoot = path.resolve(rootDir, '.render', 'visual-edits');
+  mkdirSync(visualEditRoot, { recursive: true });
+  const workspacePath = mkdtempSync(path.join(visualEditRoot, 'scene-'));
+  const sourceName = path.basename(sourcePath);
+  const isolatedPath = path.join(workspacePath, sourceName);
+  const original = readFileSync(sourcePath, 'utf8');
+  writeFileSync(isolatedPath, original, 'utf8');
+
+  try {
+    const agent = new EditorAgent({
+      model: options.model || process.env.AGENT_MODEL || 'gemini-3.5-flash',
+      workspaceDir: workspacePath,
+      maxTurns: 24,
+      tokenTrackerSessionId: `visual-${path.basename(workspacePath)}`,
+      systemPrompt: scopedVisualEditorSystemPrompt(sourceName),
+      onLog: options.onLog
+    });
+    const session = agent.startChat();
+    const output = await session.sendMessage(
+      `Target file: ${sourceName}\n\nRequested visual change:\n${instruction}`,
+      24,
+      options.signal
+    );
+    const modified = readFileSync(isolatedPath, 'utf8');
+    if (modified === original) {
+      throw new Error('The model completed without changing the scene.');
+    }
+    assertVisualEditPreservesNarration(original, modified);
+    return { original, modified, output: String(output || '').trim() };
+  } finally {
+    const resolvedWorkspace = path.resolve(workspacePath);
+    if (resolvedWorkspace.startsWith(`${visualEditRoot}${path.sep}`)) {
+      rmSync(resolvedWorkspace, { recursive: true, force: true });
+    }
+  }
+}
+
+function syncResolvedVisualFromSource(sourcePath, modifiedSource) {
+  const resolvedPath = resolvedSiblingPathForIndex(sourcePath);
+  if (!existsSync(resolvedPath) || !statSync(resolvedPath).isFile()) return '';
+
+  const resolved = readFileSync(resolvedPath, 'utf8');
+  const injectionStart = resolved.indexOf('<style id="resolved-export-motion-guard">');
+  const resolvedBodyClose = resolved.lastIndexOf('</body>');
+  const sourceBodyClose = modifiedSource.lastIndexOf('</body>');
+  if (injectionStart < 0 || resolvedBodyClose < injectionStart || sourceBodyClose < 0) {
+    throw new Error('The resolved scene could not be synchronized safely. The source scene was left unchanged.');
+  }
+
+  const preservedRuntime = resolved.slice(injectionStart, resolvedBodyClose).trim();
+  const synchronized = `${modifiedSource.slice(0, sourceBodyClose)}${preservedRuntime}\n${modifiedSource.slice(sourceBodyClose)}`;
+  writeFileSync(resolvedPath, synchronized, 'utf8');
+  return resolvedPath;
+}
+
 // TTS options are normalized before being passed through to build-plan.ts.
 function normalizeTtsVoice(value) {
   const config = readAppConfig();
@@ -810,7 +1062,8 @@ async function resolveLectureFile(filePath, options = {}) {
         '--out', fileOutPath,
         '--provider', provider,
         '--voice', voice,
-        '--speed', normalizeTtsSpeed(options.ttsSpeed)
+        '--speed', normalizeTtsSpeed(options.ttsSpeed),
+        ...(options.forceAudioSection ? ['--force-audio-section', options.forceAudioSection] : [])
       ], {
         cwd: rootDir,
         windowsHide: true,
@@ -1543,6 +1796,186 @@ const server = createServer(async (request, response) => {
       });
     } catch (error) {
       sendJson(response, 400, { error: error.message });
+    }
+    return;
+  }
+
+  // Resolve source index*.html files into resolved*.html timeline files.
+  if (requestUrl.pathname === '/regenerate-narration-section') {
+    try {
+      if (request.method !== 'POST') {
+        sendJson(response, 405, { error: 'Method not allowed' });
+        return;
+      }
+      const payload = await readJsonBody(request);
+      const requestedPath = String(payload.file || '').trim();
+      const sectionId = String(payload.sectionId || '').trim();
+      const text = String(payload.text || '').trim();
+      const ttsText = String(payload.ttsText || '').trim();
+      if (!requestedPath) throw new Error('Missing file path.');
+      if (!/^[a-zA-Z0-9_.:-]{1,120}$/.test(sectionId)) {
+        throw new Error('Invalid narration section id.');
+      }
+      if (!ttsText) throw new Error('Spoken text cannot be empty.');
+      if (!text) throw new Error('Caption text cannot be empty.');
+      if (ttsText.length > 10000) throw new Error('Spoken text is too long.');
+      if (text.length > 10000) throw new Error('Caption text is too long.');
+
+      const sourcePath = sourceSiblingPathForLecture(requestedPath);
+      if (!existsSync(sourcePath) || !statSync(sourcePath).isFile()) {
+        throw new Error(`Source HTML does not exist: ${sourcePath}`);
+      }
+
+      saveTtsOverride(sourcePath, sectionId, text, ttsText);
+      const resolvedPath = await resolveLectureFile(sourcePath, {
+        ttsVoice: payload.ttsVoice,
+        ttsSpeed: payload.ttsSpeed,
+        currentOnly: true,
+        forceAudioSection: sectionId
+      });
+      sendJson(response, 200, {
+        ok: true,
+        path: resolvedPath,
+        sectionId,
+        folder: listFolderFiles(resolvedPath)
+      });
+    } catch (error) {
+      sendJson(response, 500, { error: error.message });
+    }
+    return;
+  }
+
+  if (requestUrl.pathname === '/visual-text-candidates') {
+    try {
+      const requestedPath = requestUrl.searchParams.get('file') || viewerState.path || args.openPath;
+      if (!requestedPath) throw new Error('Missing file path.');
+      const sourcePath = sourceSiblingPathForLecture(requestedPath);
+      if (!existsSync(sourcePath) || !statSync(sourcePath).isFile()) {
+        throw new Error(`Source HTML does not exist: ${sourcePath}`);
+      }
+      const candidates = visibleTextCandidatesFromHtml(readFileSync(sourcePath, 'utf8'));
+      sendJson(response, 200, { ok: true, candidates });
+    } catch (error) {
+      sendJson(response, 500, { error: error.message });
+    }
+    return;
+  }
+
+  // Apply an exact on-screen text correction without asking the coding agent
+  // to reinterpret or regenerate the scene.
+  if (requestUrl.pathname === '/edit-visual-text') {
+    try {
+      if (request.method !== 'POST') {
+        sendJson(response, 405, { error: 'Method not allowed' });
+        return;
+      }
+      const payload = await readJsonBody(request);
+      const requestedPath = String(payload.file || '').trim();
+      const oldText = String(payload.oldText || '').trim();
+      const newText = String(payload.newText || '').trim();
+      if (!requestedPath) throw new Error('Missing file path.');
+      if (!oldText) throw new Error('Text to replace cannot be empty.');
+      if (!newText) throw new Error('Replacement text cannot be empty.');
+      if (oldText.length > 10000 || newText.length > 10000) {
+        throw new Error('Visual text is too long.');
+      }
+
+      const openedPath = resolveInputPath(requestedPath);
+      const sourcePath = sourceSiblingPathForLecture(openedPath);
+      if (!existsSync(sourcePath) || !statSync(sourcePath).isFile()) {
+        throw new Error(`Source HTML does not exist: ${sourcePath}`);
+      }
+
+      const edits = saveVisualTextEdit(sourcePath, oldText, newText);
+      const resultPath = isResolvedHtmlName(path.basename(openedPath)) && existsSync(edits.resolvedPath)
+        ? edits.resolvedPath
+        : sourcePath;
+
+      viewerState.version++;
+      viewerState.path = resultPath;
+      sendJson(response, 200, {
+        ok: true,
+        path: resultPath,
+        edits,
+        folder: listFolderFiles(resultPath)
+      });
+    } catch (error) {
+      sendJson(response, 500, { error: error.message });
+    }
+    return;
+  }
+
+  // Run a fresh, isolated one-shot model edit against only the selected scene.
+  if (requestUrl.pathname === '/regenerate-visual-scene') {
+    try {
+      if (request.method !== 'POST') {
+        sendJson(response, 405, { error: 'Method not allowed' });
+        return;
+      }
+      if (activeJob) {
+        sendJson(response, 409, { error: `A ${activeJob.type} job is already running.` });
+        return;
+      }
+
+      const payload = await readJsonBody(request);
+      const requestedPath = String(payload.file || '').trim();
+      const instruction = String(payload.instruction || '').trim();
+      if (!requestedPath) throw new Error('Missing file path.');
+      if (!instruction) throw new Error('Describe the visual change to make.');
+      if (instruction.length > 5000) throw new Error('Visual edit instruction is too long.');
+
+      const openedPath = resolveInputPath(requestedPath);
+      const sourcePath = sourceSiblingPathForLecture(openedPath);
+      if (!existsSync(sourcePath) || !statSync(sourcePath).isFile()) {
+        throw new Error(`Source HTML does not exist: ${sourcePath}`);
+      }
+
+      const abortController = new AbortController();
+      const visualJob = {
+        type: 'visual edit',
+        aborted: false,
+        kill: () => {
+          visualJob.aborted = true;
+          abortController.abort();
+        }
+      };
+      activeJob = visualJob;
+
+      const edit = await runScopedVisualEdit(sourcePath, instruction, {
+        model: payload.model,
+        signal: abortController.signal,
+        onLog: text => process.stderr.write(text)
+      });
+      if (visualJob.aborted) throw new Error('Visual edit stopped.');
+
+      const resolvedPath = resolvedSiblingPathForIndex(sourcePath);
+      const previousResolved = existsSync(resolvedPath) ? readFileSync(resolvedPath, 'utf8') : null;
+      writeFileSync(sourcePath, edit.modified, 'utf8');
+      activeJob = null;
+
+      try {
+        syncResolvedVisualFromSource(sourcePath, edit.modified);
+      } catch (error) {
+        writeFileSync(sourcePath, edit.original, 'utf8');
+        if (previousResolved !== null) writeFileSync(resolvedPath, previousResolved, 'utf8');
+        throw error;
+      }
+
+      const resultPath = isResolvedHtmlName(path.basename(openedPath)) && existsSync(resolvedPath)
+        ? resolvedPath
+        : sourcePath;
+      viewerState.version++;
+      viewerState.path = resultPath;
+      sendJson(response, 200, {
+        ok: true,
+        path: resultPath,
+        output: edit.output,
+        folder: listFolderFiles(resultPath)
+      });
+    } catch (error) {
+      sendJson(response, 500, { error: error.message });
+    } finally {
+      if (activeJob?.type === 'visual edit') activeJob = null;
     }
     return;
   }

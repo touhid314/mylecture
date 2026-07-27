@@ -685,6 +685,8 @@ select:focus-visible {
 #volume-toggle,
 #subtitles-toggle,
 #live-tts-toggle,
+#narration-edit,
+#visual-text-edit,
 #fullscreen,
 #seek-back,
 #seek-forward {
@@ -700,6 +702,8 @@ select:focus-visible {
 #volume-toggle:hover,
 #subtitles-toggle:hover,
 #live-tts-toggle:hover,
+#narration-edit:hover,
+#visual-text-edit:hover,
 #fullscreen:hover,
 #seek-back:hover,
 #seek-forward:hover {
@@ -864,6 +868,297 @@ input[type="range"]::-moz-range-thumb {
   font-variant-numeric: tabular-nums;
   white-space: nowrap;
   display: none;
+}
+#narration-edit,
+#visual-text-edit {
+  min-height: 30px;
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  padding: 5px 10px;
+}
+.take-wave {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  height: 12px;
+}
+.take-wave i {
+  width: 2px;
+  height: 5px;
+  border-radius: 2px;
+  background: currentColor;
+}
+.take-wave i:nth-child(2) { height: 11px; }
+.take-wave i:nth-child(3) { height: 8px; }
+.take-wave i:nth-child(4) { height: 12px; }
+.take-wave i:nth-child(5) { height: 6px; }
+#narration-dialog {
+  position: fixed;
+  inset: 0;
+  z-index: 2100;
+  display: none;
+  place-items: center;
+  padding: 18px;
+  background: rgba(0,0,0,0.72);
+  backdrop-filter: blur(5px);
+}
+#narration-dialog.visible {
+  display: grid;
+}
+#narration-panel {
+  width: min(680px, 100%);
+  border: 1px solid var(--line-strong);
+  border-radius: 8px;
+  overflow: hidden;
+  background: #101010;
+  box-shadow: 0 28px 90px rgba(0,0,0,0.76);
+}
+#narration-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 16px 18px;
+  border-bottom: 1px solid var(--line);
+}
+#narration-title {
+  margin: 0;
+  color: var(--text);
+  font-size: 16px;
+  font-weight: 680;
+}
+#narration-subtitle {
+  margin-top: 4px;
+  color: var(--muted);
+  font-size: 12px;
+}
+#narration-close {
+  min-height: 30px;
+  padding: 4px 9px;
+}
+#narration-form {
+  display: grid;
+  gap: 14px;
+  padding: 18px;
+}
+.narration-field {
+  display: grid;
+  gap: 6px;
+}
+.narration-field label {
+  color: var(--muted-strong);
+  font-size: 11px;
+  font-weight: 650;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+#narration-section-select,
+#narration-caption,
+#narration-spoken-text {
+  width: 100%;
+  border: 1px solid var(--line-strong);
+  border-radius: 6px;
+  color: var(--text);
+  background: var(--panel-raised);
+  font: inherit;
+  line-height: 1.5;
+}
+#narration-section-select {
+  min-height: 36px;
+  padding: 7px 9px;
+}
+#narration-caption {
+  min-height: 86px;
+  resize: vertical;
+  padding: 10px 11px;
+}
+#narration-spoken-text {
+  min-height: 110px;
+  resize: vertical;
+  padding: 11px 12px;
+}
+#narration-caption:focus,
+#narration-spoken-text:focus,
+#narration-section-select:focus {
+  outline: 2px solid var(--focus);
+  outline-offset: 1px;
+  border-color: var(--accent);
+}
+#narration-status {
+  min-height: 18px;
+  color: var(--muted);
+  font-size: 12px;
+}
+#narration-status.error { color: #ff8278; }
+#narration-actions {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding-top: 2px;
+}
+#narration-reset {
+  color: var(--muted-strong);
+  background: transparent;
+}
+#narration-regenerate {
+  border-color: var(--accent);
+  color: #111;
+  background: var(--accent);
+  font-weight: 700;
+}
+#narration-regenerate:hover:not(:disabled) {
+  background: #fff;
+}
+#visual-text-dialog {
+  position: fixed;
+  inset: 0;
+  z-index: 2100;
+  display: none;
+  place-items: center;
+  padding: 18px;
+  background: rgba(0,0,0,0.72);
+  backdrop-filter: blur(5px);
+}
+#visual-text-dialog.visible {
+  display: grid;
+}
+#visual-text-panel {
+  width: min(680px, 100%);
+  border: 1px solid var(--line-strong);
+  border-radius: 8px;
+  overflow: hidden;
+  background: #101010;
+  box-shadow: 0 28px 90px rgba(0,0,0,0.76);
+}
+#visual-text-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 16px 18px;
+  border-bottom: 1px solid var(--line);
+}
+#visual-text-title {
+  margin: 0;
+  color: var(--text);
+  font-size: 16px;
+  font-weight: 680;
+}
+#visual-text-subtitle {
+  margin-top: 4px;
+  color: var(--muted);
+  font-size: 12px;
+}
+#visual-text-close {
+  min-height: 30px;
+  padding: 4px 9px;
+}
+#visual-text-form {
+  display: grid;
+  gap: 14px;
+  padding: 18px;
+}
+.visual-editor-tabs {
+  display: inline-flex;
+  width: fit-content;
+  gap: 3px;
+  padding: 3px;
+  border: 1px solid var(--line);
+  border-radius: 7px;
+  background: #080808;
+}
+.visual-editor-tab {
+  min-height: 28px;
+  padding: 4px 10px;
+  border-color: transparent;
+  background: transparent;
+  color: var(--muted);
+}
+.visual-editor-tab.active {
+  border-color: var(--line-strong);
+  background: rgba(255,255,255,0.09);
+  color: var(--text);
+}
+.visual-editor-section {
+  display: grid;
+  gap: 14px;
+}
+.visual-editor-section[hidden] {
+  display: none;
+}
+.visual-text-field {
+  display: grid;
+  gap: 6px;
+}
+.visual-text-field label {
+  color: var(--muted-strong);
+  font-size: 11px;
+  font-weight: 650;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+#visual-text-select,
+#visual-text-find,
+#visual-text-replacement,
+#visual-prompt {
+  width: 100%;
+  border: 1px solid var(--line-strong);
+  border-radius: 6px;
+  color: var(--text);
+  background: var(--panel-raised);
+  font: inherit;
+  line-height: 1.5;
+}
+#visual-text-select,
+#visual-text-find {
+  min-height: 36px;
+  padding: 7px 9px;
+}
+#visual-text-replacement,
+#visual-prompt {
+  min-height: 86px;
+  resize: vertical;
+  padding: 10px 11px;
+}
+#visual-prompt {
+  min-height: 130px;
+}
+#visual-text-select:focus,
+#visual-text-find:focus,
+#visual-text-replacement:focus,
+#visual-prompt:focus {
+  outline: 2px solid var(--focus);
+  outline-offset: 1px;
+  border-color: var(--accent);
+}
+#visual-text-help,
+#visual-prompt-help {
+  color: var(--muted);
+  font-size: 11px;
+  line-height: 1.45;
+}
+#visual-text-status {
+  min-height: 18px;
+  color: var(--muted);
+  font-size: 12px;
+}
+#visual-text-status.error { color: #ff8278; }
+#visual-text-actions {
+  display: flex;
+  justify-content: flex-end;
+}
+#visual-text-apply,
+#visual-prompt-apply {
+  border-color: var(--accent);
+  color: #111;
+  background: var(--accent);
+  font-weight: 700;
+}
+#visual-text-apply:hover:not(:disabled),
+#visual-prompt-apply:hover:not(:disabled) {
+  background: #fff;
 }
 #info-dialog {
   position: fixed;
@@ -2135,6 +2430,11 @@ body.file-kind-mp4 .timeline-ruler {
   <div id="time">0.00 / 0.00</div>
   <button id="subtitles-toggle" type="button" aria-pressed="true" title="Closed captions">CC</button>
   <button id="live-tts-toggle" type="button" aria-pressed="true">Live TTS</button>
+  <button id="narration-edit" type="button" title="Edit and regenerate one narration clip">
+    <span class="take-wave" aria-hidden="true"><i></i><i></i><i></i><i></i><i></i></span>
+    <span>Edit take</span>
+  </button>
+  <button id="visual-text-edit" type="button" title="Edit this scene's visual or on-screen text">Edit visual</button>
   <select id="speed">
     <option value="0.5">0.5x</option>
     <option value="1" selected>1x</option>
@@ -2256,6 +2556,84 @@ body.file-kind-mp4 .timeline-ruler {
     </div>
   </div>
 </aside>
+<!-- Focused narration editor: one timeline cue, one spoken-text override, one regenerated WAV. -->
+<div id="narration-dialog" role="dialog" aria-modal="true" aria-labelledby="narration-title">
+  <div id="narration-panel">
+    <div id="narration-header">
+      <div>
+        <h2 id="narration-title">Edit narration take</h2>
+        <div id="narration-subtitle">Edit the caption and spoken text, then regenerate only that clip.</div>
+      </div>
+      <button id="narration-close" type="button" aria-label="Close narration editor">Close</button>
+    </div>
+    <form id="narration-form">
+      <div class="narration-field">
+        <label for="narration-section-select">Narration cue</label>
+        <select id="narration-section-select"></select>
+      </div>
+      <div class="narration-field">
+        <label for="narration-caption">Caption text</label>
+        <textarea id="narration-caption" spellcheck="true"></textarea>
+      </div>
+      <div class="narration-field">
+        <label for="narration-spoken-text">Spoken text</label>
+        <textarea id="narration-spoken-text" spellcheck="true"></textarea>
+      </div>
+      <div id="narration-status" role="status" aria-live="polite"></div>
+      <div id="narration-actions">
+        <button id="narration-reset" type="button">Use caption text</button>
+        <button id="narration-regenerate" type="submit">Regenerate this clip</button>
+      </div>
+    </form>
+  </div>
+</div>
+<!-- Focused visual editor: deterministic copy fixes or isolated one-scene model edits. -->
+<div id="visual-text-dialog" role="dialog" aria-modal="true" aria-labelledby="visual-text-title">
+  <div id="visual-text-panel">
+    <div id="visual-text-header">
+      <div>
+        <h2 id="visual-text-title">Edit visual</h2>
+        <div id="visual-text-subtitle">Describe one focused visual change for this scene.</div>
+      </div>
+      <button id="visual-text-close" type="button" aria-label="Close visual editor">Close</button>
+    </div>
+    <form id="visual-text-form">
+      <div class="visual-editor-tabs" role="tablist" aria-label="Visual edit method">
+        <button id="visual-prompt-tab" class="visual-editor-tab active" type="button" role="tab" aria-selected="true">Prompt model</button>
+        <button id="visual-exact-tab" class="visual-editor-tab" type="button" role="tab" aria-selected="false">Exact text</button>
+      </div>
+      <div id="visual-prompt-section" class="visual-editor-section">
+        <div class="visual-text-field">
+          <label for="visual-prompt">Change request</label>
+          <textarea id="visual-prompt" spellcheck="true" placeholder="For example: Center the three-node timeline horizontally in the frame. Keep its size, content, and animation unchanged."></textarea>
+        </div>
+        <div id="visual-prompt-help">A fresh editor sees only this scene and this request. Narration, audio, timing, and other scenes are protected.</div>
+      </div>
+      <div id="visual-exact-section" class="visual-editor-section" hidden>
+        <div class="visual-text-field">
+          <label for="visual-text-select">Visible text</label>
+          <select id="visual-text-select">
+            <option value="">Choose text from this scene</option>
+          </select>
+        </div>
+        <div class="visual-text-field">
+          <label for="visual-text-find">Text to replace</label>
+          <input id="visual-text-find" type="text" spellcheck="true" placeholder="Exact current wording">
+        </div>
+        <div class="visual-text-field">
+          <label for="visual-text-replacement">Replacement</label>
+          <textarea id="visual-text-replacement" spellcheck="true" placeholder="Correct wording"></textarea>
+        </div>
+        <div id="visual-text-help">The exact match is changed in this scene and in script.md when present. No model is used.</div>
+      </div>
+      <div id="visual-text-status" role="status" aria-live="polite"></div>
+      <div id="visual-text-actions">
+        <button id="visual-prompt-apply" type="submit">Regenerate this scene</button>
+        <button id="visual-text-apply" type="submit" hidden>Apply text change</button>
+      </div>
+    </form>
+  </div>
+</div>
 <!-- Metadata modal for the currently loaded lecture or rendered video. -->
 <div id="info-dialog" role="dialog" aria-modal="true" aria-labelledby="info-title">
   <div id="info-panel">
@@ -2461,6 +2839,32 @@ const gameMarker = document.getElementById('game-marker');
 const timeReadout = document.getElementById('time');
 const subtitlesToggle = document.getElementById('subtitles-toggle');
 const liveTtsToggle = document.getElementById('live-tts-toggle');
+const narrationEditButton = document.getElementById('narration-edit');
+const narrationDialog = document.getElementById('narration-dialog');
+const narrationCloseButton = document.getElementById('narration-close');
+const narrationForm = document.getElementById('narration-form');
+const narrationSectionSelect = document.getElementById('narration-section-select');
+const narrationCaption = document.getElementById('narration-caption');
+const narrationSpokenText = document.getElementById('narration-spoken-text');
+const narrationResetButton = document.getElementById('narration-reset');
+const narrationRegenerateButton = document.getElementById('narration-regenerate');
+const narrationStatus = document.getElementById('narration-status');
+const visualTextEditButton = document.getElementById('visual-text-edit');
+const visualTextDialog = document.getElementById('visual-text-dialog');
+const visualTextSubtitle = document.getElementById('visual-text-subtitle');
+const visualTextCloseButton = document.getElementById('visual-text-close');
+const visualTextForm = document.getElementById('visual-text-form');
+const visualTextSelect = document.getElementById('visual-text-select');
+const visualTextFind = document.getElementById('visual-text-find');
+const visualTextReplacement = document.getElementById('visual-text-replacement');
+const visualTextApplyButton = document.getElementById('visual-text-apply');
+const visualTextStatus = document.getElementById('visual-text-status');
+const visualPromptTab = document.getElementById('visual-prompt-tab');
+const visualExactTab = document.getElementById('visual-exact-tab');
+const visualPromptSection = document.getElementById('visual-prompt-section');
+const visualExactSection = document.getElementById('visual-exact-section');
+const visualPrompt = document.getElementById('visual-prompt');
+const visualPromptApplyButton = document.getElementById('visual-prompt-apply');
 const subtitleOverlay = document.getElementById('subtitle-overlay');
 const volumeToggle = document.getElementById('volume-toggle');
 const volumeSlider = document.getElementById('volume-slider');
@@ -2505,6 +2909,9 @@ let currentSecWidth = 15;
 
 let currentSceneTab = 'raw';
 let globalEntries = [];
+let narrationSections = [];
+let visualEditorMode = 'prompt';
+let visualTextCandidatesLoaded = false;
 
 function isRenderedKind(name) {
   return /^rendered.*\.mp4$/i.test(name) || (name.toLowerCase().endsWith('.mp4') && !name.toLowerCase().startsWith('temp_'));
@@ -2597,6 +3004,331 @@ const player = createLecturePlayer({
 
 function playerState() {
   return lastPlayerState || player.snapshot();
+}
+
+function narrationCuesFromPlayer() {
+  const state = playerState();
+  return (Array.isArray(state.timeline) ? state.timeline : [])
+    .filter(cue => cue?.item?.kind === 'narration+visual' && cue.item.id && cue.item.text)
+    .map(cue => ({
+      id: String(cue.item.id),
+      start: Number(cue.start) || 0,
+      end: Number(cue.end) || 0,
+      caption: String(cue.item.text),
+      spokenText: String(cue.item.ttsText || cue.item.text)
+    }));
+}
+
+function selectedNarrationSection() {
+  return narrationSections.find(section => section.id === narrationSectionSelect.value) || null;
+}
+
+function renderNarrationSelection() {
+  const section = selectedNarrationSection();
+  if (!section) return;
+  narrationCaption.value = section.caption;
+  narrationSpokenText.value = section.spokenText;
+  narrationStatus.textContent = '';
+  narrationStatus.className = '';
+}
+
+function openNarrationDialog() {
+  narrationSections = narrationCuesFromPlayer();
+  if (!narrationSections.length) {
+    setStatus('No narration cues are available in this file');
+    return;
+  }
+
+  const currentTime = Number(playerState().time) || 0;
+  const active = narrationSections.find(section => currentTime >= section.start && currentTime < section.end) ||
+    narrationSections.reduce((nearest, section) =>
+      Math.abs(section.start - currentTime) < Math.abs(nearest.start - currentTime) ? section : nearest
+    );
+
+  narrationSectionSelect.textContent = '';
+  for (const section of narrationSections) {
+    const option = document.createElement('option');
+    option.value = section.id;
+    const excerpt = section.caption.length > 58 ? section.caption.slice(0, 55) + '...' : section.caption;
+    option.textContent = section.id + '  ·  ' + formatTimecode(section.start) + '  ·  ' + excerpt;
+    narrationSectionSelect.appendChild(option);
+  }
+  narrationSectionSelect.value = active.id;
+  renderNarrationSelection();
+  narrationDialog.classList.add('visible');
+  narrationSpokenText.focus();
+  narrationSpokenText.select();
+}
+
+function closeNarrationDialog() {
+  narrationDialog.classList.remove('visible');
+  narrationStatus.textContent = '';
+  narrationStatus.className = '';
+}
+
+async function regenerateNarrationSection(event) {
+  event.preventDefault();
+  const section = selectedNarrationSection();
+  const captionText = narrationCaption.value.trim();
+  const spokenText = narrationSpokenText.value.trim();
+  if (!section || !captionText || !spokenText) {
+    narrationStatus.textContent = 'Caption and spoken text cannot be empty.';
+    narrationStatus.className = 'error';
+    return;
+  }
+
+  narrationRegenerateButton.disabled = true;
+  narrationCloseButton.disabled = true;
+  narrationStatus.textContent = 'Regenerating ' + section.id + ' with ' + resolveTtsVoice.value + '...';
+  narrationStatus.className = '';
+  startJobStatus('Regenerating narration cue ' + section.id);
+  try {
+    const response = await fetch('/regenerate-narration-section', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        file: currentFilePath,
+        sectionId: section.id,
+        text: captionText,
+        ttsText: spokenText,
+        ttsVoice: resolveTtsVoice.value,
+        ttsSpeed: resolveTtsSpeed.value
+      })
+    });
+    const payload = await response.json();
+    if (!response.ok) throw new Error(payload.error || 'Narration regeneration failed');
+
+    section.caption = captionText;
+    section.spokenText = spokenText;
+    renderFolderFiles(payload.folder);
+    await loadFile(payload.path);
+    player.seek(section.start);
+    closeNarrationDialog();
+    setStatus('Regenerated narration cue ' + section.id);
+    finishJobStatus('Done: ' + section.id);
+    playNotificationSound(true);
+  } catch (error) {
+    narrationStatus.textContent = error.message;
+    narrationStatus.className = 'error';
+    finishJobStatus(error.message, 'error');
+    playNotificationSound(false);
+  } finally {
+    narrationRegenerateButton.disabled = false;
+    narrationCloseButton.disabled = false;
+  }
+}
+
+function visibleTextFromCurrentFrame() {
+  let doc;
+  try {
+    doc = frame.contentDocument;
+  } catch {
+    return [];
+  }
+  if (!doc?.body) return [];
+
+  const isVisible = element => {
+    let current = element;
+    while (current && current !== doc.documentElement) {
+      const style = frame.contentWindow.getComputedStyle(current);
+      if (style.display === 'none' || style.visibility === 'hidden' || Number(style.opacity) === 0) {
+        return false;
+      }
+      current = current.parentElement;
+    }
+    return element.getClientRects().length > 0;
+  };
+
+  const found = new Set();
+  const walker = doc.createTreeWalker(doc.body, NodeFilter.SHOW_TEXT);
+  let node;
+  while ((node = walker.nextNode())) {
+    const parent = node.parentElement;
+    if (!parent || /^(SCRIPT|STYLE|NOSCRIPT)$/.test(parent.tagName) || !isVisible(parent)) continue;
+    const text = node.textContent.replace(/\\s+/g, ' ').trim();
+    if (text && text.length <= 500) found.add(text);
+  }
+  return [...found].sort((a, b) => a.localeCompare(b, undefined, { numeric: true, sensitivity: 'base' }));
+}
+
+function setVisualEditorMode(mode) {
+  visualEditorMode = mode === 'exact' ? 'exact' : 'prompt';
+  const isPrompt = visualEditorMode === 'prompt';
+  visualPromptTab.classList.toggle('active', isPrompt);
+  visualExactTab.classList.toggle('active', !isPrompt);
+  visualPromptTab.setAttribute('aria-selected', String(isPrompt));
+  visualExactTab.setAttribute('aria-selected', String(!isPrompt));
+  visualPromptSection.hidden = !isPrompt;
+  visualExactSection.hidden = isPrompt;
+  visualPromptApplyButton.hidden = !isPrompt;
+  visualTextApplyButton.hidden = isPrompt;
+  visualTextSubtitle.textContent = isPrompt
+    ? 'Describe one focused visual change for this scene.'
+    : 'Correct exact on-screen wording without using the model.';
+}
+
+async function loadVisualTextCandidates() {
+  if (visualTextCandidatesLoaded) return;
+  visualTextStatus.textContent = 'Reading text from this scene...';
+  visualTextStatus.className = '';
+  let candidates = visibleTextFromCurrentFrame();
+  try {
+    const response = await fetch('/visual-text-candidates?file=' + encodeURIComponent(currentFilePath));
+    const payload = await response.json();
+    if (!response.ok) throw new Error(payload.error || 'Could not read scene text');
+    candidates = [...new Set([...candidates, ...(Array.isArray(payload.candidates) ? payload.candidates : [])])]
+      .sort((a, b) => a.localeCompare(b, undefined, { numeric: true, sensitivity: 'base' }));
+  } catch (error) {
+    visualTextStatus.textContent = error.message;
+    visualTextStatus.className = 'error';
+  }
+  visualTextSelect.textContent = '';
+  const placeholder = document.createElement('option');
+  placeholder.value = '';
+  placeholder.textContent = candidates.length ? 'Choose text from the current frame' : 'No visible text detected — enter it below';
+  visualTextSelect.appendChild(placeholder);
+  for (const text of candidates) {
+    const option = document.createElement('option');
+    option.value = text;
+    option.textContent = text.length > 92 ? text.slice(0, 89) + '...' : text;
+    visualTextSelect.appendChild(option);
+  }
+  visualTextFind.value = '';
+  visualTextReplacement.value = '';
+  if (candidates.length) {
+    visualTextStatus.textContent = '';
+    visualTextStatus.className = '';
+  }
+  visualTextCandidatesLoaded = true;
+  if (candidates.length) visualTextSelect.focus();
+  else visualTextFind.focus();
+}
+
+function openVisualTextDialog() {
+  visualTextDialog.classList.add('visible');
+  visualTextCandidatesLoaded = false;
+  visualPrompt.value = '';
+  visualTextFind.value = '';
+  visualTextReplacement.value = '';
+  visualTextStatus.textContent = '';
+  visualTextStatus.className = '';
+  setVisualEditorMode('prompt');
+  visualPrompt.focus();
+}
+
+function closeVisualTextDialog() {
+  visualTextDialog.classList.remove('visible');
+  visualTextStatus.textContent = '';
+  visualTextStatus.className = '';
+}
+
+async function applyVisualTextEdit(event) {
+  event?.preventDefault();
+  const oldText = visualTextFind.value.trim();
+  const newText = visualTextReplacement.value.trim();
+  if (!oldText || !newText) {
+    visualTextStatus.textContent = 'Choose or enter the current text and its replacement.';
+    visualTextStatus.className = 'error';
+    return;
+  }
+  if (oldText === newText) {
+    visualTextStatus.textContent = 'The replacement is unchanged.';
+    visualTextStatus.className = 'error';
+    return;
+  }
+
+  setVisualEditorBusy(true);
+  visualTextStatus.textContent = 'Applying exact text change...';
+  visualTextStatus.className = '';
+  try {
+    const currentTime = Number(playerState().time) || 0;
+    const response = await fetch('/edit-visual-text', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        file: currentFilePath,
+        oldText,
+        newText,
+        ttsVoice: resolveTtsVoice.value,
+        ttsSpeed: resolveTtsSpeed.value
+      })
+    });
+    const payload = await response.json();
+    if (!response.ok) throw new Error(payload.error || 'Visual text edit failed');
+
+    renderFolderFiles(payload.folder);
+    await loadFile(payload.path);
+    player.seek(currentTime);
+    closeVisualTextDialog();
+    const count = Number(payload.edits?.htmlReplacements) || 1;
+    setStatus('Updated ' + count + ' visual text match' + (count === 1 ? '' : 'es'));
+  } catch (error) {
+    visualTextStatus.textContent = error.message;
+    visualTextStatus.className = 'error';
+  } finally {
+    setVisualEditorBusy(false);
+  }
+}
+
+function setVisualEditorBusy(isBusy) {
+  visualTextApplyButton.disabled = isBusy;
+  visualPromptApplyButton.disabled = isBusy;
+  visualTextCloseButton.disabled = isBusy;
+  visualPromptTab.disabled = isBusy;
+  visualExactTab.disabled = isBusy;
+}
+
+async function regenerateVisualScene(event) {
+  event?.preventDefault();
+  const instruction = visualPrompt.value.trim();
+  if (!instruction) {
+    visualTextStatus.textContent = 'Describe the visual change to make.';
+    visualTextStatus.className = 'error';
+    return;
+  }
+
+  setVisualEditorBusy(true);
+  visualTextStatus.textContent = 'Editing only this scene...';
+  visualTextStatus.className = '';
+  startJobStatus('Editing visual in ' + fileBaseName(currentFilePath));
+  try {
+    const currentTime = Number(playerState().time) || 0;
+    const response = await fetch('/regenerate-visual-scene', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        file: currentFilePath,
+        instruction,
+        ttsVoice: resolveTtsVoice.value,
+        ttsSpeed: resolveTtsSpeed.value
+      })
+    });
+    const payload = await response.json();
+    if (!response.ok) throw new Error(payload.error || 'Visual scene edit failed');
+
+    renderFolderFiles(payload.folder);
+    await loadFile(payload.path);
+    player.seek(currentTime);
+    closeVisualTextDialog();
+    setStatus('Updated visual in ' + fileBaseName(payload.path));
+    finishJobStatus('Visual edit complete');
+    playNotificationSound(true);
+  } catch (error) {
+    visualTextStatus.textContent = error.message;
+    visualTextStatus.className = 'error';
+    finishJobStatus(error.message, 'error');
+    playNotificationSound(false);
+  } finally {
+    setVisualEditorBusy(false);
+  }
+}
+
+function submitVisualEditor(event) {
+  if (visualEditorMode === 'exact') {
+    applyVisualTextEdit(event);
+  } else {
+    regenerateVisualScene(event);
+  }
 }
 
 function resizePreview() {
@@ -3009,10 +3741,12 @@ function syncIdeActions() {
   }
   sidebarRenderButton.disabled = !canRender;
   renderMenuToggle.disabled = !canRender;
+  narrationEditButton.disabled = !canRender;
+  visualTextEditButton.disabled = !canRender;
 }
 
 function setActionBusy(isBusy, message, action = '') {
-  for (const button of [sidebarResolveButton, resolveMenuToggle, sidebarRenderButton, renderMenuToggle]) {
+  for (const button of [sidebarResolveButton, resolveMenuToggle, sidebarRenderButton, renderMenuToggle, narrationEditButton, visualTextEditButton]) {
     button.disabled = isBusy;
   }
   sidebarResolveButton.textContent = isBusy && action === 'resolve' ? 'Resolving...' : 'Resolve';
@@ -4352,6 +5086,37 @@ liveTtsToggle.addEventListener('click', () => {
   const state = playerState();
   player.setLiveTtsEnabled(!state.liveTtsEnabled);
 });
+narrationEditButton.addEventListener('click', openNarrationDialog);
+narrationCloseButton.addEventListener('click', closeNarrationDialog);
+narrationDialog.addEventListener('click', event => {
+  if (event.target === narrationDialog) closeNarrationDialog();
+});
+narrationSectionSelect.addEventListener('change', renderNarrationSelection);
+narrationResetButton.addEventListener('click', () => {
+  narrationSpokenText.value = narrationCaption.value;
+});
+narrationForm.addEventListener('submit', regenerateNarrationSection);
+visualTextEditButton.addEventListener('click', openVisualTextDialog);
+visualTextCloseButton.addEventListener('click', closeVisualTextDialog);
+visualTextDialog.addEventListener('click', event => {
+  if (event.target === visualTextDialog) closeVisualTextDialog();
+});
+visualTextSelect.addEventListener('change', () => {
+  if (!visualTextSelect.value) return;
+  visualTextFind.value = visualTextSelect.value;
+  visualTextReplacement.value = visualTextSelect.value;
+  visualTextReplacement.focus();
+  visualTextReplacement.select();
+});
+visualPromptTab.addEventListener('click', () => {
+  setVisualEditorMode('prompt');
+  visualPrompt.focus();
+});
+visualExactTab.addEventListener('click', async () => {
+  setVisualEditorMode('exact');
+  await loadVisualTextCandidates();
+});
+visualTextForm.addEventListener('submit', submitVisualEditor);
 volumeToggle.addEventListener('click', () => {
   const state = playerState();
   const volume = Number(state.volume ?? volumeSlider.value) || 1;
@@ -4449,6 +5214,12 @@ document.addEventListener('keydown', event => {
     if (infoDialog.classList.contains('visible')) {
       event.preventDefault();
       closeInfoDialog();
+    } else if (narrationDialog.classList.contains('visible')) {
+      event.preventDefault();
+      closeNarrationDialog();
+    } else if (visualTextDialog.classList.contains('visible')) {
+      event.preventDefault();
+      closeVisualTextDialog();
     } else if (publishDialog && publishDialog.style.display === 'grid') {
       event.preventDefault();
       closePublishDialog();
