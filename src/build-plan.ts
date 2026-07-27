@@ -38,7 +38,8 @@ function parseArgs(argv) {
     voice: 'af_heart',
     speed: 1,
     audioWorkers: null,
-    forceAudio: false
+    forceAudio: false,
+    forceAudioSection: ''
   };
 
   for (let i = 0; i < argv.length; i++) {
@@ -52,6 +53,7 @@ function parseArgs(argv) {
     else if (arg === '--speed') args.speed = Number(next), i++;
     else if (arg === '--audio-workers') args.audioWorkers = Number(next), i++;
     else if (arg === '--force-audio') args.forceAudio = true;
+    else if (arg === '--force-audio-section') args.forceAudioSection = String(next || '').trim(), i++;
     else if (arg === '--help') {
       printHelp();
       process.exit(0);
@@ -91,7 +93,39 @@ Options:
   --speed <number>     TTS speed passed to src/utils/tts.py. Default: 1
   --audio-workers <n>  Concurrent audio files to generate. Default: 6 for Kokoro, CPU count otherwise
   --force-audio        Regenerate narration audio even if files already exist
+  --force-audio-section <id>
+                        Regenerate only one narration section
 `);
+}
+
+// Hand-edited spoken text lives beside generated lecture files so captions and
+// authored HTML remain untouched. Overrides are keyed by source filename, then id.
+function applyTtsOverrides(plan, inputPath) {
+  const overridesPath = path.join(path.dirname(inputPath), '.mylecture-tts-overrides.json');
+  if (!existsSync(overridesPath)) return plan;
+
+  let payload;
+  try {
+    payload = JSON.parse(readFileSync(overridesPath, 'utf8'));
+  } catch (error) {
+    throw new Error(`Could not read TTS overrides: ${error.message}`);
+  }
+
+  const fileOverrides = payload?.files?.[path.basename(inputPath)];
+  if (!fileOverrides || typeof fileOverrides !== 'object') return plan;
+
+  return plan.map(section => {
+    if (!section?.id) return section;
+    const override = fileOverrides[section.id];
+    // Accept the first release's string-only spoken-text format.
+    if (typeof override === 'string') return { ...section, ttsText: override };
+    if (!override || typeof override !== 'object') return section;
+    return {
+      ...section,
+      ...(typeof override.text === 'string' ? { text: override.text } : {}),
+      ...(typeof override.ttsText === 'string' ? { ttsText: override.ttsText } : {})
+    };
+  });
 }
 
 // Run a child command while streaming its output directly to this process.
@@ -353,6 +387,7 @@ async function resolveTimeline(plan, inputPath, outputPath, args) {
   const audioTimeline = [];
   const audioInfoBySection = new Map();
   const audioJobs = [];
+  let forcedSectionFound = !args.forceAudioSection;
 
   // First pass: decide which narration files need to exist before timing can be resolved.
   for (const [index, section] of plan.entries()) {
@@ -375,15 +410,24 @@ async function resolveTimeline(plan, inputPath, outputPath, args) {
       const displayPath = toPosixRelative(outputPath, audioPath);
       mkdirSync(path.dirname(audioPath), { recursive: true });
       audioInfoBySection.set(section.id, { audioPath, displayPath });
+      if (section.id === args.forceAudioSection) forcedSectionFound = true;
 
       if (section.audio && section.audio !== requestedAudio) {
         console.log(`Normalized audio path for ${section.id}: ${section.audio} -> ${requestedAudio}`);
       }
 
-      if (args.forceAudio || !isFile(audioPath)) {
+      const shouldRegenerate = args.forceAudio ||
+        section.id === args.forceAudioSection ||
+        !isFile(audioPath);
+      if (shouldRegenerate) {
+        const spokenText = section.ttsText ?? section.text;
+        if (!String(spokenText).trim()) {
+          throw new Error(`Narration+visual section "${section.id}" has an empty ttsText override.`);
+        }
         audioJobs.push({
           sectionId: section.id,
-          text: section.text,
+          // Spoken form only for TTS; captions keep original section.text.
+          text: normalizeTtsText(spokenText),
           outputPath: audioPath,
           displayPath,
           provider: args.provider,
@@ -394,6 +438,10 @@ async function resolveTimeline(plan, inputPath, outputPath, args) {
         console.log(`Using existing audio for ${section.id} -> ${displayPath}`);
       }
     }
+  }
+
+  if (!forcedSectionFound) {
+    throw new Error(`Narration section "${args.forceAudioSection}" was not found.`);
   }
 
   await runAudioJobs(audioJobs, args.audioWorkers);
@@ -579,7 +627,8 @@ async function main() {
     throw new Error(`Input HTML does not exist: ${inputPath}`);
   }
 
-  const plan = await readPlanFromHtml(inputPath);
+  const sourcePlan = await readPlanFromHtml(inputPath);
+  const plan = applyTtsOverrides(sourcePlan, inputPath);
   const timeline = await resolveTimeline(plan, inputPath, outputPath, args);
   writeResolvedHtml(inputPath, outputPath, timeline);
 
