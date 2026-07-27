@@ -40,6 +40,7 @@ export function defaultRenderVideoOptions() {
     frameFormat: 'jpeg',
     jpegQuality: 90,
     workers: defaultWorkerCount(),
+    autoDetectViewport: true,
     autoBuildPlan: true,
     forceAudio: false,
     ttsProvider: 'kokoro',
@@ -49,6 +50,7 @@ export function defaultRenderVideoOptions() {
     videoCodec: 'auto',
     x264Preset: 'veryfast',
     renderMode: 'stateful',
+    pipeFrames: false,
     resolvedHtml: null,
     premixedAudio: null,
     keepFrames: false,
@@ -109,6 +111,12 @@ export function normalizeRenderVideoOptions(options = {}) {
   if (args.maxFrames !== null && (!Number.isInteger(args.maxFrames) || args.maxFrames <= 0)) {
     throw new Error('--max-frames must be a positive integer');
   }
+  if (args.pipeFrames && args.keepFrames) {
+    throw new Error('--pipe-frames cannot be combined with --keep-frames');
+  }
+  if (args.pipeFrames && args.skipVideo) {
+    throw new Error('--pipe-frames cannot be combined with --skip-video');
+  }
   if (!args.out) args.out = defaultOutputPath(args.html);
 
   return args;
@@ -134,6 +142,7 @@ export function parseArgs(argv) {
     else if (arg === '--render-mode') args.renderMode = next, i++;
     else if (arg === '--video-codec') args.videoCodec = next, i++;
     else if (arg === '--x264-preset') args.x264Preset = String(next || '').toLowerCase(), i++;
+    else if (arg === '--pipe-frames') args.pipeFrames = true;
     else if (arg === '--resolved-html') args.resolvedHtml = next, i++;
     else if (arg === '--premixed-audio') args.premixedAudio = next, i++;
     else if (arg === '--max-frames') args.maxFrames = next, i++;
@@ -141,6 +150,7 @@ export function parseArgs(argv) {
     else if (arg === '--tts-voice') args.ttsVoice = next, i++;
     else if (arg === '--tts-speed') args.ttsSpeed = next, i++;
     else if (arg === '--tts-audio-workers') args.ttsAudioWorkers = next, i++;
+    else if (arg === '--no-auto-viewport') args.autoDetectViewport = false;
     else if (arg === '--no-auto-build' || arg === '--no-auto-build-plan') args.autoBuildPlan = false;
     else if (arg === '--force-audio') args.forceAudio = true;
     else if (arg === '--keep-frames') args.keepFrames = true;
@@ -172,9 +182,11 @@ Options:
   --frame-format <fmt>   Temporary frame format: jpeg or png. Default: jpeg
   --jpeg-quality <1-100> JPEG quality when --frame-format jpeg. Default: 90
   --workers <number>     Parallel Playwright pages for frame rendering. Default: logical CPU core count
+  --no-auto-viewport     Honor --width/--height instead of detecting dimensions from lecture metadata
   --render-mode <mode>   Frame scheduling: stateful, stateless, or sequential. Default: stateful
   --video-codec <codec>   MP4 video encoder: auto, libx264, h264_nvenc, h264_qsv, h264_amf. Default: auto
   --x264-preset <preset>  libx264 speed preset. Default: veryfast
+  --pipe-frames           Stream ordered screenshots to ffmpeg instead of writing temporary frame files
   --resolved-html <file>  Output path for auto-built source HTML. Default: sibling resolved.html
   --premixed-audio <file> Use an already mixed audio file instead of building the audio mix
   --no-auto-build         Do not auto-build source HTML before rendering
@@ -464,6 +476,134 @@ function buildVideoEncodeArgs({ args, codec, framesDir, fps, audioTimeline, mixe
   return ffmpegArgs;
 }
 
+// Build an image2pipe-to-MP4 command so encoding can overlap screenshot capture.
+function buildPipedVideoEncodeArgs({ args, codec, fps, audioTimeline, mixedAudioPath, outputPath }) {
+  const ffmpegArgs = [
+    '-y',
+    '-hide_banner',
+    '-loglevel', 'warning',
+    '-f', 'image2pipe',
+    '-framerate', String(fps),
+    '-vcodec', args.frameFormat === 'jpeg' ? 'mjpeg' : 'png',
+    '-i', 'pipe:0'
+  ];
+
+  if (audioTimeline.length > 0) {
+    ffmpegArgs.push('-i', mixedAudioPath);
+  }
+
+  ffmpegArgs.push(
+    ...videoCodecArgs(codec, args),
+    '-vf', `scale=in_range=pc:out_range=${args.colorRange}`,
+    '-pix_fmt', 'yuv420p',
+    '-color_range', args.colorRange,
+    '-colorspace', 'bt709',
+    '-color_primaries', 'bt709',
+    '-color_trc', 'bt709',
+    '-r', String(fps)
+  );
+
+  if (audioTimeline.length > 0) {
+    ffmpegArgs.push('-c:a', 'aac', '-b:a', '192k', '-shortest');
+  }
+
+  ffmpegArgs.push(outputPath);
+  return ffmpegArgs;
+}
+
+function startPipedVideoEncoder({ args, codec, fps, audioTimeline, mixedAudioPath, outputPath }) {
+  console.log(`Piping frames to ${codec}...`);
+  const child = spawn('ffmpeg', buildPipedVideoEncodeArgs({
+    args,
+    codec,
+    fps,
+    audioTimeline,
+    mixedAudioPath,
+    outputPath
+  }), {
+    stdio: ['pipe', 'inherit', 'inherit'],
+    windowsHide: true
+  });
+
+  const completion = new Promise((resolve, reject) => {
+    child.once('error', reject);
+    child.once('close', (code) => {
+      if (code === 0) resolve();
+      else reject(new Error(`ffmpeg piped video encode failed with ${codec} (exit code ${code})`));
+    });
+  });
+
+  return { input: child.stdin, completion };
+}
+
+function writeStreamChunk(stream, chunk) {
+  return new Promise((resolve, reject) => {
+    stream.write(chunk, (error) => {
+      if (error) reject(error);
+      else resolve();
+    });
+  });
+}
+
+// Parallel workers may submit frames out of order. Buffer them until the next
+// sequence number is available, then write a strictly ordered ffmpeg stream.
+function createOrderedFrameSink(stream, frameCount) {
+  const pending = new Map();
+  let nextFrame = 0;
+  let flushPromise = null;
+  let failure = null;
+
+  const flushAvailable = async () => {
+    try {
+      while (pending.has(nextFrame)) {
+        const frame = pending.get(nextFrame);
+        pending.delete(nextFrame);
+        await writeStreamChunk(stream, frame);
+        nextFrame++;
+      }
+    } catch (error) {
+      failure = error;
+      throw error;
+    }
+  };
+
+  const scheduleFlush = () => {
+    if (flushPromise) return;
+    // Defer the flush by one microtask so an out-of-order first submission
+    // cannot synchronously complete before flushPromise receives its value.
+    flushPromise = Promise.resolve()
+      .then(flushAvailable)
+      .finally(() => {
+        flushPromise = null;
+        if (!failure && pending.has(nextFrame)) scheduleFlush();
+      });
+  };
+
+  return {
+    submit(frameNumber, buffer) {
+      if (failure) throw failure;
+      if (pending.has(frameNumber) || frameNumber < nextFrame) {
+        throw new Error(`Duplicate piped frame ${frameNumber}`);
+      }
+      pending.set(frameNumber, buffer);
+      scheduleFlush();
+    },
+    async finish() {
+      while (flushPromise) await flushPromise;
+      if (failure) throw failure;
+      if (nextFrame !== frameCount || pending.size !== 0) {
+        throw new Error(`Incomplete piped frame stream: wrote ${nextFrame}/${frameCount} frames`);
+      }
+      await new Promise((resolve, reject) => {
+        stream.end((error) => {
+          if (error) reject(error);
+          else resolve();
+        });
+      });
+    }
+  };
+}
+
 // Try candidate encoders in order, preserving explicit codec failures as hard errors.
 async function encodeVideoWithFallback({ args, framesDir, fps, audioTimeline, mixedAudioPath, outputPath }) {
   const candidates = await videoCodecCandidates(args.videoCodec);
@@ -547,17 +687,21 @@ async function renderSingleFrame(page, framesDir, frame, fps, options, totalFram
   const time = frame / fps;
   await page.evaluate((t) => window.renderAt(t), time);
   const screenshotOptions = {
-    path: path.join(framesDir, frameName(frame, extension)),
     type: 'png',
     animations: 'disabled'
   };
+
+  if (!options.frameSink) {
+    screenshotOptions.path = path.join(framesDir, frameName(frame, extension));
+  }
 
   if (options.frameFormat === 'jpeg') {
     screenshotOptions.type = 'jpeg';
     screenshotOptions.quality = options.jpegQuality;
   }
 
-  await page.screenshot(screenshotOptions);
+  const screenshot = await page.screenshot(screenshotOptions);
+  if (options.frameSink) options.frameSink.submit(frame, screenshot);
 
   if (frame === 0 || frame === totalFrames - 1 || frame % Math.max(1, Math.floor(fps * 2)) === 0) {
     console.log(`Rendered frame ${frame + 1}/${totalFrames} at ${time.toFixed(3)}s`);
@@ -736,7 +880,8 @@ export async function renderVideo(options = {}) {
 
   assertFileExists(htmlPath, 'Renderable HTML file');
   mkdirSync(renderDir, { recursive: true });
-  ensureCleanDir(framesDir);
+  mkdirSync(path.dirname(outputPath), { recursive: true });
+  if (!args.pipeFrames) ensureCleanDir(framesDir);
 
   const browser = await chromium.launch({
     args: chromiumLaunchArgs()
@@ -744,7 +889,7 @@ export async function renderVideo(options = {}) {
   const url = `${pathToFileURL(htmlPath).href}?export=1`;
   const timelinePage = await preparePage(browser, url, args.width, args.height);
 
-  const detectedViewport = await detectPageViewport(timelinePage);
+  const detectedViewport = args.autoDetectViewport ? await detectPageViewport(timelinePage) : null;
   if (detectedViewport) {
     console.log(`Auto-detected viewport from metadata: ${detectedViewport.width}x${detectedViewport.height} (originally: ${args.width}x${args.height})`);
     args.width = detectedViewport.width;
@@ -785,28 +930,63 @@ export async function renderVideo(options = {}) {
   console.log(`Timeline duration: ${totalDuration.toFixed(3)}s, frames: ${frameCount}${args.maxFrames ? `/${fullFrameCount}` : ''}`);
   console.log(`Audio cues: ${audioTimeline.length}`);
 
-  const renderStart = performance.now();
-  await renderFrames(browser, url, framesDir, frameCount, args.fps, args);
-  await browser.close();
-  const renderElapsed = performance.now() - renderStart;
-  console.log(`Frame rendering time: ${formatSeconds(renderElapsed)} (${(frameCount / (renderElapsed / 1000)).toFixed(2)} fps effective)`);
-
   const audioDuration = args.maxFrames ? renderDuration : totalDuration;
   let audioInputPath = mixedAudioPath;
   let encodeAudioTimeline = audioTimeline;
-  if (premixedAudioPath) {
-    assertFileExists(premixedAudioPath, 'Premixed audio');
-    audioInputPath = premixedAudioPath;
-    encodeAudioTimeline = [{ start: 0, duration: totalDuration, src: premixedAudioPath }];
-    console.log(`Using premixed audio: ${premixedAudioPath}`);
-  } else if (audioTimeline.length > 0) {
-    console.log('Mixing audio...');
-    const audioStart = performance.now();
-    await run('ffmpeg', buildAudioMixArgs(audioTimeline, htmlPath, mixedAudioPath, audioDuration));
-    console.log(`Audio mix time: ${formatSeconds(performance.now() - audioStart)}`);
+  let audioPrepared = false;
+  const prepareAudioInput = async () => {
+    if (audioPrepared) return;
+    if (premixedAudioPath) {
+      assertFileExists(premixedAudioPath, 'Premixed audio');
+      audioInputPath = premixedAudioPath;
+      encodeAudioTimeline = [{ start: 0, duration: totalDuration, src: premixedAudioPath }];
+      console.log(`Using premixed audio: ${premixedAudioPath}`);
+    } else if (audioTimeline.length > 0) {
+      console.log('Mixing audio...');
+      const audioStart = performance.now();
+      await run('ffmpeg', buildAudioMixArgs(audioTimeline, htmlPath, mixedAudioPath, audioDuration));
+      console.log(`Audio mix time: ${formatSeconds(performance.now() - audioStart)}`);
+    }
+    audioPrepared = true;
+  };
+
+  let pipedEncoder = null;
+  let pipedCodec = null;
+  let pipedPipelineStart = null;
+  if (args.pipeFrames) {
+    await prepareAudioInput();
+    const candidates = await videoCodecCandidates(args.videoCodec);
+    pipedCodec = candidates[0];
+    pipedPipelineStart = performance.now();
+    pipedEncoder = startPipedVideoEncoder({
+      args,
+      codec: pipedCodec,
+      fps: args.fps,
+      audioTimeline: encodeAudioTimeline,
+      mixedAudioPath: audioInputPath,
+      outputPath
+    });
+    args.frameSink = createOrderedFrameSink(pipedEncoder.input, frameCount);
   }
 
-  if (!args.skipVideo) {
+  const renderStart = performance.now();
+  try {
+    await renderFrames(browser, url, framesDir, frameCount, args.fps, args);
+  } catch (error) {
+    if (pipedEncoder) pipedEncoder.input.destroy();
+    throw error;
+  } finally {
+    await browser.close();
+  }
+  const renderElapsed = performance.now() - renderStart;
+  console.log(`Frame rendering time: ${formatSeconds(renderElapsed)} (${(frameCount / (renderElapsed / 1000)).toFixed(2)} fps effective)`);
+
+  if (args.pipeFrames) {
+    await args.frameSink.finish();
+    await pipedEncoder.completion;
+    console.log(`Piped render+encode time: ${formatSeconds(performance.now() - pipedPipelineStart)} using ${pipedCodec}`);
+  } else if (!args.skipVideo) {
+    await prepareAudioInput();
     const encodeStart = performance.now();
     const encoder = await encodeVideoWithFallback({
       args,
@@ -818,12 +998,13 @@ export async function renderVideo(options = {}) {
     });
     console.log(`Video encode time: ${formatSeconds(performance.now() - encodeStart)} using ${encoder}`);
 
-    if (!premixedAudioPath) rmSync(mixedAudioPath, { force: true });
   }
 
-  if (!args.keepFrames) {
+  if (!premixedAudioPath && audioPrepared) rmSync(mixedAudioPath, { force: true });
+
+  if (!args.pipeFrames && !args.keepFrames) {
     rmSync(framesDir, { recursive: true, force: true });
-  } else {
+  } else if (!args.pipeFrames) {
     const renderedCount = readdirSync(framesDir).filter((name) => name.endsWith(args.frameFormat === 'jpeg' ? '.jpg' : '.png')).length;
     console.log(`Kept ${renderedCount} frames in ${framesDir}`);
   }

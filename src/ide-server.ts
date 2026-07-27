@@ -1111,7 +1111,8 @@ function renderArgsForFile(inputPath, outPath, options = {}, extraArgs = []) {
     '--tts-provider', provider,
     '--tts-voice', voice,
     '--tts-speed', normalizeTtsSpeed(options.ttsSpeed),
-    '--force-audio'
+    '--force-audio',
+    '--pipe-frames'
   ];
 
   if (isIndexHtmlName(basename)) {
