@@ -62,7 +62,18 @@ export function createViewerHtml(openPath, initialWidth = 1920, initialHeight = 
   const normalizedOpenPath = openPath ? openPath.replaceAll('\\', '/') : '';
   const safeInitialWidth = Number.isInteger(initialWidth) && initialWidth > 0 ? initialWidth : 1920;
   const safeInitialHeight = Number.isInteger(initialHeight) && initialHeight > 0 ? initialHeight : 1080;
+  const configuredTtsProvider = String(ttsConfig.provider || 'kokoro').trim().toLowerCase();
+  const defaultTtsProvider = configuredTtsProvider === '11labs'
+    ? 'elevenlabs'
+    : configuredTtsProvider;
   const defaultTtsVoice = String(ttsConfig.voice || 'af_heart');
+  const elevenLabsDefaultVoice = 'bIHbv24MWmeRgasZH58o';
+  const configuredElevenLabsVoiceOption = (
+    defaultTtsProvider === 'elevenlabs' &&
+    defaultTtsVoice !== elevenLabsDefaultVoice
+  )
+    ? `<option value="${escapeHtml(defaultTtsVoice)}" selected>Configured ElevenLabs voice (${escapeHtml(defaultTtsVoice)})</option>`
+    : '';
   const defaultTtsSpeed = String(ttsConfig.speed || 1);
   const defaultFps = String(renderConfig.fps || 60);
   const defaultBurnSubtitle = renderConfig.burnSubtitle === true;
@@ -2261,7 +2272,11 @@ body.file-kind-mp4 .timeline-ruler {
         <div class="resolve-option">
           <label for="resolve-tts-voice">TTS voice</label>
           <select id="resolve-tts-voice">
-            <optgroup label="OmniVoice TTS (Local)">
+            <optgroup label="ElevenLabs TTS (Cloud)" data-provider="elevenlabs">
+              <option value="${elevenLabsDefaultVoice}"${selectedAttr(elevenLabsDefaultVoice, defaultTtsVoice)}>Will</option>
+              ${configuredElevenLabsVoiceOption}
+            </optgroup>
+            <optgroup label="OmniVoice TTS (Local)" data-provider="omnivoice">
               <option value="mike"${selectedAttr('mike', defaultTtsVoice)}>mike (En)</option>
               <option value="american-male-1"${selectedAttr('american-male-1', defaultTtsVoice)}>american-male-1 (En)</option>
               <option value="american-male-2"${selectedAttr('american-male-2', defaultTtsVoice)}>american-male-2 (En)</option>
@@ -2269,7 +2284,7 @@ body.file-kind-mp4 .timeline-ruler {
               <option value="johnny-harris"${selectedAttr('johnny-harris', defaultTtsVoice)}>johnny-harris (En)</option>
               <option value="maruf"${selectedAttr('maruf', defaultTtsVoice)}>maruf (En)</option>
             </optgroup>
-            <optgroup label="Kokoro TTS (Local)">
+            <optgroup label="Kokoro TTS (Local)" data-provider="kokoro">
               <option value="am_puck">am_puck</option>
               <option value="af_heart"${selectedAttr('af_heart', defaultTtsVoice)}>af_heart</option>
               <option value="am_adam">am_adam</option>
@@ -2299,7 +2314,11 @@ body.file-kind-mp4 .timeline-ruler {
         <div class="render-option">
           <label for="render-tts-voice">TTS voice</label>
           <select id="render-tts-voice">
-            <optgroup label="OmniVoice TTS (Local)">
+            <optgroup label="ElevenLabs TTS (Cloud)" data-provider="elevenlabs">
+              <option value="${elevenLabsDefaultVoice}"${selectedAttr(elevenLabsDefaultVoice, defaultTtsVoice)}>Will</option>
+              ${configuredElevenLabsVoiceOption}
+            </optgroup>
+            <optgroup label="OmniVoice TTS (Local)" data-provider="omnivoice">
               <option value="mike"${selectedAttr('mike', defaultTtsVoice)}>mike (En)</option>
               <option value="american-male-1"${selectedAttr('american-male-1', defaultTtsVoice)}>american-male-1 (En)</option>
               <option value="american-male-2"${selectedAttr('american-male-2', defaultTtsVoice)}>american-male-2 (En)</option>
@@ -2307,7 +2326,7 @@ body.file-kind-mp4 .timeline-ruler {
               <option value="johnny-harris"${selectedAttr('johnny-harris', defaultTtsVoice)}>johnny-harris (En)</option>
               <option value="maruf"${selectedAttr('maruf', defaultTtsVoice)}>maruf (En)</option>
             </optgroup>
-            <optgroup label="Kokoro TTS (Local)">
+            <optgroup label="Kokoro TTS (Local)" data-provider="kokoro">
               <option value="am_puck">am_puck</option>
               <option value="af_heart"${selectedAttr('af_heart', defaultTtsVoice)}>af_heart</option>
               <option value="am_adam">am_adam</option>
@@ -2866,6 +2885,7 @@ let renderViewport = {
   height: ${safeInitialHeight}
 };
 const configuredDefaults = ${JSON.stringify({
+    ttsProvider: defaultTtsProvider,
     ttsVoice: defaultTtsVoice,
     ttsSpeed: defaultTtsSpeed,
     fps: defaultFps,
@@ -3394,9 +3414,16 @@ function setRenderOptionsVisible(visible) {
   renderMenuToggle.setAttribute('aria-expanded', visible ? 'true' : 'false');
 }
 
+function selectedTtsProvider(select) {
+  const option = select.options[select.selectedIndex];
+  const group = option && option.closest('optgroup');
+  return (group && group.dataset.provider) || configuredDefaults.ttsProvider;
+}
+
 function resolveQuery() {
   const params = new URLSearchParams();
   params.set('file', currentFilePath);
+  params.set('ttsProvider', selectedTtsProvider(resolveTtsVoice));
   params.set('ttsVoice', resolveTtsVoice.value || configuredDefaults.ttsVoice);
   params.set('ttsSpeed', resolveTtsSpeed.value || configuredDefaults.ttsSpeed);
   const currentOnlyCheckbox = document.getElementById('resolve-current-only');
@@ -3410,6 +3437,7 @@ function renderQuery() {
   const params = new URLSearchParams();
   const [width, height] = String(renderResolution.value || configuredDefaults.renderResolution).split('x');
   params.set('file', currentFilePath);
+  params.set('ttsProvider', selectedTtsProvider(renderTtsVoice));
   params.set('ttsVoice', renderTtsVoice.value || configuredDefaults.ttsVoice);
   params.set('ttsSpeed', renderTtsSpeed.value || configuredDefaults.ttsSpeed);
   params.set('fps', renderFps.value || configuredDefaults.fps);

@@ -926,6 +926,10 @@ function detectProvider(voice) {
   const v = String(voice || '').trim().toLowerCase();
   if (!v) return 'kokoro';
 
+  if (v === 'bihbv24mwmergaszh58o') {
+    return 'elevenlabs';
+  }
+
   const omniVoices = new Set([
     'mike',
     'american-male-1',
@@ -1107,7 +1111,8 @@ function renderArgsForFile(inputPath, outPath, options = {}, extraArgs = []) {
     '--tts-provider', provider,
     '--tts-voice', voice,
     '--tts-speed', normalizeTtsSpeed(options.ttsSpeed),
-    '--force-audio'
+    '--force-audio',
+    '--pipe-frames'
   ];
 
   if (isIndexHtmlName(basename)) {
@@ -1982,6 +1987,7 @@ const server = createServer(async (request, response) => {
       const requestedPath = requestUrl.searchParams.get('file') || '';
       if (!requestedPath) throw new Error('Missing file path.');
       const resolvedPath = await resolveLectureFile(requestedPath, {
+        ttsProvider: requestUrl.searchParams.get('ttsProvider'),
         ttsVoice: requestUrl.searchParams.get('ttsVoice'),
         ttsSpeed: requestUrl.searchParams.get('ttsSpeed'),
         currentOnly: requestUrl.searchParams.get('currentOnly') === '1'
@@ -2004,6 +2010,7 @@ const server = createServer(async (request, response) => {
       const requestedPath = requestUrl.searchParams.get('file') || '';
       if (!requestedPath) throw new Error('Missing file path.');
       const outputPath = await enqueueRenderJob((job) => renderLectureFile(requestedPath, {
+        ttsProvider: requestUrl.searchParams.get('ttsProvider'),
         ttsVoice: requestUrl.searchParams.get('ttsVoice'),
         ttsSpeed: requestUrl.searchParams.get('ttsSpeed'),
         fps: requestUrl.searchParams.get('fps'),
