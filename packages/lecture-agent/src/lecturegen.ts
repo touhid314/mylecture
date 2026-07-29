@@ -22,7 +22,7 @@
  *
  * Pass `--interactive` and/or `--game` for standalone learning experiences.
  * Pass `--no-video` to skip video-only stages, or `--no-getimg` to prohibit
- * image requests and skip asset fetching.
+ * external image requests (bundled Natural Earth world basemap is still copied).
  * `SCRIPT_TRIMMER_CHUNK_SIZE` is required. It sets the maximum narration words
  * per animator block; the minimum is half that value, rounded up.
  *
@@ -47,6 +47,7 @@ import { runIAGen } from './iagen.js';
 import { getScriptTrimmerChunkSizes, trimScriptByNarration } from './script_trimmer.js';
 import { writeScript } from './script_writer.js';
 import type { LectureGenAttachment } from './lecturegen_shared.js';
+import { ensureWorldBasemapInWorkspace, formatWorldBasemapDescription } from './world_basemap.js';
 import { DEFAULT_WORKSPACE_DIR } from './workspace.js';
 
 export type LectureGenOptions = {
@@ -217,12 +218,14 @@ export class LectureGen {
                 fs.writeFileSync(path.join(this.options.workspaceDir, 'script.md'), script, 'utf8');
                 startSupplementalGeneration(script);
 
+                const worldBasemapPath = ensureWorldBasemapInWorkspace(this.options.workspaceDir);
+
                 let assets: AssetDescription[] = [];
                 if (input.enableGetimg) {
                     log('Fetching requested image assets...');
                     assets = await fetchAssets(script, this.options.workspaceDir);
                 } else {
-                    log('getimg disabled; skipping the asset fetcher.');
+                    log('getimg disabled; skipping external image fetcher.');
                 }
                 assertActive();
 
@@ -239,7 +242,11 @@ export class LectureGen {
                     .filter(attachment => attachment.kind === 'image')
                     .map(attachment => `- ${path.relative(this.options.workspaceDir, attachment.path).replaceAll('\\', '/')}: uploaded image supplied by the user`)
                     .join('\n');
-                const assetDescriptions = [formatAssetDescriptions(assets), uploadedAssets].filter(Boolean).join('\n');
+                const assetDescriptions = [
+                    formatWorldBasemapDescription(worldBasemapPath),
+                    formatAssetDescriptions(assets),
+                    uploadedAssets
+                ].filter(Boolean).join('\n');
                 const previousHtmls: PreviousHtml[] = [];
                 const animatorSession = new AnimatorSession(common);
                 log('Using one retained animator LLM session for sequential context and prompt caching.');
@@ -496,7 +503,7 @@ Options:
   --interactive               Also create interactive.html
   --game                      Also create game.html
   --no-video                  Skip answer/script/index generation
-  --no-getimg                 Forbid image requests and skip the asset fetcher
+  --no-getimg                 Forbid getimg image requests (bundled world basemap still provided)
   --help                      Show this help
 
 Example:

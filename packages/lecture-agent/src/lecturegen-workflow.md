@@ -29,14 +29,15 @@ flowchart TD
 
     ANSWERFILE --> SCRIPT[Script Writer LLM]
     SCRIPT --> POLICY{getimg enabled?}
-    POLICY -->|No| STRIP[Remove image requests from script]
+    POLICY -->|No| STRIP[Strip getimg directives]
     POLICY -->|Yes| SCRIPTFILE["Write script.md"]
     STRIP --> SCRIPTFILE
 
-    SCRIPTFILE --> FORK["Start selected work in parallel"]
-    FORK --> GETIMG{getimg enabled?}
-    GETIMG -->|Yes| ASSETS["Asset Fetcher<br/>collect and download requested images"]
-    GETIMG -->|No| TRIM
+    SCRIPTFILE --> BASEMAP["Copy assets/world-basemap.svg<br/>Natural Earth basemap"]
+    BASEMAP --> FORK["Start selected work in parallel"]
+    FORK --> FETCH{getimg enabled?}
+    FETCH -->|Yes| ASSETS["Asset Fetcher<br/>download getimg assets"]
+    FETCH -->|No| TRIM
     ASSETS --> TRIM["Script Trimmer<br/>split on complete N: narration beats"]
     FORK -->|If selected| IAGEN["IAGen LLM"]
     FORK -->|If selected| GAMEGEN["GameGen LLM"]
@@ -118,8 +119,9 @@ Example:
 npm run lecturegen -- --workspace "D:\mylecture\video-generations" --length 1:30 --aspect-ratio 16:9 "Explain binary search"
 ```
 
-Use `--no-getimg` to prevent the script writer from requesting images and to
-skip the asset fetcher.
+Use `--no-getimg` to prevent the script writer from requesting general images
+(getimg). A bundled Natural Earth world basemap (`assets/world-basemap.svg`) is
+still copied into every video workspace.
 
 Use `--interactive` and/or `--game` to add those outputs. Use `--no-video` to
 create only the selected standalone experience:
@@ -158,8 +160,8 @@ agent:
 Set it to `false` for an unchecked default or `true` for a checked default.
 Before sending a generation request, the user can override that default with
 the visible Image download checkbox. When unchecked, LectureGen tells the
-script writer not to request external images, strips any remaining image
-requests, and skips the asset fetcher.
+script writer not to use getimg, strips remaining getimg requests, and still
+copies the bundled Natural Earth basemap into the workspace.
 
 Later chat messages go to:
 
@@ -259,9 +261,9 @@ Uploaded user images are also included in the animator's asset description.
 
 When getimg is disabled:
 
-- the script writer is told not to request images;
-- any remaining image requests are stripped from the returned script; and
-- the asset-fetching stage is skipped.
+- the script writer is told not to use getimg;
+- any remaining getimg requests are stripped from the returned script; and
+- the bundled `assets/world-basemap.svg` is still copied for geographic maps.
 
 ### 4. Script Trimmer
 

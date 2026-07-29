@@ -10,6 +10,7 @@
     "lecturegen": "tsx src/lecturegen.ts",
     "prompt-builder": "tsx src/prompt_builder.ts",
     "token-tracker": "tsx src/token-tracker/token_tracker_dashboard.ts",
+    "build:world-basemap": "node scripts/build-world-basemap.mjs",
     "test": "tsc --noEmit"
   },
   "dependencies": {
@@ -20,6 +21,8 @@
   },
   "devDependencies": {
     "@types/node": "*",
+    "d3-geo": "^3.1.1",
+    "topojson-client": "^3.1.0",
     "tsx": "*",
     "typescript": "*"
   }

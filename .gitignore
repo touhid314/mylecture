@@ -12,6 +12,8 @@ tests/fixtures/*/audio/
 outputs/
 *.mp4
 assets/
+!packages/lecture-agent/assets/
+!packages/lecture-agent/assets/world-basemap.svg
 models/kokoro-onnx/
 trash/
 .logs/

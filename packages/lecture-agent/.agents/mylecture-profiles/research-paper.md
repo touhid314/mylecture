@@ -73,4 +73,4 @@ Throughout the lecture keep a tracker at the top of the screen showing what sect
 
 Use the pdf2fig tool to extract figures/tables from the pdf and use them as necessary. Usually papers have some nice explanatory figures, use them to explain things nicely.
 
-Use the getimg tool to download/generate images instead of trying to make images by svg.
+For geographic maps, use the bundled Natural Earth basemap at `assets/world-basemap.svg`, then overlay markers, arcs, and labels in SVG/HTML — do not invent freehand continent/coastline polygons. See `.agents/mylecture-visuals/world-map-basemap.md`. Prefer pdf2fig for paper figures; use getimg for other photos/illustrations when available; otherwise construct visuals in code (SVG/Canvas/HTML).

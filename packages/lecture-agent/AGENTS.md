@@ -301,11 +301,14 @@ Script requests use:
 [(getimg: 'short image description', out: 'assets/descriptive-name.png')]
 ```
 
+Geographic maps use the bundled Natural Earth asset `assets/world-basemap.svg`
+(copied into every video workspace). See `.agents/mylecture-visuals/world-map-basemap.md`.
+
 Pass `--no-getimg` to the LectureGen CLI to:
 
-- instruct the script writer not to request images;
-- strip any image directives that still appear;
-- skip the asset-fetching stage.
+- instruct the script writer not to request getimg images;
+- strip any getimg directives that still appear; and
+- skip external image fetching (bundled world basemap is still provided).
 
 The asset fetcher supports search and AI generation internally, can run Watchman verification, and records local path, dimensions, format, and byte size for the animator.
 
