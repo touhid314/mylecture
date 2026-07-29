@@ -874,25 +874,8 @@ input[type="range"]::-moz-range-thumb {
   min-height: 30px;
   display: inline-flex;
   align-items: center;
-  gap: 7px;
   padding: 5px 10px;
 }
-.take-wave {
-  display: inline-flex;
-  align-items: center;
-  gap: 2px;
-  height: 12px;
-}
-.take-wave i {
-  width: 2px;
-  height: 5px;
-  border-radius: 2px;
-  background: currentColor;
-}
-.take-wave i:nth-child(2) { height: 11px; }
-.take-wave i:nth-child(3) { height: 8px; }
-.take-wave i:nth-child(4) { height: 12px; }
-.take-wave i:nth-child(5) { height: 6px; }
 #narration-dialog {
   position: fixed;
   inset: 0;
@@ -2430,10 +2413,7 @@ body.file-kind-mp4 .timeline-ruler {
   <div id="time">0.00 / 0.00</div>
   <button id="subtitles-toggle" type="button" aria-pressed="true" title="Closed captions">CC</button>
   <button id="live-tts-toggle" type="button" aria-pressed="true">Live TTS</button>
-  <button id="narration-edit" type="button" title="Edit and regenerate one narration clip">
-    <span class="take-wave" aria-hidden="true"><i></i><i></i><i></i><i></i><i></i></span>
-    <span>Edit take</span>
-  </button>
+  <button id="narration-edit" type="button" title="Edit and regenerate one narration clip">Edit narration</button>
   <button id="visual-text-edit" type="button" title="Edit this scene's visual or on-screen text">Edit visual</button>
   <select id="speed">
     <option value="0.5">0.5x</option>
@@ -2561,7 +2541,7 @@ body.file-kind-mp4 .timeline-ruler {
   <div id="narration-panel">
     <div id="narration-header">
       <div>
-        <h2 id="narration-title">Edit narration take</h2>
+        <h2 id="narration-title">Edit narration</h2>
         <div id="narration-subtitle">Edit the caption and spoken text, then regenerate only that clip.</div>
       </div>
       <button id="narration-close" type="button" aria-label="Close narration editor">Close</button>

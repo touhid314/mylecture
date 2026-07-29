@@ -21,7 +21,7 @@ So, 3/8 means "3 out of 8 equal parts."
 ```
 
 
-# Start with a good hook
-User should understand the topic of the video within 10s of the video start.
+# Open directly on the topic
+Start the first N: line by stating the topic or problem immediately — no rhetorical-question or curiosity-gap openers ("ever wonder", "have you ever", "imagine…"). The viewer should understand the topic within 10s of video start.
 
 # Keep summary as short as possible, if possible even avoid summary.
