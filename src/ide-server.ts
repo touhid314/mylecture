@@ -9,7 +9,7 @@
  * the website package. It binds to localhost by default and can be explicitly
  * exposed to a trusted local network with --host 0.0.0.0.
  */
-import { createReadStream, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync, unlinkSync, writeFileSync, watch } from 'node:fs';
+import { createReadStream, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, renameSync, rmSync, statSync, unlinkSync, writeFileSync, watch } from 'node:fs';
 import { createServer } from 'node:http';
 import { spawn } from 'node:child_process';
 import { networkInterfaces } from 'node:os';
@@ -18,6 +18,11 @@ import { createViewerHtml } from '../packages/lecture-viewer/src/index.ts';
 import { EditorAgent } from '../packages/lecture-agent/src/editor-agent/coding_agent.ts';
 import { generateLecture, parseLectureGenRequest } from '../packages/lecture-agent/src/lecturegen.ts';
 import { loadAppConfig, resolveConfigPath } from './config.ts';
+import {
+  DEFAULT_ID_PATTERN,
+  allocateFolderName,
+  sanitizeTitle,
+} from './session-folder-name.ts';
 
 const rootDir = process.cwd();
 const startupConfig = loadAppConfig(rootDir);
@@ -643,13 +648,209 @@ function siblingPath(filePath, name) {
   return path.join(path.dirname(resolveInputPath(filePath)), name);
 }
 
-function defaultOutputPath(filePath) {
-  const basename = path.basename(filePath);
-  const match = basename.match(/^(?:index|resolved)(.*)\.html$/i);
-  return siblingPath(filePath, `rendered${match?.[1] || ''}.mp4`);
+const VIDEO_METADATA_TITLE_RE = /\btitle\s*:\s*(['"`])((?:\\.|(?!\1)[\s\S])*)\1/;
+
+// Brace-depth match for window.__VIDEO_METADATA__ = { ... }; — skips string literals so
+// titles containing `};` do not truncate the protected-block boundary.
+function matchVideoMetadataBlock(html) {
+  const startRe = /window\.__VIDEO_METADATA__\s*=\s*\{/;
+  const startMatch = startRe.exec(html);
+  if (!startMatch) return null;
+  const startIdx = startMatch.index;
+  const braceStart = startIdx + startMatch[0].length - 1;
+  let depth = 0;
+  let inString = null;
+  let escaped = false;
+  for (let i = braceStart; i < html.length; i++) {
+    const ch = html[i];
+    if (inString) {
+      if (escaped) {
+        escaped = false;
+        continue;
+      }
+      if (ch === '\\') {
+        escaped = true;
+        continue;
+      }
+      if (ch === inString) inString = null;
+      continue;
+    }
+    if (ch === '"' || ch === "'" || ch === '`') {
+      inString = ch;
+      continue;
+    }
+    if (ch === '{') {
+      depth++;
+      continue;
+    }
+    if (ch === '}') {
+      depth--;
+      if (depth === 0) {
+        let j = i + 1;
+        while (j < html.length && /\s/.test(html[j])) j++;
+        if (html[j] === ';') return html.slice(startIdx, j + 1);
+        return html.slice(startIdx, i + 1);
+      }
+    }
+  }
+  return null;
 }
 
-function finalBatchOutputPath(filePath) {
+function unescapeMetadataTitle(value) {
+  return String(value).replace(/\\([\\'"])/g, '$1');
+}
+
+function titleFromVideoMetadataHtml(html) {
+  // Scope extraction to the brace-matched metadata object so mid-edit partial HTML
+  // cannot pick up a later unrelated `title:` outside the block.
+  const block = matchVideoMetadataBlock(html);
+  if (!block) return null;
+  const titleMatch = block.match(VIDEO_METADATA_TITLE_RE);
+  if (titleMatch?.[2] != null) return unescapeMetadataTitle(titleMatch[2]);
+  return null;
+}
+
+function lectureTitleForFolder(folderPath) {
+  try {
+    const resolvedFolder = path.resolve(folderPath);
+    if (!existsSync(resolvedFolder) || !statSync(resolvedFolder).isDirectory()) return null;
+
+    let indexFiles = [];
+    try {
+      indexFiles = readdirSync(resolvedFolder)
+        .filter((name) => /^index.*\.html$/i.test(name))
+        .sort((a, b) => a.localeCompare(b, undefined, { numeric: true }));
+    } catch {
+      indexFiles = [];
+    }
+
+    for (const name of indexFiles) {
+      try {
+        const html = readFileSync(path.join(resolvedFolder, name), 'utf8');
+        const title = titleFromVideoMetadataHtml(html);
+        if (typeof title === 'string' && title.trim()) return title.trim();
+      } catch {
+        // Try the next index*.html or fall through to metadata.json.
+      }
+    }
+
+    const metadataPath = path.join(resolvedFolder, 'metadata.json');
+    if (!existsSync(metadataPath)) return null;
+    const metadata = JSON.parse(readFileSync(metadataPath, 'utf8'));
+    const rawName = metadata?.name ?? metadata?.title;
+    if (typeof rawName === 'string' && rawName.trim()) return rawName.trim();
+    return null;
+  } catch {
+    return null;
+  }
+}
+
+function remapPathAfterFolderRename(filePath, oldFolder, newFolder) {
+  if (!filePath) return filePath;
+  const resolved = path.resolve(filePath);
+  const oldResolved = path.resolve(oldFolder);
+  const newResolved = path.resolve(newFolder);
+  if (resolved === oldResolved) return newResolved;
+  const prefix = oldResolved.endsWith(path.sep) ? oldResolved : `${oldResolved}${path.sep}`;
+  if (resolved.startsWith(prefix)) {
+    return path.join(newResolved, path.relative(oldResolved, resolved));
+  }
+  return filePath;
+}
+
+// True when a resolve (activeJob) or render (active/queued RenderJobs) is touching folderPath.
+// Used to avoid renaming the session folder out from under an in-flight job.
+function jobTouchesFolder(job, folderPath) {
+  if (!job) return false;
+  // Normalize case + separators so Windows C:\ vs c:\ (and / vs \) still match.
+  const normalize = (p) => path.resolve(p).replaceAll('\\', '/').toLowerCase();
+  const folder = normalize(folderPath);
+  const prefix = folder.endsWith('/') ? folder : `${folder}/`;
+  for (const candidate of [job.inputPath, job.outPath]) {
+    if (!candidate) continue;
+    const resolved = normalize(candidate);
+    if (resolved === folder || resolved.startsWith(prefix)) return true;
+  }
+  return false;
+}
+
+function hasActiveWorkInFolder(folderPath) {
+  // /resolve-file uses the global activeJob; /render-file uses activeRenderJobs + queue.
+  if (activeJob?.type === 'resolve' && jobTouchesFolder(activeJob, folderPath)) return true;
+  for (const job of activeRenderJobs.values()) {
+    if (jobTouchesFolder(job, folderPath)) return true;
+  }
+  for (const entry of queuedRenderJobs) {
+    if (jobTouchesFolder(entry.job, folderPath)) return true;
+  }
+  return false;
+}
+
+// After LectureGen succeeds, rename <id> -> <title> (or <title> (N) on collision) when safe.
+// Never throws. Keeps agentState.sessionId as the bare timestamp id (token tracker continuity);
+// only currentWorkspace is updated here — viewerState.path is remapped by the caller.
+// Opportunistic: skips (once) if render/resolve is mid-flight in this folder so the
+// encode does not 500 on listFolderFiles(oldPath); rename-gens.ts can catch up later.
+function renameSessionFolderAfterGeneration(agentState, workspaceDir) {
+  try {
+    const oldFolder = path.resolve(workspaceDir);
+    const folderName = path.basename(oldFolder);
+    if (!DEFAULT_ID_PATTERN.test(folderName)) return null;
+
+    if (hasActiveWorkInFolder(oldFolder)) {
+      console.warn(
+        `[Session] Skip rename (render/resolve active in folder): ${folderName}`
+      );
+      return null;
+    }
+
+    const rawTitle = lectureTitleForFolder(oldFolder);
+    const desiredName = sanitizeTitle(rawTitle);
+    if (!desiredName) return null;
+
+    // Idempotent: pattern-shaped titles still match DEFAULT_ID_PATTERN after rename;
+    // skip when the folder already has the desired name so we never append (2)/(3)/…
+    if (desiredName.toLowerCase() === folderName.toLowerCase()) {
+      console.log(`[Session] Already named: ${folderName}`);
+      return null;
+    }
+
+    const parentDir = path.dirname(oldFolder);
+    const newFolderName = allocateFolderName(parentDir, desiredName);
+    const newFolder = path.join(parentDir, newFolderName);
+
+    renameSync(oldFolder, newFolder);
+    agentState.currentWorkspace = newFolder;
+    console.log(`[Session] Renamed session folder: ${folderName} -> ${newFolderName}`);
+    return { oldFolder, newFolder, newFolderName };
+  } catch (error) {
+    console.warn(`[Session] Folder rename skipped: ${error?.message || error}`);
+    return null;
+  }
+}
+
+function defaultOutputPath(filePath, title) {
+  const basename = path.basename(filePath);
+  const match = basename.match(/^(?:index|resolved)(.*)\.html$/i);
+  const suffix = match?.[1] || '';
+  const resolvedTitle = title !== undefined
+    ? title
+    : sanitizeTitle(lectureTitleForFolder(path.dirname(resolveInputPath(filePath))));
+  if (resolvedTitle) {
+    // Scene delimiter is `~` (stripped from titles) so Part-2.mp4 finals are not parsed as scene 2.
+    const name = suffix ? `${resolvedTitle}~${suffix}.mp4` : `${resolvedTitle}.mp4`;
+    return siblingPath(filePath, name);
+  }
+  return siblingPath(filePath, `rendered${suffix}.mp4`);
+}
+
+function finalBatchOutputPath(filePath, title) {
+  const resolvedTitle = title !== undefined
+    ? title
+    : sanitizeTitle(lectureTitleForFolder(path.dirname(resolveInputPath(filePath))));
+  if (resolvedTitle) {
+    return siblingPath(filePath, `${resolvedTitle}.mp4`);
+  }
   return siblingPath(filePath, 'rendered.mp4');
 }
 
@@ -797,10 +998,10 @@ function saveVisualTextEdit(sourcePath, oldText, newText) {
 }
 
 function protectedVisualEditContent(html) {
-  const metadata = html.match(/window\.__VIDEO_METADATA__\s*=\s*\{[\s\S]*?\};/);
+  const metadata = matchVideoMetadataBlock(html);
   const plan = html.match(/window\.__VIDEO_PLAN__\s*=\s*\[[\s\S]*?\];/);
   return {
-    metadata: metadata?.[0] || '',
+    metadata: metadata || '',
     plan: plan?.[0] || ''
   };
 }
@@ -1246,8 +1447,11 @@ function pumpRenderQueue() {
   }
 }
 
-function enqueueRenderJob(task) {
+function enqueueRenderJob(task, inputPath) {
   const job = createRenderJob();
+  // Stamp inputPath at enqueue so renameSessionFolderAfterGeneration can see queued
+  // jobs that have not yet entered renderLectureFile (which also sets inputPath).
+  if (inputPath) job.inputPath = resolveInputPath(inputPath);
   return new Promise((resolve, reject) => {
     job.reject = reject;
     queuedRenderJobs.push({ job, task, resolve, reject });
@@ -1314,12 +1518,13 @@ async function renderLectureFile(filePath, options = {}, job = createRenderJob()
     throw new Error('Render is only available for index*.html or resolved*.html files.');
   }
 
+  const folderTitle = sanitizeTitle(lectureTitleForFolder(path.dirname(inputPath)));
   const sceneFiles = renderSceneSet(inputPath);
   if (sceneFiles.length > 1) {
-    return await renderLectureBatch(inputPath, sceneFiles, options, job);
+    return await renderLectureBatch(inputPath, sceneFiles, options, job, folderTitle);
   }
 
-  const outPath = defaultOutputPath(inputPath);
+  const outPath = defaultOutputPath(inputPath, folderTitle);
   const framesDir = path.join(rootDir, '.render', 'server-render', `job-${job.id}`, 'frames');
   const burnSubtitle = options.burnSubtitle === true;
   const renderOutputPath = burnSubtitle ? path.join(path.dirname(framesDir), 'unsubtitled.mp4') : outPath;
@@ -1364,10 +1569,13 @@ async function renderLectureFile(filePath, options = {}, job = createRenderJob()
 }
 
 // Resolve and render multiple scenes, then concatenate them into one final MP4.
-async function renderLectureBatch(inputPath, sceneFiles, options = {}, job = createRenderJob()) {
+async function renderLectureBatch(inputPath, sceneFiles, options = {}, job = createRenderJob(), folderTitle) {
   const batchId = `${Date.now()}-${Math.random().toString(16).slice(2)}`;
   const tempDir = path.resolve(rootDir, '.render', 'batch-render', batchId);
-  const outputPath = finalBatchOutputPath(inputPath);
+  const title = folderTitle !== undefined
+    ? folderTitle
+    : sanitizeTitle(lectureTitleForFolder(path.dirname(inputPath)));
+  const outputPath = finalBatchOutputPath(inputPath, title);
   const concatListPath = path.join(tempDir, 'concat.txt');
   let firstSceneError = null;
   let renderSceneFiles = sceneFiles;
@@ -1409,7 +1617,15 @@ async function renderLectureBatch(inputPath, sceneFiles, options = {}, job = cre
       throw new Error('Process stopped by user');
     }
 
-    const sceneOutputs = renderSceneFiles.map(scenePath => defaultOutputPath(scenePath));
+    // Empty-suffix scenes (index.html / resolved.html) would otherwise share the final
+    // <title>.mp4 / rendered.mp4 path; with burnSubtitle off, concat would overwrite its own input.
+    // Include scene index in the intermediate name so two empty-suffix scenes cannot collide.
+    const finalResolved = path.resolve(outputPath);
+    const sceneOutputs = renderSceneFiles.map((scenePath, index) => {
+      const sceneOut = defaultOutputPath(scenePath, title);
+      if (path.resolve(sceneOut) !== finalResolved) return sceneOut;
+      return path.join(path.dirname(sceneOut), `temp_${index}-${path.basename(sceneOut)}`);
+    });
     console.log(`Batch rendering ${renderSceneFiles.length} scenes with up to 4 parallel processes...`);
     await runLimited(renderSceneFiles, 4, async (scenePath, index) => {
       const sceneOutput = sceneOutputs[index];
@@ -2022,7 +2238,7 @@ const server = createServer(async (request, response) => {
         subtitleFont: requestUrl.searchParams.get('subtitleFont'),
         subtitleFontSize: requestUrl.searchParams.get('subtitleFontSize'),
         subtitleBottomPercent: requestUrl.searchParams.get('subtitleBottomPercent')
-      }, job));
+      }, job), requestedPath);
 
       sendJson(response, 200, {
         ok: true,
@@ -2205,6 +2421,10 @@ const server = createServer(async (request, response) => {
           task += message;
 
           if (isGenerationRequest) {
+            if (agentState.activeJob) {
+              sendJson(response, 409, { error: 'A generation is already in progress for this session.' });
+              return;
+            }
             agentState.log = '';
             const abortController = new AbortController();
             let isAborted = false;
@@ -2236,6 +2456,8 @@ const server = createServer(async (request, response) => {
                 const result = await generateLecture({
                   request: parsed.request,
                   model: payload.model || process.env.AGENT_MODEL || 'gemini-3.5-flash',
+                  scriptModel: payload.scriptModel || undefined,
+                  animatorModel: payload.animatorModel || undefined,
                   workspaceDir: agentWorkspace,
                   generationLength: parsed.generationLength,
                   aspectRatio: parsed.aspectRatio,
@@ -2257,16 +2479,29 @@ const server = createServer(async (request, response) => {
                 if (isAborted) return;
                 agentState.phase = 'edit';
                 agentState.session = null;
+
+                let workspaceDir = result.workspaceDir;
+                let entryFile = result.entryFile;
+                let htmlFiles = Array.isArray(result.htmlFiles) ? result.htmlFiles.slice() : result.htmlFiles;
+                const renamed = renameSessionFolderAfterGeneration(agentState, result.workspaceDir);
+                if (renamed) {
+                  workspaceDir = renamed.newFolder;
+                  entryFile = remapPathAfterFolderRename(entryFile, renamed.oldFolder, renamed.newFolder);
+                  if (Array.isArray(htmlFiles)) {
+                    htmlFiles = htmlFiles.map((filePath) => remapPathAfterFolderRename(filePath, renamed.oldFolder, renamed.newFolder));
+                  }
+                }
+
                 viewerState.version++;
-                viewerState.path = result.entryFile;
+                viewerState.path = entryFile;
                 if (!response.writableEnded) {
                   sendJson(response, 200, {
                     ok: true,
                     output: result.output.trim(),
                     mode: 'edit',
-                    workspace: result.workspaceDir,
-                    path: result.entryFile,
-                    files: result.htmlFiles
+                    workspace: workspaceDir,
+                    path: entryFile,
+                    files: htmlFiles
                   });
                 }
               } catch (err: any) {

@@ -115,7 +115,8 @@ export async function animateScriptBlock(input: AnimatorInput, session: Animator
         '',
         '# Current Script Block', input.scriptBlock,
         '',
-        `Create only ${input.outputPath}. Continue coherently from the previous HTML files while implementing only this script block.`
+        `Create only ${input.outputPath}. Continue coherently from the previous HTML files while implementing only this script block.`,
+        'Each index*.html file is loaded independently in the browser. Copy every draw*/render*/update* helper you call into this file — never reference functions that exist only in a previous index*.html.'
     ].join('\n');
 
     const maxAttempts = 3;
@@ -164,6 +165,8 @@ export async function requestAnimatorRepair(input: AnimatorRepairInput, session:
         `{"path":"${input.outputPath}","edits":[{"lines":[1,2],"new":"replacement text"}]}`,
         'Line ranges are inclusive and refer to the line-numbered current file below. Use [a,b] to replace, [a] to insert after line a, and [0] to insert at the top.',
         'Make the smallest complete set of edits needed to resolve every validator error. Do not return the whole HTML file.',
+        'If the error lists missing render helpers (draw*/render*/update*), copy their full function definitions from the previous validated HTML into this file.',
+        'Return exactly one JSON object and nothing else after it.',
         '',
         '# Validator Output', input.validatorOutput,
         '',

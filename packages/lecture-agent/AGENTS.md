@@ -172,12 +172,27 @@ Common variables:
 GOOGLE_API_KEY="..."
 OPENAI_API_KEY="..."
 AGENT_MODEL="gemini-3.5-flash"
+# Optional LectureGen stage overrides (fall back to AGENT_MODEL / --model):
+# SCRIPT_MODEL="gpt-5.6-luna"       # answer + script writer
+# ANIMATOR_MODEL="gemini-3.5-flash" # animator, iagen, gamegen
+GPT_REASONING_EFFORT="none"
+# GPT_SERVICE_TIER="fast"  # OpenAI only; omit when unset. Prefer fast; priority is a backwards-compatible alias. Separate from GPT_REASONING_EFFORT.
 AGENT_WORKSPACE="optional editor workspace override"
 SCRIPT_TRIMMER_CHUNK_SIZE="75"
 LOG_FULL_LLM_PROMPT="True"
 GETIMG_MODEL="..."
 GETIMG_WATCHMAN_MODEL="..."
 ```
+
+`SCRIPT_MODEL` / `ANIMATOR_MODEL` (or CLI `--script-model` / `--animator-model`) split LectureGen stages so script writing can use a different model than animation. The editor agent still uses `AGENT_MODEL` / `--model` only. PracticeGen (IAGen/GameGen) also resolves `ANIMATOR_MODEL` / `--animator-model` with fallback to `--model` / `AGENT_MODEL`.
+
+Side-by-side script A/B (no animator):
+
+```bash
+npm run lecturegen -- --script-compare gpt-5.6-luna,gemini-3.5-flash "Explain binary search"
+```
+
+Writes `answer.md` once (first compare model), then `<safe-slug>/script.md` per model plus `compare.json`. Does not require `SCRIPT_TRIMMER_CHUNK_SIZE`. `--script-model` is ignored in compare mode (stderr warning).
 
 `SCRIPT_TRIMMER_CHUNK_SIZE` is required when video output is selected:
 
@@ -187,7 +202,7 @@ GETIMG_WATCHMAN_MODEL="..."
 - Missing, empty, invalid, or non-positive values fail before any LectureGen LLM call.
 - Interactive/game-only runs do not read this variable.
 
-Gemini models use native Gemini function calling in `editor-agent/coding_agent.ts`. Other supported model names use the JSON fallback through `utils/llm_model.ts`.
+Gemini models use native Gemini function calling in `editor-agent/coding_agent.ts`. `gpt-*` models use native OpenAI Responses API function calling. Other supported model names fall back to JSON tool execution through `utils/llm_model.ts`.
 
 ## IDE Generation and Editing Phases
 
@@ -503,7 +518,7 @@ The extracted Poppler directory is intentionally ignored at its relocated path. 
 - Keep LectureGen and prompt-builder descriptions in module docstrings, not standalone Markdown files.
 - Do not reintroduce the script sub-agent or `run_script_agent`.
 - Keep editor mutation restrictions in runtime code as well as prompt text.
-- When changing prompts, schemas, attachments, or final-response behavior, verify both Gemini native and JSON fallback paths.
+- When changing prompts, schemas, attachments, or final-response behavior, verify Gemini native, OpenAI native, and JSON fallback paths.
 
 ## Verification
 

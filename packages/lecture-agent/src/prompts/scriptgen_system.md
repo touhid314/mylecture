@@ -48,7 +48,7 @@ N: lines become on-screen captions (and feed TTS). Write them as normal readable
 - No LaTeX, code, or URLs in N: lines — describe them in plain words if needed.
 - Never read a table or data grid cell-by-cell — narrate only the takeaway and the important headline numbers while the V: line highlights the relevant rows.
 - V: lines keep normal formatting and short LaTeX formulas, but describe tables in plain language — never as LaTeX arrays; the animator builds them in HTML.
-- First N: line (cold open only): no rhetorical-question or curiosity-gap openers ("ever wonder", "have you ever", "imagine…") — start with the topic or problem. Mid-lecture "imagine" analogies remain allowed.
+- First N: line (cold open only): never open with a rhetorical question or curiosity-gap hook addressed to the viewer — no "ever wonder…", "have you ever…", "ever needed to…", "imagine…", or any reworded variant of that pattern. The first sentence must be a declarative statement of the topic or problem. Mid-lecture "imagine" analogies and direct topical hooks remain allowed.
 - End when the content is done. No "would you like…", "next section", ask-the-viewer prompts, or cliffhangers about content that isn't in this video.
 
 # Example:

@@ -114,6 +114,8 @@ export type SpawnAgentOptions = {
   taskMessage: string;
   maxTurns: number;
   model?: string;
+  scriptModel?: string;
+  animatorModel?: string;
   /** Typed LectureGen settings — emitted as CLI flags (explicit args beat stdin marker). */
   settings?: LectureGenSpawnSettings;
   onStdout?: (chunk: string) => void;
@@ -147,6 +149,8 @@ export function buildLectureGenCliFlags(settings?: LectureGenSpawnSettings): str
 export function spawnAgent(options: SpawnAgentOptions) {
   const cliPath = locateLectureGenCli();
   const model = resolveAgentModel(options.model);
+  const scriptModel = String(options.scriptModel || '').trim();
+  const animatorModel = String(options.animatorModel || '').trim();
 
   const settings = options.settings ? { ...options.settings } : undefined;
   if (settings?.theme && !existsSync(settings.theme) && settings.theme.includes('\n')) {
@@ -163,6 +167,8 @@ export function spawnAgent(options: SpawnAgentOptions) {
   const args = [
     '--import', 'tsx', cliPath,
     '--model', model,
+    ...(scriptModel ? ['--script-model', scriptModel] : []),
+    ...(animatorModel ? ['--animator-model', animatorModel] : []),
     '--workspace-dir', options.workspaceDir,
     ...buildLectureGenCliFlags(settings)
   ];
@@ -311,6 +317,7 @@ export type SpawnPracticeGenOptions = {
   taskMessage: string;
   outputRelPath: string;
   model?: string;
+  animatorModel?: string;
   aspectRatio?: string;
   referencePath?: string;
   onStdout?: (chunk: string) => void;
@@ -321,15 +328,19 @@ export type SpawnPracticeGenOptions = {
 /**
  * Create or repair practice pages via static IAGen/GameGen (not EditorAgent).
  * EditorAgent remains index-root edit-only and cannot create nested activities paths.
+ * ANIMATOR_MODEL is read by practicegen from the inherited env; pass animatorModel only
+ * when an explicit override is needed.
  */
 export function spawnPracticeGen(options: SpawnPracticeGenOptions) {
   const cliPath = locatePracticeGenCli();
   const model = resolveAgentModel(options.model);
+  const animatorModel = String(options.animatorModel || '').trim();
 
   const args = [
     '--import', 'tsx', cliPath,
     '--kind', options.kind,
     '--model', model,
+    ...(animatorModel ? ['--animator-model', animatorModel] : []),
     '--workspace-dir', options.workspaceDir,
     '--output', options.outputRelPath,
     '--aspect-ratio', options.aspectRatio || '16:9'

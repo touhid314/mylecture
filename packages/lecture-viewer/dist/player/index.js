@@ -6,6 +6,7 @@
  * viewport detection, and the event API consumed by the IDE/website shells.
  */
 import { normalizeTtsText } from './tts-normalize.js';
+import { invokeRenderSection } from './invoke-render-section.js';
 export const lectureViewerVersion = '0.2';
 // Factory wrapper keeps the public API stable even if the backing class changes.
 export function createLecturePlayer(options = {}) {
@@ -346,6 +347,7 @@ class LecturePlayer {
     handleFrameLoad() {
         try {
             const win = this.iframe.contentWindow;
+            win.__PLAYER_CONTROLLED__ = true;
             // Rendered MP4 files are played by the browser's native video element.
             // Contract HTML files are handled by the custom timeline code below.
             const isMp4 = String(this.state.src || '').toLowerCase().endsWith('.mp4');
@@ -804,9 +806,8 @@ class LecturePlayer {
                 if (candidate.start > activeTime)
                     break;
             }
-            const renderSection = win.__RENDER_SECTION__ || win.__HTML_RENDER_SECTION__ || win.__AI_RENDER_SECTION__;
-            if (cue && typeof renderSection === 'function') {
-                renderSection(cue.item, activeTime - cue.start, activeTime);
+            if (cue) {
+                invokeRenderSection(win, cue.item, activeTime - cue.start, activeTime);
             }
         }
         this.updateSubtitleOverlay();
@@ -820,8 +821,8 @@ class LecturePlayer {
         if (typeof win.__STOP_INTERACTIVE__ === 'function') {
             win.__STOP_INTERACTIVE__();
         }
-        else if (typeof win.__RENDER_SECTION__ === 'function' && this.state.timeline[0]) {
-            win.__RENDER_SECTION__(this.state.timeline[0].item, 0, 0);
+        else if (this.state.timeline[0]) {
+            invokeRenderSection(win, this.state.timeline[0].item, 0, 0);
         }
     }
     stopGameSection() {
@@ -830,8 +831,8 @@ class LecturePlayer {
         if (typeof win.__STOP_GAME__ === 'function') {
             win.__STOP_GAME__();
         }
-        else if (typeof win.__RENDER_SECTION__ === 'function' && this.state.timeline[0]) {
-            win.__RENDER_SECTION__(this.state.timeline[0].item, 0, 0);
+        else if (this.state.timeline[0]) {
+            invokeRenderSection(win, this.state.timeline[0].item, 0, 0);
         }
     }
     tick(now) {

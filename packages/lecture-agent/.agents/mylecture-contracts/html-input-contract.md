@@ -108,7 +108,7 @@ window.__VIDEO_PLAN__ = VIDEO_PLAN;
 
 ## Render Function
 
-The HTML must define:
+The HTML must define at least one render hook. Legacy pages use a single unified function:
 
 ```js
 function renderSection(segment, localTime, globalTime) {
@@ -117,6 +117,37 @@ function renderSection(segment, localTime, globalTime) {
 
 window.__RENDER_SECTION__ = renderSection;
 ```
+
+### Split canvas + HTML hooks (recommended for mixed layouts)
+
+When a scene combines canvas motion with HTML overlays, define separate hooks and a shared layout object:
+
+```js
+const SCENE_LAYOUT = { /* stage coordinates shared by canvas and DOM */ };
+
+function renderCanvasSection(segment, localTime, globalTime) {
+  // clear canvas, draw diagrams/particles only
+}
+
+function renderHtmlSection(segment, localTime, globalTime) {
+  // overlay visibility, typography, KaTeX containers, table highlights
+}
+
+function renderSection(segment, localTime, globalTime) {
+  renderCanvasSection(segment, localTime, globalTime);
+  renderHtmlSection(segment, localTime, globalTime);
+}
+
+window.__RENDER_SECTION__ = renderSection;
+window.__AI_RENDER_SECTION__ = renderCanvasSection;
+window.__HTML_RENDER_SECTION__ = renderHtmlSection;
+```
+
+The player calls both split hooks when both exist (canvas first, then HTML). If only `__RENDER_SECTION__` is defined, that single hook runs instead.
+
+Each `index*.html` file is loaded standalone in the browser. Copy every `draw*` / `render*` / `update*` helper into the file that calls it — helpers from earlier `index*.html` files are not in scope.
+
+Do not run a wall-clock `requestAnimationFrame` preview loop when `window.__PLAYER_CONTROLLED__` is true (the lecture viewer drives frames).
 
 Rules:
 
@@ -137,3 +168,12 @@ The HTML must support:
 ```text
 ?export=1
 ```
+
+## Canvas and DOM Text Alignment
+
+Two classes of text:
+
+1. **Attached text** — a short label, title, or value that belongs to a canvas-drawn shape and moves, scales, or floats with it (e.g. a title on a drawn book cover, a value inside a drawn card). Draw it on the canvas with `ctx.fillText` inside the same `ctx.translate` / `ctx.scale` transform as the shape, so both share one coordinate system.
+2. **Independent text** — scene titles, key terms, equations, and annotations placed independently of any canvas shape. Render as HTML/DOM elements. Math always uses KaTeX DOM overlays, never canvas.
+
+If an HTML element must align with a canvas-drawn shape, compute its position every frame inside `__RENDER_SECTION__` or `__HTML_RENDER_SECTION__` from the same geometry constants used to draw the shape in `__AI_RENDER_SECTION__`. Never use independent hard-coded CSS offsets, and never use a different transform origin than the tracked shape.

@@ -3822,8 +3822,28 @@ function updateScenePanel(entries) {
   renderedFiles.sort((a, b) => a.name.localeCompare(b.name, undefined, { numeric: true, sensitivity: 'base' }));
 
   const getFileSuffix = (name) => {
-    const match = name.match(/^(?:index|resolved|rendered)(.*)\.(?:html|mp4)$/i);
-    return match ? match[1] : '';
+    const lower = String(name || '').toLowerCase();
+    if (lower.endsWith('.html')) {
+      // Legacy HTML: index/resolved + optional scene digits (unchanged).
+      const legacyHtml = name.match(/^(?:index|resolved)(.*)\\.html$/i);
+      return legacyHtml ? legacyHtml[1] : '';
+    }
+    if (lower.endsWith('.mp4')) {
+      // Historical producer only: rendered.mp4 / rendered1.mp4 — not titled files
+      // that merely start with those words (e.g. "Index Funds Explained.mp4").
+      // Accepted edge: a title that is literally Rendered + digits (e.g. Rendered3.mp4)
+      // still parses as legacy scene 3 — extremely rare, not worth more complexity.
+      const legacyMp4 = name.match(/^rendered(\\d*)\\.mp4$/i);
+      if (legacyMp4) return legacyMp4[1];
+      // Titled scene MP4s use ~ so Part-2.mp4 finals are not parsed as scene 2.
+      const titled = name.match(/~(\\d+)\\.mp4$/i);
+      if (titled) return titled[1];
+      // No -<digits>.mp4 back-compat: that pattern re-breaks new finals whose titles
+      // end in -<digits> (e.g. Part-2.mp4). Pre-~ titled scene leftovers from the
+      // short-lived - delimiter may mis-pair until cleaned up.
+      return '';
+    }
+    return '';
   };
 
   renderedFiles.forEach(rf => {

@@ -11,6 +11,7 @@ import { fileURLToPath } from 'node:url';
 
 import { runGameGen } from './gamegen.js';
 import { runIAGen } from './iagen.js';
+import { resolveLectureGenStageModels } from './stage_models.js';
 import { validate_practice_page_contract } from './utils/html_contract.js';
 
 export type PracticeKind = 'interactive' | 'game';
@@ -22,6 +23,8 @@ export type PracticeGenOptions = {
     kind: PracticeKind;
     request: string;
     model: string;
+    /** Override for IAGen/GameGen; defaults to ANIMATOR_MODEL then `model`. */
+    animatorModel?: string;
     workspaceDir: string;
     outputRelPath?: string;
     aspectRatio?: string;
@@ -58,8 +61,13 @@ export async function generatePracticePage(options: PracticeGenOptions): Promise
 
     const aspectRatio = options.aspectRatio || '16:9';
     const log = (message: string) => options.onLog?.(`[practicegen] ${message}\n`);
-    const common = {
+    const stages = resolveLectureGenStageModels({
         model: options.model,
+        animatorModel: options.animatorModel
+    });
+    log(`Using model ${stages.animatorModel} for ${options.kind} (fallback default: ${stages.defaultModel}).`);
+    const common = {
+        model: stages.animatorModel,
         tokenTrackerSessionId: options.tokenTrackerSessionId,
         promptWorkspaceDir: workspaceDir,
         outputPath: outputRelPath
@@ -106,7 +114,8 @@ function printPracticeGenHelp(): void {
 
 Options:
   --kind <interactive|game>   Practice kind (required)
-  --model <name>              LLM model (defaults to AGENT_MODEL)
+  --model <name>              Default/fallback LLM model (defaults to AGENT_MODEL)
+  --animator-model <name>     Model for IAGen/GameGen (defaults to ANIMATOR_MODEL, then --model)
   --workspace-dir <directory> Exact lecture workspace folder (required)
   --output <rel-path>         Output path under workspace (default activities/.../index.html)
   --aspect-ratio <ratio>      Aspect ratio hint (default: 16:9)
@@ -120,6 +129,7 @@ Request text is read from stdin (or trailing argv).`);
 export async function runPracticeGenCli(args = process.argv.slice(2)): Promise<void> {
     let kind: PracticeKind | '' = '';
     let model = process.env.AGENT_MODEL || '';
+    let animatorModel = '';
     let workspaceDir = '';
     let outputRelPath = '';
     let aspectRatio = '16:9';
@@ -148,6 +158,7 @@ export async function runPracticeGenCli(args = process.argv.slice(2)): Promise<v
                 break;
             }
             case '--model': model = nextValue(); break;
+            case '--animator-model': animatorModel = nextValue(); break;
             case '--workspace-dir': workspaceDir = path.resolve(nextValue()); break;
             case '--output': outputRelPath = nextValue(); break;
             case '--aspect-ratio': aspectRatio = nextValue(); break;
@@ -175,6 +186,7 @@ export async function runPracticeGenCli(args = process.argv.slice(2)): Promise<v
         kind,
         request,
         model,
+        animatorModel: animatorModel || undefined,
         workspaceDir,
         outputRelPath: outputRelPath || undefined,
         aspectRatio,

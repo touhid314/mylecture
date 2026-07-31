@@ -23,8 +23,12 @@
  * Pass `--interactive` and/or `--game` for standalone learning experiences.
  * Pass `--no-video` to skip video-only stages, or `--no-getimg` to prohibit
  * external image requests (bundled Natural Earth world basemap is still copied).
- * `SCRIPT_TRIMMER_CHUNK_SIZE` is required. It sets the maximum narration words
- * per animator block; the minimum is half that value, rounded up.
+ * Optional `--script-model` / `--animator-model` (or SCRIPT_MODEL / ANIMATOR_MODEL)
+ * split answer+script vs animator/iagen/gamegen. `--script-compare a,b` runs a
+ * script-only A/B with one shared answer and per-model script folders.
+ * `SCRIPT_TRIMMER_CHUNK_SIZE` is required for normal video generation. It sets the
+ * maximum narration words per animator block; the minimum is half that value,
+ * rounded up.
  *
  * Animator calls run sequentially in one retained LLM session so prior validated
  * generations remain in context and provider prompt caching can apply. Each
@@ -47,11 +51,20 @@ import { runIAGen } from './iagen.js';
 import { getScriptTrimmerChunkSizes, trimScriptByNarration } from './script_trimmer.js';
 import { writeScript } from './script_writer.js';
 import type { LectureGenAttachment } from './lecturegen_shared.js';
+import {
+    formatStageModelLog,
+    isModelSlugContained,
+    parseScriptCompareModels,
+    resolveLectureGenStageModels,
+    uniqueModelSlugs
+} from './stage_models.js';
 import { ensureWorldBasemapInWorkspace, formatWorldBasemapDescription } from './world_basemap.js';
 import { DEFAULT_WORKSPACE_DIR } from './workspace.js';
 
 export type LectureGenOptions = {
     model: string;
+    scriptModel?: string;
+    animatorModel?: string;
     workspaceDir: string;
     tokenTrackerSessionId?: string | null;
     onLog?: (text: string) => void;
@@ -73,6 +86,20 @@ export type ParsedLectureGenRequest = {
 const SETTINGS_MARKER = 'if the user query is for lecture generation then follow this:';
 const ATTACHMENT_DIRECTIVE = /\s*\[\(attachment:\s*[^\]]+\)\]/gi;
 const moduleDir = path.dirname(fileURLToPath(import.meta.url));
+
+function lectureGenNowMs(): number {
+    return typeof performance !== 'undefined' ? performance.now() : Date.now();
+}
+
+function formatLectureGenDuration(ms: number): string {
+    const totalSeconds = Math.max(0, Math.floor(ms / 1000));
+    const minutes = Math.floor(totalSeconds / 60);
+    const seconds = totalSeconds % 60;
+    if (minutes > 0) {
+        return `${minutes}m ${seconds}s`;
+    }
+    return `${seconds}s`;
+}
 
 function valueAfter(label: string, text: string, fallback: string): string {
     const match = text.match(new RegExp(`(?:^|\\n)${label}:\\s*([^\\r\\n]+)`, 'i'));
@@ -132,6 +159,7 @@ export class LectureGen {
                     if (cancelled || signal?.aborted) throw new Error('Static generation was stopped.');
                 };
                 const log = (message: string) => this.options.onLog?.(`[lecturegen] ${message}\n`);
+                const generationStartedAt = lectureGenNowMs();
                 const input = parseLectureGenRequest(task, this.options.workspaceDir);
                 if (!input.includeVideo && !input.includeInteractive && !input.includeGame) {
                     throw new Error('Select at least one output: video, interactive, or practice game.');
@@ -142,11 +170,18 @@ export class LectureGen {
                 if (!input.teachingStyle) {
                     input.teachingStyle = fs.readFileSync(path.resolve(moduleDir, '..', '.agents', 'mylecture-teaching-style', 'default.md'), 'utf8');
                 }
-                const common = {
+                const stages = resolveLectureGenStageModels({
                     model: this.options.model,
+                    scriptModel: this.options.scriptModel,
+                    animatorModel: this.options.animatorModel
+                });
+                log(formatStageModelLog(stages));
+                const shared = {
                     tokenTrackerSessionId: this.options.tokenTrackerSessionId,
                     promptWorkspaceDir: this.options.workspaceDir
                 };
+                const scriptCommon = { ...shared, model: stages.scriptModel };
+                const animatorCommon = { ...shared, model: stages.animatorModel };
                 fs.mkdirSync(this.options.workspaceDir, { recursive: true });
 
                 type SupplementalGenerationResult = {
@@ -161,7 +196,7 @@ export class LectureGen {
                         log(`Starting IAGen from ${source}${input.includeVideo ? ' in parallel with the video pipeline' : ''}...`);
                         supplementalTasks.push(
                             runIAGen({
-                                ...common,
+                                ...animatorCommon,
                                 request: input.request,
                                 aspectRatio: input.aspectRatio,
                                 referenceMaterial,
@@ -175,7 +210,7 @@ export class LectureGen {
                         log(`Starting GameGen from ${source}${input.includeVideo ? ' in parallel with the video pipeline' : ''}...`);
                         supplementalTasks.push(
                             runGameGen({
-                                ...common,
+                                ...animatorCommon,
                                 request: input.request,
                                 aspectRatio: input.aspectRatio,
                                 referenceMaterial,
@@ -191,95 +226,95 @@ export class LectureGen {
                 if (input.includeVideo) {
                     const chunkSizes = getScriptTrimmerChunkSizes();
                     getAnimatorMaxPreviousHtmls();
-                    log('Generating the concept answer...');
-                const answer = await generateAnswer({
-                    ...common,
-                    request: input.request,
-                    generationLength: input.generationLength,
-                    teachingStyle: input.teachingStyle,
-                    attachments: input.attachments
-                });
-                assertActive();
-                fs.writeFileSync(path.join(this.options.workspaceDir, 'answer.md'), answer, 'utf8');
-
-                log('Writing the audiovisual script...');
-                script = await writeScript({
-                    ...common,
-                    request: input.request,
-                    generationLength: input.generationLength,
-                    answer,
-                    theme: input.theme,
-                    teachingStyle: input.teachingStyle,
-                    enableGetimg: input.enableGetimg,
-                    attachments: input.attachments
-                });
-                assertActive();
-                if (!input.enableGetimg) script = stripImageRequests(script);
-                fs.writeFileSync(path.join(this.options.workspaceDir, 'script.md'), script, 'utf8');
-                startSupplementalGeneration(script);
-
-                const worldBasemapPath = ensureWorldBasemapInWorkspace(this.options.workspaceDir);
-
-                let assets: AssetDescription[] = [];
-                if (input.enableGetimg) {
-                    log('Fetching requested image assets...');
-                    assets = await fetchAssets(script, this.options.workspaceDir);
-                } else {
-                    log('getimg disabled; skipping external image fetcher.');
-                }
-                assertActive();
-
-                const scriptBlocks = trimScriptByNarration(
-                    script,
-                    chunkSizes.maximumNarrationWords,
-                    chunkSizes.minimumNarrationWords
-                );
-                log(
-                    `Split the script into ${scriptBlocks.length} narration-based animation block(s), `
-                    + `targeting ${chunkSizes.minimumNarrationWords}–${chunkSizes.maximumNarrationWords} words each.`
-                );
-                const uploadedAssets = input.attachments
-                    .filter(attachment => attachment.kind === 'image')
-                    .map(attachment => `- ${path.relative(this.options.workspaceDir, attachment.path).replaceAll('\\', '/')}: uploaded image supplied by the user`)
-                    .join('\n');
-                const assetDescriptions = [
-                    formatWorldBasemapDescription(worldBasemapPath),
-                    formatAssetDescriptions(assets),
-                    uploadedAssets
-                ].filter(Boolean).join('\n');
-                const previousHtmls: PreviousHtml[] = [];
-                const animatorSession = new AnimatorSession(common);
-                log('Using one retained animator LLM session for sequential context and prompt caching.');
-                for (const block of scriptBlocks) {
-                    assertActive();
-                    const outputPath = scriptBlocks.length === 1 ? 'index.html' : `index${block.index}.html`;
-                    log(`Animating ${outputPath} from script block ${block.index}/${scriptBlocks.length} (${block.narrationWords} narration words)...`);
-                    const animatorInput = {
-                        ...common,
+                    log(`Generating the concept answer with ${stages.scriptModel}...`);
+                    const answer = await generateAnswer({
+                        ...scriptCommon,
                         request: input.request,
-                        aspectRatio: input.aspectRatio,
                         generationLength: input.generationLength,
-                        scriptBlock: block.content,
-                        blockIndex: block.index,
-                        totalBlocks: scriptBlocks.length,
-                        outputPath,
+                        teachingStyle: input.teachingStyle,
+                        attachments: input.attachments
+                    });
+                    assertActive();
+                    fs.writeFileSync(path.join(this.options.workspaceDir, 'answer.md'), answer, 'utf8');
+
+                    log(`Writing the audiovisual script with ${stages.scriptModel}...`);
+                    script = await writeScript({
+                        ...scriptCommon,
+                        request: input.request,
+                        generationLength: input.generationLength,
+                        answer,
                         theme: input.theme,
                         teachingStyle: input.teachingStyle,
-                        assetDescriptions,
-                        previousHtmls: slicePreviousHtmls(previousHtmls),
+                        enableGetimg: input.enableGetimg,
                         attachments: input.attachments
-                    };
-                    const generatedHtml = await animateScriptBlock(animatorInput, animatorSession);
+                    });
                     assertActive();
-                    const validHtml = await validateAndRepairHtml(
-                        animatorInput,
-                        animatorSession,
-                        this.options.workspaceDir,
-                        generatedHtml,
-                        validation => log(validation)
+                    if (!input.enableGetimg) script = stripImageRequests(script);
+                    fs.writeFileSync(path.join(this.options.workspaceDir, 'script.md'), script, 'utf8');
+                    startSupplementalGeneration(script);
+
+                    const worldBasemapPath = ensureWorldBasemapInWorkspace(this.options.workspaceDir);
+
+                    let assets: AssetDescription[] = [];
+                    if (input.enableGetimg) {
+                        log('Fetching requested image assets...');
+                        assets = await fetchAssets(script, this.options.workspaceDir);
+                    } else {
+                        log('getimg disabled; skipping external image fetcher.');
+                    }
+                    assertActive();
+
+                    const scriptBlocks = trimScriptByNarration(
+                        script,
+                        chunkSizes.maximumNarrationWords,
+                        chunkSizes.minimumNarrationWords
                     );
-                    previousHtmls.push({ path: outputPath, content: validHtml });
-                }
+                    log(
+                        `Split the script into ${scriptBlocks.length} narration-based animation block(s), `
+                        + `targeting ${chunkSizes.minimumNarrationWords}–${chunkSizes.maximumNarrationWords} words each.`
+                    );
+                    const uploadedAssets = input.attachments
+                        .filter(attachment => attachment.kind === 'image')
+                        .map(attachment => `- ${path.relative(this.options.workspaceDir, attachment.path).replaceAll('\\', '/')}: uploaded image supplied by the user`)
+                        .join('\n');
+                    const assetDescriptions = [
+                        formatWorldBasemapDescription(worldBasemapPath),
+                        formatAssetDescriptions(assets),
+                        uploadedAssets
+                    ].filter(Boolean).join('\n');
+                    const previousHtmls: PreviousHtml[] = [];
+                    const animatorSession = new AnimatorSession(animatorCommon);
+                    log(`Using one retained animator LLM session (${stages.animatorModel}) for sequential context and prompt caching.`);
+                    for (const block of scriptBlocks) {
+                        assertActive();
+                        const outputPath = scriptBlocks.length === 1 ? 'index.html' : `index${block.index}.html`;
+                        log(`Animating ${outputPath} from script block ${block.index}/${scriptBlocks.length} (${block.narrationWords} narration words)...`);
+                        const animatorInput = {
+                            ...animatorCommon,
+                            request: input.request,
+                            aspectRatio: input.aspectRatio,
+                            generationLength: input.generationLength,
+                            scriptBlock: block.content,
+                            blockIndex: block.index,
+                            totalBlocks: scriptBlocks.length,
+                            outputPath,
+                            theme: input.theme,
+                            teachingStyle: input.teachingStyle,
+                            assetDescriptions,
+                            previousHtmls: slicePreviousHtmls(previousHtmls),
+                            attachments: input.attachments
+                        };
+                        const generatedHtml = await animateScriptBlock(animatorInput, animatorSession);
+                        assertActive();
+                        const validHtml = await validateAndRepairHtml(
+                            animatorInput,
+                            animatorSession,
+                            this.options.workspaceDir,
+                            generatedHtml,
+                            validation => log(validation)
+                        );
+                        previousHtmls.push({ path: outputPath, content: validHtml });
+                    }
                 } else {
                     log('Video output disabled; skipping answer, script, assets, trimmer, and animator.');
                     startSupplementalGeneration();
@@ -302,7 +337,9 @@ export class LectureGen {
                     title,
                     description: `A learning experience about ${title.replace(/[.!?]+$/, '')}.`
                 }, null, 2), 'utf8');
-                log('Static lesson generation complete.');
+                log(
+                    `Static lesson generation complete in ${formatLectureGenDuration(lectureGenNowMs() - generationStartedAt)}.`
+                );
                 return 'Done making the requested learning experience.';
             }
         };
@@ -312,6 +349,8 @@ export class LectureGen {
 export type LectureGenerationOptions = {
     request: string;
     model: string;
+    scriptModel?: string;
+    animatorModel?: string;
     parentWorkspace?: string;
     workspaceDir?: string;
     generationLength?: string;
@@ -441,6 +480,8 @@ export async function generateLecture(options: LectureGenerationOptions): Promis
 
     const lectureGen = new LectureGen({
         model: options.model,
+        scriptModel: options.scriptModel,
+        animatorModel: options.animatorModel,
         workspaceDir: generation.path,
         tokenTrackerSessionId: options.tokenTrackerSessionId || generation.id,
         onLog: options.onLog
@@ -492,7 +533,12 @@ function printLectureGenHelp(): void {
   npm run lecturegen -- [options] "lecture request"
 
 Options:
-  --model <name>              LLM model (defaults to AGENT_MODEL)
+  --model <name>              Default/fallback LLM model (defaults to AGENT_MODEL)
+  --script-model <name>       Model for answer + script writer (defaults to SCRIPT_MODEL, then --model)
+  --animator-model <name>     Model for animator / iagen / gamegen (defaults to ANIMATOR_MODEL, then --model)
+  --script-compare <a,b,...>  Side-by-side script A/B: generate answer once (first model), then writeScript
+                              for each listed model into <slug>/script.md. Skips assets, trimmer, animator,
+                              iagen, and gamegen. Incompatible with --no-video / --interactive / --game.
   --workspace <directory>     Parent workspace for a unique generation folder
   --workspace-dir <directory> Exact generation folder (no nested unique folder; used by coursegen)
   --length <value>            Generation length, e.g. 90s, 2:00, 2m (default: 1:00)
@@ -506,8 +552,14 @@ Options:
   --no-getimg                 Forbid getimg image requests (bundled world basemap still provided)
   --help                      Show this help
 
+Environment:
+  AGENT_MODEL                 Default/fallback model (also used by the editor agent)
+  SCRIPT_MODEL                Optional override for answer + script stages
+  ANIMATOR_MODEL              Optional override for animator / iagen / gamegen
+
 Example:
-  npm run lecturegen -- --workspace ./gens --length 2:00 --aspect-ratio 16:9 "Explain binary search"`);
+  npm run lecturegen -- --workspace ./gens --length 2:00 --aspect-ratio 16:9 "Explain binary search"
+  npm run lecturegen -- --script-compare gpt-5.6-luna,gemini-3.5-flash "Explain binary search"`);
 }
 
 function loadResource(value: string, resourceFolder: string): string {
@@ -520,8 +572,136 @@ function loadResource(value: string, resourceFolder: string): string {
     return fs.readFileSync(target, 'utf8').trim();
 }
 
+export type ScriptCompareResult = {
+    workspaceDir: string;
+    answerPath: string;
+    comparePath: string;
+    scripts: Array<{ model: string; slug: string; path: string }>;
+};
+
+/**
+ * Side-by-side script A/B: one shared answer, then writeScript per compare model.
+ * Does not run asset fetcher, trimmer, animator, iagen, or gamegen.
+ */
+export async function runScriptCompare(options: {
+    request: string;
+    models: string[];
+    model?: string;
+    parentWorkspace?: string;
+    workspaceDir?: string;
+    generationLength?: string;
+    theme?: string;
+    teachingStyle?: string;
+    attachments?: string[];
+    enableGetimg?: boolean;
+    tokenTrackerSessionId?: string | null;
+    onLog?: (text: string) => void;
+    signal?: AbortSignal;
+}): Promise<ScriptCompareResult> {
+    const request = options.request.trim();
+    if (!request) throw new Error('A generation request is required.');
+    const models = parseScriptCompareModels(options.models.join(','));
+    if (options.workspaceDir && options.parentWorkspace) {
+        throw new Error('Pass either workspaceDir or parentWorkspace, not both.');
+    }
+
+    let generation: { id: string; path: string };
+    if (options.workspaceDir) {
+        const workspaceDir = path.resolve(options.workspaceDir);
+        fs.mkdirSync(workspaceDir, { recursive: true });
+        generation = { id: path.basename(workspaceDir), path: workspaceDir };
+    } else {
+        generation = createGenerationWorkspace(options.parentWorkspace || DEFAULT_WORKSPACE_DIR);
+    }
+
+    const log = (message: string) => options.onLog?.(`[lecturegen] ${message}\n`);
+    const answerModel = models[0];
+    const theme = options.theme?.trim()
+        || fs.readFileSync(path.resolve(moduleDir, '..', '.agents', 'mylecture-themes', 'default.md'), 'utf8');
+    const teachingStyle = options.teachingStyle?.trim()
+        || fs.readFileSync(path.resolve(moduleDir, '..', '.agents', 'mylecture-teaching-style', 'default.md'), 'utf8');
+    const copiedAttachments = copyAttachmentsToGeneration(options.attachments || [], generation.path);
+    const attachmentDescriptors = extract_upload_attachments(
+        copiedAttachments.map(attachment => `[(attachment: ${attachment})]`).join('\n'),
+        generation.path
+    ) as LectureGenAttachment[];
+    const enableGetimg = options.enableGetimg !== false;
+    const generationLength = options.generationLength || '1:00';
+    const tokenTrackerSessionId = options.tokenTrackerSessionId || generation.id;
+    const assertActive = () => {
+        if (options.signal?.aborted) throw new Error('Static generation was stopped.');
+    };
+
+    log(`Script compare mode: answer with ${answerModel}; scripts for ${models.join(', ')}.`);
+    log('Generating the shared concept answer...');
+    const answer = await generateAnswer({
+        model: answerModel,
+        tokenTrackerSessionId,
+        promptWorkspaceDir: generation.path,
+        request,
+        generationLength,
+        teachingStyle,
+        attachments: attachmentDescriptors
+    });
+    assertActive();
+    const answerPath = path.join(generation.path, 'answer.md');
+    fs.writeFileSync(answerPath, answer, 'utf8');
+
+    const slugs = uniqueModelSlugs(models);
+    log(`Writing scripts in parallel for ${models.length} model(s)...`);
+    const scripts = await Promise.all(models.map(async (model, index) => {
+        assertActive();
+        const slug = slugs[index];
+        if (!isModelSlugContained(generation.path, slug)) {
+            throw new Error(`Refusing unsafe compare model folder slug: ${slug}`);
+        }
+        const modelDir = path.join(generation.path, slug);
+        fs.mkdirSync(modelDir, { recursive: true });
+        let script = await writeScript({
+            model,
+            tokenTrackerSessionId,
+            promptWorkspaceDir: generation.path,
+            request,
+            generationLength,
+            answer,
+            theme,
+            teachingStyle,
+            enableGetimg,
+            attachments: attachmentDescriptors
+        });
+        assertActive();
+        if (!enableGetimg) script = stripImageRequests(script);
+        const scriptPath = path.join(modelDir, 'script.md');
+        fs.writeFileSync(scriptPath, script, 'utf8');
+        log(`Finished script for ${model} → ${path.join(slug, 'script.md')}`);
+        return { model, slug, path: scriptPath };
+    }));
+
+    const comparePath = path.join(generation.path, 'compare.json');
+    fs.writeFileSync(comparePath, JSON.stringify({
+        request,
+        answerModel,
+        models,
+        slugs: scripts.map(entry => ({ model: entry.model, slug: entry.slug })),
+        generationLength,
+        enableGetimg,
+        generatedAt: new Date().toISOString(),
+        fallbackModel: options.model || process.env.AGENT_MODEL || ''
+    }, null, 2), 'utf8');
+
+    return {
+        workspaceDir: generation.path,
+        answerPath,
+        comparePath,
+        scripts
+    };
+}
+
 export async function runLectureGenCli(args = process.argv.slice(2)): Promise<void> {
     let model = process.env.AGENT_MODEL || '';
+    let scriptModel = process.env.SCRIPT_MODEL || '';
+    let animatorModel = process.env.ANIMATOR_MODEL || '';
+    let scriptCompareRaw = '';
     let parentWorkspace = DEFAULT_WORKSPACE_DIR;
     let workspaceDir = '';
     let parentWorkspaceSet = false;
@@ -548,6 +728,9 @@ export async function runLectureGenCli(args = process.argv.slice(2)): Promise<vo
                 printLectureGenHelp();
                 return;
             case '--model': model = nextValue(); break;
+            case '--script-model': scriptModel = nextValue(); break;
+            case '--animator-model': animatorModel = nextValue(); break;
+            case '--script-compare': scriptCompareRaw = nextValue(); break;
             case '--workspace':
                 parentWorkspace = path.resolve(nextValue());
                 parentWorkspaceSet = true;
@@ -574,9 +757,47 @@ export async function runLectureGenCli(args = process.argv.slice(2)): Promise<vo
     }
     const request = taskParts.join(' ').trim() || fs.readFileSync(0, 'utf8').trim();
     if (!request) throw new Error('Provide a video request as an argument or through stdin.');
+
+    if (scriptCompareRaw) {
+        if (!includeVideo) {
+            throw new Error('--script-compare cannot be combined with --no-video (compare is script-only).');
+        }
+        if (includeInteractive || includeGame) {
+            throw new Error('--script-compare cannot be combined with --interactive or --game.');
+        }
+        if (scriptModel.trim()) {
+            process.stderr.write(
+                '[lecturegen] Ignoring --script-model / SCRIPT_MODEL during --script-compare; '
+                + 'answer uses the first compare model.\n'
+            );
+        }
+        const compareModels = parseScriptCompareModels(scriptCompareRaw);
+        const result = await runScriptCompare({
+            request,
+            models: compareModels,
+            model,
+            ...(workspaceDir ? { workspaceDir } : { parentWorkspace }),
+            generationLength,
+            theme,
+            teachingStyle,
+            attachments,
+            enableGetimg,
+            onLog: text => process.stderr.write(text)
+        });
+        const scriptLines = result.scripts
+            .map(entry => `  ${entry.model}: ${entry.path}`)
+            .join('\n');
+        process.stdout.write(
+            `Script compare complete.\nGeneration folder: ${result.workspaceDir}\nScripts:\n${scriptLines}\n`
+        );
+        return;
+    }
+
     const result = await generateLecture({
         request,
         model,
+        scriptModel: scriptModel || undefined,
+        animatorModel: animatorModel || undefined,
         ...(workspaceDir ? { workspaceDir } : { parentWorkspace }),
         generationLength,
         aspectRatio,

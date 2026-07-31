@@ -17,6 +17,14 @@ import OpenAI from 'openai';
 
 import { log_llm_request } from './llm_prompt_logger.js';
 import { Logger } from './logger.js';
+import {
+    OPENAI_REASONING_EFFORTS,
+    OPENAI_SERVICE_TIERS,
+    applyOpenAiReasoningEffort,
+    applyOpenAiServiceTier,
+    resolveOpenAiReasoningEffortFromEnv,
+    resolveOpenAiServiceTierFromEnv,
+} from './openai_reasoning.js';
 import { extractTokenUsage, trackTokenUsageFromResponse, trackTokenUsage } from '../token-tracker/token_tracker.js';
 
 const __filename = fileURLToPath(import.meta.url);
@@ -692,6 +700,20 @@ export class LLM_Model {
         );
 
         const uploaded_file_ids: string[] = [];
+        const reasoningConfig = resolveOpenAiReasoningEffortFromEnv();
+        if (reasoningConfig.invalidRaw) {
+            this.logger.warning(
+                `Ignoring invalid GPT_REASONING_EFFORT="${reasoningConfig.invalidRaw}". `
+                + `Supported values: ${OPENAI_REASONING_EFFORTS.join(', ')}.`
+            );
+        }
+        const serviceTierConfig = resolveOpenAiServiceTierFromEnv();
+        if (serviceTierConfig.invalidRaw) {
+            this.logger.warning(
+                `Ignoring invalid GPT_SERVICE_TIER="${serviceTierConfig.invalidRaw}". `
+                + `Supported values: ${OPENAI_SERVICE_TIERS.join(', ')}.`
+            );
+        }
 
         const _upload_openai_attachments = async (att_list: Array<{ path: string; kind: string }>): Promise<any[]> => {
             const parts: any[] = [];
@@ -724,9 +746,12 @@ export class LLM_Model {
                     const mapped_role = msg.role === "model" ? "assistant" : msg.role;
                     const msg_parts: any[] = [];
                     if (msg.content) {
-                        msg_parts.push({ type: "input_text", text: msg.content });
+                        const text_type = mapped_role === "assistant" ? "output_text" : "input_text";
+                        msg_parts.push({ type: text_type, text: msg.content });
                     }
-                    const hist_att = this._normalize_attachments(msg.attachments || [], true);
+                    const hist_att = mapped_role === "assistant"
+                        ? []
+                        : this._normalize_attachments(msg.attachments || [], true);
                     msg_parts.push(...(await _upload_openai_attachments(hist_att)));
                     if (msg_parts.length > 0) {
                         input_messages.push({ role: mapped_role, content: msg_parts });
@@ -747,6 +772,12 @@ export class LLM_Model {
                 const gpt_max_tokens = process.env.GPT_MAX_TOKENS;
                 if (gpt_max_tokens) {
                     response_kwargs["max_output_tokens"] = parseInt(gpt_max_tokens, 10);
+                }
+                if (reasoningConfig.effort) {
+                    applyOpenAiReasoningEffort(response_kwargs, 'responses', reasoningConfig.effort);
+                }
+                if (serviceTierConfig.serviceTier) {
+                    applyOpenAiServiceTier(response_kwargs, 'responses', serviceTierConfig.serviceTier);
                 }
 
                 this.logger.debug("Sending request to OpenAI Responses API...");
@@ -798,6 +829,12 @@ export class LLM_Model {
                 }
                 if (return_json) {
                     request_params["response_format"] = { type: "json_object" };
+                }
+                if (reasoningConfig.effort) {
+                    applyOpenAiReasoningEffort(request_params, 'chat', reasoningConfig.effort);
+                }
+                if (serviceTierConfig.serviceTier) {
+                    applyOpenAiServiceTier(request_params, 'chat', serviceTierConfig.serviceTier);
                 }
 
                 this.logger.debug("Sending request to OpenAI Chat Completions API...");
@@ -1041,6 +1078,96 @@ export class LLM_Model {
 
     public get client(): any {
         return this._client;
+    }
+
+    public async uploadOpenAiInputFile(filePath: string): Promise<{ type: "input_file"; file_id: string }> {
+        if (this.api_type !== "openai") {
+            throw new Error("uploadOpenAiInputFile is only supported for OpenAI models");
+        }
+        const uploaded = await this._client.files.create({
+            file: fs.createReadStream(filePath),
+            purpose: "user_data",
+        });
+        return { type: "input_file", file_id: uploaded.id };
+    }
+
+    public async deleteOpenAiFile(fileId: string): Promise<void> {
+        if (this.api_type !== "openai") {
+            return;
+        }
+        try {
+            await this._client.files.delete(fileId);
+        } catch {
+            // ignore cleanup failures
+        }
+    }
+
+    public async createAgentResponse(options: {
+        instructions: string;
+        input: any[];
+        tools: any[];
+        purpose: string;
+    }): Promise<any> {
+        if (this.api_type !== "openai") {
+            throw new Error("createAgentResponse is only supported for OpenAI models");
+        }
+
+        const reasoningConfig = resolveOpenAiReasoningEffortFromEnv();
+        if (reasoningConfig.invalidRaw) {
+            this.logger.warning(
+                `Ignoring invalid GPT_REASONING_EFFORT="${reasoningConfig.invalidRaw}". `
+                + `Supported values: ${OPENAI_REASONING_EFFORTS.join(', ')}.`
+            );
+        }
+        const serviceTierConfig = resolveOpenAiServiceTierFromEnv();
+        if (serviceTierConfig.invalidRaw) {
+            this.logger.warning(
+                `Ignoring invalid GPT_SERVICE_TIER="${serviceTierConfig.invalidRaw}". `
+                + `Supported values: ${OPENAI_SERVICE_TIERS.join(', ')}.`
+            );
+        }
+
+        const response_kwargs: Record<string, unknown> = {
+            model: this.model_name,
+            instructions: options.instructions,
+            input: options.input,
+            tools: options.tools,
+        };
+        const gpt_max_tokens = process.env.GPT_MAX_TOKENS;
+        if (gpt_max_tokens) {
+            response_kwargs.max_output_tokens = parseInt(gpt_max_tokens, 10);
+        }
+        if (reasoningConfig.effort) {
+            applyOpenAiReasoningEffort(response_kwargs, 'responses', reasoningConfig.effort);
+        }
+        if (serviceTierConfig.serviceTier) {
+            applyOpenAiServiceTier(response_kwargs, 'responses', serviceTierConfig.serviceTier);
+        }
+
+        this.logger.debug("Sending agent request to OpenAI Responses API...");
+        log_llm_request("coding-agent-openai-responses", response_kwargs);
+        const started_at = now_ms();
+        const response = await this._client.responses.create(response_kwargs);
+        const latency_ms = Math.round(now_ms() - started_at);
+        _logTokenUsage(this.logger, response, 'openai');
+
+        let finalPurpose = options.purpose;
+        if (options.purpose.startsWith("step_")) {
+            const function_calls = (response.output || []).filter((item: any) => item?.type === "function_call");
+            finalPurpose = function_calls.length === 0
+                ? `${options.purpose}_done`
+                : `${options.purpose}_toolcall_${function_calls.map((call: any) => call.name || "unknown").join("_")}`;
+        }
+
+        trackTokenUsageFromResponse({
+            response,
+            provider: 'openai',
+            model: this.model_name,
+            purpose: finalPurpose,
+            latencyMs: latency_ms,
+            sessionId: this.token_tracker_session_id || undefined,
+        });
+        return response;
     }
 
     public async generateContent(request: any, purpose: string): Promise<any> {

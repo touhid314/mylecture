@@ -121,6 +121,16 @@ export const MODEL_TOKEN_COSTS_PER_MILLION: Record<string, ModelCostConfig> = {
         tiers: [{ input: 0, output: 0 }],
         imageCostPerGeneration: 0.03,
     },
+    "gpt-5.6-luna": {
+        label: "GPT-5.6 Luna",
+        contextWindow: "1.05M",
+        tiers: [
+            { maxContextTokens: 272_000, input: 0.20, output: 1.20, cachedInput: 0.02 },
+            { input: 0.40, output: 1.80, cachedInput: 0.04 },
+        ],
+        batchDiscount: 0.50,
+        notes: "Long-context tier applies when input exceeds 272K tokens.",
+    },
     "gpt-image-2": {
         label: "GPT Image 2",
         tiers: [{ input: 0, output: 0 }],

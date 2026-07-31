@@ -409,6 +409,50 @@ function gemini_function_declarations(toolOptions: ToolRuntimeOptions = {}): any
     return declarations;
 }
 
+function openai_function_tools(toolOptions: ToolRuntimeOptions = {}): any[] {
+    return tool_declarations(toolOptions).map(tool => ({
+        type: "function",
+        name: tool.name,
+        description: tool.description,
+        parameters: tool.parameters,
+    }));
+}
+
+function extract_openai_function_calls(response: any): any[] {
+    return (response.output || []).filter((item: any) => item?.type === "function_call");
+}
+
+function extract_openai_text(response: any): string {
+    if (typeof response.output_text === "string" && response.output_text.trim()) {
+        return response.output_text.trim();
+    }
+    const chunks: string[] = [];
+    for (const item of response.output || []) {
+        if (item?.type === "message" && Array.isArray(item.content)) {
+            for (const part of item.content) {
+                if (part?.type === "output_text" && part.text) {
+                    chunks.push(part.text);
+                }
+            }
+        }
+    }
+    return chunks.join("\n").trim();
+}
+
+function openai_input_token_count(usage: any): number | null {
+    if (!usage) {
+        return null;
+    }
+    return numeric_token_count(usage.input_tokens ?? usage.prompt_tokens);
+}
+
+function openai_output_token_count(usage: any): number | null {
+    if (!usage) {
+        return null;
+    }
+    return numeric_token_count(usage.output_tokens ?? usage.completion_tokens);
+}
+
 function extract_gemini_function_calls(response: any): any[] {
     if (response.functionCalls && response.functionCalls.length > 0) {
         return response.functionCalls;
@@ -735,6 +779,243 @@ export class GeminiAgentSession {
     }
 }
 
+class OpenAiAgentSession {
+    private model: string;
+    private llm: LLM_Model;
+    private instructions: string;
+    private tools: any[];
+    private contents: any[];
+    private userTasks: string[];
+    private totalInputTokens: number;
+    private totalOutputTokens: number;
+    private workspaceDir: string;
+    private toolOptions: ToolRuntimeOptions;
+    private tokenTrackerSessionId: string;
+    private uploadedOpenAiFileIds: string[] = [];
+
+    constructor(
+        model: string,
+        workspaceDir: string,
+        skills: string[] | null = null,
+        initialHistory: any[] = [],
+        toolOptions: ToolRuntimeOptions = {},
+        tokenTrackerSessionId?: string | null,
+        customSystemPrompt?: string
+    ) {
+        this.model = model;
+        this.workspaceDir = workspaceDir;
+        this.toolOptions = toolOptions;
+        this.llm = new LLM_Model(model);
+        this.tokenTrackerSessionId = resolve_token_tracker_session_id(model, workspaceDir, tokenTrackerSessionId);
+        process.env.TOKEN_TRACKER_SESSION_ID = this.tokenTrackerSessionId;
+        this.llm.token_tracker_session_id = this.tokenTrackerSessionId;
+        this.instructions = build_system_instructions(skills, workspaceDir, toolOptions, customSystemPrompt);
+        this.tools = openai_function_tools(toolOptions);
+        this.contents = [...initialHistory];
+        this.userTasks = [];
+        for (const msg of initialHistory) {
+            if (msg?.role === "user") {
+                if (msg.parts) {
+                    for (const part of msg.parts) {
+                        if (part.text) {
+                            this.userTasks.push(strip_ide_context_from_user_query(part.text));
+                        }
+                    }
+                } else if (msg.content) {
+                    this.userTasks.push(strip_ide_context_from_user_query(msg.content));
+                }
+            }
+        }
+        this.totalInputTokens = 0;
+        this.totalOutputTokens = 0;
+        print_detail("workspace", workspaceDir, Color.BLUE);
+        print_detail("token session", this.tokenTrackerSessionId, Color.BLUE);
+        print_detail("tool mode", "native OpenAI function calling", Color.BLUE);
+        if (skills && skills.length > 0) {
+            print_detail("skills", skills, Color.BLUE);
+        }
+    }
+
+    private record_token_usage(inputTokens: number | null, outputTokens: number | null, cachedInputTokens: number | null = null): void {
+        const parts: string[] = [];
+
+        if (inputTokens !== null) {
+            this.totalInputTokens += inputTokens;
+            parts.push(`input=${inputTokens}`);
+        } else {
+            parts.push("input=unavailable");
+        }
+
+        if (cachedInputTokens !== null) {
+            parts.push(`cached_input=${cachedInputTokens}`);
+        }
+
+        if (outputTokens !== null) {
+            this.totalOutputTokens += outputTokens;
+            parts.push(`output=${outputTokens}`);
+        } else {
+            parts.push("output=unavailable");
+        }
+
+        print_detail("tokens", parts.join(" "), Color.DIM);
+        print_detail("token totals", format_token_totals(this.totalInputTokens, this.totalOutputTokens), Color.DIM);
+    }
+
+    private async upload_attachment_part(attachment: UploadAttachment): Promise<{ type: "input_file"; file_id: string }> {
+        print_detail("upload", `${attachment.kind}:${attachment.path}`, Color.BLUE);
+        const uploaded = await this.llm.uploadOpenAiInputFile(attachment.path);
+        this.uploadedOpenAiFileIds.push(uploaded.file_id);
+        return uploaded;
+    }
+
+    private async cleanup_uploaded_files(): Promise<void> {
+        const ids = this.uploadedOpenAiFileIds.slice();
+        this.uploadedOpenAiFileIds = [];
+        for (const fileId of ids) {
+            await this.llm.deleteOpenAiFile(fileId);
+        }
+    }
+
+    private async generate_sanitized_final_response(): Promise<string> {
+        const finalContext = build_pre_user_response_context(this.userTasks);
+        const final_llm = new LLM_Model(
+            this.model,
+            finalContext.systemInstruction,
+            null,
+            false
+        );
+        final_llm.token_tracker_session_id = this.tokenTrackerSessionId;
+        final_llm.token_tracker_purpose = "openai_native_final_response";
+        const response = await final_llm.generate(
+            finalContext.userPrompt,
+            null,
+            null,
+            null,
+            null,
+            false,
+            false
+        );
+        return typeof response === 'string' && response.trim() ? response.trim() : "Finished working.";
+    }
+
+    async run(task: string, max_turns: number, abortSignal?: AbortSignal): Promise<string> {
+        if (abortSignal?.aborted) throw new AgentAbortError();
+        this.userTasks.push(strip_ide_context_from_user_query(task));
+        let prepared_task = prepare_user_task(task, this.workspaceDir);
+        const attachments = extract_upload_attachments(task, this.workspaceDir);
+        if (attachments.length > 0) {
+            print_detail("attachments", format_attachment_summary(attachments), Color.BLUE);
+            const attachmentPaths = attachments.map(attachment => path.relative(this.workspaceDir, attachment.path));
+            prepared_task += `\n\n[Available workspace attachment paths: ${attachmentPaths.join(", ")}. Pass relevant paths to tools that accept attachments.]`;
+        }
+
+        const userContent: any[] = [{ type: "input_text", text: prepared_task }];
+        for (const attachment of attachments) {
+            if (abortSignal?.aborted) throw new AgentAbortError();
+            userContent.push(await this.upload_attachment_part(attachment));
+            if (abortSignal?.aborted) throw new AgentAbortError();
+        }
+        this.contents.push({ role: "user", content: userContent });
+
+        try {
+            for (let step = 1; step <= max_turns; step++) {
+                print_step(step, "asking model for next action", Color.MAGENTA);
+                let response;
+                try {
+                    response = await this.llm.createAgentResponse({
+                        instructions: this.instructions,
+                        input: this.contents,
+                        tools: this.tools,
+                        purpose: `step_${step}`,
+                    });
+                    if (abortSignal?.aborted) throw new AgentAbortError();
+                } catch (err: any) {
+                    if (err instanceof AgentAbortError) throw err;
+                    console.error("OPENAI API ERROR DETAIL:", err);
+                    if (err.status) console.error("API ERROR STATUS:", err.status);
+                    if (err.error) console.error("API ERROR BODY:", JSON.stringify(err.error, null, 2));
+                    throw err;
+                }
+
+                const usage = response.usage;
+                const input_tokens = openai_input_token_count(usage);
+                const output_tokens = openai_output_token_count(usage);
+                const tracked_usage = extractTokenUsage(response, "openai");
+                this.record_token_usage(input_tokens, output_tokens, tracked_usage.cachedInputTokens ?? null);
+
+                const function_calls = extract_openai_function_calls(response);
+                if (function_calls.length === 0) {
+                    print_step(step, "done", Color.GREEN);
+                    return extract_openai_text(response) || "Done.";
+                }
+
+                this.contents.push(...(response.output || []));
+
+                const followUpItems: any[] = [];
+                for (const call of function_calls) {
+                    if (abortSignal?.aborted) throw new AgentAbortError();
+                    const name = call.name;
+                    let argumentsObj: any = {};
+                    try {
+                        argumentsObj = JSON.parse(call.arguments || "{}");
+                    } catch {
+                        argumentsObj = {};
+                    }
+                    print_step(step, `running tool \`${name}\``, Color.BLUE);
+                    print_detail("arguments", compact_tool_arguments(argumentsObj), Color.DIM, 700);
+
+                    const result = await execute_tool(name, argumentsObj, this.workspaceDir, this.toolOptions);
+                    const result_color = result.startsWith("ERROR:") ? Color.RED : Color.GREEN;
+                    print_detail(`tool:${name} result`, compact_tool_result(result), result_color);
+
+                    const payload = build_function_response_payload(name, argumentsObj, result, this.workspaceDir);
+                    if ("contract_validation" in payload) {
+                        const validation_color = payload["contract_validation"].includes("validation passed") ? Color.GREEN : Color.RED;
+                        print_detail("contract", payload["contract_validation"], validation_color, 1200);
+                    }
+
+                    followUpItems.push({
+                        type: "function_call_output",
+                        call_id: call.call_id,
+                        output: JSON.stringify(payload),
+                    });
+
+                    if (name === "read" && !result.startsWith("ERROR:")) {
+                        const filePath = argumentsObj.path || "";
+                        const ext = path.extname(filePath).toLowerCase();
+                        const isImage = ['.png', '.jpg', '.jpeg', '.webp', '.bmp'].includes(ext);
+                        if (isImage) {
+                            try {
+                                const absolutePath = resolve_workspace_path(filePath, this.workspaceDir);
+                                const mimeType = UPLOAD_MIME_BY_EXT[ext] || "image/png";
+                                const uploaded = await this.upload_attachment_part({
+                                    path: absolutePath,
+                                    mimeType,
+                                    kind: "image",
+                                });
+                                followUpItems.push({
+                                    role: "user",
+                                    content: [uploaded],
+                                });
+                            } catch (e: any) {
+                                console.error("[WARN] Failed to upload image attachment in read tool:", e);
+                            }
+                        }
+                    }
+                }
+
+                this.contents.push(...followUpItems);
+            }
+
+            return `Stopped after ${max_turns} tool loop(s). Ask me to continue if needed.`;
+        } finally {
+            remove_temporary_openai_read_attachments(this.contents);
+            compact_openai_turn(this.contents);
+            await this.cleanup_uploaded_files();
+        }
+    }
+}
+
 class JsonFallbackAgentSession {
     private llm: LLM_Model;
     private transcript: any[];
@@ -882,8 +1163,12 @@ class JsonFallbackAgentSession {
 }
 
 function create_agent_session(model: string, workspaceDir: string, skills: string[] | null = null, initialHistory: any[] = [], toolOptions: ToolRuntimeOptions = {}, tokenTrackerSessionId?: string | null, customSystemPrompt?: string): any {
-    if (model.toLowerCase().includes("gemini")) {
+    const normalized = model.toLowerCase();
+    if (normalized.includes("gemini")) {
         return new GeminiAgentSession(model, workspaceDir, skills, initialHistory, toolOptions, tokenTrackerSessionId, customSystemPrompt);
+    }
+    if (normalized.startsWith("gpt-")) {
+        return new OpenAiAgentSession(model, workspaceDir, skills, initialHistory, toolOptions, tokenTrackerSessionId, customSystemPrompt);
     }
     return new JsonFallbackAgentSession(model, workspaceDir, skills, initialHistory, toolOptions, tokenTrackerSessionId, customSystemPrompt);
 }
@@ -921,6 +1206,54 @@ function remove_temporary_read_attachments(contents: any[]): void {
         if (hasFunctionResponse) {
             msg.parts = msg.parts.filter((p: any) => !p.fileData);
         }
+    }
+}
+
+function remove_temporary_openai_read_attachments(contents: any[]): void {
+    for (let index = 0; index < contents.length; index++) {
+        const item = contents[index];
+        if (!item || item.type !== "function_call_output") continue;
+        const next = contents[index + 1];
+        if (next?.role === "user" && Array.isArray(next.content) && next.content.every((part: any) => part?.type === "input_file")) {
+            contents.splice(index + 1, 1);
+        }
+    }
+}
+
+function compact_openai_turn(contents: any[]): void {
+    const callById = new Map<string, any>();
+    for (const item of contents) {
+        if (item?.type === "function_call" && item.call_id) {
+            callById.set(item.call_id, item);
+        }
+    }
+    for (const item of contents) {
+        if (item?.type !== "function_call_output" || !item.call_id) continue;
+        const call = callById.get(item.call_id);
+        if (!call) continue;
+        let argumentsObj: any = {};
+        try {
+            argumentsObj = JSON.parse(call.arguments || "{}");
+        } catch {
+            argumentsObj = {};
+        }
+        let rawResult = typeof item.output === "string" ? item.output : JSON.stringify(item.output ?? "");
+        try {
+            const parsed = JSON.parse(rawResult);
+            if (parsed && typeof parsed.result === "string") {
+                rawResult = parsed.result;
+            }
+        } catch {
+            // keep raw output string
+        }
+        const { compactedArgs } = compact_tool_history(call.name, argumentsObj, "");
+        const { compactedResult } = compact_tool_history(call.name, argumentsObj, rawResult);
+        try {
+            call.arguments = JSON.stringify(compactedArgs);
+        } catch {
+            // keep original arguments
+        }
+        item.output = compactedResult;
     }
 }
 
@@ -981,7 +1314,10 @@ function compact_fallback_turn(transcript: any[]): void {
 export interface ChatMessage {
     role: "user" | "model" | "assistant" | "tool";
     parts?: any[];
-    content?: string;
+    content?: string | any[];
+    type?: string;
+    call_id?: string;
+    output?: string;
     model_response?: any;
     tool?: string;
     arguments?: any;
@@ -1059,6 +1395,9 @@ export class ChatSession {
         }
         if (this.model.toLowerCase().includes("gemini")) {
             return [...historyBeforeTurn, { role: "user", parts: [{ text: prepare_user_task(prompt, this.workspaceDir) }] }];
+        }
+        if (this.model.toLowerCase().startsWith("gpt-")) {
+            return [...historyBeforeTurn, { role: "user", content: [{ type: "input_text", text: prepare_user_task(prompt, this.workspaceDir) }] }];
         }
         return [...historyBeforeTurn, { role: "user", content: prepare_user_task(prompt, this.workspaceDir) }];
     }

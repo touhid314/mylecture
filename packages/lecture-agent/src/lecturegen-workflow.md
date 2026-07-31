@@ -84,7 +84,8 @@ unique child directory.
 Important inputs include:
 
 - `request`
-- `model`
+- `model` (default/fallback; editor and unset stages)
+- optional `scriptModel` / `animatorModel` (or env `SCRIPT_MODEL` / `ANIMATOR_MODEL`)
 - `workspaceDir` or `parentWorkspace`
 - `generationLength`
 - `aspectRatio`
@@ -96,6 +97,8 @@ Important inputs include:
 - `includeInteractive`
 - `includeGame`
 - optional cancellation signal, token-tracker session ID, and log callback
+
+CLI also supports `--script-compare a,b` for script-only A/B (shared answer from the first model; no animator).
 
 The returned result contains:
 

@@ -85,11 +85,17 @@ Common variables:
 ```env
 GOOGLE_API_KEY="..."
 OPENAI_API_KEY="..."
-AGENT_MODEL="gemini-3.5-flash"
+AGENT_MODEL=""
+GPT_REASONING_EFFORT="none"
+# GPT_SERVICE_TIER="fast"  # OpenAI only; omit when unset. Prefer fast; priority is a backwards-compatible alias
 LOG_FULL_LLM_PROMPT="True"
 ```
 
-Gemini models use native Gemini function calling. Model names starting with `gpt-` use the OpenAI/JSON fallback path through `packages/lecture-agent/src/llm_model.ts`.
+Gemini models use native Gemini function calling. Model names starting with `gpt-` use native OpenAI Responses API function calling in `packages/lecture-agent/src/editor-agent/coding_agent.ts`.
+
+For OpenAI reasoning models (for example `gpt-5.6-luna`), set `GPT_REASONING_EFFORT` to one of `none`, `minimal`, `low`, `medium`, `high`, `xhigh`, or `max`. When unset, the stack defaults to `none` to match Gemini 3.5 Flash (no extended thinking budget configured).
+
+To enable OpenAI Fast mode, set `GPT_SERVICE_TIER="fast"` (recommended) or `"priority"` (OpenAI's backwards-compatible alias). OpenAI-only; ignored for Gemini. This is separate from `GPT_REASONING_EFFORT`. When unset or empty, `service_tier` is omitted and the API uses its default behavior. Invalid values are ignored with a warning.
 
 ## IDE Server
 
@@ -339,14 +345,18 @@ Typical globals:
 window.__VIDEO_METADATA__ = {
   contractVersion: "0.2",
   title: "Lecture Title",
-  aspectRatio: "16:9"
+  aspectRatio: "16:9",
 };
 
 window.__VIDEO_PLAN__ = [
   // narration+visual, visual-only, interactive, or game segments
 ];
 
-window.__RENDER_SECTION__ = function renderSection(segment, localTime, globalTime) {
+window.__RENDER_SECTION__ = function renderSection(
+  segment,
+  localTime,
+  globalTime,
+) {
   // Deterministic visual state based on time.
 };
 ```
@@ -380,10 +390,10 @@ TTS provider/voice/speed are normalized in `ide-server.ts` before invoking `buil
 `src/render-video.ts` exports a programmatic renderer API:
 
 ```ts
-renderVideo(options)
-parseArgs(argv)
-defaultRenderVideoOptions()
-normalizeRenderVideoOptions(options)
+renderVideo(options);
+parseArgs(argv);
+defaultRenderVideoOptions();
+normalizeRenderVideoOptions(options);
 ```
 
 Keep the CLI as a thin wrapper around `renderVideo(options)` for manual testing and scripts. Do not put server queueing, request concurrency, or IDE job policy inside the renderer; those belong in `src/ide-server.ts`.

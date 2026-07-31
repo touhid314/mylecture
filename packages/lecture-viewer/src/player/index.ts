@@ -6,6 +6,7 @@
  * viewport detection, and the event API consumed by the IDE/website shells.
  */
 import { normalizeTtsText } from './tts-normalize.js';
+import { invokeRenderSection } from './invoke-render-section.js';
 
 export const lectureViewerVersion = '0.2';
 
@@ -372,6 +373,7 @@ class LecturePlayer {
   handleFrameLoad() {
     try {
       const win = this.iframe.contentWindow;
+      win.__PLAYER_CONTROLLED__ = true;
 
       // Rendered MP4 files are played by the browser's native video element.
       // Contract HTML files are handled by the custom timeline code below.
@@ -854,9 +856,8 @@ class LecturePlayer {
         if (candidate.start <= activeTime) cue = candidate;
         if (candidate.start > activeTime) break;
       }
-      const renderSection = win.__RENDER_SECTION__ || win.__HTML_RENDER_SECTION__ || win.__AI_RENDER_SECTION__;
-      if (cue && typeof renderSection === 'function') {
-        renderSection(cue.item, activeTime - cue.start, activeTime);
+      if (cue) {
+        invokeRenderSection(win, cue.item, activeTime - cue.start, activeTime);
       }
     }
 
@@ -871,8 +872,8 @@ class LecturePlayer {
     this.state.interactiveActive = false;
     if (typeof win.__STOP_INTERACTIVE__ === 'function') {
       win.__STOP_INTERACTIVE__();
-    } else if (typeof win.__RENDER_SECTION__ === 'function' && this.state.timeline[0]) {
-      win.__RENDER_SECTION__(this.state.timeline[0].item, 0, 0);
+    } else if (this.state.timeline[0]) {
+      invokeRenderSection(win, this.state.timeline[0].item, 0, 0);
     }
   }
 
@@ -881,8 +882,8 @@ class LecturePlayer {
     this.state.gameActive = false;
     if (typeof win.__STOP_GAME__ === 'function') {
       win.__STOP_GAME__();
-    } else if (typeof win.__RENDER_SECTION__ === 'function' && this.state.timeline[0]) {
-      win.__RENDER_SECTION__(this.state.timeline[0].item, 0, 0);
+    } else if (this.state.timeline[0]) {
+      invokeRenderSection(win, this.state.timeline[0].item, 0, 0);
     }
   }
 

@@ -10,7 +10,7 @@ import path from 'path';
 import { spawnSync } from 'child_process';
 import { fileURLToPath } from 'url';
 
-import { DEFAULT_WORKSPACE_DIR, resolve_workspace_path } from '../workspace.js';
+import { findMissingRenderHelpers, formatMissingRenderHelpersError } from './render_helpers_check.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -107,6 +107,11 @@ export function validate_index_html_contract(filePath: string, workspaceDir: str
     const [, escaped_markup_count] = purify_html_markup_escapes(content);
     if (escaped_markup_count > 0) {
         return `HTML contract validation failed for ${filePath}: found ${escaped_markup_count} literal escaped quote(s) in HTML markup. Use normal attributes like id="stage", not id=\\"stage\\".`;
+    }
+
+    const missingHelpers = findMissingRenderHelpers(content);
+    if (missingHelpers.length > 0) {
+        return formatMissingRenderHelpersError(filePath, missingHelpers);
     }
 
     try {

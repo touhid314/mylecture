@@ -16,6 +16,7 @@ import { existsSync, mkdirSync, readFileSync, statSync, writeFileSync, unlinkSyn
 import path from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { normalizeTtsText } from './tts-normalize.ts';
+import { getInvokeRenderSectionSource } from '../packages/lecture-viewer/src/player/invoke-render-section.ts';
 
 const rootDir = process.cwd();
 
@@ -251,11 +252,16 @@ async function readPlanFromHtml(inputPath) {
   const plan = await page.evaluate(() => window.__VIDEO_PLAN__);
   await browser.close();
 
-  if (errors.length > 0) {
-    throw new Error(`Source page errors:\n${errors.join('\n')}`);
-  }
   if (!Array.isArray(plan) || plan.length === 0) {
+    if (errors.length > 0) {
+      throw new Error(`Source page errors:\n${errors.join('\n')}`);
+    }
     throw new Error('Source HTML must expose a non-empty window.__VIDEO_PLAN__ array.');
+  }
+  if (errors.length > 0) {
+    console.warn(
+      `Source page preview warnings (resolve will continue):\n${errors.join('\n')}`
+    );
   }
 
   return plan;
@@ -542,6 +548,8 @@ function writeResolvedHtml(inputPath, outputPath, timeline, resolvedAt = new Dat
     '</script>',
     '<script id="resolved-render-runtime">',
     `(() => {
+  ${getInvokeRenderSectionSource()}
+
   const timeline = window.__RESOLVED_TIMELINE__;
   if (!timeline) return;
 
@@ -587,9 +595,8 @@ function writeResolvedHtml(inputPath, outputPath, timeline, resolvedAt = new Dat
       if (candidate.start > activeTime) break;
     }
 
-    const renderSection = window.__RENDER_SECTION__ || window.__HTML_RENDER_SECTION__ || window.__AI_RENDER_SECTION__;
-    if (cue && typeof renderSection === "function") {
-      renderSection(cue.item, activeTime - cue.start, activeTime);
+    if (cue) {
+      invokeRenderSection(window, cue.item, activeTime - cue.start, activeTime);
     }
 
     updateOptionalControls(activeTime);
