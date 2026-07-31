@@ -11,6 +11,7 @@ import { spawnSync } from 'child_process';
 import { fileURLToPath } from 'url';
 
 import { findMissingRenderHelpers, formatMissingRenderHelpersError } from './render_helpers_check.js';
+import { DEFAULT_WORKSPACE_DIR, resolve_workspace_path } from '../workspace.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);

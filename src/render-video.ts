@@ -187,7 +187,7 @@ Options:
   --fps <number>         Frames per second. Default: 60
   --width <pixels>       Viewport width. Default: 1080
   --height <pixels>      Viewport height. Default: 1920
-  --max-short-edge <px>  After auto-detect, scale viewport so min(width,height) is at most this (even dimensions)
+  --max-short-edge <px>  After auto-detect, downscale the encoded MP4 so min(width,height) is at most this (even dimensions). Frame capture stays at the full metadata viewport.
   --frames-dir <dir>     Temporary frame directory. Default: .render/frames
   --frame-format <fmt>   Temporary frame format: jpeg or png. Default: jpeg
   --jpeg-quality <1-100> JPEG quality when --frame-format jpeg. Default: 90
@@ -453,6 +453,40 @@ function videoCodecArgs(codec, args) {
   return ['-c:v', 'libx264', '-preset', args.x264Preset, '-threads', '0'];
 }
 
+// Build ffmpeg -vf chain: optional output downscale, then color-range conversion.
+export function buildVideoScaleFilter(args) {
+  const filters = [];
+  const outputWidth = Number(args.outputWidth);
+  const outputHeight = Number(args.outputHeight);
+  const captureWidth = Number(args.width);
+  const captureHeight = Number(args.height);
+
+  if (
+    Number.isInteger(outputWidth) && outputWidth > 0 &&
+    Number.isInteger(outputHeight) && outputHeight > 0 &&
+    (outputWidth !== captureWidth || outputHeight !== captureHeight)
+  ) {
+    filters.push(`scale=${outputWidth}:${outputHeight}:flags=lanczos`);
+  }
+
+  filters.push(`scale=in_range=pc:out_range=${args.colorRange}`);
+  return filters.join(',');
+}
+
+export function resolveCaptureAndOutputDimensions(width, height, maxShortEdge) {
+  const capture = {
+    width: ensureEvenDimension(width),
+    height: ensureEvenDimension(height),
+  };
+
+  if (maxShortEdge === null || maxShortEdge === undefined) {
+    return { capture, output: capture };
+  }
+
+  const output = scaleViewportToMaxShortEdge(capture.width, capture.height, maxShortEdge);
+  return { capture, output };
+}
+
 // Build the final image-sequence-to-MP4 ffmpeg command.
 function buildVideoEncodeArgs({ args, codec, framesDir, fps, audioTimeline, mixedAudioPath, outputPath }) {
   const ffmpegArgs = [
@@ -469,7 +503,7 @@ function buildVideoEncodeArgs({ args, codec, framesDir, fps, audioTimeline, mixe
 
   ffmpegArgs.push(
     ...videoCodecArgs(codec, args),
-    '-vf', `scale=in_range=pc:out_range=${args.colorRange}`,
+    '-vf', buildVideoScaleFilter(args),
     '-pix_fmt', 'yuv420p',
     '-color_range', args.colorRange,
     '-colorspace', 'bt709',
@@ -504,7 +538,7 @@ function buildPipedVideoEncodeArgs({ args, codec, fps, audioTimeline, mixedAudio
 
   ffmpegArgs.push(
     ...videoCodecArgs(codec, args),
-    '-vf', `scale=in_range=pc:out_range=${args.colorRange}`,
+    '-vf', buildVideoScaleFilter(args),
     '-pix_fmt', 'yuv420p',
     '-color_range', args.colorRange,
     '-colorspace', 'bt709',
@@ -931,15 +965,23 @@ export async function renderVideo(options = {}) {
     args.height = detectedViewport.height;
   }
 
-  if (args.maxShortEdge) {
-    const scaled = scaleViewportToMaxShortEdge(args.width, args.height, args.maxShortEdge);
-    if (scaled.width !== args.width || scaled.height !== args.height) {
-      console.log(
-        `Scaled viewport for --max-short-edge ${args.maxShortEdge}: ${args.width}x${args.height} -> ${scaled.width}x${scaled.height}`,
-      );
-    }
-    args.width = scaled.width;
-    args.height = scaled.height;
+  const { capture, output } = resolveCaptureAndOutputDimensions(
+    args.width,
+    args.height,
+    args.maxShortEdge,
+  );
+  args.width = capture.width;
+  args.height = capture.height;
+  args.outputWidth = output.width;
+  args.outputHeight = output.height;
+
+  if (
+    args.maxShortEdge &&
+    (output.width !== capture.width || output.height !== capture.height)
+  ) {
+    console.log(
+      `Output video will be downscaled for --max-short-edge ${args.maxShortEdge}: ${capture.width}x${capture.height} -> ${output.width}x${output.height} (capture viewport unchanged)`,
+    );
   }
 
   const timeline = await getTimelineFromPage(timelinePage);
@@ -969,7 +1011,11 @@ export async function renderVideo(options = {}) {
   console.log(`HTML: ${sourceHtmlPath}`);
   if (htmlPath !== sourceHtmlPath) console.log(`Renderable HTML: ${htmlPath}`);
   console.log(`Output: ${outputPath}`);
-  console.log(`Viewport: ${args.width}x${args.height}, fps: ${args.fps}`);
+  if (args.outputWidth !== args.width || args.outputHeight !== args.height) {
+    console.log(`Capture viewport: ${args.width}x${args.height}, output video: ${args.outputWidth}x${args.outputHeight}, fps: ${args.fps}`);
+  } else {
+    console.log(`Viewport: ${args.width}x${args.height}, fps: ${args.fps}`);
+  }
   const activeFrameWorkers = args.renderMode === 'sequential' ? 1 : Math.min(args.workers, frameCount);
   console.log(`Frame format: ${args.frameFormat}${args.frameFormat === 'jpeg' ? ` quality ${args.jpegQuality}` : ''}, workers: ${activeFrameWorkers}, mode: ${args.renderMode}`);
   console.log(`Video codec: ${args.videoCodec}${args.videoCodec === 'libx264' || args.videoCodec === 'auto' ? `, x264 preset: ${args.x264Preset}` : ''}`);

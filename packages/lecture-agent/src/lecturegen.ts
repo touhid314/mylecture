@@ -48,7 +48,7 @@ import { fetchAssets, formatAssetDescriptions, stripImageRequests, type AssetDes
 import { AnimatorSession, animateScriptBlock, getAnimatorMaxPreviousHtmls, slicePreviousHtmls, validateAndRepairHtml, type PreviousHtml } from './animator.js';
 import { runGameGen } from './gamegen.js';
 import { runIAGen } from './iagen.js';
-import { getScriptTrimmerChunkSizes, trimScriptByNarration } from './script_trimmer.js';
+import { getScriptTrimmerChunkSizes, trimScriptByNarration, validateAudiovisualScript } from './script_trimmer.js';
 import { writeScript } from './script_writer.js';
 import type { LectureGenAttachment } from './lecturegen_shared.js';
 import {
@@ -251,6 +251,7 @@ export class LectureGen {
                     assertActive();
                     if (!input.enableGetimg) script = stripImageRequests(script);
                     fs.writeFileSync(path.join(this.options.workspaceDir, 'script.md'), script, 'utf8');
+                    validateAudiovisualScript(script);
                     startSupplementalGeneration(script);
 
                     const worldBasemapPath = ensureWorldBasemapInWorkspace(this.options.workspaceDir);

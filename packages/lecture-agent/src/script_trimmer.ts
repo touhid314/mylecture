@@ -12,7 +12,10 @@ type ScriptBeat = {
 };
 
 const NARRATION_PATTERN = /^\s*N:\s*(.*)$/i;
+const VISUAL_PATTERN = /^\s*V:\s*(.*)$/i;
 const SCENE_PATTERN = /^\s*#\s*Scene\b.*$/i;
+const CARRY_OVER_PATTERN = /^\s*\[carry-over:/i;
+const METADATA_LINE_PATTERN = /^\s*(?:#|\[)/;
 
 export type ScriptTrimmerChunkSizes = {
     maximumNarrationWords: number;
@@ -38,6 +41,83 @@ export function getScriptTrimmerChunkSizes(
 
 export function countNarrationWords(text: string): number {
     return text.match(/[\p{L}\p{N}]+(?:['’\-][\p{L}\p{N}]+)*/gu)?.length || 0;
+}
+
+function isMetadataLine(line: string): boolean {
+    const trimmed = line.trim();
+    if (!trimmed) return true;
+    if (SCENE_PATTERN.test(line)) return true;
+    if (CARRY_OVER_PATTERN.test(line)) return true;
+    if (METADATA_LINE_PATTERN.test(trimmed) && !NARRATION_PATTERN.test(line) && !VISUAL_PATTERN.test(line)) {
+        return true;
+    }
+    return false;
+}
+
+function findUnprefixedNarrationLineNumbers(lines: string[]): number[] {
+    const lineNumbers: number[] = [];
+    for (let index = 0; index < lines.length; index++) {
+        if (!VISUAL_PATTERN.test(lines[index])) continue;
+
+        let previous = index - 1;
+        while (previous >= 0 && !lines[previous].trim()) previous--;
+        if (previous < 0) continue;
+
+        const candidate = lines[previous];
+        if (NARRATION_PATTERN.test(candidate) || VISUAL_PATTERN.test(candidate) || isMetadataLine(candidate)) {
+            continue;
+        }
+        lineNumbers.push(previous + 1);
+    }
+    return [...new Set(lineNumbers)];
+}
+
+function formatLineNumberSample(lineNumbers: number[]): string {
+    const sample = lineNumbers.slice(0, 3).map(lineNumber => `line ${lineNumber}`).join(', ');
+    const remaining = lineNumbers.length - 3;
+    return remaining > 0 ? `${sample}, and ${remaining} more` : sample;
+}
+
+export function validateAudiovisualScript(script: string): void {
+    const normalized = script.replace(/\r\n/g, '\n');
+    if (!normalized.trim()) {
+        throw new Error('Script validation failed: script is empty.');
+    }
+
+    const lines = normalized.split('\n');
+    const narrationCount = lines.filter(line => NARRATION_PATTERN.test(line)).length;
+    const visualCount = lines.filter(line => VISUAL_PATTERN.test(line)).length;
+    const unprefixedNarrationLines = findUnprefixedNarrationLineNumbers(lines);
+
+    if (narrationCount > 0 && unprefixedNarrationLines.length === 0) {
+        return;
+    }
+
+    if (narrationCount === 0) {
+        const details: string[] = [];
+        if (visualCount > 0) {
+            details.push(`found ${visualCount} V: visual cue(s) but no N: narration cues`);
+        } else {
+            details.push('found no N: narration cues or V: visual cues');
+        }
+        if (unprefixedNarrationLines.length > 0) {
+            details.push(
+                `${unprefixedNarrationLines.length} narration line(s) are missing the required "N: " prefix `
+                + `(${formatLineNumberSample(unprefixedNarrationLines)})`
+            );
+        }
+        throw new Error(
+            `Script validation failed: ${details.join('; ')}. `
+            + 'Each narration beat must use "N: ..." followed by "V: ...". '
+            + 'Re-run script generation or edit script.md to add the missing prefixes.'
+        );
+    }
+
+    throw new Error(
+        `Script validation failed: ${unprefixedNarrationLines.length} narration line(s) are missing the required `
+        + `"N: " prefix (${formatLineNumberSample(unprefixedNarrationLines)}). `
+        + 'Edit script.md or re-run script generation.'
+    );
 }
 
 function parseBeats(script: string): ScriptBeat[] {
@@ -83,6 +163,7 @@ function parseBeats(script: string): ScriptBeat[] {
     finishCurrent();
 
     if (beats.length === 0) {
+        validateAudiovisualScript(script);
         throw new Error('Script trimmer could not find any N: narration cues.');
     }
     return beats;
@@ -143,6 +224,7 @@ export function trimScriptByNarration(
     maximumNarrationWords = getScriptTrimmerChunkSizes().maximumNarrationWords,
     minimumNarrationWords = Math.ceil(maximumNarrationWords / 2)
 ): ScriptBlock[] {
+    validateAudiovisualScript(script);
     if (!Number.isInteger(maximumNarrationWords) || maximumNarrationWords <= 0) {
         throw new Error('maximumNarrationWords must be a positive integer.');
     }

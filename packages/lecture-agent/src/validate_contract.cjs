@@ -336,9 +336,360 @@ async function validateWithPlaywright(htmlPath) {
       const layoutErrors = [];
       const seenLayoutErrors = new Set();
 
-      function visibleTextLeaves() {
-        return Array.from(document.querySelectorAll('body *')).flatMap((element) => {
-          if (element.closest('[data-layout-check="ignore"]')) return [];
+      // Merged canvas+DOM layout check: instrument 2D ink, collect DOM boxes, flag partial overlaps.
+      const canvasInk = [];
+      let metricsEpoch = 0;
+      let overlapFindingCount = 0;
+      let paddingFindingCount = 0;
+
+      // Ink / shape recording
+      const MIN_INK_ALPHA = 0.22; // overlap + text ink
+      const MIN_PANEL_ALPHA = 0.10; // low-alpha header bands (often α≈0.15×reveal)
+      const OPAQUE_WIPE_ALPHA = 0.85;
+      const MIN_SHAPE_AREA = 2500;
+      const MIN_SHAPE_SIDE = 24;
+      const MAX_SHAPE_CANVAS_FRAC = 0.8;
+
+      // Collision thresholds
+      const CONTAINMENT_RATIO = 0.85;
+      const NEST_AREA_RATIO = 1.4; // larger must be meaningfully bigger than smaller
+      const OVERLAP_RATIO = 0.28;
+      const MIN_OVERLAP_W = 24;
+      const MIN_OVERLAP_H = 12;
+      const MIN_SHAPE_SHAPE_OVERLAP_AREA = 2000;
+      const MAX_OVERLAP_FINDINGS = 5;
+      const MAX_PADDING_FINDINGS = 5;
+      const MAX_LAYOUT_FINDINGS = 10;
+      const MAXIMUM_LAYOUT_SAMPLES = 50;
+      const MAX_SAMPLES_PER_SEGMENT = 8;
+      const NUMERIC_TEXT_RE = /^[\d.,%+-]+$/;
+      const KATEX_HOST_SKIP_IDS = new Set(['stage', 'htmlLayer', 'canvas']);
+
+      // Padding / safe-zone (theme default.md) — no centering heuristics
+      const SAFE_ZONE_FRAC = 0.05;
+      const SAFE_ZONE_TOLERANCE_PX = 6;
+      const PANEL_PAD_FRAC = 0.05;
+      const PANEL_PAD_MIN_PX = 24;
+      const PANEL_EDGE_TOLERANCE_PX = 3;
+      // Exclude true stage-sized fills; allow large content cards (~500² and similar).
+      const MAX_PANEL_VIEWPORT_FRAC = 0.55;
+
+      function resetCanvasInk() {
+        canvasInk.length = 0;
+      }
+
+      function beginLayoutSample() {
+        metricsEpoch += 1;
+        resetCanvasInk();
+      }
+
+      function parseFontSize(font) {
+        const match = String(font || '').match(/(\d+(?:\.\d+)?)px/);
+        return match ? Number(match[1]) : 16;
+      }
+
+      function instrumentContext2d(ctx, canvas) {
+        if (!ctx || ctx.__mlLayoutInk) return;
+        ctx.__mlLayoutInk = true;
+
+        let pathBounds = null;
+        let cachedMetrics = null;
+        let cachedMetricsEpoch = -1;
+
+        function resetPathBounds() {
+          pathBounds = null;
+        }
+
+        function includePoint(x, y) {
+          if (!Number.isFinite(x) || !Number.isFinite(y)) return;
+          if (!pathBounds) {
+            pathBounds = { minX: x, minY: y, maxX: x, maxY: y };
+            return;
+          }
+          pathBounds.minX = Math.min(pathBounds.minX, x);
+          pathBounds.minY = Math.min(pathBounds.minY, y);
+          pathBounds.maxX = Math.max(pathBounds.maxX, x);
+          pathBounds.maxY = Math.max(pathBounds.maxY, y);
+        }
+
+        function includeRect(x, y, w, h) {
+          includePoint(x, y);
+          includePoint(x + w, y);
+          includePoint(x, y + h);
+          includePoint(x + w, y + h);
+        }
+
+        function canvasMetrics() {
+          if (cachedMetrics && cachedMetricsEpoch === metricsEpoch) return cachedMetrics;
+          const rect = canvas.getBoundingClientRect();
+          const iw = canvas.width || rect.width || 1;
+          const ih = canvas.height || rect.height || 1;
+          cachedMetrics = {
+            rect,
+            scaleX: rect.width / iw,
+            scaleY: rect.height / ih,
+            canvasArea: iw * ih
+          };
+          cachedMetricsEpoch = metricsEpoch;
+          return cachedMetrics;
+        }
+
+        function mapUserBox(x, y, w, h) {
+          const { rect, scaleX, scaleY } = canvasMetrics();
+          const transform = ctx.getTransform();
+          const corners = [
+            new DOMPoint(x, y),
+            new DOMPoint(x + w, y),
+            new DOMPoint(x, y + h),
+            new DOMPoint(x + w, y + h)
+          ].map((point) => point.matrixTransform(transform));
+          return {
+            left: Math.min(...corners.map((c) => c.x)) * scaleX + rect.left,
+            right: Math.max(...corners.map((c) => c.x)) * scaleX + rect.left,
+            top: Math.min(...corners.map((c) => c.y)) * scaleY + rect.top,
+            bottom: Math.max(...corners.map((c) => c.y)) * scaleY + rect.top
+          };
+        }
+
+        function pushInk(box, label, text, flags) {
+          const width = box.right - box.left;
+          const height = box.bottom - box.top;
+          if (width < 4 || height < 4) return;
+          const forOverlap = Boolean(flags && flags.forOverlap);
+          const forPanel = Boolean(flags && flags.forPanel);
+          if (!forOverlap && !forPanel) return;
+          canvasInk.push({
+            source: 'canvas',
+            element: null,
+            transparentBackground: true,
+            label,
+            text: String(text || '').replace(/\s+/g, ' ').trim().slice(0, 48),
+            left: box.left,
+            top: box.top,
+            right: box.right,
+            bottom: box.bottom,
+            forOverlap,
+            forPanel
+          });
+        }
+
+        function isNearFullCanvas(w, h) {
+          const { canvasArea } = canvasMetrics();
+          return canvasArea > 0 && Math.abs(w * h) >= canvasArea * MAX_SHAPE_CANVAS_FRAC;
+        }
+
+        function shouldRecordShape(w, h) {
+          const absW = Math.abs(w);
+          const absH = Math.abs(h);
+          const area = absW * absH;
+          if (area < MIN_SHAPE_AREA) return false;
+          if (Math.min(absW, absH) < MIN_SHAPE_SIDE) return false;
+          if (isNearFullCanvas(w, h)) return false;
+          return true;
+        }
+
+        function recordShapeBox(x, y, w, h, label) {
+          const alpha = ctx.globalAlpha;
+          if (alpha < MIN_PANEL_ALPHA) return;
+          if (!shouldRecordShape(w, h)) return;
+          pushInk(mapUserBox(x, y, w, h), label, '', {
+            forOverlap: alpha >= MIN_INK_ALPHA,
+            forPanel: true
+          });
+        }
+
+        function recordTextBox(text, x, y, kind) {
+          if (ctx.globalAlpha < MIN_INK_ALPHA) return;
+          const raw = String(text || '');
+          if (!raw.trim()) return;
+          const metrics = ctx.measureText(raw);
+          const fontSize = parseFontSize(ctx.font);
+          const width = Math.max(metrics.width || 0, fontSize * 0.5);
+          const height = Math.max(
+            (metrics.actualBoundingBoxAscent || 0) + (metrics.actualBoundingBoxDescent || 0),
+            fontSize * 1.15
+          );
+          let left = x;
+          let top = y;
+          const align = ctx.textAlign || 'start';
+          const baseline = ctx.textBaseline || 'alphabetic';
+          if (align === 'center') left -= width / 2;
+          else if (align === 'right' || align === 'end') left -= width;
+          if (baseline === 'middle') top -= height / 2;
+          else if (baseline === 'top' || baseline === 'hanging') {
+            // y is already top
+          } else if (baseline === 'bottom' || baseline === 'ideographic') top -= height;
+          else top -= height * 0.8; // alphabetic / default
+          pushInk(mapUserBox(left, top, width, height), kind, raw, {
+            forOverlap: true,
+            forPanel: false
+          });
+        }
+
+        function wrap(methodName, beforeCall) {
+          const original = ctx[methodName];
+          if (typeof original !== 'function') return;
+          ctx[methodName] = function wrappedCanvasMethod(...args) {
+            try {
+              beforeCall.apply(this, args);
+            } catch (_) {
+              // Layout instrumentation must never break lecture drawing.
+            }
+            return original.apply(this, args);
+          };
+        }
+
+        wrap('beginPath', () => {
+          resetPathBounds();
+        });
+        wrap('moveTo', (x, y) => {
+          includePoint(x, y);
+        });
+        wrap('lineTo', (x, y) => {
+          includePoint(x, y);
+        });
+        wrap('quadraticCurveTo', (cpx, cpy, x, y) => {
+          includePoint(cpx, cpy);
+          includePoint(x, y);
+        });
+        wrap('bezierCurveTo', (cp1x, cp1y, cp2x, cp2y, x, y) => {
+          includePoint(cp1x, cp1y);
+          includePoint(cp2x, cp2y);
+          includePoint(x, y);
+        });
+        wrap('arc', (x, y, radius) => {
+          includeRect(x - radius, y - radius, radius * 2, radius * 2);
+        });
+        wrap('rect', (x, y, w, h) => {
+          includeRect(x, y, w, h);
+        });
+
+        wrap('clearRect', (x, y, w, h) => {
+          if (isNearFullCanvas(w, h)) resetCanvasInk();
+        });
+
+        // Near-full opaque wipe fillRect must clear prior ink (even though we skip recording it as a shape).
+        wrap('fillRect', (x, y, w, h) => {
+          if (isNearFullCanvas(w, h) && ctx.globalAlpha >= OPAQUE_WIPE_ALPHA) {
+            resetCanvasInk();
+            return;
+          }
+          recordShapeBox(x, y, w, h, 'fillRect');
+        });
+        wrap('strokeRect', (x, y, w, h) => {
+          recordShapeBox(x, y, w, h, 'strokeRect');
+        });
+        if (typeof ctx.roundRect === 'function') {
+          wrap('roundRect', (x, y, w, h) => {
+            includeRect(x, y, w, h);
+          });
+        }
+
+        wrap('fill', () => {
+          if (!pathBounds) return;
+          const w = pathBounds.maxX - pathBounds.minX;
+          const h = pathBounds.maxY - pathBounds.minY;
+          if (isNearFullCanvas(w, h) && ctx.globalAlpha >= OPAQUE_WIPE_ALPHA) {
+            resetCanvasInk();
+            resetPathBounds();
+            return;
+          }
+          recordShapeBox(pathBounds.minX, pathBounds.minY, w, h, 'fill');
+          resetPathBounds();
+        });
+
+        wrap('fillText', (text, x, y) => {
+          recordTextBox(text, x, y, 'fillText');
+        });
+        wrap('strokeText', (text, x, y) => {
+          recordTextBox(text, x, y, 'strokeText');
+        });
+      }
+
+      function instrumentAllCanvases() {
+        document.querySelectorAll('canvas').forEach((canvas) => {
+          if (canvas.__mlLayoutCanvas) return;
+          canvas.__mlLayoutCanvas = true;
+          const existing = canvas.getContext('2d');
+          if (existing) instrumentContext2d(existing, canvas);
+          const originalGetContext = canvas.getContext.bind(canvas);
+          canvas.getContext = function patchedGetContext(type, ...rest) {
+            const context = originalGetContext(type, ...rest);
+            if (type === '2d' && context) instrumentContext2d(context, canvas);
+            return context;
+          };
+        });
+      }
+
+      function elementOpacity(element) {
+        let opacity = 1;
+        let current = element;
+        while (current && current !== document.documentElement) {
+          const style = getComputedStyle(current);
+          if (style.display === 'none' || style.visibility === 'hidden') return 0;
+          opacity *= Number(style.opacity) || 0;
+          current = current.parentElement;
+        }
+        return opacity;
+      }
+
+      function clipToAncestors(element, bounds) {
+        let left = Math.max(0, bounds.left);
+        let top = Math.max(0, bounds.top);
+        let right = Math.min(window.innerWidth, bounds.right);
+        let bottom = Math.min(window.innerHeight, bounds.bottom);
+        for (let parent = element.parentElement; parent; parent = parent.parentElement) {
+          const style = getComputedStyle(parent);
+          if (/(hidden|clip|auto|scroll)/.test(`${style.overflow} ${style.overflowX} ${style.overflowY}`)) {
+            const clip = parent.getBoundingClientRect();
+            left = Math.max(left, clip.left);
+            top = Math.max(top, clip.top);
+            right = Math.min(right, clip.right);
+            bottom = Math.min(bottom, clip.bottom);
+          }
+        }
+        return { left, top, right, bottom };
+      }
+
+      function domLabel(element) {
+        if (element.id) return `#${element.id}`;
+        const tag = element.tagName.toLowerCase();
+        const cls = element.classList.length ? `.${element.classList[0]}` : '';
+        return `${tag}${cls}`;
+      }
+
+      function isTransparentBackground(element) {
+        const ownStyle = getComputedStyle(element);
+        return ownStyle.backgroundImage === 'none'
+          && (ownStyle.backgroundColor === 'transparent' || ownStyle.backgroundColor === 'rgba(0, 0, 0, 0)');
+      }
+
+      function resolveKatexHost(katexEl) {
+        // Prefer a dedicated labeled host (e.g. #wsEquation); never promote to #stage / body.
+        const labeled = katexEl.closest('[id]');
+        if (
+          labeled
+          && labeled !== document.body
+          && labeled !== document.documentElement
+          && !KATEX_HOST_SKIP_IDS.has(labeled.id)
+        ) {
+          const hostArea = labeled.getBoundingClientRect();
+          const stageArea = window.innerWidth * window.innerHeight;
+          if (hostArea.width * hostArea.height < stageArea * 0.45) {
+            return labeled;
+          }
+        }
+        return katexEl;
+      }
+
+      function collectDomBoxes() {
+        const texts = [];
+        const panels = [];
+        const viewportArea = window.innerWidth * window.innerHeight;
+
+        Array.from(document.querySelectorAll('body *')).forEach((element) => {
+          if (element.closest('[data-layout-check="ignore"]')) return;
+          if (element.closest('.katex') && !element.classList.contains('katex')) return;
 
           const textNodes = Array.from(element.childNodes)
             .filter(node => node.nodeType === Node.TEXT_NODE && node.textContent?.trim());
@@ -347,24 +698,15 @@ async function validateWithPlaywright(htmlPath) {
             .join(' ')
             .replace(/\s+/g, ' ')
             .trim();
-          if (!text) return [];
-
-          let opacity = 1;
-          let current = element;
-          while (current && current !== document.documentElement) {
-            const style = getComputedStyle(current);
-            if (style.display === 'none' || style.visibility === 'hidden') return [];
-            opacity *= Number(style.opacity) || 0;
-            current = current.parentElement;
-          }
-          if (opacity < 0.6) return [];
+          if (!text) return;
+          if (elementOpacity(element) < 0.6) return;
 
           const textRects = textNodes.flatMap((node) => {
             const range = document.createRange();
             range.selectNodeContents(node);
             return Array.from(range.getClientRects());
           });
-          if (textRects.length === 0) return [];
+          if (textRects.length === 0) return;
 
           const bounds = {
             left: Math.min(...textRects.map(rect => rect.left)),
@@ -372,79 +714,424 @@ async function validateWithPlaywright(htmlPath) {
             right: Math.max(...textRects.map(rect => rect.right)),
             bottom: Math.max(...textRects.map(rect => rect.bottom))
           };
-          let left = Math.max(0, bounds.left);
-          let top = Math.max(0, bounds.top);
-          let right = Math.min(window.innerWidth, bounds.right);
-          let bottom = Math.min(window.innerHeight, bounds.bottom);
+          const clipped = clipToAncestors(element, bounds);
+          if (clipped.right - clipped.left < 12 || clipped.bottom - clipped.top < 8) return;
 
-          for (let parent = element.parentElement; parent; parent = parent.parentElement) {
-            const style = getComputedStyle(parent);
-            if (/(hidden|clip|auto|scroll)/.test(`${style.overflow} ${style.overflowX} ${style.overflowY}`)) {
-              const clip = parent.getBoundingClientRect();
-              left = Math.max(left, clip.left);
-              top = Math.max(top, clip.top);
-              right = Math.min(right, clip.right);
-              bottom = Math.min(bottom, clip.bottom);
-            }
-          }
-
-          if (right - left < 12 || bottom - top < 8) return [];
-          const label = element.id
-            ? `#${element.id}`
-            : `${element.tagName.toLowerCase()}${element.classList.length ? `.${element.classList[0]}` : ''}`;
-          const ownStyle = getComputedStyle(element);
-          const transparentBackground = ownStyle.backgroundImage === 'none'
-            && (ownStyle.backgroundColor === 'transparent' || ownStyle.backgroundColor === 'rgba(0, 0, 0, 0)');
-          return [{
+          texts.push({
+            source: 'dom',
             element,
-            transparentBackground,
-            label,
+            transparentBackground: isTransparentBackground(element),
+            label: domLabel(element),
             text: text.slice(0, 48),
-            left,
-            top,
-            right,
-            bottom
-          }];
+            left: clipped.left,
+            top: clipped.top,
+            right: clipped.right,
+            bottom: clipped.bottom,
+            forOverlap: true,
+            forPanel: false
+          });
         });
+
+        const seenKatexHosts = new Set();
+        document.querySelectorAll('.katex').forEach((element) => {
+          if (element.closest('[data-layout-check="ignore"]')) return;
+          const host = resolveKatexHost(element);
+          if (seenKatexHosts.has(host)) return;
+          seenKatexHosts.add(host);
+          if (elementOpacity(host) < 0.6) return;
+          const rect = host.getBoundingClientRect();
+          const clipped = clipToAncestors(host, {
+            left: rect.left,
+            top: rect.top,
+            right: rect.right,
+            bottom: rect.bottom
+          });
+          if (clipped.right - clipped.left < 12 || clipped.bottom - clipped.top < 8) return;
+          const text = (
+            element.getAttribute('aria-label')
+            || host.getAttribute('aria-label')
+            || element.textContent
+            || ''
+          ).replace(/\s+/g, ' ').trim().slice(0, 48);
+          texts.push({
+            source: 'dom',
+            element: host,
+            transparentBackground: isTransparentBackground(host),
+            label: domLabel(host),
+            text: text || 'katex',
+            left: clipped.left,
+            top: clipped.top,
+            right: clipped.right,
+            bottom: clipped.bottom,
+            forOverlap: true,
+            forPanel: false
+          });
+        });
+
+        // Opaque DOM boxes as panel candidates (padding only — not overlap ink).
+        Array.from(document.querySelectorAll('body *')).forEach((element) => {
+          if (element.closest('[data-layout-check="ignore"]')) return;
+          if (element === document.body || element === document.documentElement) return;
+          if (KATEX_HOST_SKIP_IDS.has(element.id)) return;
+          if (element.tagName === 'CANVAS') return;
+          if (isTransparentBackground(element)) return;
+          if (elementOpacity(element) < 0.6) return;
+
+          const rect = element.getBoundingClientRect();
+          const clipped = clipToAncestors(element, {
+            left: rect.left,
+            top: rect.top,
+            right: rect.right,
+            bottom: rect.bottom
+          });
+          const width = clipped.right - clipped.left;
+          const height = clipped.bottom - clipped.top;
+          const area = width * height;
+          if (area < MIN_SHAPE_AREA) return;
+          if (Math.min(width, height) < MIN_SHAPE_SIDE) return;
+          if (viewportArea > 0 && area >= viewportArea * MAX_SHAPE_CANVAS_FRAC) return;
+
+          panels.push({
+            source: 'dom',
+            element,
+            transparentBackground: false,
+            label: domLabel(element),
+            text: '',
+            left: clipped.left,
+            top: clipped.top,
+            right: clipped.right,
+            bottom: clipped.bottom,
+            forOverlap: false,
+            forPanel: true
+          });
+        });
+
+        return { texts, panels };
       }
 
-      function recordObviousTextOverlap(segment, localTime) {
-        if (layoutErrors.length >= 5) return;
-        const items = visibleTextLeaves();
+      function boxArea(box) {
+        return Math.max(0, box.right - box.left) * Math.max(0, box.bottom - box.top);
+      }
+
+      function isIntentionalNest(a, b, overlapArea) {
+        const areaA = boxArea(a);
+        const areaB = boxArea(b);
+        const smaller = Math.min(areaA, areaB);
+        const larger = Math.max(areaA, areaB);
+        if (smaller <= 0 || larger <= 0) return false;
+        // Nest only when the smaller box is mostly inside a meaningfully larger parent.
+        // Same-size competing layers (double-draw) must still fail.
+        return (overlapArea / smaller) >= CONTAINMENT_RATIO && larger >= smaller * NEST_AREA_RATIO;
+      }
+
+      function formatBox(box) {
+        const text = box.text ? ` ("${box.text}")` : '';
+        return `${box.source} ${box.label}${text}`;
+      }
+
+      function isTextInk(box) {
+        return Boolean(box.text && box.text.trim());
+      }
+
+      function pushOverlapFinding(key, message) {
+        if (overlapFindingCount >= MAX_OVERLAP_FINDINGS) return false;
+        if (layoutErrors.length >= MAX_LAYOUT_FINDINGS) return false;
+        if (seenLayoutErrors.has(key)) return false;
+        seenLayoutErrors.add(key);
+        layoutErrors.push(message);
+        overlapFindingCount += 1;
+        return true;
+      }
+
+      function pushPaddingFinding(key, message) {
+        if (paddingFindingCount >= MAX_PADDING_FINDINGS) return false;
+        if (layoutErrors.length >= MAX_LAYOUT_FINDINGS) return false;
+        if (seenLayoutErrors.has(key)) return false;
+        seenLayoutErrors.add(key);
+        layoutErrors.push(message);
+        paddingFindingCount += 1;
+        return true;
+      }
+
+      function recordMergedLayoutOverlaps(segment, localTime, domBoxes) {
+        if (overlapFindingCount >= MAX_OVERLAP_FINDINGS) return;
+        if (layoutErrors.length >= MAX_LAYOUT_FINDINGS) return;
+        const overlapInk = canvasInk.filter((box) => box.forOverlap);
+        const items = [...overlapInk, ...(domBoxes.texts || [])];
         for (let i = 0; i < items.length; i++) {
           for (let j = i + 1; j < items.length; j++) {
             const a = items[i];
             const b = items[j];
-            if (a.element.contains(b.element) || b.element.contains(a.element)) continue;
-            if (!a.transparentBackground || !b.transparentBackground) continue;
-            if (/^[\d.,%+-]+$/.test(a.text) && /^[\d.,%+-]+$/.test(b.text)) continue;
+            if (a.element && b.element) {
+              if (a.element.contains(b.element) || b.element.contains(a.element)) continue;
+            }
+            // Dom↔dom only: restore transparent-background gate (canvas pairs stay ungated).
+            if (a.source === 'dom' && b.source === 'dom') {
+              if (!a.transparentBackground || !b.transparentBackground) continue;
+            }
+            // Numeric tick pairs — both-DOM only.
+            if (
+              a.source === 'dom'
+              && b.source === 'dom'
+              && a.text
+              && b.text
+              && NUMERIC_TEXT_RE.test(a.text)
+              && NUMERIC_TEXT_RE.test(b.text)
+            ) continue;
 
             const overlapWidth = Math.min(a.right, b.right) - Math.max(a.left, b.left);
             const overlapHeight = Math.min(a.bottom, b.bottom) - Math.max(a.top, b.top);
-            if (overlapWidth < 24 || overlapHeight < 12) continue;
+            if (overlapWidth < MIN_OVERLAP_W || overlapHeight < MIN_OVERLAP_H) continue;
 
             const overlapArea = overlapWidth * overlapHeight;
-            const smallerArea = Math.min(
-              (a.right - a.left) * (a.bottom - a.top),
-              (b.right - b.left) * (b.bottom - b.top)
-            );
-            if (overlapArea / smallerArea < 0.2) continue;
+            const smallerArea = Math.min(boxArea(a), boxArea(b));
+            if (smallerArea <= 0) continue;
+            const ratio = overlapArea / smallerArea;
+            if (isIntentionalNest(a, b, overlapArea)) continue;
+            if (ratio < OVERLAP_RATIO) continue;
 
-            const key = `${segment.id}|${a.label}|${a.text}|${b.label}|${b.text}`;
-            if (seenLayoutErrors.has(key)) continue;
-            seenLayoutErrors.add(key);
-            layoutErrors.push(
-              `segment '${segment.id}' at localTime=${localTime.toFixed(3)}s: ${a.label} ("${a.text}") overlaps ${b.label} ("${b.text}") by ${Math.round(overlapWidth)}x${Math.round(overlapHeight)}px`
+            const aHasText = isTextInk(a);
+            const bHasText = isTextInk(b);
+            if (!aHasText && !bHasText && overlapArea < MIN_SHAPE_SHAPE_OVERLAP_AREA) continue;
+
+            const key = `${segment.id}|overlap|${a.source}|${a.label}|${a.text}|${b.source}|${b.label}|${b.text}`;
+            pushOverlapFinding(
+              key,
+              `segment '${segment.id}' at localTime=${localTime.toFixed(3)}s: ${formatBox(a)} overlaps ${formatBox(b)} by ${Math.round(overlapWidth)}x${Math.round(overlapHeight)}px`
             );
-            if (layoutErrors.length >= 5) return;
+            if (overlapFindingCount >= MAX_OVERLAP_FINDINGS || layoutErrors.length >= MAX_LAYOUT_FINDINGS) return;
           }
         }
       }
 
+      function isPaddingContainer(text, shape) {
+        if (text.element && shape.element && text.element === shape.element) return false;
+        const textArea = boxArea(text);
+        const shapeArea = boxArea(shape);
+        if (textArea <= 0 || shapeArea <= 0) return false;
+        if (shapeArea < textArea * NEST_AREA_RATIO) return false;
+
+        const viewportArea = window.innerWidth * window.innerHeight;
+        if (viewportArea > 0 && shapeArea >= viewportArea * MAX_PANEL_VIEWPORT_FRAC) return false;
+
+        const overlapWidth = Math.min(text.right, shape.right) - Math.max(text.left, shape.left);
+        const overlapHeight = Math.min(text.bottom, shape.bottom) - Math.max(text.top, shape.top);
+        if (overlapWidth <= 0 || overlapHeight <= 0) return false;
+        const overlapArea = overlapWidth * overlapHeight;
+
+        // Strict nest: text mostly inside the shape.
+        if ((overlapArea / textArea) >= CONTAINMENT_RATIO) return true;
+
+        // Header-spill: horizontally contained and starts inside the band, even if it protrudes out.
+        const textW = text.right - text.left;
+        if (
+          textW > 0
+          && (overlapWidth / textW) >= CONTAINMENT_RATIO
+          && text.top >= shape.top - PANEL_EDGE_TOLERANCE_PX
+          && text.top < shape.bottom - PANEL_EDGE_TOLERANCE_PX
+        ) {
+          return true;
+        }
+        return false;
+      }
+
+      function findSmallestContainingShape(text, shapes) {
+        const candidates = [];
+        for (const shape of shapes) {
+          if (!isPaddingContainer(text, shape)) continue;
+          candidates.push(shape);
+        }
+        if (candidates.length === 0) return null;
+
+        candidates.sort((a, b) => boxArea(a) - boxArea(b));
+        const minArea = boxArea(candidates[0]);
+        // Among near-tied smallest panels (morph washes vs real chrome), prefer better horizontal fit.
+        const nearSmallest = candidates.filter((shape) => boxArea(shape) <= minArea * 1.25);
+        function horizontalFit(shape) {
+          return Math.min(text.left - shape.left, shape.right - text.right);
+        }
+        nearSmallest.sort((a, b) => horizontalFit(b) - horizontalFit(a));
+        return nearSmallest[0];
+      }
+
+      function recordPaddingAndSafeZone(segment, localTime, domBoxes) {
+        if (paddingFindingCount >= MAX_PADDING_FINDINGS) return;
+        if (layoutErrors.length >= MAX_LAYOUT_FINDINGS) return;
+
+        const texts = [
+          ...canvasInk.filter((box) => box.forOverlap && isTextInk(box)),
+          ...(domBoxes.texts || [])
+        ];
+        const shapes = [
+          ...canvasInk.filter((box) => box.forPanel && !isTextInk(box)),
+          ...(domBoxes.panels || [])
+        ];
+
+        const vw = window.innerWidth;
+        const vh = window.innerHeight;
+        const margin = SAFE_ZONE_FRAC * Math.min(vw, vh);
+        const safeLeft = margin;
+        const safeTop = margin;
+        const safeRight = vw - margin;
+        const safeBottom = vh - margin;
+
+        function worstSide(entries) {
+          let best = null;
+          for (const entry of entries) {
+            if (!best || entry.px > best.px) best = entry;
+          }
+          return best;
+        }
+
+        // 1) Viewport safe-zone: text only (skip numeric tick-like labels).
+        for (const box of texts) {
+          if (paddingFindingCount >= MAX_PADDING_FINDINGS || layoutErrors.length >= MAX_LAYOUT_FINDINGS) return;
+          if (box.text && NUMERIC_TEXT_RE.test(box.text)) continue;
+
+          const intrusions = [];
+          if (safeLeft - box.left > SAFE_ZONE_TOLERANCE_PX) {
+            intrusions.push({ side: 'left', px: Math.ceil(safeLeft - box.left) });
+          }
+          if (safeTop - box.top > SAFE_ZONE_TOLERANCE_PX) {
+            intrusions.push({ side: 'top', px: Math.ceil(safeTop - box.top) });
+          }
+          if (box.right - safeRight > SAFE_ZONE_TOLERANCE_PX) {
+            intrusions.push({ side: 'right', px: Math.ceil(box.right - safeRight) });
+          }
+          if (box.bottom - safeBottom > SAFE_ZONE_TOLERANCE_PX) {
+            intrusions.push({ side: 'bottom', px: Math.ceil(box.bottom - safeBottom) });
+          }
+          const worst = worstSide(intrusions);
+          if (!worst) continue;
+          const key = `${segment.id}|safe-zone|${box.source}|${box.label}|${box.text}|${worst.side}`;
+          pushPaddingFinding(
+            key,
+            `segment '${segment.id}' at localTime=${localTime.toFixed(3)}s: safe-zone: ${formatBox(box)} crosses viewport margin by ${worst.px}px (${worst.side})`
+          );
+        }
+
+        // 2) Panel inset / protrusion relative to smallest containing shape.
+        for (const text of texts) {
+          if (paddingFindingCount >= MAX_PADDING_FINDINGS || layoutErrors.length >= MAX_LAYOUT_FINDINGS) return;
+          const panel = findSmallestContainingShape(text, shapes);
+          if (!panel) continue; // no containing panel → safe-zone only
+
+          const panelW = panel.right - panel.left;
+          const panelH = panel.bottom - panel.top;
+          const pad = Math.max(PANEL_PAD_FRAC * Math.min(panelW, panelH), PANEL_PAD_MIN_PX);
+
+          const protrusions = [];
+          if (panel.left - text.left > PANEL_EDGE_TOLERANCE_PX) {
+            protrusions.push({ side: 'left', px: Math.ceil(panel.left - text.left) });
+          }
+          if (panel.top - text.top > PANEL_EDGE_TOLERANCE_PX) {
+            protrusions.push({ side: 'top', px: Math.ceil(panel.top - text.top) });
+          }
+          if (text.right - panel.right > PANEL_EDGE_TOLERANCE_PX) {
+            protrusions.push({ side: 'right', px: Math.ceil(text.right - panel.right) });
+          }
+          if (text.bottom - panel.bottom > PANEL_EDGE_TOLERANCE_PX) {
+            protrusions.push({ side: 'bottom', px: Math.ceil(text.bottom - panel.bottom) });
+          }
+          const worstProtrusion = worstSide(protrusions);
+          if (worstProtrusion) {
+            const key = `${segment.id}|panel-protrude|${text.source}|${text.label}|${text.text}|${panel.source}|${panel.label}|${worstProtrusion.side}`;
+            pushPaddingFinding(
+              key,
+              `segment '${segment.id}' at localTime=${localTime.toFixed(3)}s: panel padding: ${formatBox(text)} protrudes from panel ${formatBox(panel)} by ${worstProtrusion.px}px (${worstProtrusion.side})`
+            );
+            continue;
+          }
+
+          const padShortfalls = [];
+          const insets = [
+            { side: 'left', inset: text.left - panel.left },
+            { side: 'top', inset: text.top - panel.top },
+            { side: 'right', inset: panel.right - text.right },
+            { side: 'bottom', inset: panel.bottom - text.bottom }
+          ];
+          for (const { side, inset } of insets) {
+            if (inset + PANEL_EDGE_TOLERANCE_PX < pad) {
+              padShortfalls.push({ side, px: Math.ceil(pad - inset) });
+            }
+          }
+          const worstPad = worstSide(padShortfalls);
+          if (!worstPad) continue;
+          const key = `${segment.id}|panel-pad|${text.source}|${text.label}|${text.text}|${panel.source}|${panel.label}|${worstPad.side}`;
+          pushPaddingFinding(
+            key,
+            `segment '${segment.id}' at localTime=${localTime.toFixed(3)}s: panel padding: ${formatBox(text)} short of required pad by ${worstPad.px}px (${worstPad.side}) vs ${formatBox(panel)}`
+          );
+        }
+      }
+
+      function buildSampleLocalTimes(duration, budget) {
+        const endTime = Math.max(0, duration - (1 / 30));
+        const endRounded = Number(endTime.toFixed(6));
+        const sampleBudget = Math.max(2, Math.min(MAX_SAMPLES_PER_SEGMENT, budget || 2));
+        const times = new Set();
+
+        function add(t) {
+          if (!Number.isFinite(t) || t < 0) return;
+          // Near-end always maps to the stable end tick so toFixed rounding cannot drop it.
+          if (endTime <= 0 || t >= endTime - 1e-9) {
+            times.add(endTime > 0 ? endRounded : 0);
+            return;
+          }
+          times.add(Math.min(Number(t.toFixed(6)), endRounded));
+        }
+
+        // Required anchors: start, mid, end (when duration allows).
+        add(0);
+        if (endTime > 0) {
+          add(endTime / 2);
+          add(endTime);
+        }
+
+        // Single early-heavy morph schedule (collapsed; no redundant stacks).
+        for (const probe of [0.25, 0.5, 0.75, 1.0, 1.25, 1.5]) {
+          if (probe < endTime) add(probe);
+        }
+
+        // Extra full-span anchors if budget still has room after trim.
+        if (sampleBudget > 6 && endTime > 2) {
+          for (let i = 1; i < 4; i++) add(endTime * (i / 4));
+        }
+
+        const sorted = [...times].sort((a, b) => a - b);
+        if (sorted.length <= sampleBudget) return sorted;
+
+        // Trim: always keep 0 + end; keep mid when budget ≥ 3; fill rest early-heavy.
+        const required = new Set([0]);
+        if (endRounded > 0) required.add(endRounded);
+        if (sampleBudget >= 3 && endTime > 0) {
+          required.add(Math.min(Number((endTime / 2).toFixed(6)), endRounded));
+        }
+        const remaining = sorted.filter(t => !required.has(t));
+        remaining.sort((a, b) => {
+          const ae = a <= 1.5 ? 0 : 1;
+          const be = b <= 1.5 ? 0 : 1;
+          if (ae !== be) return ae - be;
+          return a - b;
+        });
+        const picked = [...required];
+        for (const t of remaining) {
+          if (picked.length >= sampleBudget) break;
+          picked.push(t);
+        }
+        return picked.sort((a, b) => a - b);
+      }
+
+      instrumentAllCanvases();
+
       if (typeof window.__RENDER_SECTION__ === 'function' && Array.isArray(window.__VIDEO_PLAN__)) {
         const plan = window.__VIDEO_PLAN__.filter(segment => segment && segment.id);
-        const maximumSamples = 50;
-        const samplesPerSegment = Math.max(1, Math.min(5, Math.floor(maximumSamples / Math.max(plan.length, 1))));
+        const planLength = Math.max(plan.length, 1);
+        // Global sample budget (~50): distribute per segment; always ≥2 (0+end), ≤8.
+        const samplesPerSegment = Math.max(
+          2,
+          Math.min(MAX_SAMPLES_PER_SEGMENT, Math.floor(MAXIMUM_LAYOUT_SAMPLES / planLength))
+        );
         const resolvedEntries = Array.isArray(window.__RESOLVED_TIMELINE__?.videoTimeline)
           ? window.__RESOLVED_TIMELINE__.videoTimeline
           : [];
@@ -463,19 +1150,14 @@ async function validateWithPlaywright(htmlPath) {
           const globalStart = Number.isFinite(Number(resolvedEntry?.start))
             ? Number(resolvedEntry.start)
             : estimatedGlobalStart;
-          const endTime = Math.max(0, duration - (1 / 30));
-          const localTimes = samplesPerSegment === 1
-            ? [0]
-            : Array.from({ length: samplesPerSegment }, (_, index) =>
-                index === samplesPerSegment - 1
-                  ? endTime
-                  : duration * (index / (samplesPerSegment - 1))
-              );
 
-          for (const localTime of [...new Set(localTimes.map(value => Number(value.toFixed(6))))]) {
+          for (const localTime of buildSampleLocalTimes(duration, samplesPerSegment)) {
             try {
+              beginLayoutSample();
               window.__RENDER_SECTION__(segment, localTime, globalStart + localTime);
-              recordObviousTextOverlap(segment, localTime);
+              const domBoxes = collectDomBoxes();
+              recordMergedLayoutOverlaps(segment, localTime, domBoxes);
+              recordPaddingAndSafeZone(segment, localTime, domBoxes);
             } catch (err) {
               renderErrors.push(
                 `segment '${segment.id}' at localTime=${localTime.toFixed(3)}s: ${err.name || 'Error'}: ${err.message || err}`
