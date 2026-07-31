@@ -313,7 +313,12 @@ async function handleJobs(
       return;
     }
 
-    scheduleJob(() => runJob(params));
+    scheduleJob(async () => {
+      const result = await runJob(params);
+      if (!result.ok) {
+        console.error(`HTTP job ${params.jobId} failed: ${result.error}`);
+      }
+    });
   } catch (error) {
     const message =
       error instanceof Error ? error.message : "Job request failed";

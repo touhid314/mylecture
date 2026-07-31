@@ -247,10 +247,12 @@ callback (the job still runs).
 
 ## Renderer flag: `--max-short-edge`
 
-The `render:video` CLI accepts `--max-short-edge <pixels>` to cap the viewport
-short edge after metadata auto-detection. Dimensions are scaled proportionally
-and rounded to the nearest even integers (H.264 yuv420p requirement). Preview
-jobs use `--max-short-edge 480`.
+The `render:video` CLI accepts `--max-short-edge <pixels>` to cap the encoded
+MP4 short edge after metadata auto-detection. Dimensions are scaled
+proportionally and rounded to the nearest even integers (H.264 yuv420p
+requirement). **Frame capture stays at the full metadata viewport**; only the
+ffmpeg encode step downscales the output video. Preview jobs use
+`--max-short-edge 480`.
 
 ## Docker
 
@@ -284,3 +286,13 @@ docker run -d --name render-worker --restart unless-stopped -p 8787:8787 \
 ```
 
 Mount or bake Kokoro assets under `models/` before expecting narration to succeed.
+
+## Hardening
+
+- The container runs as a non-root `renderworker` user.
+- `build-plan` / `render-video` subprocesses do not inherit `DATABASE_URL`,
+  `RENDER_*_TOKEN`, or storage secret env vars.
+- Subprocess wall clock is capped by `RENDER_WORKER_SUBPROCESS_TIMEOUT_MS`
+  (default 30 minutes).
+- Queue failures store the sanitized stderr summary (e.g. `Set ELEVENLABS_TTS_MODEL
+  in .env`) instead of a generic `Render job failed`.

@@ -24,7 +24,14 @@ RUN npm install
 
 COPY . .
 
-RUN npx playwright install --with-deps chromium
+ENV PLAYWRIGHT_BROWSERS_PATH=/ms-playwright
+RUN mkdir -p /ms-playwright && npx playwright install --with-deps chromium
+
+RUN groupadd --system renderworker \
+    && useradd --system --gid renderworker --home-dir /app renderworker \
+    && chown -R renderworker:renderworker /app /ms-playwright
+
+USER renderworker
 
 ENV PORT=8787
 EXPOSE 8787

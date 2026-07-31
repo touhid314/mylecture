@@ -49,8 +49,8 @@ async function processClaimedJob(row: RenderQueueRow): Promise<void> {
       `Running queue job ${row.videoJobId} (${row.phase}) [queue ${row.id}]`,
     );
 
-    const ok = await runJob(params, { notifyOnFailure: false });
-    if (ok) {
+    const result = await runJob(params, { notifyOnFailure: false });
+    if (result.ok) {
       const marked = await markRenderJobCompleted(row.id, workerId);
       if (marked) {
         console.log(`Queue job completed ${row.videoJobId} (${row.phase})`);
@@ -62,8 +62,10 @@ async function processClaimedJob(row: RenderQueueRow): Promise<void> {
       return;
     }
 
-    await markRenderJobFailedOrRetry(row.id, "Render job failed");
-    console.warn(`Queue job failed ${row.videoJobId} (${row.phase})`);
+    await markRenderJobFailedOrRetry(row.id, result.error);
+    console.warn(
+      `Queue job failed ${row.videoJobId} (${row.phase}): ${result.error}`,
+    );
   } catch (error) {
     const message =
       error instanceof Error ? error.message : "Render queue job failed";

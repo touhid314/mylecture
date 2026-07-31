@@ -8,11 +8,25 @@ import {
   resolveTtsVoice,
 } from "./tts-provider.ts";
 import { getRenderStorage } from "./utils/storage/index.ts";
+import { isVideoJobActive } from "./video-job-db.ts";
 
 const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 
 const MAX_PROCESS_OUTPUT_TAIL = 65_536;
 const CALLBACK_FETCH_TIMEOUT_MS = 10_000;
+
+const CHILD_ENV_BLOCKLIST = new Set([
+  "DATABASE_URL",
+  "RENDER_CALLBACK_TOKEN",
+  "RENDER_WORKER_TOKEN",
+  "R2_SECRET_ACCESS_KEY",
+  "SUPABASE_SERVICE_ROLE_KEY",
+  "SUPABASE_JWT_SECRET",
+]);
+
+export type JobRunResult =
+  | { ok: true; cancelled?: boolean }
+  | { ok: false; error: string };
 
 export type JobPhase = "preview" | "final";
 
@@ -72,12 +86,19 @@ function readEnvInt(name: string, fallback: number): number {
 
 function childEnv(kokoroDevice: string, chunkWorkers: number): NodeJS.ProcessEnv {
   const env = { ...process.env };
+  for (const key of CHILD_ENV_BLOCKLIST) {
+    delete env[key];
+  }
   if (!env.GOOGLE_API_KEY && env.GEMINI_API_KEY) {
     env.GOOGLE_API_KEY = env.GEMINI_API_KEY;
   }
   env.KOKORO_DEVICE = kokoroDevice;
   env.KOKORO_CHUNK_WORKERS = String(chunkWorkers);
   return env;
+}
+
+function jobOk(cancelled = false): JobRunResult {
+  return cancelled ? { ok: true, cancelled: true } : { ok: true };
 }
 
 function runProcess(
@@ -165,6 +186,24 @@ function formatProcessFailure(label: string, result: ProcessResult): string {
     parts.push(`stdout:\n${result.stdout.trim()}`);
   }
   return parts.join("\n\n");
+}
+
+function errorFromProcessResult(
+  label: string,
+  result: ProcessResult,
+  fallback: string,
+): string {
+  console.error(formatProcessFailure(label, result));
+  const stderr = result.stderr.trim();
+  const runtimeMatch = stderr.match(/RuntimeError:\s*(.+)$/m);
+  if (runtimeMatch?.[1]) {
+    return sanitizeCallbackError(runtimeMatch[1].trim(), fallback);
+  }
+  const errorMatch = stderr.match(/Error:\s*(.+)$/m);
+  if (errorMatch?.[1]) {
+    return sanitizeCallbackError(errorMatch[1].trim(), fallback);
+  }
+  return fallback;
 }
 
 function parseDurationSeconds(stdout: string): number | null {
@@ -390,10 +429,21 @@ async function isStoredArtifactCurrent(
   return artifact.lastModifiedMs >= source.lastModifiedMs;
 }
 
+async function ensureVideoJobActive(jobId: string): Promise<boolean> {
+  const active = await isVideoJobActive(jobId);
+  if (!active) {
+    console.log(
+      `Video job ${jobId} was deleted or cancelled; stopping render work`,
+    );
+    return false;
+  }
+  return true;
+}
+
 async function processPreviewJob(
   params: JobParams,
   options?: { notifyOnFailure?: boolean },
-): Promise<boolean> {
+): Promise<JobRunResult> {
   const {
     jobId,
     phase,
@@ -413,10 +463,16 @@ async function processPreviewJob(
 
   const storage = getRenderStorage();
   const rawHtmlPath = `${storageBase}/raw.html`;
+  if (!(await ensureVideoJobActive(jobId))) {
+    return jobOk(true);
+  }
   if (await isStoredArtifactCurrent(previewVideoPath, rawHtmlPath)) {
     console.log(
       `Preview artifacts already exist for job ${jobId}; sending callback only`,
     );
+    if (!(await ensureVideoJobActive(jobId))) {
+      return jobOk(true);
+    }
     const paths: Record<string, string> = {
       resolvedHtmlPath,
       resolvedAudioPrefix,
@@ -431,7 +487,9 @@ async function processPreviewJob(
       status: "preview_ready",
       paths,
     });
-    return delivered;
+    return delivered
+      ? jobOk()
+      : { ok: false, error: "Could not notify website after preview completed" };
   }
 
   let workDir: string | null = null;
@@ -463,8 +521,18 @@ async function processPreviewJob(
       { kokoroDevice, chunkWorkers },
     );
     if (buildResult.code !== 0) {
-      console.error(formatProcessFailure("build:plan", buildResult));
-      throw new Error("Build plan failed");
+      return {
+        ok: false,
+        error: errorFromProcessResult(
+          "build:plan",
+          buildResult,
+          "Build plan failed",
+        ),
+      };
+    }
+
+    if (!(await ensureVideoJobActive(jobId))) {
+      return jobOk(true);
     }
 
     await postCallback({
@@ -472,6 +540,10 @@ async function processPreviewJob(
       phase,
       status: "rendering_preview",
     });
+
+    if (!(await ensureVideoJobActive(jobId))) {
+      return jobOk(true);
+    }
 
     const previewFramesDir = path.join(workDir, "frames");
     const renderResult = await runProcess(
@@ -494,8 +566,18 @@ async function processPreviewJob(
       { kokoroDevice, chunkWorkers },
     );
     if (renderResult.code !== 0) {
-      console.error(formatProcessFailure("render:video", renderResult));
-      throw new Error("Preview render failed");
+      return {
+        ok: false,
+        error: errorFromProcessResult(
+          "render:video",
+          renderResult,
+          "Preview render failed",
+        ),
+      };
+    }
+
+    if (!(await ensureVideoJobActive(jobId))) {
+      return jobOk(true);
     }
 
     await getRenderStorage().uploadFile(resolvedHtmlPath, resolvedHtml, "text/html");
@@ -538,18 +620,24 @@ async function processPreviewJob(
       callbackPayload.durationSeconds = durationSeconds;
     }
     const delivered = await postCallback(callbackPayload);
-    return delivered;
+    return delivered
+      ? jobOk()
+      : { ok: false, error: "Could not notify website after preview completed" };
   } catch (error) {
     console.error(`Preview job ${jobId} failed:`, error);
+    if (!(await isVideoJobActive(jobId))) {
+      return jobOk(true);
+    }
+    const message = sanitizeCallbackError(error, "Preview job failed");
     if (options?.notifyOnFailure !== false) {
       await postCallback({
         jobId,
         phase,
         status: "failed",
-        error: sanitizeCallbackError(error, "Preview job failed"),
+        error: message,
       });
     }
-    return false;
+    return { ok: false, error: message };
   } finally {
     if (workDir) {
       await rm(workDir, { recursive: true, force: true }).catch(() => {});
@@ -560,12 +648,15 @@ async function processPreviewJob(
 async function processFinalJob(
   params: JobParams,
   options?: { notifyOnFailure?: boolean },
-): Promise<boolean> {
+): Promise<JobRunResult> {
   const { jobId, phase, storageBase, voice, kokoroDevice, chunkWorkers, fps } =
     params;
 
   const finalVideoPath = `${storageBase}/final.mp4`;
   const resolvedSourcePath = `${storageBase}/resolved/resolved.html`;
+  if (!(await ensureVideoJobActive(jobId))) {
+    return jobOk(true);
+  }
   if (await isStoredArtifactCurrent(finalVideoPath, resolvedSourcePath)) {
     console.log(
       `Final video already exists for job ${jobId}; sending callback only`,
@@ -576,7 +667,9 @@ async function processFinalJob(
       status: "ready",
       paths: { finalVideoPath },
     });
-    return delivered;
+    return delivered
+      ? jobOk()
+      : { ok: false, error: "Could not notify website after final render completed" };
   }
 
   let workDir: string | null = null;
@@ -600,6 +693,10 @@ async function processFinalJob(
       // Captions are optional for final render.
     }
 
+    if (!(await ensureVideoJobActive(jobId))) {
+      return jobOk(true);
+    }
+
     const finalFramesDir = path.join(workDir, "frames");
     const renderResult = await runProcess(
       [
@@ -619,8 +716,18 @@ async function processFinalJob(
       { kokoroDevice, chunkWorkers },
     );
     if (renderResult.code !== 0) {
-      console.error(formatProcessFailure("render:video", renderResult));
-      throw new Error("Final render failed");
+      return {
+        ok: false,
+        error: errorFromProcessResult(
+          "render:video",
+          renderResult,
+          "Final render failed",
+        ),
+      };
+    }
+
+    if (!(await ensureVideoJobActive(jobId))) {
+      return jobOk(true);
     }
 
     await getRenderStorage().uploadFile(finalVideoPath, finalMp4, "video/mp4");
@@ -636,18 +743,24 @@ async function processFinalJob(
       callbackPayload.durationSeconds = durationSeconds;
     }
     const delivered = await postCallback(callbackPayload);
-    return delivered;
+    return delivered
+      ? jobOk()
+      : { ok: false, error: "Could not notify website after final render completed" };
   } catch (error) {
     console.error(`Final job ${jobId} failed:`, error);
+    if (!(await isVideoJobActive(jobId))) {
+      return jobOk(true);
+    }
+    const message = sanitizeCallbackError(error, "Final job failed");
     if (options?.notifyOnFailure !== false) {
       await postCallback({
         jobId,
         phase,
         status: "failed",
-        error: sanitizeCallbackError(error, "Final job failed"),
+        error: message,
       });
     }
-    return false;
+    return { ok: false, error: message };
   } finally {
     if (workDir) {
       await rm(workDir, { recursive: true, force: true }).catch(() => {});
@@ -658,7 +771,7 @@ async function processFinalJob(
 export async function runJob(
   params: JobParams,
   options?: { notifyOnFailure?: boolean },
-): Promise<boolean> {
+): Promise<JobRunResult> {
   if (params.phase === "preview") {
     return processPreviewJob(params, options);
   }
