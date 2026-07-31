@@ -55,6 +55,7 @@ export function defaultRenderVideoOptions() {
     premixedAudio: null,
     keepFrames: false,
     maxFrames: null,
+    maxShortEdge: null,
     skipVideo: false,
     colorRange: 'tv'
   };
@@ -77,6 +78,7 @@ export function normalizeRenderVideoOptions(options = {}) {
   args.videoCodec = String(args.videoCodec || '').toLowerCase();
   args.colorRange = String(args.colorRange || '').toLowerCase();
   if (args.maxFrames !== null) args.maxFrames = Number(args.maxFrames);
+  if (args.maxShortEdge !== null) args.maxShortEdge = Number(args.maxShortEdge);
   if (args.ttsAudioWorkers !== null) args.ttsAudioWorkers = Number(args.ttsAudioWorkers);
 
   if (!Number.isFinite(args.fps) || args.fps <= 0) throw new Error('--fps must be a positive number');
@@ -110,6 +112,12 @@ export function normalizeRenderVideoOptions(options = {}) {
   if (!['tv', 'pc'].includes(args.colorRange)) throw new Error('--color-range must be "tv" or "pc"');
   if (args.maxFrames !== null && (!Number.isInteger(args.maxFrames) || args.maxFrames <= 0)) {
     throw new Error('--max-frames must be a positive integer');
+  }
+  if (
+    args.maxShortEdge !== null &&
+    (!Number.isInteger(args.maxShortEdge) || args.maxShortEdge < 2)
+  ) {
+    throw new Error('--max-short-edge must be an integer >= 2');
   }
   if (args.pipeFrames && args.keepFrames) {
     throw new Error('--pipe-frames cannot be combined with --keep-frames');
@@ -146,6 +154,7 @@ export function parseArgs(argv) {
     else if (arg === '--resolved-html') args.resolvedHtml = next, i++;
     else if (arg === '--premixed-audio') args.premixedAudio = next, i++;
     else if (arg === '--max-frames') args.maxFrames = next, i++;
+    else if (arg === '--max-short-edge') args.maxShortEdge = next, i++;
     else if (arg === '--tts-provider') args.ttsProvider = next, i++;
     else if (arg === '--tts-voice') args.ttsVoice = next, i++;
     else if (arg === '--tts-speed') args.ttsSpeed = next, i++;
@@ -178,6 +187,7 @@ Options:
   --fps <number>         Frames per second. Default: 60
   --width <pixels>       Viewport width. Default: 1080
   --height <pixels>      Viewport height. Default: 1920
+  --max-short-edge <px>  After auto-detect, scale viewport so min(width,height) is at most this (even dimensions)
   --frames-dir <dir>     Temporary frame directory. Default: .render/frames
   --frame-format <fmt>   Temporary frame format: jpeg or png. Default: jpeg
   --jpeg-quality <1-100> JPEG quality when --frame-format jpeg. Default: 90
@@ -865,6 +875,31 @@ async function detectPageViewport(page) {
   });
 }
 
+export function ensureEvenDimension(value) {
+  const rounded = Math.max(2, Math.round(Number(value)));
+  return rounded % 2 === 0 ? rounded : rounded + 1;
+}
+
+export function scaleViewportToMaxShortEdge(width, height, maxShortEdge) {
+  const safeWidth = ensureEvenDimension(width);
+  const safeHeight = ensureEvenDimension(height);
+  const limit = Number(maxShortEdge);
+  if (!Number.isFinite(limit) || limit < 2) {
+    return { width: safeWidth, height: safeHeight };
+  }
+
+  const shortEdge = Math.min(safeWidth, safeHeight);
+  if (shortEdge <= limit) {
+    return { width: safeWidth, height: safeHeight };
+  }
+
+  const scale = limit / shortEdge;
+  return {
+    width: ensureEvenDimension(safeWidth * scale),
+    height: ensureEvenDimension(safeHeight * scale),
+  };
+}
+
 // Programmatic renderer API. The CLI below is a thin wrapper around this.
 export async function renderVideo(options = {}) {
   const totalStart = performance.now();
@@ -894,6 +929,17 @@ export async function renderVideo(options = {}) {
     console.log(`Auto-detected viewport from metadata: ${detectedViewport.width}x${detectedViewport.height} (originally: ${args.width}x${args.height})`);
     args.width = detectedViewport.width;
     args.height = detectedViewport.height;
+  }
+
+  if (args.maxShortEdge) {
+    const scaled = scaleViewportToMaxShortEdge(args.width, args.height, args.maxShortEdge);
+    if (scaled.width !== args.width || scaled.height !== args.height) {
+      console.log(
+        `Scaled viewport for --max-short-edge ${args.maxShortEdge}: ${args.width}x${args.height} -> ${scaled.width}x${scaled.height}`,
+      );
+    }
+    args.width = scaled.width;
+    args.height = scaled.height;
   }
 
   const timeline = await getTimelineFromPage(timelinePage);
