@@ -3,7 +3,10 @@ import { access, mkdtemp, readdir, rm } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { resolveRenderVoice } from "./voice-allowlist.ts";
+import {
+  resolveTtsProvider,
+  resolveTtsVoice,
+} from "./tts-provider.ts";
 import { getRenderStorage } from "./utils/storage/index.ts";
 
 const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
@@ -30,6 +33,7 @@ export type JobParams = {
   userId: string | null;
   phase: JobPhase;
   storageBase: string;
+  ttsProvider: string;
   voice: string;
   audioWorkers: number;
   kokoroDevice: string;
@@ -275,7 +279,8 @@ export function resolveJobParams(body: JobRequestBody): JobParams {
     throw new Error('phase must be "preview" or "final"');
   }
 
-  const voice = resolveRenderVoice(body.voice);
+  const ttsProvider = resolveTtsProvider(body.voice);
+  const voice = resolveTtsVoice(ttsProvider, body.voice);
   const audioWorkers = clampPositiveInt(
     typeof body.audioWorkers === "number" ? body.audioWorkers : 0,
     MAX_AUDIO_WORKERS,
@@ -304,6 +309,7 @@ export function resolveJobParams(body: JobRequestBody): JobParams {
     userId: typeof body.userId === "string" ? body.userId : null,
     phase,
     storageBase,
+    ttsProvider,
     voice,
     audioWorkers,
     kokoroDevice,
@@ -327,12 +333,15 @@ export function jobParamsFromQueueRow(row: {
     throw new Error(`Invalid queue phase: ${row.phase}`);
   }
 
+  const ttsProvider = resolveTtsProvider(row.voice);
+
   return {
     jobId: row.videoJobId,
     userId: null,
     phase,
     storageBase: row.storageBase,
-    voice: resolveRenderVoice(row.voice),
+    ttsProvider,
+    voice: resolveTtsVoice(ttsProvider, row.voice),
     audioWorkers: clampPositiveInt(row.audioWorkers, MAX_AUDIO_WORKERS, 1),
     kokoroDevice: row.kokoroDevice.trim() || "cpu",
     chunkWorkers: clampPositiveInt(
@@ -389,6 +398,7 @@ async function processPreviewJob(
     jobId,
     phase,
     storageBase,
+    ttsProvider,
     voice,
     audioWorkers,
     kokoroDevice,
@@ -443,6 +453,8 @@ async function processPreviewJob(
         sourceHtml,
         "--out",
         resolvedHtml,
+        "--provider",
+        ttsProvider,
         "--audio-workers",
         String(audioWorkers),
         "--voice",

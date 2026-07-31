@@ -37,6 +37,16 @@ The server listens on `PORT` (default `8787`).
 | `RENDER_QUEUE_CLAIM_TIMEOUT_MS` | `1800000` | Reclaim jobs stuck in `claimed` |
 | `RENDER_QUEUE_REAP_INTERVAL_MS` | `300000` | How often to scan for stuck claimed jobs |
 | `RENDER_QUEUE_RETRY_BACKOFF_MS` | `30000` | Delay before retrying a failed queue row |
+| `STORAGE_BACKEND` | inferred | **Set explicitly** to match Vercel: `supabase`, `r2`, or `r2-only`. When unset, defaults to `r2-only` if `R2_PRIVATE_BUCKET` (or `R2_BUCKET_NAME`) and `R2_SECRET_ACCESS_KEY` are set, otherwise `supabase`. |
+| `R2_ACCOUNT_ID` | _(unset)_ | Cloudflare account id (used to build endpoint if `R2_ENDPOINT` unset) |
+| `R2_ENDPOINT` | _(unset)_ | S3 API endpoint, e.g. `https://<account-id>.r2.cloudflarestorage.com` |
+| `R2_ACCESS_KEY_ID` | _(unset)_ | R2 access key |
+| `R2_SECRET_ACCESS_KEY` | _(unset)_ | R2 secret key |
+| `R2_PRIVATE_BUCKET` | _(unset)_ | Private bucket for video job artifacts (must match website `R2_PRIVATE_BUCKET`) |
+| `TTS_PROVIDER` | `kokoro` | `kokoro`, `elevenlabs`, `google`, etc. Passed to `build-plan --provider`. Set `elevenlabs` for cloud TTS (no Kokoro models required). |
+| `ELEVENLABS_API_KEY` | _(unset)_ | Required when `TTS_PROVIDER=elevenlabs` |
+| `ELEVENLABS_TTS_MODEL` | _(unset)_ | Required when `TTS_PROVIDER=elevenlabs`, e.g. `eleven_flash_v2_5` |
+| `ELEVENLABS_TTS_VOICE` | `bIHbv24MWmeRgasZH58o` | Default ElevenLabs voice ID when the job voice is a Kokoro name |
 
 When `DATABASE_URL` is set, the render server starts a background Postgres queue
 worker automatically. It claims rows from the website's `RenderQueue` table with
@@ -48,7 +58,24 @@ compatibility but does not schedule work while the queue worker is active.
 
 ### `GET /health`
 
-Returns `200` with JSON `{ "ok": true }`. Does not require models or ffmpeg.
+Returns JSON with worker readiness (no secrets):
+
+```json
+{
+  "ok": true,
+  "storageBackend": "r2-only",
+  "storageConfigured": true,
+  "queueConfigured": true,
+  "callbackConfigured": true,
+  "workerAuthConfigured": true,
+  "issues": []
+}
+```
+
+- Status `200` when `ok` is true; `503` when required env is missing.
+- Use after deploy to confirm storage/callback/queue parity with Vercel.
+
+Copy `.env.worker.example` to your VPS env file and set `STORAGE_BACKEND` explicitly to the same value as Vercel.
 
 ### `POST /render`
 
@@ -232,12 +259,27 @@ January 2027). The Dockerfile uses `node:22-bookworm`.
 
 ```bash
 docker build -t mylecture-render-worker .
-docker run -p 8787:8787 \
+docker run -d --name render-worker --restart unless-stopped -p 8787:8787 \
+  --env-file /opt/mylecture/.env \
   -e RENDER_WORKER_TOKEN=your-secret \
-  -e SUPABASE_URL=https://your-project.supabase.co \
-  -e SUPABASE_SERVICE_ROLE_KEY=your-service-role-key \
+  -e STORAGE_BACKEND=r2-only \
+  -e R2_ACCOUNT_ID=... \
+  -e R2_ACCESS_KEY_ID=... \
+  -e R2_SECRET_ACCESS_KEY=... \
+  -e R2_PRIVATE_BUCKET=mylecture-private \
+  -e DATABASE_URL=postgresql://...:5432/... \
   -e WEBSITE_CALLBACK_URL=https://your-site/api/video-agent/callback \
-  -v /path/to/models:/app/models \
+  -e RENDER_CALLBACK_TOKEN=... \
+  -v /opt/mylecture/models:/app/models \
+  mylecture-render-worker
+```
+
+Or pass a single env file (see `.env.worker.example`):
+
+```bash
+docker run -d --name render-worker --restart unless-stopped -p 8787:8787 \
+  --env-file /opt/mylecture/.env \
+  -v /opt/mylecture/models:/app/models \
   mylecture-render-worker
 ```
 

@@ -16,7 +16,15 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { buildRenderMultipart } from "./utils/render-multipart.ts";
 import { isStorageConfigured } from "./utils/storage/index.ts";
-import { resolveRenderVoice } from "./voice-allowlist.ts";
+import {
+  collectWorkerEnvIssues,
+  getWorkerHealthSnapshot,
+  logWorkerEnvIssues,
+} from "./utils/worker-env.ts";
+import {
+  resolveTtsProvider,
+  resolveTtsVoice,
+} from "./tts-provider.ts";
 import {
   resolveJobParams,
   runJob,
@@ -345,7 +353,8 @@ async function handleRender(
       return;
     }
 
-    const voice = resolveRenderVoice(body.voice);
+    const ttsProvider = resolveTtsProvider(body.voice);
+    const voice = resolveTtsVoice(ttsProvider, body.voice);
     const audioWorkers =
       typeof body.audioWorkers === "number" &&
       Number.isInteger(body.audioWorkers) &&
@@ -376,6 +385,8 @@ async function handleRender(
       sourceHtml,
       "--out",
       resolvedHtml,
+      "--provider",
+      ttsProvider,
       "--audio-workers",
       String(audioWorkers),
       "--voice",
@@ -454,7 +465,8 @@ const server = createServer((req, res) => {
   const pathname = url.pathname;
 
   if (req.method === "GET" && pathname === "/health") {
-    sendJson(res, 200, { ok: true });
+    const snapshot = getWorkerHealthSnapshot();
+    sendJson(res, snapshot.ok ? 200 : 503, snapshot);
     return;
   }
 
@@ -472,6 +484,8 @@ const server = createServer((req, res) => {
 });
 
 server.listen(port, () => {
+  const envIssues = collectWorkerEnvIssues();
+  logWorkerEnvIssues(envIssues);
   console.log(`Render worker listening on port ${port}`);
   startRenderQueueWorker();
 });
