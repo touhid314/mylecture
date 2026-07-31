@@ -95,8 +95,9 @@ import tempfile
 import time
 import wave
 from concurrent.futures import ThreadPoolExecutor, as_completed
+from functools import lru_cache
 from pathlib import Path
-from typing import Any
+from typing import Any, NamedTuple
 from urllib.error import HTTPError, URLError
 from urllib.parse import quote, urlencode
 from urllib.request import Request, urlopen
@@ -157,11 +158,6 @@ def _required_bool_env(name: str) -> bool:
     raise RuntimeError(f"{name} must be one of: true, false, 1, 0, yes, no")
 
 
-DEFAULT_OPENAI_MODEL = _require_env("OPENAI_TTS_MODEL")
-DEFAULT_OPENAI_VOICE = _require_env("OPENAI_TTS_VOICE")
-
-DEFAULT_GEMINI_MODEL = _require_env("GOOGLE_TTS_MODEL")
-DEFAULT_GEMINI_VOICE = _require_env("GOOGLE_TTS_VOICE")
 _ALLOWED_GEMINI_MODELS = {
     "gemini-3-flash-preview-tts",
     "gemini-3-flash-lite-preview-tts",
@@ -169,28 +165,62 @@ _ALLOWED_GEMINI_MODELS = {
     "gemini-2.5-flash-preview-tts",
 }
 
-DEFAULT_ELEVENLABS_MODEL = _require_env("ELEVENLABS_TTS_MODEL")
-DEFAULT_ELEVENLABS_VOICE = os.getenv(
-    "ELEVENLABS_TTS_VOICE",
-    os.getenv("ELEVENLABS_VOICE_ID", "bIHbv24MWmeRgasZH58o"),
-).strip()  # Will
 ELEVENLABS_OUTPUT_FORMAT = "pcm_24000"
 
-DEFAULT_KOKORO_MODEL = _require_env("KOKORO_MODEL")
-DEFAULT_KOKORO_VOICE = _require_env("KOKORO_DEFAULT_VOICE")
-DEFAULT_KOKORO_ENGINE = _require_env("KOKORO_ENGINE").lower()
-DEFAULT_KOKORO_DEVICE = _require_env("KOKORO_DEVICE")
-DEFAULT_KOKORO_DTYPE = _require_env("KOKORO_DTYPE")
-DEFAULT_KOKORO_PHONEMIZER = _require_env("KOKORO_PHONEMIZER").lower()
-DEFAULT_KOKORO_ONNX_MODEL = _require_env("KOKORO_ONNX_MODEL")
-DEFAULT_KOKORO_ONNX_MODEL_DIR = Path(_require_env("KOKORO_ONNX_MODEL_DIR"))
-if not DEFAULT_KOKORO_ONNX_MODEL_DIR.is_absolute():
-    DEFAULT_KOKORO_ONNX_MODEL_DIR = PROJECT_ROOT / DEFAULT_KOKORO_ONNX_MODEL_DIR
-DEFAULT_KOKORO_STRICT_GPU = _required_bool_env("KOKORO_STRICT_GPU")
-DEFAULT_KOKORO_CHUNK_WORKERS = int(_require_env("KOKORO_CHUNK_WORKERS"))
-DEFAULT_KOKORO_CPU_FALLBACK_DTYPE = _require_env("KOKORO_CPU_FALLBACK_DTYPE")
-if DEFAULT_KOKORO_CHUNK_WORKERS <= 0:
-    raise RuntimeError("KOKORO_CHUNK_WORKERS must be a positive integer")
+
+class KokoroSettings(NamedTuple):
+    model: str
+    voice: str
+    engine: str
+    device: str
+    dtype: str
+    phonemizer: str
+    onnx_model: str
+    onnx_model_dir: Path
+    strict_gpu: bool
+    chunk_workers: int
+
+
+@lru_cache(maxsize=1)
+def _openai_settings() -> tuple[str, str]:
+    return _require_env("OPENAI_TTS_MODEL"), _require_env("OPENAI_TTS_VOICE")
+
+
+@lru_cache(maxsize=1)
+def _gemini_settings() -> tuple[str, str]:
+    return _require_env("GOOGLE_TTS_MODEL"), _require_env("GOOGLE_TTS_VOICE")
+
+
+@lru_cache(maxsize=1)
+def _elevenlabs_settings() -> tuple[str, str]:
+    model = _require_env("ELEVENLABS_TTS_MODEL")
+    voice = os.getenv(
+        "ELEVENLABS_TTS_VOICE",
+        os.getenv("ELEVENLABS_VOICE_ID", "bIHbv24MWmeRgasZH58o"),
+    ).strip()  # Will
+    return model, voice
+
+
+@lru_cache(maxsize=1)
+def _kokoro_settings() -> KokoroSettings:
+    onnx_model_dir = Path(_require_env("KOKORO_ONNX_MODEL_DIR"))
+    if not onnx_model_dir.is_absolute():
+        onnx_model_dir = PROJECT_ROOT / onnx_model_dir
+    chunk_workers = int(_require_env("KOKORO_CHUNK_WORKERS"))
+    if chunk_workers <= 0:
+        raise RuntimeError("KOKORO_CHUNK_WORKERS must be a positive integer")
+    return KokoroSettings(
+        model=_require_env("KOKORO_MODEL"),
+        voice=_require_env("KOKORO_DEFAULT_VOICE"),
+        engine=_require_env("KOKORO_ENGINE").lower(),
+        device=_require_env("KOKORO_DEVICE"),
+        dtype=_require_env("KOKORO_DTYPE"),
+        phonemizer=_require_env("KOKORO_PHONEMIZER").lower(),
+        onnx_model=_require_env("KOKORO_ONNX_MODEL"),
+        onnx_model_dir=onnx_model_dir,
+        strict_gpu=_required_bool_env("KOKORO_STRICT_GPU"),
+        chunk_workers=chunk_workers,
+    )
 
 KOKORO_JS = r"""
 import { KokoroTTS } from "kokoro-js";
@@ -365,6 +395,7 @@ def _run_elevenlabs(
     or transcoded. Alignment uses normalized character timing when available and
     falls back to timing for the original text.
     """
+    elevenlabs_model, _ = _elevenlabs_settings()
     endpoint = (
         "https://api.elevenlabs.io/v1/text-to-speech/"
         + quote(voice, safe="")
@@ -378,7 +409,7 @@ def _run_elevenlabs(
         data=json.dumps(
             {
                 "text": text,
-                "model_id": DEFAULT_ELEVENLABS_MODEL,
+                "model_id": elevenlabs_model,
                 "voice_settings": {"speed": speed},
             }
         ).encode("utf-8"),
@@ -436,7 +467,7 @@ def _run_elevenlabs(
             else "alignment"
         ),
         "voice_id": voice,
-        "model_id": DEFAULT_ELEVENLABS_MODEL,
+        "model_id": elevenlabs_model,
         "request_id": request_id,
         "character_cost": character_cost,
         "words": _elevenlabs_word_alignment(chosen_alignment),
@@ -683,8 +714,9 @@ def _run_kokoro_onnxruntime(text: str, output_path: Path, voice: str, speed: flo
 
     global _ONNX_SESSIONS, _TOKENIZERS, _VOICES, _G2P_OBJECTS
 
-    model_dir = DEFAULT_KOKORO_ONNX_MODEL_DIR
-    if not (model_dir / "tokenizer.json").is_file() or not (model_dir / "onnx" / DEFAULT_KOKORO_ONNX_MODEL).is_file():
+    k = _kokoro_settings()
+    model_dir = k.onnx_model_dir
+    if not (model_dir / "tokenizer.json").is_file() or not (model_dir / "onnx" / k.onnx_model).is_file():
         snapshot_download(
             "onnx-community/Kokoro-82M-v1.0-ONNX",
             local_dir=str(model_dir),
@@ -693,7 +725,7 @@ def _run_kokoro_onnxruntime(text: str, output_path: Path, voice: str, speed: flo
 
     tokenizer_path = model_dir / "tokenizer.json"
     voice_path = model_dir / "voices" / f"{voice}.bin"
-    model_path = model_dir / "onnx" / DEFAULT_KOKORO_ONNX_MODEL
+    model_path = model_dir / "onnx" / k.onnx_model
     if not voice_path.is_file():
         raise RuntimeError(f"Kokoro voice file not found: {voice_path}")
     if not model_path.is_file():
@@ -728,7 +760,7 @@ def _run_kokoro_onnxruntime(text: str, output_path: Path, voice: str, speed: flo
     input_ids = np.array([[0, *tokens, 0]], dtype=np.int64)
     speed_input = np.array([speed], dtype=np.float32)
 
-    requested_device = (DEFAULT_KOKORO_DEVICE or "cuda").lower()
+    requested_device = (k.device or "cuda").lower()
     if requested_device == "cpu":
         providers = ["CPUExecutionProvider"]
     elif requested_device == "cuda":
@@ -751,7 +783,7 @@ def _run_kokoro_onnxruntime(text: str, output_path: Path, voice: str, speed: flo
     available = ort.get_available_providers()
     primary_provider = providers[0][0] if isinstance(providers[0], (tuple, list)) else providers[0]
     if primary_provider not in available:
-        if DEFAULT_KOKORO_STRICT_GPU:
+        if k.strict_gpu:
             raise RuntimeError(f"ONNX Runtime provider {primary_provider} is not available. Available: {available}")
         log.warning(f"ONNX Runtime provider {primary_provider} is not available ({available}). Falling back to CPUExecutionProvider.")
         providers = ["CPUExecutionProvider"]
@@ -763,10 +795,10 @@ def _run_kokoro_onnxruntime(text: str, output_path: Path, voice: str, speed: flo
     sess = _ONNX_SESSIONS[sess_key]
 
     active = sess.get_providers()
-    if requested_device == "cuda" and DEFAULT_KOKORO_STRICT_GPU and (not active or active[0] != "CUDAExecutionProvider"):
+    if requested_device == "cuda" and k.strict_gpu and (not active or active[0] != "CUDAExecutionProvider"):
         raise RuntimeError(f"CUDAExecutionProvider was requested but session providers are {active}")
 
-    if DEFAULT_KOKORO_STRICT_GPU:
+    if k.strict_gpu:
         disable_fallback = getattr(sess, "disable_fallback", None)
         if callable(disable_fallback):
             disable_fallback()
@@ -777,16 +809,17 @@ def _run_kokoro_onnxruntime(text: str, output_path: Path, voice: str, speed: flo
 
 
 def _run_kokoro_js(text: str, output_path: Path, voice: str, speed: float) -> None:
+    k = _kokoro_settings()
     env = os.environ.copy()
     env.update(
         {
             "KOKORO_TEXT": text,
             "KOKORO_OUTPUT": str(output_path),
-            "KOKORO_MODEL": DEFAULT_KOKORO_MODEL,
-            "KOKORO_DTYPE": DEFAULT_KOKORO_DTYPE,
+            "KOKORO_MODEL": k.model,
+            "KOKORO_DTYPE": k.dtype,
             "KOKORO_VOICE": voice,
             "KOKORO_SPEED": str(speed),
-            "KOKORO_DEVICE": DEFAULT_KOKORO_DEVICE,
+            "KOKORO_DEVICE": k.device,
         }
     )
 
@@ -911,23 +944,25 @@ def _run_misaki_phonemizer(text: str, british: bool) -> str:
 
 
 def _run_kokoro_phonemizer(text: str, british: bool) -> str:
-    if DEFAULT_KOKORO_PHONEMIZER in {"misaki", "python"}:
+    phonemizer = _kokoro_settings().phonemizer
+    if phonemizer in {"misaki", "python"}:
         return _run_misaki_phonemizer(text, british)
-    if DEFAULT_KOKORO_PHONEMIZER in {"js", "node", "phonemizer"}:
+    if phonemizer in {"js", "node", "phonemizer"}:
         return _run_js_phonemizer(text, british)
     raise RuntimeError("KOKORO_PHONEMIZER must be one of: misaki, js")
 
 
 def _run_kokoro(text: str, output_path: Path, voice: str, speed: float) -> None:
-    if DEFAULT_KOKORO_ENGINE in {"onnxruntime", "onnx", "ort", "cuda"}:
+    k = _kokoro_settings()
+    if k.engine in {"onnxruntime", "onnx", "ort", "cuda"}:
         try:
             _run_kokoro_onnxruntime(text, output_path, voice, speed)
             return
         except Exception as exc:
-            if DEFAULT_KOKORO_STRICT_GPU:
+            if k.strict_gpu:
                 raise
             log.warning(f"Kokoro ONNX Runtime backend failed; falling back to kokoro-js. {exc}")
-    elif DEFAULT_KOKORO_ENGINE not in {"kokoro-js", "node", "js"}:
+    elif k.engine not in {"kokoro-js", "node", "js"}:
         raise RuntimeError("KOKORO_ENGINE must be one of: onnxruntime, kokoro-js")
 
     _run_kokoro_js(text, output_path, voice, speed)
@@ -946,7 +981,7 @@ def _run_kokoro_chunked(text: str, output_path: Path, voice: str, speed: float) 
     with tempfile.TemporaryDirectory(dir=str(tmp_root), prefix="kokoro_chunks_") as td:
         chunk_dir = Path(td)
         chunk_paths = [chunk_dir / f"chunk_{idx:04d}.wav" for idx in range(len(chunks))]
-        max_workers = DEFAULT_KOKORO_CHUNK_WORKERS
+        max_workers = _kokoro_settings().chunk_workers
         max_workers = max(1, min(len(chunks), max_workers))
 
         with ThreadPoolExecutor(max_workers=max_workers) as executor:
@@ -1172,10 +1207,11 @@ def tts(
     log.info(f"TTS provider={chosen_provider} -> {out_path}")
 
     if chosen_provider == "openai":
+        openai_model, openai_voice = _openai_settings()
         client = _openai_client()
-        chosen_voice = (voice or DEFAULT_OPENAI_VOICE).strip()
+        chosen_voice = (voice or openai_voice).strip()
         with client.audio.speech.with_streaming_response.create(
-            model=DEFAULT_OPENAI_MODEL,
+            model=openai_model,
             voice=chosen_voice,
             input=clean_text,
             response_format="wav",
@@ -1188,13 +1224,13 @@ def tts(
             raise RuntimeError("Google GenAI SDK types are not available")
 
         client = _google_client()
-        chosen_model = DEFAULT_GEMINI_MODEL
+        chosen_model, gemini_voice = _gemini_settings()
         if chosen_model not in _ALLOWED_GEMINI_MODELS:
             raise RuntimeError(
                 "GOOGLE_TTS_MODEL must be one of: "
                 + ", ".join(sorted(_ALLOWED_GEMINI_MODELS))
             )
-        chosen_voice = (voice or DEFAULT_GEMINI_VOICE).strip()
+        chosen_voice = (voice or gemini_voice).strip()
 
         response = client.models.generate_content(
             model=chosen_model,
@@ -1215,7 +1251,8 @@ def tts(
         return str(out_path)
 
     if chosen_provider == "elevenlabs":
-        chosen_voice = (voice or DEFAULT_ELEVENLABS_VOICE).strip()
+        elevenlabs_model, elevenlabs_voice = _elevenlabs_settings()
+        chosen_voice = (voice or elevenlabs_voice).strip()
         if not chosen_voice:
             raise ValueError(
                 "Set an ElevenLabs voice ID with voice=, "
@@ -1225,7 +1262,7 @@ def tts(
         if chosen_speed <= 0:
             raise ValueError("speed must be greater than 0")
         log.info(
-            f"ElevenLabs config model={DEFAULT_ELEVENLABS_MODEL} "
+            f"ElevenLabs config model={elevenlabs_model} "
             f"voice={chosen_voice} speed={chosen_speed} alignment={alignment}"
         )
         _run_elevenlabs(
@@ -1239,14 +1276,15 @@ def tts(
         return str(out_path)
 
     if chosen_provider == "kokoro":
-        chosen_voice = (voice or DEFAULT_KOKORO_VOICE).strip()
+        k = _kokoro_settings()
+        chosen_voice = (voice or k.voice).strip()
         chosen_speed = float(speed) if speed is not None else 1.0
         if chosen_speed <= 0:
             raise ValueError("speed must be greater than 0")
         log.info(
-            f"Kokoro config model={DEFAULT_KOKORO_MODEL} dtype={DEFAULT_KOKORO_DTYPE} "
-            f"device={DEFAULT_KOKORO_DEVICE or 'default'} voice={chosen_voice} "
-            f"speed={chosen_speed} phonemizer={DEFAULT_KOKORO_PHONEMIZER}"
+            f"Kokoro config model={k.model} dtype={k.dtype} "
+            f"device={k.device or 'default'} voice={chosen_voice} "
+            f"speed={chosen_speed} phonemizer={k.phonemizer}"
         )
         _run_kokoro_chunked(clean_text, out_path, chosen_voice, chosen_speed)
         return str(out_path)
