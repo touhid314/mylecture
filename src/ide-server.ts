@@ -23,6 +23,11 @@ import {
   allocateFolderName,
   sanitizeTitle,
 } from './session-folder-name.ts';
+import {
+  assertVisualEditPreservesNarration,
+  matchVideoMetadataBlock,
+  restoreProtectedVisualBlocks,
+} from './visual-edit-protect.ts';
 
 const rootDir = process.cwd();
 const startupConfig = loadAppConfig(rootDir);
@@ -650,52 +655,6 @@ function siblingPath(filePath, name) {
 
 const VIDEO_METADATA_TITLE_RE = /\btitle\s*:\s*(['"`])((?:\\.|(?!\1)[\s\S])*)\1/;
 
-// Brace-depth match for window.__VIDEO_METADATA__ = { ... }; — skips string literals so
-// titles containing `};` do not truncate the protected-block boundary.
-function matchVideoMetadataBlock(html) {
-  const startRe = /window\.__VIDEO_METADATA__\s*=\s*\{/;
-  const startMatch = startRe.exec(html);
-  if (!startMatch) return null;
-  const startIdx = startMatch.index;
-  const braceStart = startIdx + startMatch[0].length - 1;
-  let depth = 0;
-  let inString = null;
-  let escaped = false;
-  for (let i = braceStart; i < html.length; i++) {
-    const ch = html[i];
-    if (inString) {
-      if (escaped) {
-        escaped = false;
-        continue;
-      }
-      if (ch === '\\') {
-        escaped = true;
-        continue;
-      }
-      if (ch === inString) inString = null;
-      continue;
-    }
-    if (ch === '"' || ch === "'" || ch === '`') {
-      inString = ch;
-      continue;
-    }
-    if (ch === '{') {
-      depth++;
-      continue;
-    }
-    if (ch === '}') {
-      depth--;
-      if (depth === 0) {
-        let j = i + 1;
-        while (j < html.length && /\s/.test(html[j])) j++;
-        if (html[j] === ';') return html.slice(startIdx, j + 1);
-        return html.slice(startIdx, i + 1);
-      }
-    }
-  }
-  return null;
-}
-
 function unescapeMetadataTitle(value) {
   return String(value).replace(/\\([\\'"])/g, '$1');
 }
@@ -997,24 +956,10 @@ function saveVisualTextEdit(sourcePath, oldText, newText) {
   };
 }
 
-function protectedVisualEditContent(html) {
-  const metadata = matchVideoMetadataBlock(html);
-  const plan = html.match(/window\.__VIDEO_PLAN__\s*=\s*\[[\s\S]*?\];/);
-  return {
-    metadata: metadata || '',
-    plan: plan?.[0] || ''
-  };
-}
+const SCOPED_VISUAL_EDIT_MAX_TURNS = 8;
 
-function assertVisualEditPreservesNarration(original, modified) {
-  const before = protectedVisualEditContent(original);
-  const after = protectedVisualEditContent(modified);
-  if (!after.metadata || !after.plan) {
-    throw new Error('The visual edit removed required video metadata or narration plan.');
-  }
-  if (before.metadata !== after.metadata || before.plan !== after.plan) {
-    throw new Error('The visual edit attempted to change narration, audio, or video metadata, so it was not applied.');
-  }
+function visualEditLog(message: string): void {
+  process.stdout.write(`[visual edit] ${message}\n`);
 }
 
 function scopedVisualEditorSystemPrompt(targetName) {
@@ -1023,14 +968,16 @@ function scopedVisualEditorSystemPrompt(targetName) {
 # Scope
 
 - The isolated workspace contains exactly one target file: ${targetName}.
-- Read that file, implement only the user's requested visual or layout change, and edit it with the edits tool.
-- Make the smallest sufficient HTML, CSS, SVG, Canvas, or render-function change.
+- Read that file once, then apply one or a few small edits tool patches — never rewrite the whole file.
+- Change only visual/layout/render code: HTML structure for visuals, CSS, SVG, Canvas, or window.__RENDER_SECTION__ drawing logic.
+- Make the smallest sufficient change for the user's request.
 - Keep every coordinate in its immediate positioned parent's local coordinate system. Never reuse 1920x1080 stage coordinates inside an inset or reduced-width container; prefer Flexbox/Grid for multi-node rows and verify equal intended edge margins.
-- Preserve all narration text, audio paths, cue IDs, cue ordering, window.__VIDEO_METADATA__, and window.__VIDEO_PLAN__ exactly.
-- Preserve timing and unrelated visual content.
+- Do NOT edit, regenerate, reformat, or delete window.__VIDEO_METADATA__ or window.__VIDEO_PLAN__. Narration text, audio paths, cue IDs, cue ordering, and timing are immutable — the host discards any change to those blocks.
+- For broad requests (e.g. "readd missing visuals"), implement only what existing cues already describe — do not invent new cue IDs or narration.
+- Preserve unrelated visual content and timing.
 - Do not add new facts, equations, statistics, labels, citations, or other technical content.
 - Do not create files or inspect anything outside the target file.
-- Do not modify resolved HTML, audio, scripts, assets, or metadata.
+- Do not modify resolved HTML, audio, scripts, or assets.
 - The target must retain window.__VIDEO_METADATA__, window.__VIDEO_PLAN__, and window.__RENDER_SECTION__ and pass the HTML contract validator.
 - When the edit is complete, provide one short sentence describing it.
 
@@ -1052,27 +999,35 @@ async function runScopedVisualEdit(sourcePath, instruction, options = {}) {
   const original = readFileSync(sourcePath, 'utf8');
   writeFileSync(isolatedPath, original, 'utf8');
 
+  visualEditLog(`Starting on ${sourceName} (max ${SCOPED_VISUAL_EDIT_MAX_TURNS} turns)`);
+
   try {
     const agent = new EditorAgent({
       model: options.model || process.env.AGENT_MODEL || 'gemini-3.5-flash',
       workspaceDir: workspacePath,
-      maxTurns: 24,
+      maxTurns: SCOPED_VISUAL_EDIT_MAX_TURNS,
       tokenTrackerSessionId: `visual-${path.basename(workspacePath)}`,
       systemPrompt: scopedVisualEditorSystemPrompt(sourceName),
-      onLog: options.onLog
+      onLog: text => process.stdout.write(`[visual edit] ${text}`)
     });
     const session = agent.startChat();
     const output = await session.sendMessage(
       `Target file: ${sourceName}\n\nRequested visual change:\n${instruction}`,
-      24,
+      SCOPED_VISUAL_EDIT_MAX_TURNS,
       options.signal
     );
-    const modified = readFileSync(isolatedPath, 'utf8');
+    let modified = readFileSync(isolatedPath, 'utf8');
     if (modified === original) {
       throw new Error('The model completed without changing the scene.');
     }
+    visualEditLog('Restoring protected narration/metadata blocks...');
+    modified = restoreProtectedVisualBlocks(original, modified);
     assertVisualEditPreservesNarration(original, modified);
+    visualEditLog('Protected blocks verified; applying edit.');
     return { original, modified, output: String(output || '').trim() };
+  } catch (error) {
+    visualEditLog(`Failed: ${error?.message || error}`);
+    throw error;
   } finally {
     const resolvedWorkspace = path.resolve(workspacePath);
     if (resolvedWorkspace.startsWith(`${visualEditRoot}${path.sep}`)) {
@@ -2160,8 +2115,7 @@ const server = createServer(async (request, response) => {
 
       const edit = await runScopedVisualEdit(sourcePath, instruction, {
         model: payload.model,
-        signal: abortController.signal,
-        onLog: text => process.stderr.write(text)
+        signal: abortController.signal
       });
       if (visualJob.aborted) throw new Error('Visual edit stopped.');
 
@@ -2183,6 +2137,11 @@ const server = createServer(async (request, response) => {
         : sourcePath;
       viewerState.version++;
       viewerState.path = resultPath;
+      visualEditLog(
+        `Saved ${path.basename(sourcePath)}${
+          existsSync(resolvedPath) ? ` and synced ${path.basename(resolvedPath)}` : ''
+        }`
+      );
       sendJson(response, 200, {
         ok: true,
         path: resultPath,
@@ -2190,6 +2149,7 @@ const server = createServer(async (request, response) => {
         folder: listFolderFiles(resultPath)
       });
     } catch (error) {
+      visualEditLog(`Request failed: ${error.message}`);
       sendJson(response, 500, { error: error.message });
     } finally {
       if (activeJob?.type === 'visual edit') activeJob = null;

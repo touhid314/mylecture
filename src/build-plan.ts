@@ -12,10 +12,15 @@
 import { chromium } from 'playwright';
 import { spawn } from 'node:child_process';
 import os from 'node:os';
-import { existsSync, mkdirSync, readFileSync, statSync, writeFileSync, unlinkSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, statSync, writeFileSync, unlinkSync, readdirSync } from 'node:fs';
 import path from 'node:path';
 import { pathToFileURL } from 'node:url';
-import { normalizeTtsText } from './tts-normalize.ts';
+import { normalizeTtsText } from '../packages/lecture-viewer/src/player/tts-normalize.ts';
+import {
+  elevenLabsContextForSection,
+  narrationSpokenTextsInOrder,
+} from './elevenlabs-context.ts';
+import { isIndexHtmlName } from './coursegen/paths.ts';
 import { getInvokeRenderSectionSource } from '../packages/lecture-viewer/src/player/invoke-render-section.ts';
 
 const rootDir = process.cwd();
@@ -27,7 +32,81 @@ function defaultWorkerCount() {
 }
 
 function defaultAudioWorkerCount(provider) {
+  if (isElevenLabsProvider(provider)) return 1;
   return (provider === 'kokoro' || provider === 'omnivoice') ? 6 : defaultWorkerCount();
+}
+
+function isElevenLabsProvider(provider) {
+  const value = String(provider || '').trim().toLowerCase();
+  return value === 'elevenlabs' || value === '11labs';
+}
+
+function sortIndexHtmlNames(a, b) {
+  return a.localeCompare(b, undefined, { numeric: true });
+}
+
+function listSiblingIndexHtmlFiles(inputPath) {
+  const dir = path.dirname(inputPath);
+  const basename = path.basename(inputPath);
+  if (!isIndexHtmlName(basename)) return [];
+
+  try {
+    return readdirSync(dir)
+      .filter((name) => isIndexHtmlName(name))
+      .sort(sortIndexHtmlNames);
+  } catch {
+    return [];
+  }
+}
+
+/** Spoken narration from the previous / next index*.html in the same lecture folder. */
+async function loadLectureCrossSceneNarration(inputPath) {
+  const basename = path.basename(inputPath);
+  const indexFiles = listSiblingIndexHtmlFiles(inputPath);
+  const fileIndex = indexFiles.indexOf(basename);
+  if (fileIndex < 0) {
+    return { priorSceneText: null, followingSceneText: null };
+  }
+
+  const dir = path.dirname(inputPath);
+  let priorSceneText = null;
+  let followingSceneText = null;
+
+  if (fileIndex > 0) {
+    const prevPath = path.join(dir, indexFiles[fileIndex - 1]);
+    const prevPlan = applyTtsOverrides(
+      await readPlanFromHtml(prevPath),
+      prevPath
+    );
+    const items = narrationSpokenTextsInOrder(
+      prevPlan,
+      normalizeSectionKind,
+      normalizeTtsText
+    );
+    priorSceneText = items.map((item) => item.text).join(' ');
+    console.log(
+      `ElevenLabs cross-lecture prior context from ${path.basename(prevPath)} (${items.length} cue(s))`
+    );
+  }
+
+  if (fileIndex < indexFiles.length - 1) {
+    const nextPath = path.join(dir, indexFiles[fileIndex + 1]);
+    const nextPlan = applyTtsOverrides(
+      await readPlanFromHtml(nextPath),
+      nextPath
+    );
+    const items = narrationSpokenTextsInOrder(
+      nextPlan,
+      normalizeSectionKind,
+      normalizeTtsText
+    );
+    followingSceneText = items.map((item) => item.text).join(' ');
+    console.log(
+      `ElevenLabs cross-lecture following context from ${path.basename(nextPath)} (${items.length} cue(s))`
+    );
+  }
+
+  return { priorSceneText, followingSceneText };
 }
 
 // Parse CLI options for resolving source HTML into timeline-ready HTML.
@@ -92,7 +171,7 @@ Options:
   --provider <name>    TTS provider passed to src/utils/tts.py. Default: kokoro
   --voice <name>       TTS voice passed to src/utils/tts.py. Default: af_heart
   --speed <number>     TTS speed passed to src/utils/tts.py. Default: 1
-  --audio-workers <n>  Concurrent audio files to generate. Default: 6 for Kokoro, CPU count otherwise
+  --audio-workers <n>  Concurrent audio files to generate. Default: 6 for Kokoro/OmniVoice, 1 for ElevenLabs, CPU count otherwise
   --force-audio        Regenerate narration audio even if files already exist
   --force-audio-section <id>
                         Regenerate only one narration section
@@ -302,12 +381,21 @@ async function generateAudio({ text, outputPath, provider, voice, speed }) {
 }
 
 // Generate missing narration audio in one Python process to avoid repeated model loads.
-async function runAudioJobs(audioJobs, maxWorkers) {
+async function runAudioJobs(audioJobs, maxWorkers, provider) {
   if (audioJobs.length === 0) return;
+
+  const sequential = isElevenLabsProvider(provider);
+  const workers = sequential ? 1 : maxWorkers;
 
   const python = resolveTtsPython();
   console.log(`TTS Python: ${python}`);
-  console.log(`Generating ${audioJobs.length} audio file(s) in a single batch with ${maxWorkers} workers...`);
+  if (sequential) {
+    console.log(
+      `Generating ${audioJobs.length} ElevenLabs clip(s) sequentially in plan order with cumulative scene context...`
+    );
+  } else {
+    console.log(`Generating ${audioJobs.length} audio file(s) in a single batch with ${workers} workers...`);
+  }
   const tempJobsFile = path.resolve(rootDir, '.tmp', `jobs_${Date.now()}.json`);
   mkdirSync(path.dirname(tempJobsFile), { recursive: true });
   writeFileSync(tempJobsFile, JSON.stringify(audioJobs, null, 2), 'utf8');
@@ -328,20 +416,27 @@ async function runAudioJobs(audioJobs, maxWorkers) {
     '',
     'def run_job(job):',
     '    print(f"Generating audio for {job[\'sectionId\']} -> {job[\'displayPath\']}", flush=True)',
-    '    tts(',
-    '        job["text"],',
-    '        provider=job["provider"],',
-    '        voice=job["voice"],',
-    '        output_path=job["outputPath"],',
-    '        speed=job["speed"]',
-    '    )',
+    '    kwargs = {',
+    '        "provider": job["provider"],',
+    '        "voice": job["voice"],',
+    '        "output_path": job["outputPath"],',
+    '        "speed": job["speed"],',
+    '    }',
+    '    if job.get("previousText"):',
+    '        kwargs["previous_text"] = job["previousText"]',
+    '    if job.get("nextText"):',
+    '        kwargs["next_text"] = job["nextText"]',
+    '    tts(job["text"], **kwargs)',
     '',
     'if len(jobs) > 0:',
-    '    # Warm up sequentially first to cache the session and avoid concurrent CUDA initialization',
-    '    run_job(jobs[0])',
-    'if len(jobs) > 1:',
-    '    with ThreadPoolExecutor(max_workers=max_workers) as executor:',
-    '        list(executor.map(run_job, jobs[1:]))',
+    '    if max_workers <= 1:',
+    '        for job in jobs:',
+    '            run_job(job)',
+    '    else:',
+    '        run_job(jobs[0])',
+    '        if len(jobs) > 1:',
+    '            with ThreadPoolExecutor(max_workers=max_workers) as executor:',
+    '                list(executor.map(run_job, jobs[1:]))',
     '',
     'try:',
     '    os.unlink(jobs_file)',
@@ -356,7 +451,7 @@ async function runAudioJobs(audioJobs, maxWorkers) {
         ...process.env,
         PROJECT_ROOT: rootDir,
         TTS_JOBS_FILE: tempJobsFile,
-        TTS_MAX_WORKERS: String(maxWorkers)
+        TTS_MAX_WORKERS: String(workers)
       }
     });
   } catch (error) {
@@ -385,7 +480,7 @@ async function measureAudioDuration(audioPath) {
 }
 
 // Convert the authored plan into render and audio timelines.
-async function resolveTimeline(plan, inputPath, outputPath, args) {
+async function resolveTimeline(plan, inputPath, outputPath, args, crossScene = null) {
   const outputDir = path.dirname(outputPath);
 
   let cursor = 0;
@@ -394,6 +489,11 @@ async function resolveTimeline(plan, inputPath, outputPath, args) {
   const audioInfoBySection = new Map();
   const audioJobs = [];
   let forcedSectionFound = !args.forceAudioSection;
+  const narrationItems = narrationSpokenTextsInOrder(
+    plan,
+    normalizeSectionKind,
+    normalizeTtsText
+  );
 
   // First pass: decide which narration files need to exist before timing can be resolved.
   for (const [index, section] of plan.entries()) {
@@ -430,7 +530,7 @@ async function resolveTimeline(plan, inputPath, outputPath, args) {
         if (!String(spokenText).trim()) {
           throw new Error(`Narration+visual section "${section.id}" has an empty ttsText override.`);
         }
-        audioJobs.push({
+        const job = {
           sectionId: section.id,
           // Spoken form only for TTS; captions keep original section.text.
           text: normalizeTtsText(spokenText),
@@ -439,7 +539,17 @@ async function resolveTimeline(plan, inputPath, outputPath, args) {
           provider: args.provider,
           voice: args.voice,
           speed: args.speed
-        });
+        };
+        if (isElevenLabsProvider(args.provider)) {
+          const { previousText, nextText } = elevenLabsContextForSection(
+            narrationItems,
+            section.id,
+            crossScene
+          );
+          if (previousText) job.previousText = previousText;
+          if (nextText) job.nextText = nextText;
+        }
+        audioJobs.push(job);
       } else {
         console.log(`Using existing audio for ${section.id} -> ${displayPath}`);
       }
@@ -450,7 +560,7 @@ async function resolveTimeline(plan, inputPath, outputPath, args) {
     throw new Error(`Narration section "${args.forceAudioSection}" was not found.`);
   }
 
-  await runAudioJobs(audioJobs, args.audioWorkers);
+  await runAudioJobs(audioJobs, args.audioWorkers, args.provider);
 
   // Second pass: construct the ordered timelines now that narration durations are known.
   for (const [index, section] of plan.entries()) {
@@ -636,7 +746,11 @@ async function main() {
 
   const sourcePlan = await readPlanFromHtml(inputPath);
   const plan = applyTtsOverrides(sourcePlan, inputPath);
-  const timeline = await resolveTimeline(plan, inputPath, outputPath, args);
+  let crossScene = null;
+  if (isElevenLabsProvider(args.provider)) {
+    crossScene = await loadLectureCrossSceneNarration(inputPath);
+  }
+  const timeline = await resolveTimeline(plan, inputPath, outputPath, args, crossScene);
   writeResolvedHtml(inputPath, outputPath, timeline);
 
   console.log(`Resolved duration: ${timeline.duration.toFixed(3)}s`);

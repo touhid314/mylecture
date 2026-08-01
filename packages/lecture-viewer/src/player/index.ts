@@ -728,7 +728,7 @@ class LecturePlayer {
     }
 
     const cue = this.activeVideoCue();
-    const text = String(cue?.item?.text || '').trim();
+    const text = String((cue?.item?.ttsText ?? cue?.item?.text) || '').trim();
     if (!cue || !text || this.state.interactiveActive || this.state.gameActive) {
       this.stopLiveTts();
       return;

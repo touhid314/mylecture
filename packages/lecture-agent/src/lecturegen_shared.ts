@@ -3,6 +3,14 @@ import path from 'node:path';
 
 import { build_prompt } from './prompt_builder.js';
 import { LLM_Model } from './utils/llm_model.js';
+import {
+    clampLlmRetryWaitMs,
+    isLlmRateLimitError,
+    parseRetryAfterMs,
+    PRIMARY_RESTORE_FAILURE_PUSH_MS,
+    primaryCooldownUntilMs,
+    resolveLlmFallbackModel,
+} from './utils/llm_rate_limit.js';
 
 export type LectureGenAttachment = {
     path: string;
@@ -29,6 +37,136 @@ function responseText(response: any, purpose: string): string {
     return value;
 }
 
+function rateLimitBackoffMs(err: unknown, attempt: number): number {
+    const delay = parseRetryAfterMs(err) ?? 2000 * attempt;
+    return clampLlmRetryWaitMs(delay);
+}
+
+type LlmRetryHandle = {
+    llm: LLM_Model;
+    primaryModel: string;
+    onFallback: boolean;
+    primaryRetryAtMs: number | null;
+    systemContent: string;
+};
+
+function switchLlmModel(
+    handle: LlmRetryHandle,
+    nextModel: string,
+    { copyHistory }: { copyHistory: boolean }
+): void {
+    const history = copyHistory ? handle.llm.history.slice() : null;
+    const sessionId = handle.llm.token_tracker_session_id;
+    const trackerPurpose: string | null = handle.llm.token_tracker_purpose;
+    const next = new LLM_Model(nextModel, handle.systemContent);
+    if (history) next.history = history;
+    next.token_tracker_session_id = sessionId;
+    next.token_tracker_purpose = trackerPurpose;
+    handle.llm = next;
+}
+
+function maybeRestorePrimary(
+    handle: LlmRetryHandle,
+    purpose: string,
+    options?: { copyHistoryOnFallback?: boolean }
+): void {
+    if (
+        !handle.onFallback ||
+        handle.primaryRetryAtMs == null ||
+        Date.now() < handle.primaryRetryAtMs
+    ) {
+        return;
+    }
+
+    try {
+        switchLlmModel(handle, handle.primaryModel, {
+            copyHistory: options?.copyHistoryOnFallback ?? false,
+        });
+        handle.onFallback = false;
+        handle.primaryRetryAtMs = null;
+        console.log(
+            `[LectureGen LLM] ${purpose} cooldown elapsed; returning to ${handle.primaryModel}`
+        );
+    } catch (restoreErr: any) {
+        console.warn(
+            `[LectureGen LLM] ${purpose} restore to ${handle.primaryModel} failed: ${restoreErr?.message || restoreErr}`
+        );
+        // Stay on Gemini; push cooldown forward to avoid hammering.
+        handle.primaryRetryAtMs = Date.now() + PRIMARY_RESTORE_FAILURE_PUSH_MS;
+    }
+}
+
+/**
+ * Shared LectureGen retry loop: temporary Gemini fallback on rate limit.
+ * Primary restore runs once per generate (start of this call), not mid-retry;
+ * the next generate()/runLlm still returns to Luna after cooldown.
+ * Retry-after backoff when no fallback is available / construction fails,
+ * or when already on Gemini.
+ */
+async function generateWithRateLimitFallback(
+    handle: LlmRetryHandle,
+    purpose: string,
+    generateOnce: (llm: LLM_Model) => Promise<any>,
+    options?: { copyHistoryOnFallback?: boolean }
+): Promise<string> {
+    maybeRestorePrimary(handle, purpose, options);
+
+    const maxAttempts = 3;
+    let lastError: any = null;
+    let fallbackBudgetResetUsed = false;
+
+    for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+        try {
+            const response = await generateOnce(handle.llm);
+            return responseText(response, purpose);
+        } catch (err: any) {
+            lastError = err;
+            console.warn(
+                `[LectureGen LLM] ${purpose} attempt ${attempt}/${maxAttempts} failed: ${err.message || err}`
+            );
+
+            if (isLlmRateLimitError(err) && !handle.onFallback) {
+                const fallback = resolveLlmFallbackModel(handle.primaryModel);
+                if (fallback) {
+                    console.warn(
+                        `[LectureGen LLM] ${purpose} rate-limited on ${handle.llm.model_name}; falling back to ${fallback}`
+                    );
+                    handle.primaryRetryAtMs = primaryCooldownUntilMs(err);
+                    try {
+                        switchLlmModel(handle, fallback, {
+                            copyHistory: options?.copyHistoryOnFallback ?? false,
+                        });
+                        handle.onFallback = true;
+                        // Fresh attempt budget on Gemini at most once per generate.
+                        if (!fallbackBudgetResetUsed) {
+                            fallbackBudgetResetUsed = true;
+                            attempt = 0;
+                            continue;
+                        }
+                        // Already reset once; keep burning remaining attempts (no OpenAI wait).
+                        continue;
+                    } catch (constructErr: any) {
+                        console.warn(
+                            `[LectureGen LLM] ${purpose} fallback to ${fallback} failed: ${constructErr?.message || constructErr}`
+                        );
+                        // Do not set onFallback — fall through to primary retry-after backoff.
+                        handle.primaryRetryAtMs = null;
+                    }
+                }
+            }
+
+            if (attempt < maxAttempts) {
+                const delayMs = isLlmRateLimitError(err)
+                    ? rateLimitBackoffMs(err, attempt)
+                    : 2000 * attempt;
+                await new Promise(resolve => setTimeout(resolve, delayMs));
+            }
+        }
+    }
+
+    throw new Error(`${purpose} failed after ${maxAttempts} attempts: ${lastError?.message || lastError}`);
+}
+
 export async function runLlm(
     options: LectureGenLlmOptions,
     purpose: string,
@@ -37,34 +175,28 @@ export async function runLlm(
     attachments: LectureGenAttachment[] = []
 ): Promise<string> {
     const workspaceDir = options.promptWorkspaceDir || process.cwd();
-    const llm = new LLM_Model(options.model, build_prompt(systemPrompt, workspaceDir));
-    llm.token_tracker_session_id = options.tokenTrackerSessionId || null;
-    llm.token_tracker_purpose = purpose;
-    const maxAttempts = 3;
-    let lastError: any = null;
+    const systemContent = build_prompt(systemPrompt, workspaceDir);
+    const handle: LlmRetryHandle = {
+        llm: new LLM_Model(options.model, systemContent),
+        primaryModel: options.model,
+        onFallback: false,
+        primaryRetryAtMs: null,
+        systemContent,
+    };
+    handle.llm.token_tracker_session_id = options.tokenTrackerSessionId || null;
+    handle.llm.token_tracker_purpose = purpose;
 
-    for (let attempt = 1; attempt <= maxAttempts; attempt++) {
-        try {
-            const response = await llm.generate(
-                build_prompt(userPrompt, workspaceDir),
-                null,
-                null,
-                null,
-                attachments,
-                false,
-                false
-            );
-            return responseText(response, purpose);
-        } catch (err: any) {
-            lastError = err;
-            console.warn(`[LectureGen LLM] ${purpose} attempt ${attempt}/${maxAttempts} failed: ${err.message || err}`);
-            if (attempt < maxAttempts) {
-                await new Promise(resolve => setTimeout(resolve, 2000 * attempt));
-            }
-        }
-    }
-
-    throw new Error(`${purpose} failed after ${maxAttempts} attempts: ${lastError?.message || lastError}`);
+    return generateWithRateLimitFallback(handle, purpose, (llm) =>
+        llm.generate(
+            build_prompt(userPrompt, workspaceDir),
+            null,
+            null,
+            null,
+            attachments,
+            false,
+            false
+        )
+    );
 }
 
 /**
@@ -72,17 +204,21 @@ export async function runLlm(
  * cacheable prefix, matching the coding agent's within-turn behavior.
  */
 export class LectureGenLlmSession {
-    private readonly llm: LLM_Model;
+    private readonly handle: LlmRetryHandle;
     private attachmentsAdded = false;
     private readonly promptWorkspaceDir: string;
 
     constructor(options: LectureGenLlmOptions, systemPrompt: string) {
         this.promptWorkspaceDir = options.promptWorkspaceDir || process.cwd();
-        this.llm = new LLM_Model(
-            options.model,
-            build_prompt(systemPrompt, this.promptWorkspaceDir)
-        );
-        this.llm.token_tracker_session_id = options.tokenTrackerSessionId || null;
+        const systemContent = build_prompt(systemPrompt, this.promptWorkspaceDir);
+        this.handle = {
+            llm: new LLM_Model(options.model, systemContent),
+            primaryModel: options.model,
+            onFallback: false,
+            primaryRetryAtMs: null,
+            systemContent,
+        };
+        this.handle.llm.token_tracker_session_id = options.tokenTrackerSessionId || null;
     }
 
     async generate(
@@ -90,16 +226,16 @@ export class LectureGenLlmSession {
         userPrompt: string,
         attachments: LectureGenAttachment[] = []
     ): Promise<string> {
-        this.llm.token_tracker_purpose = purpose;
+        this.handle.llm.token_tracker_purpose = purpose;
         // Attach binary inputs once. They remain part of retained history; adding
         // them to every new user message would duplicate them and disrupt caching.
         const currentAttachments = this.attachmentsAdded ? [] : attachments;
-        const maxAttempts = 3;
-        let lastError: any = null;
 
-        for (let attempt = 1; attempt <= maxAttempts; attempt++) {
-            try {
-                const response = await this.llm.generate(
+        const text = await generateWithRateLimitFallback(
+            this.handle,
+            purpose,
+            (llm) =>
+                llm.generate(
                     build_prompt(userPrompt, this.promptWorkspaceDir),
                     null,
                     null,
@@ -107,20 +243,11 @@ export class LectureGenLlmSession {
                     currentAttachments,
                     false,
                     true
-                );
-                const text = responseText(response, purpose);
-                if (currentAttachments.length > 0) this.attachmentsAdded = true;
-                return text;
-            } catch (err: any) {
-                lastError = err;
-                console.warn(`[LectureGen LLM] ${purpose} attempt ${attempt}/${maxAttempts} failed: ${err.message || err}`);
-                if (attempt < maxAttempts) {
-                    await new Promise(resolve => setTimeout(resolve, 2000 * attempt));
-                }
-            }
-        }
-
-        throw new Error(`${purpose} failed after ${maxAttempts} attempts: ${lastError?.message || lastError}`);
+                ),
+            { copyHistoryOnFallback: true }
+        );
+        if (currentAttachments.length > 0) this.attachmentsAdded = true;
+        return text;
     }
 }
 

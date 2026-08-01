@@ -25,6 +25,7 @@ import {
     resolveOpenAiReasoningEffortFromEnv,
     resolveOpenAiServiceTierFromEnv,
 } from './openai_reasoning.js';
+import { isLlmRateLimitError, LlmRateLimitError, parseRetryAfterMs } from './llm_rate_limit.js';
 import { extractTokenUsage, trackTokenUsageFromResponse, trackTokenUsage } from '../token-tracker/token_tracker.js';
 
 const __filename = fileURLToPath(import.meta.url);
@@ -872,6 +873,16 @@ export class LLM_Model {
             return response_content;
         } catch (e) {
             this.logger.error(`Error calling OpenAI: ${e}`);
+            if (isLlmRateLimitError(e)) {
+                throw new LlmRateLimitError(
+                    e instanceof Error ? e.message : String(e),
+                    {
+                        retryAfterMs: parseRetryAfterMs(e),
+                        provider: 'openai',
+                        model: this.model_name,
+                    }
+                );
+            }
             return null;
         } finally {
             for (const file_id of uploaded_file_ids) {
@@ -1053,6 +1064,16 @@ export class LLM_Model {
 
         } catch (e: any) {
             this.logger.error(`Error calling Google Gemini: ${e.message}`);
+            if (isLlmRateLimitError(e)) {
+                throw new LlmRateLimitError(
+                    e instanceof Error ? e.message : String(e?.message ?? e),
+                    {
+                        retryAfterMs: parseRetryAfterMs(e),
+                        provider: 'google',
+                        model: this.model_name,
+                    }
+                );
+            }
             return null;
         } finally {
             for (const file_ref of uploaded_files) {

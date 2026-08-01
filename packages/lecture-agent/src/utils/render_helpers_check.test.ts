@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { findMissingRenderHelpers } from './render_helpers_check.ts';
+import { findMissingRenderHelpers } from './render_helpers_check.js';
 
 const selfContained = `
 <script>

@@ -68,6 +68,9 @@ Providers available via this module:
    - Voice is an ElevenLabs voice ID.
    - Voice selection order is: explicit voice argument, ELEVENLABS_TTS_VOICE,
      ELEVENLABS_VOICE_ID, then the built-in Will voice.
+   - Optional ELEVENLABS_STABILITY (default 0.7) and ELEVENLABS_SIMILARITY_BOOST
+     (default 0.75) tune delivery consistency on Flash and other models.
+   - previous_text / next_text (optional tts() args) improve cadence across cues.
    - Requests 24 kHz signed 16-bit PCM and wraps it in a WAV container without
      audio transcoding.
    - Optional alignment writes normalized character timings and derived word
@@ -199,6 +202,51 @@ def _elevenlabs_settings() -> tuple[str, str]:
         os.getenv("ELEVENLABS_VOICE_ID", "bIHbv24MWmeRgasZH58o"),
     ).strip()  # Will
     return model, voice
+
+
+def _clamp_elevenlabs_unit(value: float) -> float:
+    return max(0.0, min(1.0, value))
+
+
+def _optional_elevenlabs_unit_env(name: str, default: float) -> float:
+    raw = os.getenv(name)
+    if raw is None or not str(raw).strip():
+        return default
+    try:
+        return _clamp_elevenlabs_unit(float(raw))
+    except ValueError as exc:
+        raise RuntimeError(f"{name} must be a number between 0 and 1.") from exc
+
+
+@lru_cache(maxsize=1)
+def _elevenlabs_voice_settings_base() -> dict[str, float]:
+    return {
+        "stability": _optional_elevenlabs_unit_env("ELEVENLABS_STABILITY", 0.7),
+        "similarity_boost": _optional_elevenlabs_unit_env(
+            "ELEVENLABS_SIMILARITY_BOOST", 0.75
+        ),
+    }
+
+
+ELEVENLABS_CONTEXT_MAX_CHARS = 500
+
+
+def _truncate_elevenlabs_previous_text(text: str | None) -> str | None:
+    trimmed = (text or "").strip()
+    if not trimmed:
+        return None
+    if len(trimmed) <= ELEVENLABS_CONTEXT_MAX_CHARS:
+        return trimmed
+    return trimmed[-ELEVENLABS_CONTEXT_MAX_CHARS:]
+
+
+def _truncate_elevenlabs_next_text(text: str | None) -> str | None:
+    trimmed = (text or "").strip()
+    if not trimmed:
+        return None
+    if len(trimmed) <= ELEVENLABS_CONTEXT_MAX_CHARS:
+        return trimmed
+    return trimmed[:ELEVENLABS_CONTEXT_MAX_CHARS]
 
 
 @lru_cache(maxsize=1)
@@ -387,6 +435,8 @@ def _run_elevenlabs(
     speed: float,
     alignment: bool,
     alignment_output_path: str | None,
+    previous_text: str | None = None,
+    next_text: str | None = None,
 ) -> None:
     """
     Request 24 kHz PCM from ElevenLabs and write WAV plus optional timing JSON.
@@ -404,15 +454,24 @@ def _run_elevenlabs(
         endpoint += "/with-timestamps"
     endpoint += "?" + urlencode({"output_format": ELEVENLABS_OUTPUT_FORMAT})
 
+    voice_settings = dict(_elevenlabs_voice_settings_base())
+    voice_settings["speed"] = speed
+
+    payload: dict[str, Any] = {
+        "text": text,
+        "model_id": elevenlabs_model,
+        "voice_settings": voice_settings,
+    }
+    prev = _truncate_elevenlabs_previous_text(previous_text)
+    nxt = _truncate_elevenlabs_next_text(next_text)
+    if prev:
+        payload["previous_text"] = prev
+    if nxt:
+        payload["next_text"] = nxt
+
     request = Request(
         endpoint,
-        data=json.dumps(
-            {
-                "text": text,
-                "model_id": elevenlabs_model,
-                "voice_settings": {"speed": speed},
-            }
-        ).encode("utf-8"),
+        data=json.dumps(payload).encode("utf-8"),
         headers={
             "Accept": "application/json" if alignment else "application/octet-stream",
             "Content-Type": "application/json",
@@ -1105,6 +1164,8 @@ def tts(
     speed: float | None = None,
     alignment: bool = False,
     alignment_output_path: str | None = None,
+    previous_text: str | None = None,
+    next_text: str | None = None,
 ) -> str:
     """
     Generate speech audio and return the output file path.
@@ -1125,6 +1186,8 @@ def tts(
             character alignment plus derived word start/end timings to JSON.
         alignment_output_path: Optional ElevenLabs alignment JSON path. Defaults
             to the audio path with an ".alignment.json" suffix.
+        previous_text: ElevenLabs only. Tail-truncated prior cue for continuity.
+        next_text: ElevenLabs only. Head-truncated following cue for continuity.
 
     Returns:
         The generated WAV path as a string.
@@ -1156,7 +1219,10 @@ def tts(
             Requires ELEVENLABS_API_KEY and ELEVENLABS_TTS_MODEL. Accepts an
             ElevenLabs voice ID. Voice selection order is the explicit voice,
             ELEVENLABS_TTS_VOICE, ELEVENLABS_VOICE_ID, then the built-in
-            Will voice. Alignment is available only for this provider.
+            Will voice. Optional ELEVENLABS_STABILITY (default 0.7) and
+            ELEVENLABS_SIMILARITY_BOOST (default 0.75) tune delivery consistency.
+            previous_text / next_text improve cadence across cues. Alignment is
+            available only for this provider.
 
         kokoro:
             Uses the configured KOKORO_* model, engine, device, phonemizer, and
@@ -1261,9 +1327,15 @@ def tts(
         chosen_speed = float(speed) if speed is not None else 1.0
         if chosen_speed <= 0:
             raise ValueError("speed must be greater than 0")
+        voice_settings = _elevenlabs_voice_settings_base()
         log.info(
             f"ElevenLabs config model={elevenlabs_model} "
-            f"voice={chosen_voice} speed={chosen_speed} alignment={alignment}"
+            f"voice={chosen_voice} speed={chosen_speed} "
+            f"stability={voice_settings['stability']} "
+            f"similarity_boost={voice_settings['similarity_boost']} "
+            f"alignment={alignment} "
+            f"previous_text={'yes' if previous_text else 'no'} "
+            f"next_text={'yes' if next_text else 'no'}"
         )
         _run_elevenlabs(
             clean_text,
@@ -1272,6 +1344,8 @@ def tts(
             chosen_speed,
             alignment,
             alignment_output_path,
+            previous_text,
+            next_text,
         )
         return str(out_path)
 

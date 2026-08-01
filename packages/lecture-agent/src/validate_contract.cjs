@@ -8,6 +8,7 @@
 const fs = require('fs');
 const path = require('path');
 const vm = require('vm');
+const { checkSceneLayoutKeys } = require('./scene_layout_keys.cjs');
 
 function runChecks(windowObj) {
   const errors = [];
@@ -370,9 +371,14 @@ async function validateWithPlaywright(htmlPath) {
       const SAFE_ZONE_TOLERANCE_PX = 6;
       const PANEL_PAD_FRAC = 0.05;
       const PANEL_PAD_MIN_PX = 24;
+      // Table cells use fixed theme insets, not the card max(5%, 24) formula.
+      const TABLE_CELL_PAD_H_PX = 16;
+      const TABLE_CELL_PAD_V_PX = 12;
       const PANEL_EDGE_TOLERANCE_PX = 3;
       // Exclude true stage-sized fills; allow large content cards (~500² and similar).
       const MAX_PANEL_VIEWPORT_FRAC = 0.55;
+      // Table structural chrome is not a padding panel (cells are).
+      const TABLE_CHROME_TAGS = new Set(['TABLE', 'THEAD', 'TBODY', 'TFOOT', 'TR', 'COLGROUP']);
 
       function resetCanvasInk() {
         canvasInk.length = 0;
@@ -774,6 +780,7 @@ async function validateWithPlaywright(htmlPath) {
           if (element === document.body || element === document.documentElement) return;
           if (KATEX_HOST_SKIP_IDS.has(element.id)) return;
           if (element.tagName === 'CANVAS') return;
+          if (TABLE_CHROME_TAGS.has(element.tagName)) return;
           if (isTransparentBackground(element)) return;
           if (elementOpacity(element) < 0.6) return;
 
@@ -904,8 +911,49 @@ async function validateWithPlaywright(htmlPath) {
         }
       }
 
+      function isTableCellElement(el) {
+        return Boolean(el && (el.tagName === 'TD' || el.tagName === 'TH'));
+      }
+
+      function nearestTableCell(el) {
+        if (!el) return null;
+        if (isTableCellElement(el)) return el;
+        if (typeof el.closest === 'function') return el.closest('td, th');
+        return null;
+      }
+
+      function panelBoxFromElement(element) {
+        const rect = element.getBoundingClientRect();
+        const clipped = clipToAncestors(element, {
+          left: rect.left,
+          top: rect.top,
+          right: rect.right,
+          bottom: rect.bottom
+        });
+        return {
+          source: 'dom',
+          element,
+          transparentBackground: isTransparentBackground(element),
+          label: domLabel(element),
+          text: '',
+          left: clipped.left,
+          top: clipped.top,
+          right: clipped.right,
+          bottom: clipped.bottom,
+          forOverlap: false,
+          forPanel: true
+        };
+      }
+
+      function tableCellPadForSide(side) {
+        return side === 'left' || side === 'right' ? TABLE_CELL_PAD_H_PX : TABLE_CELL_PAD_V_PX;
+      }
+
       function isPaddingContainer(text, shape) {
-        if (text.element && shape.element && text.element === shape.element) return false;
+        // Table cells may pad their own direct text leaves (th/td with text nodes).
+        if (text.element && shape.element && text.element === shape.element) {
+          if (!isTableCellElement(text.element)) return false;
+        }
         const textArea = boxArea(text);
         const shapeArea = boxArea(shape);
         if (textArea <= 0 || shapeArea <= 0) return false;
@@ -1011,14 +1059,27 @@ async function validateWithPlaywright(htmlPath) {
         }
 
         // 2) Panel inset / protrusion relative to smallest containing shape.
+        //    Table cell text uses the nearest td/th with theme cell pads (16h / 12v).
         for (const text of texts) {
           if (paddingFindingCount >= MAX_PADDING_FINDINGS || layoutErrors.length >= MAX_LAYOUT_FINDINGS) return;
-          const panel = findSmallestContainingShape(text, shapes);
-          if (!panel) continue; // no containing panel → safe-zone only
+
+          const cell = nearestTableCell(text.element);
+          let panel = null;
+          let useTableCellPad = false;
+
+          if (cell) {
+            panel = shapes.find((shape) => shape.element === cell) || panelBoxFromElement(cell);
+            useTableCellPad = true;
+          } else {
+            panel = findSmallestContainingShape(text, shapes);
+            if (!panel) continue; // no containing panel → safe-zone only
+            if (isTableCellElement(panel.element)) useTableCellPad = true;
+          }
 
           const panelW = panel.right - panel.left;
           const panelH = panel.bottom - panel.top;
-          const pad = Math.max(PANEL_PAD_FRAC * Math.min(panelW, panelH), PANEL_PAD_MIN_PX);
+          const cardPad = Math.max(PANEL_PAD_FRAC * Math.min(panelW, panelH), PANEL_PAD_MIN_PX);
+          const padForSide = (side) => (useTableCellPad ? tableCellPadForSide(side) : cardPad);
 
           const protrusions = [];
           if (panel.left - text.left > PANEL_EDGE_TOLERANCE_PX) {
@@ -1051,6 +1112,7 @@ async function validateWithPlaywright(htmlPath) {
             { side: 'bottom', inset: panel.bottom - text.bottom }
           ];
           for (const { side, inset } of insets) {
+            const pad = padForSide(side);
             if (inset + PANEL_EDGE_TOLERANCE_PX < pad) {
               padShortfalls.push({ side, px: Math.ceil(pad - inset) });
             }
@@ -1226,6 +1288,12 @@ async function main() {
   let errors = [];
   let mode = 'vm';
 
+  // 0. Static SCENE_LAYOUT key check (Node-only, before / alongside runtime checks).
+  // Prefer listing these first so repair agents see "X is referenced but not defined"
+  // instead of only a TypeError on `.x`.
+  const htmlContent = fs.readFileSync(absolutePath, 'utf8');
+  const sceneLayoutErrors = checkSceneLayoutKeys(htmlContent);
+
   // 1. Run VM check first (extremely fast, ~10ms)
   try {
     errors = validateWithVM(absolutePath);
@@ -1243,6 +1311,11 @@ async function main() {
   } catch (pwErr) {
     const details = (pwErr.message || String(pwErr)).split('\n')[0].trim();
     errors.push(`Playwright validation failed: ${details}. (Run 'npx playwright install' to ensure browser binaries are downloaded)`);
+  }
+
+  // Prepend static SCENE_LAYOUT findings so they always appear in failure output.
+  if (sceneLayoutErrors.length > 0) {
+    errors = [...sceneLayoutErrors, ...errors];
   }
 
   if (errors.length > 0) {

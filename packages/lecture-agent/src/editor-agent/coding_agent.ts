@@ -59,6 +59,7 @@ import { AsyncLocalStorage } from 'node:async_hooks';
 export const loggerStorage = new AsyncLocalStorage<(text: string) => void>();
 
 import { LLM_Model } from '../utils/llm_model.js';
+import { isLlmRateLimitError } from '../utils/llm_rate_limit.js';
 import { log_llm_request, start_new_llm_log_session } from '../utils/llm_prompt_logger.js';
 import { build_prompt, extract_upload_attachments, type UploadAttachment, UPLOAD_MIME_BY_EXT } from '../prompt_builder.js';
 import { extractTokenUsage } from '../token-tracker/token_tracker.js';
@@ -1091,15 +1092,25 @@ class JsonFallbackAgentSession {
             for (let step = 1; step <= max_turns; step++) {
                 print_step(step, "asking model for next action", Color.MAGENTA);
                 this.llm.token_tracker_purpose = `step_${step}_next_action`;
-                const response = await this.llm.generate(
-                    build_agent_prompt(prepared_task, this.transcript, this.toolOptions, this.workspaceDir),
-                    null,
-                    null,
-                    null,
-                    attachments,
-                    true,
-                    false
-                );
+                let response: any = null;
+                try {
+                    response = await this.llm.generate(
+                        build_agent_prompt(prepared_task, this.transcript, this.toolOptions, this.workspaceDir),
+                        null,
+                        null,
+                        null,
+                        attachments,
+                        true,
+                        false
+                    );
+                } catch (err: any) {
+                    // Rate limits used to return null from llm_model; keep soft-fail behavior.
+                    if (isLlmRateLimitError(err)) {
+                        response = null;
+                    } else {
+                        throw err;
+                    }
+                }
                 if (abortSignal?.aborted) throw new AgentAbortError();
 
                 if (response === null) {
