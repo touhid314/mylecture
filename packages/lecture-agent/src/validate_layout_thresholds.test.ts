@@ -56,16 +56,8 @@ describe('validate_contract layout severity floors', () => {
         assert.match(output, /safe-zone/i);
     });
 
-    it('passes when shape-only overlap area is just under 4500px²', () => {
-        const result = runValidator(path.join(FIXTURES, 'layout-thresholds-pass-shape-overlap', 'index.html'));
-        const output = [result.stderr, result.stdout].filter(Boolean).join('\n');
-        assert.equal(result.status, 0, output);
-        assert.match(output, /HTML contract validation passed/i);
-        assert.doesNotMatch(output, /overlaps/i);
-    });
-
-    it('fails when shape-only overlap area exceeds 4500px²', () => {
-        const result = runValidator(path.join(FIXTURES, 'layout-thresholds-fail-shape-overlap', 'index.html'));
+    it('fails when competing canvas shapes overlap materially — no area free-pass', () => {
+        const result = runValidator(path.join(FIXTURES, 'layout-thresholds-fail-shape-overlap-small', 'index.html'));
         const output = [result.stderr, result.stdout].filter(Boolean).join('\n');
         assert.notEqual(result.status, 0, 'expected overlap failure');
         assert.match(output, /overlaps/i);

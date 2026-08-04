@@ -2,32 +2,41 @@
 <html lang="en">
 <head>
 <meta charset="UTF-8">
-<title>Shape Overlap Over Floor Fail Fixture</title>
+<title>DOM Panel vs Canvas Fill Overlap Fail Fixture</title>
 <style>
   html, body { margin: 0; width: 100%; height: 100%; overflow: hidden; background: #101820; color: #f4f7fb; font-family: Georgia, serif; }
   #stage { position: relative; width: 100vw; height: 100vh; }
   #canvas { position: absolute; inset: 0; width: 100%; height: 100%; }
+  #htmlLayer { position: absolute; inset: 0; pointer-events: none; }
+  .card {
+    position: absolute;
+    box-sizing: border-box;
+    background: #3a5a6c;
+    border-radius: 8px;
+  }
 </style>
 </head>
 <body>
   <main id="stage">
     <canvas id="canvas" width="1920" height="1080"></canvas>
+    <div id="htmlLayer">
+      <div id="domCard" class="card"></div>
+    </div>
   </main>
   <script>
     window.__VIDEO_METADATA__ = {
       contractVersion: "0.2",
-      title: "Shape Overlap Over Floor Fail Fixture",
+      title: "DOM Panel vs Canvas Fill Overlap Fail Fixture",
       aspectRatio: "16:9"
     };
     window.__VIDEO_PLAN__ = [
-      { id: "shape_overlap_over_floor", kind: "visual-only", duration: 2 }
+      { id: "dom_canvas_overlap", kind: "visual-only", duration: 2 }
     ];
 
     const canvas = document.getElementById("canvas");
     const ctx = canvas.getContext("2d");
-    const BOX_A = { x: 500, y: 500, w: 100, h: 100 };
-    // Overlap 91×50 = 4550px² (above 4500 floor).
-    const BOX_B = { x: 509, y: 550, w: 100, h: 100 };
+    const domCard = document.getElementById("domCard");
+    const CARD = { x: 500, y: 500, w: 200, h: 120 };
 
     function renderSection() {
       ctx.clearRect(0, 0, 1920, 1080);
@@ -35,9 +44,12 @@
       ctx.fillRect(0, 0, 1920, 1080);
 
       ctx.fillStyle = "#2a4a5c";
-      ctx.fillRect(BOX_A.x, BOX_A.y, BOX_A.w, BOX_A.h);
-      ctx.fillStyle = "#4a6a7c";
-      ctx.fillRect(BOX_B.x, BOX_B.y, BOX_B.w, BOX_B.h);
+      ctx.fillRect(CARD.x, CARD.y, CARD.w, CARD.h);
+
+      domCard.style.left = `${CARD.x}px`;
+      domCard.style.top = `${CARD.y}px`;
+      domCard.style.width = `${CARD.w}px`;
+      domCard.style.height = `${CARD.h}px`;
     }
 
     window.__RENDER_SECTION__ = renderSection;

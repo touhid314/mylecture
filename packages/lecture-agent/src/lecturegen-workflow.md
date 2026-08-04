@@ -359,13 +359,15 @@ it allows at most five animator repair requests. Generation fails with the final
 validator output if the file still does not pass.
 
 When failures are layout-only, the workflow escalates to a full HTML layout
-rewrite earlier than the final attempt: after one failed JSON-edit pass when
-six or more layout errors remain, or after two JSON-edit passes when four or
-more remain. A layout rewrite is still always attempted on the last repair slot.
-After a rewrite, remaining few layout errors are handled with JSON edits again.
+rewrite earlier than the final attempt: immediately on the first repair when
+six or more layout errors are reported, or after one JSON-edit pass when three
+or more layout errors remain. A layout rewrite is still always attempted on the
+last repair slot. After a rewrite, remaining few layout errors are handled with
+JSON edits again.
 
-The validator includes runtime sampling at multiple local times, so failures
-that appear only after an animation progresses can be detected before render.
+The validator includes runtime sampling at segment start/end and (when budget
+permits) settled-tail local times within each segment, so failures that appear
+only after an animation progresses can be detected before render.
 
 ### 6. IAGen
 

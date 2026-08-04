@@ -340,6 +340,7 @@ async function validateWithPlaywright(htmlPath) {
       // Merged canvas+DOM layout check: instrument 2D ink, collect DOM boxes, flag partial overlaps.
       const canvasInk = [];
       let metricsEpoch = 0;
+      let sampleHasPartialAlpha = false;
       let overlapFindingCount = 0;
       let paddingFindingCount = 0;
       let safeZoneFindingCount = 0;
@@ -358,13 +359,17 @@ async function validateWithPlaywright(htmlPath) {
       const OVERLAP_RATIO = 0.28;
       const MIN_OVERLAP_W = 24;
       const MIN_OVERLAP_H = 12;
-      const MIN_SHAPE_SHAPE_OVERLAP_AREA = 4500;
       const MAX_OVERLAP_FINDINGS = 5;
       const MAX_PADDING_FINDINGS = 5;
       const MAX_SAFE_ZONE_FINDINGS = 5;
       const MAX_LAYOUT_FINDINGS = 10;
       const MAXIMUM_LAYOUT_SAMPLES = 50;
       const MAX_SAMPLES_PER_SEGMENT = 8;
+      // Settled-tail sampling: intermediates only in the last quarter of the segment.
+      const SETTLE_TAIL_FRAC = 0.75;
+      // Mid-transition samples skip overlap (not padding/safe-zone) when non-text canvas ink fades.
+      const SETTLE_INK_ALPHA = 0.95;
+      const GEOM_QUANT_PX = 20;
       const NUMERIC_TEXT_RE = /^[\d.,%+-]+$/;
       const KATEX_HOST_SKIP_IDS = new Set(['stage', 'htmlLayer', 'canvas']);
 
@@ -391,6 +396,7 @@ async function validateWithPlaywright(htmlPath) {
       function beginLayoutSample() {
         metricsEpoch += 1;
         resetCanvasInk();
+        sampleHasPartialAlpha = false;
       }
 
       function parseFontSize(font) {
@@ -518,15 +524,18 @@ async function validateWithPlaywright(htmlPath) {
           const alpha = ctx.globalAlpha;
           if (alpha < MIN_PANEL_ALPHA) return;
           if (!shouldRecordShape(w, h)) return;
+          const forOverlap = alpha >= MIN_INK_ALPHA;
+          if (forOverlap && alpha < SETTLE_INK_ALPHA) sampleHasPartialAlpha = true;
           pushInk(mapUserBox(x, y, w, h), label, '', {
-            forOverlap: alpha >= MIN_INK_ALPHA,
+            forOverlap,
             forPanel: true,
             halfLineWidthPx: extras && extras.halfLineWidthPx
           });
         }
 
         function recordTextBox(text, x, y, kind) {
-          if (ctx.globalAlpha < MIN_INK_ALPHA) return;
+          const alpha = ctx.globalAlpha;
+          if (alpha < MIN_INK_ALPHA) return;
           const raw = String(text || '');
           if (!raw.trim()) return;
           const metrics = ctx.measureText(raw);
@@ -801,7 +810,7 @@ async function validateWithPlaywright(htmlPath) {
           });
         });
 
-        // Opaque DOM boxes as panel candidates (padding only — not overlap ink).
+        // Opaque DOM boxes: overlap material and padding panels.
         Array.from(document.querySelectorAll('body *')).forEach((element) => {
           if (element.closest('[data-layout-check="ignore"]')) return;
           if (element === document.body || element === document.documentElement) return;
@@ -835,7 +844,7 @@ async function validateWithPlaywright(htmlPath) {
             top: clipped.top,
             right: clipped.right,
             bottom: clipped.bottom,
-            forOverlap: false,
+            forOverlap: true,
             forPanel: true
           });
         });
@@ -845,6 +854,24 @@ async function validateWithPlaywright(htmlPath) {
 
       function boxArea(box) {
         return Math.max(0, box.right - box.left) * Math.max(0, box.bottom - box.top);
+      }
+
+      function quantizeGeom(value) {
+        const n = Number(value);
+        if (!Number.isFinite(n)) return 0;
+        return Math.round(n / GEOM_QUANT_PX) * GEOM_QUANT_PX;
+      }
+
+      function quantizeBoxPosition(box) {
+        return `${quantizeGeom(box.left)}|${quantizeGeom(box.top)}`;
+      }
+
+      function quantizeOverlapSignature(a, b) {
+        const left = Math.max(a.left, b.left);
+        const top = Math.max(a.top, b.top);
+        const right = Math.min(a.right, b.right);
+        const bottom = Math.min(a.bottom, b.bottom);
+        return `${quantizeGeom(left)}|${quantizeGeom(top)}|${quantizeGeom(right - left)}|${quantizeGeom(bottom - top)}`;
       }
 
       function isIntentionalNest(a, b, overlapArea) {
@@ -979,7 +1006,11 @@ async function validateWithPlaywright(htmlPath) {
         if (overlapFindingCount >= MAX_OVERLAP_FINDINGS) return;
         if (layoutErrors.length >= MAX_LAYOUT_FINDINGS) return;
         const overlapInk = canvasInk.filter((box) => box.forOverlap);
-        const items = [...overlapInk, ...(domBoxes.texts || [])];
+        const items = [
+          ...overlapInk,
+          ...(domBoxes.texts || []),
+          ...(domBoxes.panels || []).filter((box) => box.forOverlap)
+        ];
         for (let i = 0; i < items.length; i++) {
           for (let j = i + 1; j < items.length; j++) {
             const a = items[i];
@@ -987,9 +1018,15 @@ async function validateWithPlaywright(htmlPath) {
             if (a.element && b.element) {
               if (a.element.contains(b.element) || b.element.contains(a.element)) continue;
             }
-            // Dom↔dom only: restore transparent-background gate (canvas pairs stay ungated).
+            // Dom↔dom transparent gate: text↔text only (panels always participate).
             if (a.source === 'dom' && b.source === 'dom') {
-              if (!a.transparentBackground || !b.transparentBackground) continue;
+              const aIsPanel = a.forPanel;
+              const bIsPanel = b.forPanel;
+              const aIsText = isTextInk(a) && !aIsPanel;
+              const bIsText = isTextInk(b) && !bIsPanel;
+              if (aIsText && bIsText) {
+                if (!a.transparentBackground || !b.transparentBackground) continue;
+              }
             }
             // Numeric tick pairs — both-DOM only.
             if (
@@ -1015,11 +1052,7 @@ async function validateWithPlaywright(htmlPath) {
             if (isIntentionalNest(a, b, overlapArea)) continue;
             if (ratio < OVERLAP_RATIO) continue;
 
-            const aHasText = isTextInk(a);
-            const bHasText = isTextInk(b);
-            if (!aHasText && !bHasText && overlapArea < MIN_SHAPE_SHAPE_OVERLAP_AREA) continue;
-
-            const key = `${segment.id}|overlap|${a.source}|${a.label}|${a.text}|${b.source}|${b.label}|${b.text}`;
+            const key = `overlap|${a.source}|${a.label}|${a.text}|${b.source}|${b.label}|${b.text}|${quantizeOverlapSignature(a, b)}`;
             pushOverlapFinding(
               key,
               `segment '${segment.id}' at localTime=${localTime.toFixed(3)}s: ${formatBox(a)} overlaps ${formatBox(b)} by ${Math.round(overlapWidth)}x${Math.round(overlapHeight)}px`
@@ -1166,7 +1199,7 @@ async function validateWithPlaywright(htmlPath) {
           }
           const worst = worstSide(intrusions);
           if (!worst) continue;
-          const key = `${segment.id}|safe-zone|${box.source}|${box.label}|${box.text}|${worst.side}`;
+          const key = `safe-zone|${box.source}|${box.label}|${box.text}|${worst.side}|${quantizeBoxPosition(box)}`;
           pushSafeZoneFinding(
             key,
             `segment '${segment.id}' at localTime=${localTime.toFixed(3)}s: safe-zone: ${formatBox(box)} is clipped outside the viewport by ${worst.px}px (${worst.side})`
@@ -1222,7 +1255,7 @@ async function validateWithPlaywright(htmlPath) {
           }
           const worstProtrusion = worstSide(protrusions);
           if (worstProtrusion && worstProtrusion.px > MIN_PADDING_VIOLATION_PX) {
-            const key = `${segment.id}|panel-protrude|${text.source}|${text.label}|${text.text}|${panel.source}|${panel.label}|${worstProtrusion.side}`;
+            const key = `panel-protrude|${text.source}|${text.label}|${text.text}|${panel.source}|${panel.label}|${worstProtrusion.side}|${quantizeBoxPosition(text)}`;
             pushPaddingFinding(
               key,
               `segment '${segment.id}' at localTime=${localTime.toFixed(3)}s: panel padding: ${formatBox(text)} protrudes from panel ${formatBox(panel)} by ${worstProtrusion.px}px (${worstProtrusion.side})`
@@ -1247,7 +1280,7 @@ async function validateWithPlaywright(htmlPath) {
           }
           const worstPad = worstSide(padShortfalls);
           if (!worstPad || worstPad.px <= MIN_PADDING_VIOLATION_PX) continue;
-          const key = `${segment.id}|panel-pad|${text.source}|${text.label}|${text.text}|${panel.source}|${panel.label}|${worstPad.side}`;
+          const key = `panel-pad|${text.source}|${text.label}|${text.text}|${panel.source}|${panel.label}|${worstPad.side}|${quantizeBoxPosition(text)}`;
           pushPaddingFinding(
             key,
             `segment '${segment.id}' at localTime=${localTime.toFixed(3)}s: panel padding: ${formatBox(text)} short of required pad by ${worstPad.px}px (${worstPad.side}) vs ${formatBox(panel)}`
@@ -1271,39 +1304,44 @@ async function validateWithPlaywright(htmlPath) {
           times.add(Math.min(Number(t.toFixed(6)), endRounded));
         }
 
-        // Required anchors: start, mid, end (when duration allows).
+        // Settled anchors: segment start and end (no default mid-morph probes).
         add(0);
-        if (endTime > 0) {
-          add(endTime / 2);
-          add(endTime);
+        if (endTime > 0) add(endTime);
+
+        // Test fixtures may request one mid probe (before settled tail) to exercise partial-alpha skip.
+        const meta = window.__VIDEO_METADATA__;
+        if (meta && meta.layoutMidProbe && endTime > 0) {
+          const mid = endTime * 0.5;
+          const tailStart = endTime * SETTLE_TAIL_FRAC;
+          if (mid < tailStart - 1e-9) add(mid);
         }
 
-        // Single early-heavy morph schedule (collapsed; no redundant stacks).
-        for (const probe of [0.25, 0.5, 0.75, 1.0, 1.25, 1.5]) {
-          if (probe < endTime) add(probe);
-        }
-
-        // Extra full-span anchors if budget still has room after trim.
-        if (sampleBudget > 6 && endTime > 2) {
-          for (let i = 1; i < 4; i++) add(endTime * (i / 4));
+        // Extra samples only in the settled tail (last quarter) when budget allows.
+        if (sampleBudget > 2 && endTime > 0) {
+          const tailStart = endTime * SETTLE_TAIL_FRAC;
+          const extraSlots = sampleBudget - 2;
+          for (let i = 1; i <= extraSlots; i++) {
+            const frac = SETTLE_TAIL_FRAC + ((1 - SETTLE_TAIL_FRAC) * i) / (extraSlots + 1);
+            const t = endTime * frac;
+            if (t >= tailStart && t < endTime - 1e-9) add(t);
+          }
         }
 
         const sorted = [...times].sort((a, b) => a - b);
         if (sorted.length <= sampleBudget) return sorted;
 
-        // Trim: always keep 0 + end; keep mid when budget ≥ 3; fill rest early-heavy.
+        // Trim: always keep 0 + end; when layoutMidProbe, also keep mid; fill remainder from late tail samples.
         const required = new Set([0]);
         if (endRounded > 0) required.add(endRounded);
-        if (sampleBudget >= 3 && endTime > 0) {
-          required.add(Math.min(Number((endTime / 2).toFixed(6)), endRounded));
+        if (meta && meta.layoutMidProbe && endTime > 0) {
+          const mid = endTime * 0.5;
+          const tailStart = endTime * SETTLE_TAIL_FRAC;
+          if (mid < tailStart - 1e-9) {
+            required.add(Math.min(Number(mid.toFixed(6)), endRounded));
+          }
         }
-        const remaining = sorted.filter(t => !required.has(t));
-        remaining.sort((a, b) => {
-          const ae = a <= 1.5 ? 0 : 1;
-          const be = b <= 1.5 ? 0 : 1;
-          if (ae !== be) return ae - be;
-          return a - b;
-        });
+        const remaining = sorted.filter((t) => !required.has(t));
+        remaining.sort((a, b) => b - a);
         const picked = [...required];
         for (const t of remaining) {
           if (picked.length >= sampleBudget) break;
@@ -1341,12 +1379,18 @@ async function validateWithPlaywright(htmlPath) {
             ? Number(resolvedEntry.start)
             : estimatedGlobalStart;
 
+          const segmentEndTime = Math.max(0, duration - (1 / 30));
           for (const localTime of buildSampleLocalTimes(duration, samplesPerSegment)) {
             try {
               beginLayoutSample();
               window.__RENDER_SECTION__(segment, localTime, globalStart + localTime);
               const domBoxes = collectDomBoxes();
-              recordMergedLayoutOverlaps(segment, localTime, domBoxes);
+              const isSettledAnchor = localTime <= 0 || localTime >= segmentEndTime - 1e-9;
+              const settledTailStart = segmentEndTime * SETTLE_TAIL_FRAC;
+              const isSettledTail = localTime >= settledTailStart;
+              if (isSettledAnchor || isSettledTail || !sampleHasPartialAlpha) {
+                recordMergedLayoutOverlaps(segment, localTime, domBoxes);
+              }
               recordPaddingAndSafeZone(segment, localTime, domBoxes);
             } catch (err) {
               renderErrors.push(
