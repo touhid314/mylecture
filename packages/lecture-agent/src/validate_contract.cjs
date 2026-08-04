@@ -342,6 +342,7 @@ async function validateWithPlaywright(htmlPath) {
       let metricsEpoch = 0;
       let overlapFindingCount = 0;
       let paddingFindingCount = 0;
+      let safeZoneFindingCount = 0;
 
       // Ink / shape recording
       const MIN_INK_ALPHA = 0.22; // overlap + text ink
@@ -357,9 +358,10 @@ async function validateWithPlaywright(htmlPath) {
       const OVERLAP_RATIO = 0.28;
       const MIN_OVERLAP_W = 24;
       const MIN_OVERLAP_H = 12;
-      const MIN_SHAPE_SHAPE_OVERLAP_AREA = 2000;
+      const MIN_SHAPE_SHAPE_OVERLAP_AREA = 4500;
       const MAX_OVERLAP_FINDINGS = 5;
       const MAX_PADDING_FINDINGS = 5;
+      const MAX_SAFE_ZONE_FINDINGS = 5;
       const MAX_LAYOUT_FINDINGS = 10;
       const MAXIMUM_LAYOUT_SAMPLES = 50;
       const MAX_SAMPLES_PER_SEGMENT = 8;
@@ -367,14 +369,16 @@ async function validateWithPlaywright(htmlPath) {
       const KATEX_HOST_SKIP_IDS = new Set(['stage', 'htmlLayer', 'canvas']);
 
       // Padding / safe-zone (theme default.md) — no centering heuristics
-      const SAFE_ZONE_FRAC = 0.05;
-      const SAFE_ZONE_TOLERANCE_PX = 6;
+      // 5% viewport margin remains theme/author guidance; validator hard-fails clip-only.
+      const MIN_PADDING_VIOLATION_PX = 12;
+      // Slack is a fraction of the relevant geometric threshold (not a fixed px fudge).
+      const EDGE_TOLERANCE_FRAC = 0.1;
+      const EDGE_TOLERANCE_MIN_PX = 0.75;
       const PANEL_PAD_FRAC = 0.05;
       const PANEL_PAD_MIN_PX = 24;
       // Table cells use fixed theme insets, not the card max(5%, 24) formula.
       const TABLE_CELL_PAD_H_PX = 16;
       const TABLE_CELL_PAD_V_PX = 12;
-      const PANEL_EDGE_TOLERANCE_PX = 3;
       // Exclude true stage-sized fills; allow large content cards (~500² and similar).
       const MAX_PANEL_VIEWPORT_FRAC = 0.55;
       // Table structural chrome is not a padding panel (cells are).
@@ -464,6 +468,7 @@ async function validateWithPlaywright(htmlPath) {
           const forOverlap = Boolean(flags && flags.forOverlap);
           const forPanel = Boolean(flags && flags.forPanel);
           if (!forOverlap && !forPanel) return;
+          const halfLineWidthPx = Number(flags && flags.halfLineWidthPx);
           canvasInk.push({
             source: 'canvas',
             element: null,
@@ -475,8 +480,23 @@ async function validateWithPlaywright(htmlPath) {
             right: box.right,
             bottom: box.bottom,
             forOverlap,
-            forPanel
+            forPanel,
+            // Screen-space half stroke width for strokeRect ↔ fill matching.
+            halfLineWidthPx: Number.isFinite(halfLineWidthPx) && halfLineWidthPx > 0 ? halfLineWidthPx : 0
           });
+        }
+
+        /** Project ctx.lineWidth into CSS pixels (transform × canvas→CSS scale). */
+        function screenHalfLineWidth() {
+          const transform = ctx.getTransform();
+          const userScaleX = Math.hypot(transform.a, transform.b) || 1;
+          const userScaleY = Math.hypot(transform.c, transform.d) || 1;
+          const userScale = (userScaleX + userScaleY) / 2;
+          const { scaleX, scaleY } = canvasMetrics();
+          const cssScale = (Math.abs(scaleX) + Math.abs(scaleY)) / 2 || 1;
+          const raw = Number(ctx.lineWidth);
+          const lineWidth = Number.isFinite(raw) && raw > 0 ? raw : 1;
+          return (lineWidth * userScale * cssScale) / 2;
         }
 
         function isNearFullCanvas(w, h) {
@@ -494,13 +514,14 @@ async function validateWithPlaywright(htmlPath) {
           return true;
         }
 
-        function recordShapeBox(x, y, w, h, label) {
+        function recordShapeBox(x, y, w, h, label, extras) {
           const alpha = ctx.globalAlpha;
           if (alpha < MIN_PANEL_ALPHA) return;
           if (!shouldRecordShape(w, h)) return;
           pushInk(mapUserBox(x, y, w, h), label, '', {
             forOverlap: alpha >= MIN_INK_ALPHA,
-            forPanel: true
+            forPanel: true,
+            halfLineWidthPx: extras && extras.halfLineWidthPx
           });
         }
 
@@ -511,10 +532,14 @@ async function validateWithPlaywright(htmlPath) {
           const metrics = ctx.measureText(raw);
           const fontSize = parseFontSize(ctx.font);
           const width = Math.max(metrics.width || 0, fontSize * 0.5);
-          const height = Math.max(
-            (metrics.actualBoundingBoxAscent || 0) + (metrics.actualBoundingBoxDescent || 0),
-            fontSize * 1.15
-          );
+          const ascent = Number(metrics.actualBoundingBoxAscent);
+          const descent = Number(metrics.actualBoundingBoxDescent);
+          const hasInkBounds = Number.isFinite(ascent) && Number.isFinite(descent)
+            && (ascent > 0 || descent > 0);
+          // Prefer real glyph bounds; fall back to em-box estimates only when missing.
+          const inkAscent = hasInkBounds ? Math.max(0, ascent) : fontSize * 0.8;
+          const inkDescent = hasInkBounds ? Math.max(0, descent) : fontSize * 0.2;
+          const height = Math.max(inkAscent + inkDescent, fontSize * 0.5);
           let left = x;
           let top = y;
           const align = ctx.textAlign || 'start';
@@ -525,7 +550,7 @@ async function validateWithPlaywright(htmlPath) {
           else if (baseline === 'top' || baseline === 'hanging') {
             // y is already top
           } else if (baseline === 'bottom' || baseline === 'ideographic') top -= height;
-          else top -= height * 0.8; // alphabetic / default
+          else top -= inkAscent; // alphabetic / default — use ascent, not a 0.8×height fudge
           pushInk(mapUserBox(left, top, width, height), kind, raw, {
             forOverlap: true,
             forPanel: false
@@ -583,7 +608,9 @@ async function validateWithPlaywright(htmlPath) {
           recordShapeBox(x, y, w, h, 'fillRect');
         });
         wrap('strokeRect', (x, y, w, h) => {
-          recordShapeBox(x, y, w, h, 'strokeRect');
+          recordShapeBox(x, y, w, h, 'strokeRect', {
+            halfLineWidthPx: screenHalfLineWidth()
+          });
         });
         if (typeof ctx.roundRect === 'function') {
           wrap('roundRect', (x, y, w, h) => {
@@ -840,6 +867,84 @@ async function validateWithPlaywright(htmlPath) {
         return Boolean(box.text && box.text.trim());
       }
 
+      // Float/subpixel slack only — geometric match tolerance comes from stroke half-width.
+      const STROKE_FILL_FLOAT_EPSILON_PX = 0.75;
+      const CANVAS_FILL_SHAPE_LABELS = new Set(['fillRect', 'fill']);
+      const CANVAS_PANEL_SHAPE_LABELS = new Set(['fillRect', 'fill', 'strokeRect']);
+
+      function isCanvasShape(box) {
+        return box.source === 'canvas' && !isTextInk(box);
+      }
+
+      function edgeTolerancePx(basisPx) {
+        const basis = Math.max(0, Number(basisPx) || 0);
+        return Math.max(EDGE_TOLERANCE_MIN_PX, basis * EDGE_TOLERANCE_FRAC);
+      }
+
+      function boxesNearlyEqual(a, b, tolerancePx) {
+        const tol = Math.max(0, Number(tolerancePx) || 0);
+        return (
+          Math.abs(a.left - b.left) <= tol
+          && Math.abs(a.right - b.right) <= tol
+          && Math.abs(a.top - b.top) <= tol
+          && Math.abs(a.bottom - b.bottom) <= tol
+        );
+      }
+
+      function isStrokeOnMatchingFill(a, b) {
+        if (a.source !== 'canvas' || b.source !== 'canvas') return false;
+        if (isTextInk(a) || isTextInk(b)) return false;
+
+        let stroke = null;
+        let fill = null;
+        if (a.label === 'strokeRect' && CANVAS_FILL_SHAPE_LABELS.has(b.label)) {
+          stroke = a;
+          fill = b;
+        } else if (b.label === 'strokeRect' && CANVAS_FILL_SHAPE_LABELS.has(a.label)) {
+          stroke = b;
+          fill = a;
+        } else {
+          return false;
+        }
+
+        // Path rects must match within half the stroke width (centered stroke ink).
+        const halfStroke = Number(stroke.halfLineWidthPx);
+        const tolerancePx = (Number.isFinite(halfStroke) && halfStroke > 0 ? halfStroke : 0.5)
+          + STROKE_FILL_FLOAT_EPSILON_PX;
+        return boxesNearlyEqual(stroke, fill, tolerancePx);
+      }
+
+      /** Same-path double fill/fillRect (wash + solid) is not competing material. */
+      function isMatchingFillPair(a, b) {
+        if (a.source !== 'canvas' || b.source !== 'canvas') return false;
+        if (isTextInk(a) || isTextInk(b)) return false;
+        if (!CANVAS_FILL_SHAPE_LABELS.has(a.label) || !CANVAS_FILL_SHAPE_LABELS.has(b.label)) return false;
+        return boxesNearlyEqual(a, b, STROKE_FILL_FLOAT_EPSILON_PX);
+      }
+
+      function isCanvasPanelShape(box) {
+        return isCanvasShape(box) && box.forPanel && CANVAS_PANEL_SHAPE_LABELS.has(box.label);
+      }
+
+      function isCanvasPanelUnderText(a, b, overlapArea) {
+        let shape;
+        let text;
+        if (isCanvasPanelShape(a) && isTextInk(b)) {
+          shape = a;
+          text = b;
+        } else if (isCanvasPanelShape(b) && isTextInk(a)) {
+          shape = b;
+          text = a;
+        } else {
+          return false;
+        }
+        // Canvas text or DOM text: ≥85% of text AABB inside panel (padding still applies).
+        // Skips the 1.4× nest-area gate that false-flags chips/labels in slightly larger panels.
+        const textArea = boxArea(text);
+        if (textArea <= 0) return false;
+        return (overlapArea / textArea) >= CONTAINMENT_RATIO;
+      }
+
       function pushOverlapFinding(key, message) {
         if (overlapFindingCount >= MAX_OVERLAP_FINDINGS) return false;
         if (layoutErrors.length >= MAX_LAYOUT_FINDINGS) return false;
@@ -857,6 +962,16 @@ async function validateWithPlaywright(htmlPath) {
         seenLayoutErrors.add(key);
         layoutErrors.push(message);
         paddingFindingCount += 1;
+        return true;
+      }
+
+      function pushSafeZoneFinding(key, message) {
+        if (safeZoneFindingCount >= MAX_SAFE_ZONE_FINDINGS) return false;
+        if (layoutErrors.length >= MAX_LAYOUT_FINDINGS) return false;
+        if (seenLayoutErrors.has(key)) return false;
+        seenLayoutErrors.add(key);
+        layoutErrors.push(message);
+        safeZoneFindingCount += 1;
         return true;
       }
 
@@ -893,6 +1008,9 @@ async function validateWithPlaywright(htmlPath) {
             const overlapArea = overlapWidth * overlapHeight;
             const smallerArea = Math.min(boxArea(a), boxArea(b));
             if (smallerArea <= 0) continue;
+            if (isStrokeOnMatchingFill(a, b)) continue;
+            if (isMatchingFillPair(a, b)) continue;
+            if (isCanvasPanelUnderText(a, b, overlapArea)) continue;
             const ratio = overlapArea / smallerArea;
             if (isIntentionalNest(a, b, overlapArea)) continue;
             if (ratio < OVERLAP_RATIO) continue;
@@ -972,11 +1090,12 @@ async function validateWithPlaywright(htmlPath) {
 
         // Header-spill: horizontally contained and starts inside the band, even if it protrudes out.
         const textW = text.right - text.left;
+        const bandTol = edgeTolerancePx(Math.min(shape.bottom - shape.top, shape.right - shape.left) * PANEL_PAD_FRAC);
         if (
           textW > 0
           && (overlapWidth / textW) >= CONTAINMENT_RATIO
-          && text.top >= shape.top - PANEL_EDGE_TOLERANCE_PX
-          && text.top < shape.bottom - PANEL_EDGE_TOLERANCE_PX
+          && text.top >= shape.top - bandTol
+          && text.top < shape.bottom - bandTol
         ) {
           return true;
         }
@@ -1003,7 +1122,6 @@ async function validateWithPlaywright(htmlPath) {
       }
 
       function recordPaddingAndSafeZone(segment, localTime, domBoxes) {
-        if (paddingFindingCount >= MAX_PADDING_FINDINGS) return;
         if (layoutErrors.length >= MAX_LAYOUT_FINDINGS) return;
 
         const texts = [
@@ -1017,11 +1135,7 @@ async function validateWithPlaywright(htmlPath) {
 
         const vw = window.innerWidth;
         const vh = window.innerHeight;
-        const margin = SAFE_ZONE_FRAC * Math.min(vw, vh);
-        const safeLeft = margin;
-        const safeTop = margin;
-        const safeRight = vw - margin;
-        const safeBottom = vh - margin;
+        const clipTol = EDGE_TOLERANCE_MIN_PX;
 
         function worstSide(entries) {
           let best = null;
@@ -1032,31 +1146,34 @@ async function validateWithPlaywright(htmlPath) {
         }
 
         // 1) Viewport safe-zone: text only (skip numeric tick-like labels).
+        // Hard-fail only when text extends outside the viewport (clip-only).
         for (const box of texts) {
-          if (paddingFindingCount >= MAX_PADDING_FINDINGS || layoutErrors.length >= MAX_LAYOUT_FINDINGS) return;
+          if (safeZoneFindingCount >= MAX_SAFE_ZONE_FINDINGS || layoutErrors.length >= MAX_LAYOUT_FINDINGS) return;
           if (box.text && NUMERIC_TEXT_RE.test(box.text)) continue;
 
           const intrusions = [];
-          if (safeLeft - box.left > SAFE_ZONE_TOLERANCE_PX) {
-            intrusions.push({ side: 'left', px: Math.ceil(safeLeft - box.left) });
+          if (box.left < -clipTol) {
+            intrusions.push({ side: 'left', px: Math.ceil(-box.left) });
           }
-          if (safeTop - box.top > SAFE_ZONE_TOLERANCE_PX) {
-            intrusions.push({ side: 'top', px: Math.ceil(safeTop - box.top) });
+          if (box.top < -clipTol) {
+            intrusions.push({ side: 'top', px: Math.ceil(-box.top) });
           }
-          if (box.right - safeRight > SAFE_ZONE_TOLERANCE_PX) {
-            intrusions.push({ side: 'right', px: Math.ceil(box.right - safeRight) });
+          if (box.right > vw + clipTol) {
+            intrusions.push({ side: 'right', px: Math.ceil(box.right - vw) });
           }
-          if (box.bottom - safeBottom > SAFE_ZONE_TOLERANCE_PX) {
-            intrusions.push({ side: 'bottom', px: Math.ceil(box.bottom - safeBottom) });
+          if (box.bottom > vh + clipTol) {
+            intrusions.push({ side: 'bottom', px: Math.ceil(box.bottom - vh) });
           }
           const worst = worstSide(intrusions);
           if (!worst) continue;
           const key = `${segment.id}|safe-zone|${box.source}|${box.label}|${box.text}|${worst.side}`;
-          pushPaddingFinding(
+          pushSafeZoneFinding(
             key,
-            `segment '${segment.id}' at localTime=${localTime.toFixed(3)}s: safe-zone: ${formatBox(box)} crosses viewport margin by ${worst.px}px (${worst.side})`
+            `segment '${segment.id}' at localTime=${localTime.toFixed(3)}s: safe-zone: ${formatBox(box)} is clipped outside the viewport by ${worst.px}px (${worst.side})`
           );
         }
+
+        if (paddingFindingCount >= MAX_PADDING_FINDINGS) return;
 
         // 2) Panel inset / protrusion relative to smallest containing shape.
         //    Table cell text uses the nearest td/th with theme cell pads (16h / 12v).
@@ -1080,22 +1197,31 @@ async function validateWithPlaywright(htmlPath) {
           const panelH = panel.bottom - panel.top;
           const cardPad = Math.max(PANEL_PAD_FRAC * Math.min(panelW, panelH), PANEL_PAD_MIN_PX);
           const padForSide = (side) => (useTableCellPad ? tableCellPadForSide(side) : cardPad);
+          const protrudeTolForSide = (side) => edgeTolerancePx(padForSide(side));
 
           const protrusions = [];
-          if (panel.left - text.left > PANEL_EDGE_TOLERANCE_PX) {
-            protrusions.push({ side: 'left', px: Math.ceil(panel.left - text.left) });
+          const leftGross = panel.left - text.left;
+          const leftTol = protrudeTolForSide('left');
+          if (leftGross > leftTol) {
+            protrusions.push({ side: 'left', px: Math.ceil(leftGross - leftTol) });
           }
-          if (panel.top - text.top > PANEL_EDGE_TOLERANCE_PX) {
-            protrusions.push({ side: 'top', px: Math.ceil(panel.top - text.top) });
+          const topGross = panel.top - text.top;
+          const topTol = protrudeTolForSide('top');
+          if (topGross > topTol) {
+            protrusions.push({ side: 'top', px: Math.ceil(topGross - topTol) });
           }
-          if (text.right - panel.right > PANEL_EDGE_TOLERANCE_PX) {
-            protrusions.push({ side: 'right', px: Math.ceil(text.right - panel.right) });
+          const rightGross = text.right - panel.right;
+          const rightTol = protrudeTolForSide('right');
+          if (rightGross > rightTol) {
+            protrusions.push({ side: 'right', px: Math.ceil(rightGross - rightTol) });
           }
-          if (text.bottom - panel.bottom > PANEL_EDGE_TOLERANCE_PX) {
-            protrusions.push({ side: 'bottom', px: Math.ceil(text.bottom - panel.bottom) });
+          const bottomGross = text.bottom - panel.bottom;
+          const bottomTol = protrudeTolForSide('bottom');
+          if (bottomGross > bottomTol) {
+            protrusions.push({ side: 'bottom', px: Math.ceil(bottomGross - bottomTol) });
           }
           const worstProtrusion = worstSide(protrusions);
-          if (worstProtrusion) {
+          if (worstProtrusion && worstProtrusion.px > MIN_PADDING_VIOLATION_PX) {
             const key = `${segment.id}|panel-protrude|${text.source}|${text.label}|${text.text}|${panel.source}|${panel.label}|${worstProtrusion.side}`;
             pushPaddingFinding(
               key,
@@ -1113,12 +1239,14 @@ async function validateWithPlaywright(htmlPath) {
           ];
           for (const { side, inset } of insets) {
             const pad = padForSide(side);
-            if (inset + PANEL_EDGE_TOLERANCE_PX < pad) {
-              padShortfalls.push({ side, px: Math.ceil(pad - inset) });
+            const edgeTol = edgeTolerancePx(pad);
+            const grossShortfall = pad - inset;
+            if (grossShortfall > edgeTol) {
+              padShortfalls.push({ side, px: Math.ceil(grossShortfall - edgeTol) });
             }
           }
           const worstPad = worstSide(padShortfalls);
-          if (!worstPad) continue;
+          if (!worstPad || worstPad.px <= MIN_PADDING_VIOLATION_PX) continue;
           const key = `${segment.id}|panel-pad|${text.source}|${text.label}|${text.text}|${panel.source}|${panel.label}|${worstPad.side}`;
           pushPaddingFinding(
             key,

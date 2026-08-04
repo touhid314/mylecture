@@ -24,7 +24,7 @@ A left panel should contain necessary background info/text including a next step
 # Interactive segment theme & Layout Rules (720p Mobile-Friendly Stage)
 - Reference Resolution: Design all layouts, canvas elements, and typography specifically for a **720p landscape stage (1280px × 720px, 16:9 aspect ratio)**.
 - Must be full screen. 
-- Layout Scaling: The layout must expand to fill the full viewport cleanly (`width: 100vw; height: 100vh; height: 100dvh; display: flex; align-items: center; justify-content: center; overflow: hidden;`).
+- Layout Scaling: The layout must expand to fill the full viewport cleanly (`width: 100%; height: 100%; display: flex; align-items: center; justify-content: center; overflow: hidden;` on `html`/`body` — use **`height: 100%`**, not `100vh`, because activities run inside a fixed 1280×720 iframe in the lesson player). The root app shell (`#app` or equivalent) must also use `height: 100%; max-height: 100%; box-sizing: border-box; min-height: 0` so nothing clips at the bottom.
 - Background color: complete white (`#FFFFFF`).
 - Font family: Arial (or another clean font if appropriate).
 
@@ -38,6 +38,7 @@ A left panel should contain necessary background info/text including a next step
 ## Margins & Mobile Safe Area
 - Enforce a minimum margin/padding of `32px` around all outer edges of the stage.
 - NEVER place buttons or interactive elements flush against the bottom or sides of the screen. Keep bottom controls at least `40px` above the bottom edge so they don't overlap with iPhone/Android home swipe bars or device corners.
+- Left and right columns must use `min-height: 0` with internal scrolling (`overflow-y: auto` on the left text column) so all controls remain reachable within 720px height.
 
 
 ## Color profile

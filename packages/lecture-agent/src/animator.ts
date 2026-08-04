@@ -1,5 +1,6 @@
 import fs from 'node:fs';
 import path from 'node:path';
+import vm from 'node:vm';
 import { fileURLToPath } from 'node:url';
 
 import { tool_edits, type RangeEdit } from './utils/file_edits.js';
@@ -143,6 +144,48 @@ function lineNumbered(content: string): string {
     return content.split(/\r?\n/).map((line, index) => `${index + 1}: ${line}`).join('\n');
 }
 
+const INLINE_SCRIPT_TAG_RE = /<script\b([^>]*)>([\s\S]*?)<\/script>/gi;
+
+export function revertToLastViable(target: string, lastViableHtml: string): string {
+    fs.writeFileSync(target, lastViableHtml, 'utf8');
+    return lastViableHtml;
+}
+
+export function findInlineScriptSyntaxError(html: string): string | null {
+    let scriptIndex = 0;
+    for (const match of html.matchAll(INLINE_SCRIPT_TAG_RE)) {
+        const attrs = match[1] ?? '';
+        const body = match[2] ?? '';
+        if (/\bsrc\s*=/i.test(attrs)) continue;
+        if (/\btype\s*=\s*(["']?)module\1/i.test(attrs)) continue;
+        scriptIndex += 1;
+        try {
+            new vm.Script(body);
+        } catch (err) {
+            const name = err instanceof SyntaxError ? 'SyntaxError' : (err instanceof Error ? err.name : 'Error');
+            const message = err instanceof Error ? err.message : String(err);
+            return `inline script ${scriptIndex}: ${name}: ${message}`;
+        }
+    }
+    return null;
+}
+
+/** Advance the syntax-clean disk-revert anchor when html compiles; scriptBroken does not block this. */
+export function nextSyntaxCleanAnchor(
+    html: string,
+    currentAnchor: string,
+    htmlSyntaxError: string | null | undefined = undefined,
+): { anchor: string; isSyntaxClean: boolean } {
+    const error = htmlSyntaxError === undefined ? findInlineScriptSyntaxError(html) : htmlSyntaxError;
+    if (error === null) {
+        return { anchor: html, isSyntaxClean: true };
+    }
+    return {
+        anchor: currentAnchor,
+        isSyntaxClean: findInlineScriptSyntaxError(currentAnchor) === null,
+    };
+}
+
 export function parseAnimatorEdits(response: string, expectedPath: string): RangeEdit[] {
     let content = response.trim().replace(/^```(?:json)?\s*/i, '').replace(/\s*```$/, '').trim();
     const firstBrace = content.indexOf('{');
@@ -158,6 +201,102 @@ export function parseAnimatorEdits(response: string, expectedPath: string): Rang
     return parsed.edits as RangeEdit[];
 }
 
+const TEMPORAL_LAYOUT_MARKER = 'Temporal layout check failed:';
+const SCRIPT_BEFORE_GLOBALS_MARKER = 'Browser script error before contract globals:';
+/** Rewrite immediately when this many layout errors are reported (skip first JSON edit). */
+const IMMEDIATE_LAYOUT_REWRITE_ERROR_THRESHOLD = 6;
+/** After this many repair attempts, rewrite when several layout errors remain. */
+const JSON_EDIT_ATTEMPTS_BEFORE_BULK_REWRITE = 1;
+/** Minimum remaining layout errors to prefer rewrite over more JSON edits. */
+const BULK_LAYOUT_REWRITE_MIN_ERRORS = 3;
+/** Failed JSON/syntax repairs before forcing layout rewrite. */
+const FAILED_REPAIR_REWRITE_THRESHOLD = 2;
+/** Applied edits that did not reduce layout errors before forcing rewrite. */
+const UNIMPROVED_REPAIR_REWRITE_THRESHOLD = 2;
+
+export type LayoutRewriteDecisionInput = {
+    attempt: number;
+    maximumRepairs: number;
+    validation: string;
+    consecutiveFailedRepairs?: number;
+    consecutiveUnimprovedRepairs?: number;
+    priorLayoutRewrite?: boolean;
+};
+
+export function countTemporalLayoutErrors(validation: string): number {
+    return validation
+        .split(/\r?\n/)
+        .filter(line => line.trim().startsWith('- ') && line.includes(TEMPORAL_LAYOUT_MARKER))
+        .length;
+}
+
+export function isTemporalLayoutValidation(validation: string): boolean {
+    if (!validation.includes(TEMPORAL_LAYOUT_MARKER)) return false;
+    if (validation.includes(SCRIPT_BEFORE_GLOBALS_MARKER)) return false;
+
+    const errorLines = validation
+        .split(/\r?\n/)
+        .map(line => line.trim())
+        .filter(line => line.startsWith('- '));
+
+    if (errorLines.length === 0) return false;
+
+    return errorLines.every(line => line.includes(TEMPORAL_LAYOUT_MARKER));
+}
+
+export function shouldRequestLayoutRewrite(input: LayoutRewriteDecisionInput): boolean;
+export function shouldRequestLayoutRewrite(
+    attempt: number,
+    maximumRepairs: number,
+    validation: string
+): boolean;
+export function shouldRequestLayoutRewrite(
+    attemptOrInput: number | LayoutRewriteDecisionInput,
+    maximumRepairs?: number,
+    validation?: string
+): boolean {
+    const input: LayoutRewriteDecisionInput = typeof attemptOrInput === 'number'
+        ? {
+            attempt: attemptOrInput,
+            maximumRepairs: maximumRepairs ?? 5,
+            validation: validation ?? '',
+        }
+        : attemptOrInput;
+
+    if (!isTemporalLayoutValidation(input.validation)) return false;
+
+    const layoutErrorCount = countTemporalLayoutErrors(input.validation);
+    if (layoutErrorCount === 0) return false;
+
+    const failedRepairs = input.consecutiveFailedRepairs ?? 0;
+    const unimprovedRepairs = input.consecutiveUnimprovedRepairs ?? 0;
+
+    // Last repair slot: always rewrite layout-only failures.
+    if (input.attempt >= input.maximumRepairs - 1) return true;
+
+    // JSON/syntax repair never applied — escalate quickly.
+    if (failedRepairs >= FAILED_REPAIR_REWRITE_THRESHOLD) return true;
+
+    // JSON edits applied but layout error count did not improve.
+    if (unimprovedRepairs >= UNIMPROVED_REPAIR_REWRITE_THRESHOLD) return true;
+
+    // After a prior rewrite, prefer another rewrite over brittle line edits.
+    if (input.priorLayoutRewrite && input.attempt >= 1) return true;
+
+    // Many layout issues on first repair: skip JSON line-edits entirely.
+    if (input.attempt === 0 && layoutErrorCount >= IMMEDIATE_LAYOUT_REWRITE_ERROR_THRESHOLD) return true;
+
+    // One JSON edit try, then rewrite when many layout issues remain.
+    if (input.attempt >= 1 && layoutErrorCount >= IMMEDIATE_LAYOUT_REWRITE_ERROR_THRESHOLD) return true;
+
+    // After one JSON edit, rewrite when several layout issues remain.
+    if (input.attempt >= JSON_EDIT_ATTEMPTS_BEFORE_BULK_REWRITE && layoutErrorCount >= BULK_LAYOUT_REWRITE_MIN_ERRORS) {
+        return true;
+    }
+
+    return false;
+}
+
 export async function requestAnimatorRepair(input: AnimatorRepairInput, session: AnimatorSession): Promise<RangeEdit[]> {
     const repairPrompt = [
         `The generated ${input.outputPath} failed the HTML contract validator.`,
@@ -166,6 +305,11 @@ export async function requestAnimatorRepair(input: AnimatorRepairInput, session:
         'Line ranges are inclusive and refer to the line-numbered current file below. Use [a,b] to replace, [a] to insert after line a, and [0] to insert at the top.',
         'Make the smallest complete set of edits needed to resolve every validator error. Do not return the whole HTML file.',
         'If the error lists missing render helpers (draw*/render*/update*), copy their full function definitions from the previous validated HTML into this file.',
+        'Every inline <script> block (without src=) must remain syntactically valid as a classic browser script after your edits.',
+        'Never use a top-level return outside a function — that is illegal in browser scripts.',
+        'Prefer coordinate, size, and CSS fixes for layout errors; do not rewrite large script regions unless the validator requires it.',
+        'For canvas overlap errors, replace the existing fillText/strokeText line — do not add a second copy of the same label.',
+        'Match exact line ranges carefully so replacements do not splice mid-statement or mid-expression.',
         'Return exactly one JSON object and nothing else after it.',
         '',
         '# Validator Output', input.validatorOutput,
@@ -180,6 +324,30 @@ export async function requestAnimatorRepair(input: AnimatorRepairInput, session:
     return parseAnimatorEdits(response, input.outputPath);
 }
 
+export async function requestAnimatorLayoutRewrite(input: AnimatorRepairInput, session: AnimatorSession): Promise<string> {
+    const rewritePrompt = [
+        `The generated ${input.outputPath} failed the HTML contract validator with temporal layout errors (overlaps, padding shortfalls).`,
+        `Return one complete raw HTML document for ${input.outputPath} only. Begin with <!doctype html> and end with </html>. Do not return Markdown fences, JSON edits, or explanations.`,
+        'Fix every layout error listed below by adjusting coordinates, font sizes, panel geometry, and padding.',
+        'One label string = one fillText/strokeText call per draw pass.',
+        'Keep window.__VIDEO_METADATA__, window.__VIDEO_PLAN__, and window.__RENDER_SECTION__ complete and valid.',
+        'Every inline <script> block (without src=) must remain syntactically valid as a classic browser script.',
+        'Never use a top-level return outside a function — that is illegal in browser scripts.',
+        'Each index*.html file is standalone — copy every draw*/render*/update* helper you call into this file.',
+        '',
+        '# Validator Output', input.validatorOutput,
+        '',
+        '# Previous Validated HTML Context', formatPreviousHtmlSummary(input.previousHtmls),
+        '',
+        `# Current ${input.outputPath} (rewrite from this, fixing layout)`, input.currentHtml,
+        '',
+        '# Current Script Block', input.scriptBlock
+    ].join('\n');
+    const response = await session.generate(`lecturegen_animator_layout_rewrite_block_${input.blockIndex}`, rewritePrompt, input.attachments);
+    const [html] = purify_content_for_path(input.outputPath, parseAnimatorHtml(response));
+    return html;
+}
+
 export async function validateAndRepairHtml(
     input: AnimatorInput,
     session: AnimatorSession,
@@ -190,7 +358,13 @@ export async function validateAndRepairHtml(
 ): Promise<string> {
     const target = path.resolve(workspaceDir, input.outputPath);
     let html = initialHtml;
+    let lastSyntaxCleanHtml = initialHtml;
     let previousRepairError = '';
+    let consecutiveFailedRepairs = 0;
+    let consecutiveUnimprovedRepairs = 0;
+    let priorLayoutRewrite = false;
+    let previousLayoutErrorCount: number | null = null;
+    let hadRepairSinceLastValidation = false;
     fs.writeFileSync(target, html, 'utf8');
 
     for (let attempt = 0; attempt <= maximumRepairs; attempt++) {
@@ -200,21 +374,78 @@ export async function validateAndRepairHtml(
         if (attempt === maximumRepairs) {
             throw new Error(`${input.outputPath} still failed validation after ${maximumRepairs} animator repair attempt(s):\n${validation}`);
         }
-        let edits: RangeEdit[];
+
+        const currentLayoutErrorCount = isTemporalLayoutValidation(validation)
+            ? countTemporalLayoutErrors(validation)
+            : null;
+        if (
+            hadRepairSinceLastValidation &&
+            previousLayoutErrorCount != null &&
+            currentLayoutErrorCount != null
+        ) {
+            if (currentLayoutErrorCount >= previousLayoutErrorCount) {
+                consecutiveUnimprovedRepairs += 1;
+            } else {
+                consecutiveUnimprovedRepairs = 0;
+            }
+        }
+        hadRepairSinceLastValidation = false;
+        previousLayoutErrorCount = currentLayoutErrorCount;
+
+        ({ anchor: lastSyntaxCleanHtml } = nextSyntaxCleanAnchor(html, lastSyntaxCleanHtml));
+
+        const repairInput: AnimatorRepairInput = {
+            ...input,
+            currentHtml: html,
+            validatorOutput: [
+                validation,
+                previousRepairError ? `Previous repair attempt error:\n${previousRepairError}` : ''
+            ].filter(Boolean).join('\n\n')
+        };
+
+        const useLayoutRewrite = shouldRequestLayoutRewrite({
+            attempt,
+            maximumRepairs,
+            validation,
+            consecutiveFailedRepairs,
+            consecutiveUnimprovedRepairs,
+            priorLayoutRewrite,
+        });
+
         try {
-            edits = await requestAnimatorRepair({
-                ...input,
-                currentHtml: html,
-                validatorOutput: [validation, previousRepairError].filter(Boolean).join('\n\nPrevious repair attempt error:\n')
-            }, session);
-            tool_edits(input.outputPath, edits, workspaceDir);
+            if (useLayoutRewrite) {
+                const rewriteSession = new AnimatorSession({
+                    model: input.model,
+                    tokenTrackerSessionId: input.tokenTrackerSessionId,
+                    promptWorkspaceDir: input.promptWorkspaceDir,
+                });
+                html = await requestAnimatorLayoutRewrite(repairInput, rewriteSession);
+                fs.writeFileSync(target, html, 'utf8');
+                priorLayoutRewrite = true;
+            } else {
+                const edits = await requestAnimatorRepair(repairInput, session);
+                tool_edits(input.outputPath, edits, workspaceDir);
+                html = fs.readFileSync(target, 'utf8');
+            }
         } catch (error) {
             previousRepairError = error instanceof Error ? error.message : String(error);
+            consecutiveFailedRepairs += 1;
             onValidation?.(`Animator repair attempt failed: ${previousRepairError}`);
             continue;
         }
+
+        const postEditSyntaxError = findInlineScriptSyntaxError(html);
+        if (postEditSyntaxError) {
+            html = revertToLastViable(target, lastSyntaxCleanHtml);
+            previousRepairError = `Repair edits introduced a JavaScript syntax error (${postEditSyntaxError}). Edits were reverted to the last viable file.`;
+            consecutiveFailedRepairs += 1;
+            onValidation?.(previousRepairError);
+            continue;
+        }
+
+        consecutiveFailedRepairs = 0;
         previousRepairError = '';
-        html = fs.readFileSync(target, 'utf8');
+        hadRepairSinceLastValidation = true;
     }
     throw new Error(`Unexpected validation loop exit for ${input.outputPath}.`);
 }

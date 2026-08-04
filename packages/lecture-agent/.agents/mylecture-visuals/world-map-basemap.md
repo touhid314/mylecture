@@ -12,9 +12,19 @@ assets/world-basemap.svg
 
 ## Usage in HTML
 
-1. Use `assets/world-basemap.svg` as the map background (inline `<image href="assets/world-basemap.svg">` inside your stage SVG, or embed the `#world-land` path from the file).
-2. Place supply-chain nodes and arcs in the **same** SVG coordinate system (1920×1080).
-3. **Never** draw freehand continent polygons when this asset is available.
+1. Use `assets/world-basemap.svg` as the map background (`<image href="assets/world-basemap.svg" x="0" y="0" width="1920" height="1080"/>` inside your stage SVG).
+2. Place markers, arcs, heat circles, and labels in the **same** 1920×1080 SVG coordinate system.
+3. **Never** invent freehand continent, country, coastline, or border polygons when this asset is available.
+
+## Country / region close-ups
+
+Do **not** redraw Croatia, Taiwan, etc. as simplified blobs. Zoom the basemap:
+
+1. Keep the full-world `<image … width="1920" height="1080"/>`.
+2. Set the parent SVG `viewBox` from lon/lat bounds via `viewBoxForBounds` (pad ~0.5–2° so neighbors stay visible).
+3. City/hazard positions still use `projectLonLat` — they stay correct under viewBox zoom.
+
+110m is a world-scale coastline: at extreme zoom small countries look a bit coarse, but real Natural Earth geometry always beats freehand outlines.
 
 ## Lon/lat → pixel (matches the bundled SVG)
 
@@ -34,6 +44,14 @@ function projectLonLat(lon, lat) {
   const y = padT + ((latMax - lat) / (latMax - latMin)) * (H - padT - padB);
   return { x: Math.round(x * 10) / 10, y: Math.round(y * 10) / 10 };
 }
+
+function viewBoxForBounds(lonMin, latMin, lonMax, latMax) {
+  const sw = projectLonLat(lonMin, latMin);
+  const ne = projectLonLat(lonMax, latMax);
+  return `${sw.x} ${ne.y} ${ne.x - sw.x} ${sw.y - ne.y}`;
+}
+
+// Croatia example: viewBoxForBounds(13.0, 42.0, 20.5, 47.0)
 ```
 
 Example cities (approximate):
@@ -46,4 +64,4 @@ Example cities (approximate):
 
 ## Script cues
 
-In `V:` lines, describe the map as: “Use bundled `assets/world-basemap.svg` as background; plot nodes at …” — do **not** use getimg/getmap directives for basemaps.
+In `V:` lines, describe the map as: “Use bundled `assets/world-basemap.svg` as background; zoom viewBox to …; plot nodes at …” — do **not** use getimg/getmap directives for basemaps, and do **not** invent country outlines.

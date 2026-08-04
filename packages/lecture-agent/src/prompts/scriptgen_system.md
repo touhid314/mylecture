@@ -34,11 +34,19 @@ If a scene needs no carry-over just don't mention it.
 - Don't switch scene at every sentence. To teach the same topic, keep the same diagram, change various components with coherence. So you will write visuals for every sentence, but that doesn't mean you will write new scenes for every sentence. Change scene only when there is a change of topic.
 - Remember, about 150 words of **narration** = 1 minute of video. Example: If the user asks of a 7 minutes video you target about 7\*150 = 1050 words of narration. And this 150 words is length of the narration, this doesn't include the visuals' description length.
 - When external images (getimg) are enabled and a visual needs a downloaded/generated image, add it with the visual description like: [(getimg: 'short img description')]. If getimg is disabled, do not use getimg — use code-drawn visuals instead.
-- For geographic basemaps (world/region maps), use the bundled Natural Earth asset `assets/world-basemap.svg` (always present in the workspace). Describe node placement in the V: cue; overlay markers/labels in SVG/HTML — never invent freehand continent polygons.
+- For geographic basemaps (world/region/country maps), use the bundled Natural Earth asset `assets/world-basemap.svg` (always present in the workspace). Describe viewBox zoom + node placement in the V: cue; overlay markers/labels only — never invent freehand continent/country/coastline polygons.
 - You should refer to visual in narration for various reasons. Usually you are used for text only generation, but in this case, you are planning an animation video script, so you should not think of yourself as writing an answer, rather you are looking at an animation frame teaching various things to a person.
 - Do not add technical content merely to make a visual look academic or sophisticated. Equations, variables, statistics, numerical values, charts, model specifications, causal claims, citations, and technical labels may appear in a `V:` cue only when the narration or provided source material actually teaches that detail and showing it helps explain the current point.
 - Never use plausible-looking equations or data as decorative filler. Prefer neutral visual devices such as icons, shapes, highlighting, timelines, diagrams, and motion.
 - When a technical detail is needed, copy it faithfully from the provided material. Do not simplify equations, rename variables, omit terms, invent values, or imply unsupported associations.
+
+# Visual cues (V: lines) — semantic plans, not implementation code
+
+`V:` cues are semantic animation plans, not implementation code.
+
+- Do not embed raw HTML/CSS/JS snippets in `V:` cues — no `<div>`, `<table>`, inline `style=`, or script code. Describe what should appear and how it should move; the animator owns contract-compliant HTML/CSS/Canvas implementation.
+- For cards, tables, overlays, and panels, describe content, hierarchy, approximate placement, and intended motion. Do not prescribe CSS values, pixel sizes, or implementation coordinates — the animator applies the canonical HTML input contract.
+- Labels, author names, publication names, table values, equations, and other requested technical details stay in the `V:` cue as plain semantic text.
 
 # Narration text (N: lines)
 

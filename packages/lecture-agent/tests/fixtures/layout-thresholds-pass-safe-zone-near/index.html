@@ -1,0 +1,29 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Safe Zone Near Edge Pass Fixture</title>
+<style>
+  html, body { margin: 0; width: 100%; height: 100%; overflow: hidden; background: #101820; color: #f4f7fb; font-family: Georgia, serif; }
+  #stage { position: relative; width: 100vw; height: 100vh; }
+  #label { position: absolute; left: 4px; top: 4px; font-size: 32px; font-weight: 600; }
+</style>
+</head>
+<body>
+  <main id="stage">
+    <div id="label">Too close</div>
+  </main>
+  <script>
+    window.__VIDEO_METADATA__ = {
+      contractVersion: "0.2",
+      title: "Safe Zone Near Edge Pass Fixture",
+      aspectRatio: "16:9"
+    };
+    window.__VIDEO_PLAN__ = [
+      { id: "safe_zone_near_edge", kind: "visual-only", duration: 2 }
+    ];
+
+    window.__RENDER_SECTION__ = function renderSection() {};
+  </script>
+</body>
+</html>

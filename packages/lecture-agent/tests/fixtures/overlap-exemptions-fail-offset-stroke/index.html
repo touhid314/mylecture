@@ -1,0 +1,53 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Offset Stroke Fail Fixture</title>
+<style>
+  html, body { margin: 0; width: 100%; height: 100%; overflow: hidden; background: #101820; color: #f4f7fb; font-family: Georgia, serif; }
+  #stage { position: relative; width: 100vw; height: 100vh; }
+  #canvas { position: absolute; inset: 0; width: 100%; height: 100%; }
+</style>
+</head>
+<body>
+  <main id="stage">
+    <canvas id="canvas" width="1920" height="1080"></canvas>
+  </main>
+  <script>
+    window.__VIDEO_METADATA__ = {
+      contractVersion: "0.2",
+      title: "Offset Stroke Fail Fixture",
+      aspectRatio: "16:9"
+    };
+    window.__VIDEO_PLAN__ = [
+      {
+        id: "offset_stroke",
+        kind: "visual-only",
+        duration: 2
+      }
+    ];
+
+    const canvas = document.getElementById("canvas");
+    const ctx = canvas.getContext("2d");
+    const CARD_X = 200;
+    const CARD_Y = 220;
+    const CARD_W = 640;
+    const CARD_H = 360;
+    const OFFSET = 15;
+
+    function renderSection(segment, localTime) {
+      ctx.clearRect(0, 0, 1920, 1080);
+      ctx.fillStyle = "#101820";
+      ctx.fillRect(0, 0, 1920, 1080);
+
+      ctx.fillStyle = "#1c2a36";
+      ctx.fillRect(CARD_X, CARD_Y, CARD_W, CARD_H);
+      ctx.strokeStyle = "#5f7f9a";
+      ctx.lineWidth = 4;
+      ctx.strokeRect(CARD_X + OFFSET, CARD_Y + OFFSET, CARD_W, CARD_H);
+    }
+
+    window.__RENDER_SECTION__ = renderSection;
+  </script>
+</body>
+</html>

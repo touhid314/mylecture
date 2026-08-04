@@ -10,7 +10,7 @@ describe('normalizeTtsText', () => {
     );
   });
 
-  it('strips comma separators from digit groups and speaks numbers', () => {
+  it('speaks comma-grouped quantities as cardinals, not years', () => {
     assert.equal(
       normalizeTtsText('They tracked over 1,700 vacuum cleaners.'),
       'They tracked over one thousand seven hundred vacuum cleaners.'
@@ -19,12 +19,16 @@ describe('normalizeTtsText', () => {
       normalizeTtsText('12,345,678 items'),
       'twelve million three hundred forty five thousand six hundred seventy eight items'
     );
+    assert.equal(
+      normalizeTtsText('sold 1,996 units'),
+      'sold one thousand nine hundred ninety six units'
+    );
   });
 
   it('does not touch commas followed by spaces or non-groups', () => {
     assert.equal(
       normalizeTtsText('In 2020, 300 people responded.'),
-      'In two thousand twenty, three hundred people responded.'
+      'In twenty twenty, three hundred people responded.'
     );
     assert.equal(normalizeTtsText('rows 1,23 and 4'), 'rows one,twenty three and four');
   });
@@ -48,7 +52,7 @@ describe('normalizeTtsText', () => {
   it('expands attributive currency before uppercase acronyms', () => {
     assert.equal(
       normalizeTtsText('NASA grew 24% after a $60 API upgrade in 2020.'),
-      'N A S A grew twenty four percent after a sixty dollar A P I upgrade in two thousand twenty.'
+      'N A S A grew twenty four percent after a sixty dollar A P I upgrade in twenty twenty.'
     );
   });
 
@@ -76,9 +80,14 @@ describe('normalizeTtsText', () => {
   it('does not expand hyphen chains in phone numbers or ISBNs', () => {
     assert.equal(
       normalizeTtsText('call 1-800-555-1212'),
-      'call one-eight hundred-five hundred fifty five-one thousand two hundred twelve'
+      'call one-eight hundred-five hundred fifty five-twelve twelve'
     );
     assert.doesNotMatch(normalizeTtsText('call 1-800-555-1212'), /\bto\b/);
+    assert.equal(
+      normalizeTtsText('call 555-1212'),
+      'call five hundred fifty five-twelve twelve'
+    );
+    assert.doesNotMatch(normalizeTtsText('call 555-1212'), /\bto\b/);
     assert.equal(
       normalizeTtsText('ISBN 978-0-321-57345-4'),
       'I S B N nine hundred seventy eight-zero-three hundred twenty one-fifty seven thousand three hundred forty five-four'
@@ -100,7 +109,7 @@ describe('normalizeTtsText', () => {
     assert.equal(normalizeTtsText('a 3/4 share'), 'a three over four share');
     assert.equal(
       normalizeTtsText('on 3/15/2020 we launched'),
-      'on three/fifteen/two thousand twenty we launched'
+      'on three/fifteen/twenty twenty we launched'
     );
     assert.doesNotMatch(normalizeTtsText('on 3/15/2020 we launched'), /over/);
   });
@@ -112,6 +121,13 @@ describe('normalizeTtsText', () => {
     assert.equal(normalizeTtsText('the 3rd option'), 'the third option');
     assert.equal(normalizeTtsText('the 4th item'), 'the fourth item');
     assert.equal(normalizeTtsText('the 21st century'), 'the twenty first century');
+  });
+
+  it('speaks year ordinals in year style', () => {
+    assert.equal(normalizeTtsText('the 1996th edition'), 'the nineteen ninety sixth edition');
+    assert.equal(normalizeTtsText('the 2020th summit'), 'the twenty twentieth summit');
+    assert.equal(normalizeTtsText('the 1900th anniversary'), 'the nineteen hundredth anniversary');
+    assert.equal(normalizeTtsText('the 1905th meeting'), 'the nineteen oh fifth meeting');
   });
 
   it('leaves version numbers with multiple dots unchanged', () => {
@@ -145,5 +161,39 @@ describe('normalizeTtsText', () => {
 
   it('handles empty and non-string-safe input', () => {
     assert.equal(normalizeTtsText(''), '');
+  });
+
+  it('speaks 4-digit years in year style', () => {
+    assert.equal(
+      normalizeTtsText('Since 1996, teams searched.'),
+      'Since nineteen ninety six, teams searched.'
+    );
+    assert.equal(normalizeTtsText('Founded in 1900.'), 'Founded in nineteen hundred.');
+    assert.equal(normalizeTtsText('Born in 1905.'), 'Born in nineteen oh five.');
+    assert.equal(normalizeTtsText('The year 2000.'), 'The year two thousand.');
+    assert.equal(normalizeTtsText('Started in 2005.'), 'Started in two thousand five.');
+    assert.equal(normalizeTtsText('Graduated in 2010.'), 'Graduated in twenty ten.');
+    assert.equal(normalizeTtsText('Peak in 2020.'), 'Peak in twenty twenty.');
+    assert.equal(normalizeTtsText('Built in 1100.'), 'Built in eleven hundred.');
+    assert.equal(
+      normalizeTtsText('era 1990-1995'),
+      'era nineteen ninety to nineteen ninety five'
+    );
+  });
+
+  it('does not year-style non-4-digit or out-of-band numbers', () => {
+    assert.equal(
+      normalizeTtsText('altitude 755 feet'),
+      'altitude seven hundred fifty five feet'
+    );
+    assert.equal(
+      normalizeTtsText('budget is 2000000000000'),
+      'budget is two trillion'
+    );
+    assert.equal(
+      normalizeTtsText('about 300 items'),
+      'about three hundred items'
+    );
+    assert.equal(normalizeTtsText('agent 007'), 'agent zero zero seven');
   });
 });

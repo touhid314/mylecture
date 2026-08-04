@@ -177,3 +177,27 @@ Two classes of text:
 2. **Independent text** — scene titles, key terms, equations, and annotations placed independently of any canvas shape. Render as HTML/DOM elements. Math always uses KaTeX DOM overlays, never canvas.
 
 If an HTML element must align with a canvas-drawn shape, compute its position every frame inside `__RENDER_SECTION__` or `__HTML_RENDER_SECTION__` from the same geometry constants used to draw the shape in `__AI_RENDER_SECTION__`. Never use independent hard-coded CSS offsets, and never use a different transform origin than the tracked shape.
+
+## Authoring rules for temporal layout validation
+
+This section documents the authoring rules and thresholds relevant to temporal layout validation. It does not enumerate every internal heuristic, finding cap, or implementation exception in the validator.
+
+Layouts must remain valid throughout motion. The validator samples a bounded set of render states at segment start and end, and (when budget permits) intermediate `localTime` / `globalTime` values. At every sampled state, layout must satisfy the rules below.
+
+### Validator-enforced thresholds
+
+- **Viewport safe-zone:** Keep visible text boxes away from viewport edges. Theme guidance recommends at least 5% of `min(viewportWidth, viewportHeight)` on each edge. The validator hard-fails only when the **measured** text axis-aligned box extends outside the viewport (small float tolerance). DOM text boxes are collected after viewport and ancestor clipping, so this check primarily catches **canvas text** drawn off-screen; on-screen DOM text flush to the edge does not hard-fail. Portrait theme files may request stricter top/bottom margins in theme guidance; those are theme recommendations, not this validator's threshold.
+- **Panel text inset (non-table):** Text inside a containing panel requires inset of at least `max(5% of min(panel width, panel height), 24px)` on every side, measured in the browser after scaling. Inset/protrusion slack is 10% of the required pad for that side. Panel padding violations under 12px net (after slack) are not reported by the validator.
+- **Table cell padding:** Table cells require at least 16px horizontal and 12px vertical padding.
+- **Material overlap:** The validator flags merged canvas/DOM collisions when overlap is at least 24px wide × 12px high and at least 28% of the smaller box. Avoid unintended material overlap. Intentional nesting is allowed only when the smaller box is at least 85% contained and the larger is at least 1.4× the smaller area. Shape-only overlaps under 4500px² may be tolerated; text overlaps are not subject to that area floor. Detection uses axis-aligned bounding boxes only (no z-order); overlapping layers may be flagged even when one is visually behind another.
+- **Stroke-on-fill exemption:** A `strokeRect` border on a matching `fillRect`/`fill` card is not treated as material overlap when the path rectangles align within half the stroke's screen-space `lineWidth` (plus a small float epsilon). Offset same-size pairs beyond that stroke half-width are still flagged.
+- **Matching fill pair exemption:** Same-path `fillRect`/`fill` double-draws (e.g. wash + solid) are not treated as competing material overlap.
+- **Canvas panel under text:** A canvas panel recorded via `fillRect`/`fill`/`strokeRect` may sit behind canvas or DOM text when at least 85% of the text axis-aligned box is geometrically inside the canvas panel (DOM parentage is not required). Panel padding and safe-zone rules still apply.
+
+### Implementation recommendations (not independently validated)
+
+These practices help meet the contract but are not separately asserted as validator rules:
+
+- **Canvas-attached labels** share the shape's canvas transform (`translate` / `scale`); independent informational text stays in the DOM.
+- Use `box-sizing: border-box`, shared geometry constants (e.g. `SCENE_LAYOUT`), and JS-calculated scaled padding rather than hardcoded pixel insets on large cards.
+- Avoid placing a competing opaque canvas fill behind an HTML text card of similar size; prefer intentional panel nesting. A canvas panel behind DOM text with ≥85% geometric containment (text AABB mostly inside the panel) is allowed.

@@ -87,9 +87,48 @@ function digitByDigit(token) {
 function isVersionLikeToken(token) {
     return (token.match(/\./g) || []).length >= 2;
 }
+function isYearToken(token) {
+    if (token.includes('.'))
+        return false;
+    if (token.length !== 4)
+        return false;
+    if (hasLeadingZeros(token))
+        return false;
+    const n = Number(token);
+    return n >= 1000 && n <= 2099;
+}
+function yearToWords(year) {
+    const high = Math.floor(year / 100);
+    const low = year % 100;
+    if (high === 20 && low <= 9) {
+        if (low === 0)
+            return 'two thousand';
+        return `two thousand ${ONES[low]}`;
+    }
+    if (low === 0)
+        return `${cardinalUnder1000(high)} hundred`;
+    if (low < 10)
+        return `${cardinalUnder1000(high)} oh ${ONES[low]}`;
+    return `${cardinalUnder1000(high)} ${cardinalUnder1000(low)}`;
+}
+/** Digits with optional thousands commas and optional decimal: 1,700 or 12,345.67 */
+const GROUPED_NUMBER = String.raw `\d{1,3}(?:,\d{3})+(?:\.\d+)?|\d+(?:\.\d+)?`;
 function numericTokenToWords(token) {
     if (isVersionLikeToken(token))
         return token;
+    // Comma-grouped quantities are never years — strip commas only for parsing.
+    if (token.includes(',')) {
+        const cleaned = token.replace(/,/g, '');
+        if (shouldSpeakDigitByDigit(cleaned))
+            return digitByDigit(cleaned);
+        if (cleaned.includes('.')) {
+            const [intPart, fracPart] = cleaned.split('.');
+            const intWords = intPart ? numberToWords(Number(intPart)) : 'zero';
+            const fracWords = fracPart.split('').map(digitToWord).join(' ');
+            return `${intWords} point ${fracWords}`;
+        }
+        return numberToWords(Number(cleaned));
+    }
     if (shouldSpeakDigitByDigit(token))
         return digitByDigit(token);
     if (token.includes('.')) {
@@ -98,6 +137,8 @@ function numericTokenToWords(token) {
         const fracWords = fracPart.split('').map(digitToWord).join(' ');
         return `${intWords} point ${fracWords}`;
     }
+    if (isYearToken(token))
+        return yearToWords(Number(token));
     return numberToWords(Number(token));
 }
 function lastWordToOrdinal(word) {
@@ -126,37 +167,42 @@ function ordinalToWords(n) {
     words[words.length - 1] = lastWordToOrdinal(words[words.length - 1]);
     return words.join(' ');
 }
-function stripDigitGroupCommas(text) {
-    let result = text;
-    while (/\d,\d{3}(?!\d)/.test(result)) {
-        result = result.replace(/(\d),(\d{3})(?!\d)/g, '$1$2');
-    }
-    return result;
-}
 function expandCurrency(text) {
-    const withAttributiveAmounts = text.replace(/\b(a|an)\s+\$(\d+(?:\.\d+)?)(?:\s+(thousand|million|billion|trillion))?\s+([A-Za-z][A-Za-z-]*)/g, (_match, article, amount, scale, noun) => `${article} ${amount}${scale ? ` ${scale}` : ''} dollar ${noun}`);
-    return withAttributiveAmounts.replace(/\$(\d+(?:\.\d+)?)((?:\s(?:thousand|million|billion|trillion))?)/gi, (_match, amount, scale) => {
-        const unit = amount === '1' && !scale ? 'dollar' : 'dollars';
-        return `${amount}${scale} ${unit}`;
+    const amount = GROUPED_NUMBER;
+    const withAttributiveAmounts = text.replace(new RegExp(String.raw `\b(a|an)\s+\$(${amount})(?:\s+(thousand|million|billion|trillion))?\s+([A-Za-z][A-Za-z-]*)`, 'g'), (_match, article, value, scale, noun) => `${article} ${value}${scale ? ` ${scale}` : ''} dollar ${noun}`);
+    return withAttributiveAmounts.replace(new RegExp(String.raw `\$(${amount})((?:\s(?:thousand|million|billion|trillion))?)`, 'gi'), (_match, value, scale) => {
+        const unit = value.replace(/,/g, '') === '1' && !scale ? 'dollar' : 'dollars';
+        return `${value}${scale} ${unit}`;
     });
 }
 function expandPercent(text) {
-    return text.replace(/(\d+(?:\.\d+)?)%/g, '$1 percent');
+    return text.replace(new RegExp(String.raw `(${GROUPED_NUMBER})%`, 'g'), '$1 percent');
 }
 function expandRanges(text) {
-    return text.replace(/(?<!\d)(?<!\d-)(\d+(?:\.\d+)?)\s*[-\u2013\u2014]\s*(\d+(?:\.\d+)?)(?!\d)(?!\-\d)/g, (_match, start, end) => `${numericTokenToWords(start)} to ${numericTokenToWords(end)}`);
+    return text.replace(/(?<!\d)(?<!\d-)(\d+(?:\.\d+)?)\s*[-\u2013\u2014]\s*(\d+(?:\.\d+)?)(?!\d)(?!\-\d)/g, (match, start, end) => {
+        if (/^\d{3}$/.test(start) && /^\d{4}$/.test(end))
+            return match;
+        return `${numericTokenToWords(start)} to ${numericTokenToWords(end)}`;
+    });
 }
 function expandFractions(text) {
     return text.replace(/(?<![\d/])(\d+)\s*\/\s*(\d+)(?![\d/])(?!\s*\/\s*\d)/g, (_match, numerator, denominator) => `${numberToWords(Number(numerator))} over ${numberToWords(Number(denominator))}`);
 }
 function expandOrdinals(text) {
-    return text.replace(/\b(\d+)(st|nd|rd|th)\b/gi, (_match, digits) => ordinalToWords(Number(digits)));
+    return text.replace(/\b(\d+)(st|nd|rd|th)\b/gi, (_match, digits) => {
+        if (isYearToken(digits)) {
+            const words = yearToWords(Number(digits)).split(' ');
+            words[words.length - 1] = lastWordToOrdinal(words[words.length - 1]);
+            return words.join(' ');
+        }
+        return ordinalToWords(Number(digits));
+    });
 }
 function expandNegativeNumbers(text) {
     return text.replace(/(^|[\s([{"'])-(\d+(?:\.\d+)?)\b/g, (_match, prefix, digits) => `${prefix}minus ${numericTokenToWords(digits)}`);
 }
 function expandRemainingNumbers(text) {
-    return text.replace(/\d+(?:\.\d+){2,}|\b\d+(?:\.\d+)?\b/g, (match) => {
+    return text.replace(new RegExp(String.raw `\d+(?:\.\d+){2,}|\b(?:${GROUPED_NUMBER})\b`, 'g'), (match) => {
         if (isVersionLikeToken(match))
             return match;
         return numericTokenToWords(match);
@@ -170,7 +216,6 @@ function collapseSpaces(text) {
 }
 export function normalizeTtsText(text) {
     let result = String(text ?? '');
-    result = stripDigitGroupCommas(result);
     result = expandCurrency(result);
     result = expandPercent(result);
     result = expandRanges(result);

@@ -23,8 +23,9 @@ export function ensureWorldBasemapInWorkspace(workspaceDir: string): string {
 export function formatWorldBasemapDescription(relativePath: string = WORLD_BASEMAP_RELATIVE_PATH): string {
     return [
         `- ${relativePath}: Natural Earth 110m land basemap (public domain), 1920x1080 SVG.`,
-        '  Use as the geographic background for world/region supply-chain maps.',
-        '  Overlay markers, arcs, and labels in SVG/HTML on top — never invent freehand continent polygons.',
-        '  See .agents/mylecture-visuals/world-map-basemap.md for lon/lat → pixel projection.',
+        '  Required background for world/region/country maps. Overlay markers/arcs/labels only.',
+        '  Never invent freehand continent, country, coastline, or border polygons.',
+        '  Country close-ups: zoom via SVG viewBox from lon/lat bounds — do not redraw the country.',
+        '  See .agents/mylecture-visuals/world-map-basemap.md for lon/lat → pixel and viewBox helpers.',
     ].join('\n');
 }
