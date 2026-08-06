@@ -27,6 +27,9 @@ flowchart TD
     VIDEO -->|Yes| ANSWER[Answer Generator LLM]
     ANSWER --> ANSWERFILE["Write answer.md"]
 
+    ANSWERFILE --> METAGEN["Metadata Generator LLM<br/>runs in parallel with the rest of the pipeline"]
+    METAGEN --> META
+
     ANSWERFILE --> SCRIPT[Script Writer LLM]
     SCRIPT --> POLICY{getimg enabled?}
     POLICY -->|No| STRIP[Strip getimg directives]
@@ -65,7 +68,7 @@ flowchart TD
     DIRECT -->|If selected| GAMEGEN
     DIRECT --> JOIN
     JOIN --> WRITEEXTRAS["Write interactive.html / game.html"]
-    WRITEEXTRAS --> META["Write metadata.json"]
+    WRITEEXTRAS --> META["Await metadata (if requested)<br/>and write metadata.json"]
 
     META --> RESULT["Return workspace, entry file,<br/>all HTML files, and completion message"]
     RESULT -->|IDE| EDITMODE["Switch client phase to edit<br/>open first index file"]
@@ -225,7 +228,21 @@ answer.md
 Writing the intermediate result to disk makes a partially completed generation
 inspectable if a later stage fails.
 
-### 2. Script Writer
+### 2. Metadata Generator
+
+`metadata_generator.ts` uses `prompts/metadatagen_system.md`.
+
+It receives the original request and the generated answer, and returns a JSON
+object with a concise `title` and a one-sentence `description`. The call is
+started immediately after `answer.md` is written and is **not** awaited until
+the very end of the run, so it executes concurrently with the script writer,
+asset fetcher, script trimmer, animator loop, IAGen, and GameGen.
+
+If the call fails or returns unusable output, LectureGen logs a warning and
+falls back to a deterministic title (the request text, trimmed) and a generic
+description instead of failing the generation.
+
+### 3. Script Writer
 
 `script_writer.ts` uses `prompts/scriptgen_system.md`.
 
@@ -248,7 +265,7 @@ The final script is written to:
 script.md
 ```
 
-### 3. Asset Fetcher
+### 4. Asset Fetcher
 
 `asset_fetcher.ts` contains the complete image-request parsing and image-fetching
 implementation.
@@ -268,7 +285,7 @@ When getimg is disabled:
 - any remaining getimg requests are stripped from the returned script; and
 - the bundled `assets/world-basemap.svg` is still copied for geographic maps.
 
-### 4. Script Trimmer
+### 5. Script Trimmer
 
 `script_trimmer.ts` divides the full script into small animator inputs without
 splitting an `N:` narration beat from its associated visuals and scene data.
@@ -291,7 +308,7 @@ a partition of complete narration beats that keeps blocks within those bounds
 when possible. If the entire script is shorter than the minimum, it remains one
 block because the trimmer never invents narration.
 
-### 5. Animator
+### 6. Animator
 
 `animator.ts` combines:
 
@@ -369,7 +386,7 @@ The validator includes runtime sampling at segment start/end and (when budget
 permits) settled-tail local times within each segment, so failures that appear
 only after an animation progresses can be detected before render.
 
-### 6. IAGen
+### 7. IAGen
 
 `iagen.ts` uses `prompts/iagen_system.md`. It receives the user request, aspect
 ratio, attachments, and optional script reference. Its response is plain HTML
@@ -380,7 +397,7 @@ When video and interactive output are both selected, IAGen starts immediately
 after `script.md` is written and runs concurrently with asset preparation and
 the animator loop.
 
-### 7. GameGen
+### 8. GameGen
 
 `gamegen.ts` uses `prompts/gamegen_system.md` with the same request and
 reference-material rules. It writes the returned HTML code to `game.html`.
@@ -394,8 +411,10 @@ animator loop. If IAGen is also selected, all three generation branches run
 concurrently. LectureGen joins the selected branches before writing metadata
 and returning success.
 
-When video output is disabled, stages 1 through 5 are skipped and these makers
-work directly from the request and attachments.
+When video output is disabled, stages 1 through 6 are skipped and these makers
+work directly from the request and attachments. `metadata.json` then falls
+back to the deterministic title/description derived from the request, since
+there is no answer for the metadata generator to work from.
 
 ## Workspace Output
 
@@ -429,8 +448,10 @@ For multi-block scripts:
 
 The precise asset subdirectories depend on the paths requested by the script.
 
-`metadata.json` contains a title derived from the request and a short lecture
-description.
+`metadata.json` normally contains an LLM-generated title and one-sentence
+description produced from `answer.md` by the metadata generator (stage 2). If
+that call fails, or video output was skipped, it falls back to a title/
+description derived directly from the request text.
 
 ## Module Map
 
@@ -438,6 +459,7 @@ description.
 | --- | --- |
 | `lecturegen.ts` | Main orchestration, API, CLI, workspace creation, attachment copying, and final result |
 | `answer_generator.ts` | Generates the educational answer |
+| `metadata_generator.ts` | Generates the `metadata.json` title/description from the answer, in parallel with the rest of the pipeline |
 | `script_writer.ts` | Converts the answer into an audiovisual script |
 | `asset_fetcher.ts` | Parses, downloads, or generates requested image assets |
 | `script_trimmer.ts` | Partitions complete narration beats into bounded blocks |
@@ -449,6 +471,25 @@ description.
 | `utils/html_contract.ts` | Purifies and validates generated lecture HTML |
 | `utils/file_edits.ts` | Applies animator repair edits |
 | `editor-agent/` | Handles post-generation user edit requests against the same workspace |
+
+## Standalone Tools Not in the Pipeline
+
+### Thumbnail Generator
+
+`thumbnail_gen.ts` (with `prompts/thumbnailgen_system.md`) generates a
+YouTube-style thumbnail image from a script or answer file via Gemini image
+generation. It exists and works, but it is **not** wired into `lecturegen.ts`.
+
+It is intentionally left unintegrated: a thumbnail generated from a script/
+answer description is an independent AI image, not a real frame or composite
+of the actual rendered video visuals, so it cannot be guaranteed to look
+authentic to what the generated lecture actually shows. Auto-attaching it to
+every generation risked shipping a thumbnail that misrepresents the video.
+
+It remains available to run manually via CLI (see its own header comment for
+usage) and can be wired into the pipeline later if a way to make it authentic
+to the actual rendered visuals (e.g. compositing from real rendered frames)
+is worked out.
 
 ## Failure and Cancellation Behavior
 

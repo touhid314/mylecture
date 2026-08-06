@@ -1245,6 +1245,12 @@ export class LLM_Model {
                     config.imageConfig.imageSize = options.resolution === '0.5K' ? '512' : options.resolution;
                 }
             }
+            if (this.system_content) {
+                config.systemInstruction = {
+                    role: "system",
+                    parts: [{ text: this.system_content }]
+                };
+            }
 
             const request = {
                 model: this.model_name,

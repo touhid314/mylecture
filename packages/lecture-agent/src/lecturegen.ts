@@ -44,6 +44,7 @@ import { fileURLToPath } from 'node:url';
 
 import { extract_upload_attachments, is_upload_supported_path } from './prompt_builder.js';
 import { generateAnswer } from './answer_generator.js';
+import { generateMetadata, resolveMetadataModel, type LectureMetadata } from './metadata_generator.js';
 import { fetchAssets, formatAssetDescriptions, stripImageRequests, type AssetDescription } from './asset_fetcher.js';
 import { AnimatorSession, animateScriptBlock, getAnimatorMaxPreviousHtmls, slicePreviousHtmls, validateAndRepairHtml, type PreviousHtml } from './animator.js';
 import { runGameGen } from './gamegen.js';
@@ -223,6 +224,7 @@ export class LectureGen {
                 };
 
                 let script = '';
+                let metadataPromise: Promise<LectureMetadata | null> | null = null;
                 if (input.includeVideo) {
                     const chunkSizes = getScriptTrimmerChunkSizes();
                     getAnimatorMaxPreviousHtmls();
@@ -236,6 +238,20 @@ export class LectureGen {
                     });
                     assertActive();
                     fs.writeFileSync(path.join(this.options.workspaceDir, 'answer.md'), answer, 'utf8');
+
+                    metadataPromise = (async () => {
+                        const metadataModel = resolveMetadataModel();
+                        log(`Generating metadata with ${metadataModel} in parallel with the rest of the pipeline...`);
+                        return generateMetadata({
+                            ...shared,
+                            model: metadataModel,
+                            request: input.request,
+                            answer
+                        });
+                    })().catch(error => {
+                        log(`Metadata generation failed; falling back to a default title/description: ${error instanceof Error ? error.message : error}`);
+                        return null;
+                    });
 
                     log(`Writing the audiovisual script with ${stages.scriptModel}...`);
                     script = await writeScript({
@@ -333,10 +349,13 @@ export class LectureGen {
                     log(`Finished ${result.outputPath}.`);
                 }
 
-                const title = input.request.replace(/\s+/g, ' ').trim().slice(0, 120) || 'Lecture';
+                const metadata = metadataPromise ? await metadataPromise : null;
+                const fallbackTitle = input.request.replace(/\s+/g, ' ').trim().slice(0, 120) || 'Lecture';
+                const title = metadata?.title || fallbackTitle;
+                const description = metadata?.description || `A learning experience about ${fallbackTitle.replace(/[.!?]+$/, '')}.`;
                 fs.writeFileSync(path.join(this.options.workspaceDir, 'metadata.json'), JSON.stringify({
                     title,
-                    description: `A learning experience about ${title.replace(/[.!?]+$/, '')}.`
+                    description
                 }, null, 2), 'utf8');
                 log(
                     `Static lesson generation complete in ${formatLectureGenDuration(lectureGenNowMs() - generationStartedAt)}.`
