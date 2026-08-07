@@ -244,6 +244,18 @@ export function isTemporalLayoutValidation(validation: string): boolean {
     return errorLines.every(line => line.includes(TEMPORAL_LAYOUT_MARKER));
 }
 
+/**
+ * A full HTML rewrite can repair layout findings even when the same validation
+ * also reports structural layout issues (for example a missing SCENE_LAYOUT
+ * key). Do not rewrite when the current page already has a browser syntax error;
+ * in that case a rewrite has no trustworthy executable baseline.
+ */
+export function hasRewriteableLayoutValidation(validation: string): boolean {
+    return validation.includes(TEMPORAL_LAYOUT_MARKER)
+        && !validation.includes(SCRIPT_BEFORE_GLOBALS_MARKER)
+        && countTemporalLayoutErrors(validation) > 0;
+}
+
 export function shouldRequestLayoutRewrite(input: LayoutRewriteDecisionInput): boolean;
 export function shouldRequestLayoutRewrite(
     attempt: number,
@@ -263,7 +275,7 @@ export function shouldRequestLayoutRewrite(
         }
         : attemptOrInput;
 
-    if (!isTemporalLayoutValidation(input.validation)) return false;
+    if (!hasRewriteableLayoutValidation(input.validation)) return false;
 
     const layoutErrorCount = countTemporalLayoutErrors(input.validation);
     if (layoutErrorCount === 0) return false;
@@ -328,7 +340,9 @@ export async function requestAnimatorLayoutRewrite(input: AnimatorRepairInput, s
     const rewritePrompt = [
         `The generated ${input.outputPath} failed the HTML contract validator with temporal layout errors (overlaps, padding shortfalls).`,
         `Return one complete raw HTML document for ${input.outputPath} only. Begin with <!doctype html> and end with </html>. Do not return Markdown fences, JSON edits, or explanations.`,
-        'Fix every layout error listed below by adjusting coordinates, font sizes, panel geometry, and padding.',
+        'Fix every validator error listed below, including SCENE_LAYOUT key/reference errors and temporal layout errors.',
+        'For missing SCENE_LAYOUT keys, either define the referenced key completely or remove/replace the invalid reference.',
+        'Fix overlaps and padding errors by adjusting coordinates, font sizes, panel geometry, and padding.',
         'One label string = one fillText/strokeText call per draw pass.',
         'Keep window.__VIDEO_METADATA__, window.__VIDEO_PLAN__, and window.__RENDER_SECTION__ complete and valid.',
         'Every inline <script> block (without src=) must remain syntactically valid as a classic browser script.',

@@ -3,7 +3,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { describe, it } from 'node:test';
-import { countTemporalLayoutErrors, findInlineScriptSyntaxError, isTemporalLayoutValidation, nextSyntaxCleanAnchor, revertToLastViable, shouldRequestLayoutRewrite } from './animator.js';
+import { countTemporalLayoutErrors, findInlineScriptSyntaxError, hasRewriteableLayoutValidation, isTemporalLayoutValidation, nextSyntaxCleanAnchor, revertToLastViable, shouldRequestLayoutRewrite } from './animator.js';
 
 const VALID_HTML = `<!DOCTYPE html>
 <html>
@@ -210,6 +210,18 @@ describe('shouldRequestLayoutRewrite', () => {
         assert.equal(shouldRequestLayoutRewrite(0, 5, layoutValidation(8)), true);
     });
 
+    it('escalates mixed SCENE_LAYOUT and temporal failures to a rewrite', () => {
+        const mixedValidation = `HTML contract validation failed (mode: playwright):
+ - SCENE_LAYOUT key check failed: SCENE_LAYOUT.words.forEach is referenced but not defined
+ - Temporal layout check failed: canvas fill overlaps dom #word-testament by 256x77px
+ - Temporal layout check failed: canvas fill overlaps dom #word-tapestry by 253x84px
+ - Temporal layout check failed: canvas fill overlaps dom #word-moreover by 248x76px`;
+
+        assert.equal(isTemporalLayoutValidation(mixedValidation), false);
+        assert.equal(hasRewriteableLayoutValidation(mixedValidation), true);
+        assert.equal(shouldRequestLayoutRewrite(1, 5, mixedValidation), true);
+    });
+
     it('requests rewrite on attempt 1 when many layout errors remain', () => {
         assert.equal(shouldRequestLayoutRewrite(1, 5, layoutValidation(9)), true);
     });
@@ -249,6 +261,13 @@ describe('shouldRequestLayoutRewrite', () => {
         const scriptBroken = `HTML contract validation failed (mode: playwright):
  - Browser script error before contract globals: SyntaxError: Unexpected token '}'`;
         assert.equal(shouldRequestLayoutRewrite(4, 5, scriptBroken), false);
+    });
+
+    it('does not rewrite mixed layout output when a browser syntax error is present', () => {
+        const syntaxAndLayout = `${layoutOnly}
+ - Browser script error before contract globals: SyntaxError: Unexpected token '}'`;
+        assert.equal(hasRewriteableLayoutValidation(syntaxAndLayout), false);
+        assert.equal(shouldRequestLayoutRewrite(4, 5, syntaxAndLayout), false);
     });
 
     it('respects maximumRepairs when choosing the last attempt', () => {
