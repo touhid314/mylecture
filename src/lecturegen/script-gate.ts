@@ -62,17 +62,27 @@ export function extractNarrationScript(html: string): string | null {
   const segments: string[] = [];
   const planMatch = html.match(/window\.__VIDEO_PLAN__\s*=\s*(\[[\s\S]*?\]);/);
   if (!planMatch) return null;
+  let plan: Array<{ text?: string; narration?: string }>;
   try {
-    const plan = JSON.parse(planMatch[1]) as Array<{ text?: string; narration?: string }>;
-    for (const segment of plan) {
-      // Contract field is `text` (see html-input-contract.md); accept legacy `narration` too.
-      const line = segment?.text?.trim() || segment?.narration?.trim();
-      if (line) {
-        segments.push(line);
-      }
-    }
+    // Animator output is a JS array literal (often unquoted keys), not strict JSON.
+    plan = new Function(`"use strict"; return (${planMatch[1]});`)() as Array<{
+      text?: string;
+      narration?: string;
+    }>;
   } catch {
-    return null;
+    try {
+      plan = JSON.parse(planMatch[1]) as Array<{ text?: string; narration?: string }>;
+    } catch {
+      return null;
+    }
+  }
+  if (!Array.isArray(plan)) return null;
+  for (const segment of plan) {
+    // Contract field is `text` (see html-input-contract.md); accept legacy `narration` too.
+    const line = segment?.text?.trim() || segment?.narration?.trim();
+    if (line) {
+      segments.push(line);
+    }
   }
   return segments.length > 0 ? segments.join("\n\n") : null;
 }
