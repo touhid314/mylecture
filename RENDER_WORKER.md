@@ -218,7 +218,7 @@ network errors or non-2xx responses.
   "durationSeconds": 42.5,
   "generationId": "lecturegen-uuid",
   "sourceVersion": 1,
-  "idempotencyKey": "<jobId>:preview:1",
+  "idempotencyKey": "<jobId>:preview:1:preview_ready",
   "timestamp": "2026-08-06T12:00:00.000Z"
 }
 ```
@@ -236,12 +236,12 @@ network errors or non-2xx responses.
   "durationSeconds": 42.5,
   "generationId": "lecturegen-uuid",
   "sourceVersion": 1,
-  "idempotencyKey": "<jobId>:final:1",
+  "idempotencyKey": "<jobId>:final:1:ready",
   "timestamp": "2026-08-06T12:00:00.000Z"
 }
 ```
 
-LectureGen pipeline callbacks include `generationId`, `sourceVersion`, `idempotencyKey`, and `timestamp` on every status (including `rendering_preview` and `failed`) so the website can ignore stale work.
+LectureGen pipeline callbacks include `generationId`, `sourceVersion`, `idempotencyKey`, and `timestamp` on every status (including `rendering_preview` and `failed`) so the website can ignore stale work. The `idempotencyKey` includes the callback `status` so mid-phase updates (`rendering_preview`) and terminal updates (`preview_ready`) are not deduplicated against each other.
 
 **Failure (any phase)**
 
@@ -262,12 +262,13 @@ callback (the job still runs).
 
 ## Renderer flag: `--max-short-edge`
 
-The `render:video` CLI accepts `--max-short-edge <pixels>` to cap the encoded
-MP4 short edge after metadata auto-detection. Dimensions are scaled
-proportionally and rounded to the nearest even integers (H.264 yuv420p
-requirement). **Frame capture stays at the full metadata viewport**; only the
-ffmpeg encode step downscales the output video. Preview jobs use
-`--max-short-edge 480`.
+The `render:video` CLI accepts `--max-short-edge <pixels>` to cap preview
+resolution after metadata auto-detection. The authored CSS viewport remains at
+its full dimensions, while Chromium uses a fractional device scale factor to
+rasterize complete frames near the requested output size. This preserves the
+full composition without capturing full-resolution frames first. Dimensions
+remain proportional and are rounded to even integers for H.264 yuv420p.
+Preview jobs use `--max-short-edge 480`.
 
 ## Docker
 

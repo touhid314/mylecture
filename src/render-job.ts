@@ -326,7 +326,7 @@ export async function notifyRenderJobFailed(
       ? {
           generationId: lectureGen.generationId,
           sourceVersion: lectureGen.sourceVersion,
-          idempotencyKey: `${jobId}:${phase}:${lectureGen.sourceVersion}`,
+          idempotencyKey: `${jobId}:${phase}:${lectureGen.sourceVersion}:failed`,
           timestamp: new Date().toISOString(),
         }
       : {};
@@ -505,7 +505,10 @@ function usesLectureGenPipeline(params: JobParams): boolean {
   return Boolean(params.generationId && params.sourceVersion);
 }
 
-function callbackExtras(params: JobParams): Record<string, unknown> {
+export function callbackExtras(
+  params: JobParams,
+  status: string,
+): Record<string, unknown> {
   const extras: Record<string, unknown> = {};
   if (params.meteringOperationId) {
     extras.meteringOperationId = params.meteringOperationId;
@@ -515,7 +518,7 @@ function callbackExtras(params: JobParams): Record<string, unknown> {
     ...extras,
     generationId: params.generationId,
     sourceVersion: params.sourceVersion,
-    idempotencyKey: `${params.jobId}:${params.phase}:${params.sourceVersion}`,
+    idempotencyKey: `${params.jobId}:${params.phase}:${params.sourceVersion}:${status}`,
     timestamp: new Date().toISOString(),
   };
 }
@@ -808,7 +811,7 @@ async function processPreviewJob(
       phase,
       status: "preview_ready",
       paths,
-      ...callbackExtras(params),
+      ...callbackExtras(params, "preview_ready"),
     });
     return delivered
       ? jobOk()
@@ -873,7 +876,7 @@ async function processPreviewJob(
       jobId,
       phase,
       status: "rendering_preview",
-      ...callbackExtras(params),
+      ...callbackExtras(params, "rendering_preview"),
     });
 
     if (!(await ensureVideoJobActive(jobId))) {
@@ -942,7 +945,7 @@ async function processPreviewJob(
       phase,
       status: "preview_ready",
       paths: callbackPaths,
-      ...callbackExtras(params),
+      ...callbackExtras(params, "preview_ready"),
     };
     if (durationSeconds !== null) {
       callbackPayload.durationSeconds = durationSeconds;
@@ -963,7 +966,7 @@ async function processPreviewJob(
         phase,
         status: "failed",
         error: message,
-        ...callbackExtras(params),
+        ...callbackExtras(params, "failed"),
       });
     }
     return { ok: false, error: message };
@@ -998,7 +1001,7 @@ async function processFinalJob(
       phase,
       status: "ready",
       paths: { finalVideoPath },
-      ...callbackExtras(params),
+      ...callbackExtras(params, "ready"),
     });
     return delivered
       ? jobOk()
@@ -1065,7 +1068,7 @@ async function processFinalJob(
       phase,
       status: "ready",
       paths: { finalVideoPath },
-      ...callbackExtras(params),
+      ...callbackExtras(params, "ready"),
     };
     if (durationSeconds !== null) {
       callbackPayload.durationSeconds = durationSeconds;
@@ -1086,7 +1089,7 @@ async function processFinalJob(
         phase,
         status: "failed",
         error: message,
-        ...callbackExtras(params),
+        ...callbackExtras(params, "failed"),
       });
     }
     return { ok: false, error: message };

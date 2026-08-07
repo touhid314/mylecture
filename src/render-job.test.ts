@@ -4,6 +4,7 @@ import os from "node:os";
 import path from "node:path";
 import test from "node:test";
 import {
+  callbackExtras,
   listSourceScenePaths,
   sanitizeCallbackError,
 } from "./render-job.ts";
@@ -23,6 +24,35 @@ test("listSourceScenePaths discovers multipart scenes in numeric order", async (
   } finally {
     await rm(workDir, { recursive: true, force: true });
   }
+});
+
+test("callbackExtras uses distinct idempotency keys per callback status", () => {
+  const params = {
+    jobId: "job-1",
+    userId: null,
+    phase: "preview" as const,
+    storageBase: "user/job-1",
+    generationId: "gen-1",
+    sourceVersion: 1,
+    ttsProvider: "kokoro",
+    voice: "af_heart",
+    audioWorkers: 1,
+    kokoroDevice: "cpu",
+    chunkWorkers: 1,
+    fps: 15,
+    meteringOperationId: null,
+  };
+
+  const rendering = callbackExtras(params, "rendering_preview") as {
+    idempotencyKey: string;
+  };
+  const ready = callbackExtras(params, "preview_ready") as {
+    idempotencyKey: string;
+  };
+
+  assert.equal(rendering.idempotencyKey, "job-1:preview:1:rendering_preview");
+  assert.equal(ready.idempotencyKey, "job-1:preview:1:preview_ready");
+  assert.notEqual(rendering.idempotencyKey, ready.idempotencyKey);
 });
 
 test("sanitizeCallbackError preserves string queue failures", () => {

@@ -187,7 +187,7 @@ Options:
   --fps <number>         Frames per second. Default: 60
   --width <pixels>       Viewport width. Default: 1080
   --height <pixels>      Viewport height. Default: 1920
-  --max-short-edge <px>  After auto-detect, downscale the encoded MP4 so min(width,height) is at most this (even dimensions). Frame capture stays at the full metadata viewport.
+  --max-short-edge <px>  Keep the full metadata layout but capture frames near this short-edge resolution for faster previews.
   --frames-dir <dir>     Temporary frame directory. Default: .render/frames
   --frame-format <fmt>   Temporary frame format: jpeg or png. Default: jpeg
   --jpeg-quality <1-100> JPEG quality when --frame-format jpeg. Default: 90
@@ -458,8 +458,8 @@ export function buildVideoScaleFilter(args) {
   const filters = [];
   const outputWidth = Number(args.outputWidth);
   const outputHeight = Number(args.outputHeight);
-  const captureWidth = Number(args.width);
-  const captureHeight = Number(args.height);
+  const captureWidth = Number(args.frameWidth ?? args.width);
+  const captureHeight = Number(args.frameHeight ?? args.height);
 
   if (
     Number.isInteger(outputWidth) && outputWidth > 0 &&
@@ -485,6 +485,23 @@ export function resolveCaptureAndOutputDimensions(width, height, maxShortEdge) {
 
   const output = scaleViewportToMaxShortEdge(capture.width, capture.height, maxShortEdge);
   return { capture, output };
+}
+
+/**
+ * Keep the authored CSS viewport unchanged while asking Chromium to rasterize
+ * each CSS pixel at a fractional device scale. Using the larger axis ratio
+ * avoids rounding either raster dimension below the requested output size.
+ */
+export function resolveCaptureRaster(capture, output) {
+  const deviceScaleFactor = Math.min(
+    1,
+    Math.max(output.width / capture.width, output.height / capture.height),
+  );
+  return {
+    deviceScaleFactor,
+    width: Math.max(1, Math.floor(capture.width * deviceScaleFactor + 1e-6)),
+    height: Math.max(1, Math.floor(capture.height * deviceScaleFactor + 1e-6)),
+  };
 }
 
 // Build the final image-sequence-to-MP4 ffmpeg command.
@@ -699,10 +716,10 @@ async function getTimelineFromPage(page) {
 }
 
 // Prepare a Playwright page with export-mode timing and animation suppression.
-async function preparePage(browser, url, width, height) {
+async function preparePage(browser, url, width, height, deviceScaleFactor = 1) {
   const page = await browser.newPage({
     viewport: { width, height },
-    deviceScaleFactor: 1
+    deviceScaleFactor
   });
 
   page.on('console', (message) => {
@@ -757,7 +774,16 @@ async function renderSingleFrame(page, framesDir, frame, fps, options, totalFram
 async function renderFramesStateless(browser, url, framesDir, frameCount, fps, args) {
   const workerCount = Math.min(args.workers, frameCount);
   const pages = await Promise.all(
-    Array.from({ length: workerCount }, () => preparePage(browser, url, args.width, args.height))
+    Array.from(
+      { length: workerCount },
+      () => preparePage(
+        browser,
+        url,
+        args.width,
+        args.height,
+        args.captureDeviceScaleFactor,
+      ),
+    )
   );
 
   let nextFrame = 0;
@@ -809,7 +835,13 @@ async function renderFrameRange(page, framesDir, startFrame, endFrame, fps, args
 async function renderFramesStateful(browser, url, framesDir, frameCount, fps, args) {
   const chunks = frameChunks(frameCount, Math.min(args.workers, frameCount));
   await Promise.all(chunks.map(async (chunk) => {
-    const page = await preparePage(browser, url, args.width, args.height);
+    const page = await preparePage(
+      browser,
+      url,
+      args.width,
+      args.height,
+      args.captureDeviceScaleFactor,
+    );
     try {
       await warmPageToFrame(page, chunk.start, fps, chunk.index);
       await renderFrameRange(page, framesDir, chunk.start, chunk.end, fps, args, frameCount);
@@ -820,7 +852,13 @@ async function renderFramesStateful(browser, url, framesDir, frameCount, fps, ar
 }
 
 async function renderFramesSequential(browser, url, framesDir, frameCount, fps, args) {
-  const page = await preparePage(browser, url, args.width, args.height);
+  const page = await preparePage(
+    browser,
+    url,
+    args.width,
+    args.height,
+    args.captureDeviceScaleFactor,
+  );
   try {
     await renderFrameRange(page, framesDir, 0, frameCount, fps, args, frameCount);
   } finally {
@@ -974,13 +1012,17 @@ export async function renderVideo(options = {}) {
   args.height = capture.height;
   args.outputWidth = output.width;
   args.outputHeight = output.height;
+  const captureRaster = resolveCaptureRaster(capture, output);
+  args.captureDeviceScaleFactor = captureRaster.deviceScaleFactor;
+  args.frameWidth = captureRaster.width;
+  args.frameHeight = captureRaster.height;
 
   if (
     args.maxShortEdge &&
     (output.width !== capture.width || output.height !== capture.height)
   ) {
     console.log(
-      `Output video will be downscaled for --max-short-edge ${args.maxShortEdge}: ${capture.width}x${capture.height} -> ${output.width}x${output.height} (capture viewport unchanged)`,
+      `Low-resolution capture for --max-short-edge ${args.maxShortEdge}: CSS viewport ${capture.width}x${capture.height}, raster frames ${captureRaster.width}x${captureRaster.height}, output ${output.width}x${output.height}`,
     );
   }
 
@@ -1012,7 +1054,7 @@ export async function renderVideo(options = {}) {
   if (htmlPath !== sourceHtmlPath) console.log(`Renderable HTML: ${htmlPath}`);
   console.log(`Output: ${outputPath}`);
   if (args.outputWidth !== args.width || args.outputHeight !== args.height) {
-    console.log(`Capture viewport: ${args.width}x${args.height}, output video: ${args.outputWidth}x${args.outputHeight}, fps: ${args.fps}`);
+    console.log(`CSS viewport: ${args.width}x${args.height}, captured frames: ${args.frameWidth}x${args.frameHeight}, output video: ${args.outputWidth}x${args.outputHeight}, fps: ${args.fps}`);
   } else {
     console.log(`Viewport: ${args.width}x${args.height}, fps: ${args.fps}`);
   }
