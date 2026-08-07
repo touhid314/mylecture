@@ -58,15 +58,17 @@ function parseJsonObject(text: string): Record<string, unknown> | null {
   return null;
 }
 
-function extractNarrationScript(html: string): string | null {
+export function extractNarrationScript(html: string): string | null {
   const segments: string[] = [];
   const planMatch = html.match(/window\.__VIDEO_PLAN__\s*=\s*(\[[\s\S]*?\]);/);
   if (!planMatch) return null;
   try {
-    const plan = JSON.parse(planMatch[1]) as Array<{ narration?: string }>;
+    const plan = JSON.parse(planMatch[1]) as Array<{ text?: string; narration?: string }>;
     for (const segment of plan) {
-      if (segment?.narration?.trim()) {
-        segments.push(segment.narration.trim());
+      // Contract field is `text` (see html-input-contract.md); accept legacy `narration` too.
+      const line = segment?.text?.trim() || segment?.narration?.trim();
+      if (line) {
+        segments.push(line);
       }
     }
   } catch {
@@ -137,12 +139,13 @@ export async function runScriptGate(options: {
   options.onLog?.("Running narration quality review…");
   const narration = extractNarrationScript(html);
   if (!narration) {
+    const label = path.basename(options.htmlPath) || "index.html";
     return {
       html,
       htmlPath,
       scriptReview: {
         passed: false,
-        findings: ["No narration segments found in index.html"],
+        findings: [`No narration segments found in ${label}`],
         repaired: false,
       },
       extraTokens: null,
