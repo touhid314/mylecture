@@ -228,8 +228,13 @@ function parseDurationSeconds(stdout: string): number | null {
   return Number.isFinite(value) ? value : null;
 }
 
-function sanitizeCallbackError(error: unknown, fallback: string): string {
-  const raw = error instanceof Error ? error.message : fallback;
+export function sanitizeCallbackError(error: unknown, fallback: string): string {
+  const raw =
+    error instanceof Error
+      ? error.message
+      : typeof error === "string"
+        ? error
+        : fallback;
   return raw
     .replace(/[A-Za-z]:[\\/][^\s\n]+/g, "[path]")
     .replace(/\/(?:tmp|var|Users|home|app)[^\s\n]*/g, "[path]")

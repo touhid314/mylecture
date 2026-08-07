@@ -1,5 +1,5 @@
 import { spawn } from "node:child_process";
-import { existsSync } from "node:fs";
+import { existsSync, readdirSync } from "node:fs";
 import { mkdir, mkdtemp, rm } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
@@ -17,13 +17,23 @@ import { assertSafeRelativePath } from "../utils/safe-tar-extract.ts";
 
 const bundleBuildPromises = new Map<string, Promise<void>>();
 
-const BUNDLE_ENTRY_FILES = ["index.html", "interactive.html", "game.html"] as const;
+const ACTIVITY_ENTRY_FILES = ["interactive.html", "game.html"] as const;
 
-/** At least one activity entry HTML must exist; renderer validates index.html separately. */
+/** At least one video scene or activity entry HTML must exist. */
 export function workspaceHasBundleableHtml(workspaceDir: string): boolean {
-  return BUNDLE_ENTRY_FILES.some((name) =>
-    existsSync(path.join(workspaceDir, name)),
-  );
+  if (
+    ACTIVITY_ENTRY_FILES.some((name) => existsSync(path.join(workspaceDir, name)))
+  ) {
+    return true;
+  }
+
+  try {
+    return readdirSync(workspaceDir).some((name) =>
+      /^index(?:\d+)?\.html$/i.test(name),
+    );
+  } catch {
+    return false;
+  }
 }
 
 export async function downloadWorkspaceFromStorage(
@@ -113,7 +123,7 @@ export async function ensureWorkspaceBundle(
     try {
       if (!workspaceHasBundleableHtml(workspaceDir)) {
         throw new Error(
-          "Workspace must contain index.html, interactive.html, or game.html",
+          "Workspace must contain index*.html, interactive.html, or game.html",
         );
       }
       const bundle = await createSourceBundleFile(workspaceDir);

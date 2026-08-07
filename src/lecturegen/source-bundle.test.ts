@@ -5,6 +5,17 @@ import path from "node:path";
 import { test } from "node:test";
 import { workspaceHasBundleableHtml } from "./source-bundle.ts";
 
+test("workspaceHasBundleableHtml accepts multipart index HTML", async () => {
+  const workspaceDir = await mkdtemp(path.join(os.tmpdir(), "lecturegen-bundle-"));
+  try {
+    await writeFile(path.join(workspaceDir, "index1.html"), "<html></html>", "utf-8");
+    await writeFile(path.join(workspaceDir, "index2.html"), "<html></html>", "utf-8");
+    assert.equal(workspaceHasBundleableHtml(workspaceDir), true);
+  } finally {
+    await rm(workspaceDir, { recursive: true, force: true });
+  }
+});
+
 test("workspaceHasBundleableHtml accepts interactive.html without index.html", async () => {
   const workspaceDir = await mkdtemp(path.join(os.tmpdir(), "lecturegen-bundle-"));
   try {
