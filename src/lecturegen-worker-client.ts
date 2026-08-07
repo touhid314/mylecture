@@ -3,7 +3,8 @@ export type LectureGenTransferPurpose =
   | "workspace_download"
   | "resolved_upload"
   | "resolved_download"
-  | "resolved_audio_list";
+  | "resolved_audio_list"
+  | "resolved_scene_list";
 
 export function isLectureGenWorkerConfigured(): boolean {
   return Boolean(
@@ -76,6 +77,29 @@ export async function requestLectureGenResolvedAudioList(opts: {
   if (!response.ok) {
     const text = await response.text().catch(() => "");
     throw new Error(`LectureGen audio list failed (${response.status}): ${text}`);
+  }
+
+  const body = (await response.json()) as { objectKeys?: string[] };
+  return body.objectKeys ?? [];
+}
+
+export async function requestLectureGenResolvedSceneList(opts: {
+  generationId: string;
+  sourceVersion: number;
+}): Promise<string[]> {
+  const endpoint = `${lectureGenUrl()}/v1/jobs/${opts.generationId}/transfers`;
+  const response = await fetch(endpoint, {
+    method: "POST",
+    headers: workerHeaders(),
+    body: JSON.stringify({
+      purpose: "resolved_scene_list",
+      sourceVersion: opts.sourceVersion,
+    }),
+  });
+
+  if (!response.ok) {
+    const text = await response.text().catch(() => "");
+    throw new Error(`LectureGen scene list failed (${response.status}): ${text}`);
   }
 
   const body = (await response.json()) as { objectKeys?: string[] };

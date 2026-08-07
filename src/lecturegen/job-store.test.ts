@@ -6,6 +6,7 @@ import path from "node:path";
 import { test } from "node:test";
 import {
   appendJobLog,
+  createGenerationId,
   createJobRecord,
   flushPersist,
   getJobRecord,
@@ -17,6 +18,23 @@ import {
 } from "./job-store.ts";
 import { loadJobManifest } from "./job-manifest.ts";
 import { finalizeJobDeletion } from "./reaper.ts";
+
+test("generation IDs are readable and chronologically sortable", () => {
+  const earlier = createGenerationId(
+    Date.parse("2026-08-07T09:13:07.586Z"),
+    "4a605e85-e020-4c76-b31b-7c51aa702ed7",
+  );
+  const later = createGenerationId(
+    Date.parse("2026-08-08T10:14:08.687Z"),
+    "2966cccc-9425-4d5e-a232-879ec1aee00a",
+  );
+
+  assert.equal(
+    earlier,
+    "2026-08-07T09-13-07-586Z_4a605e85-e020-4c76-b31b-7c51aa702ed7",
+  );
+  assert.ok(earlier < later);
+});
 
 test("persist writes are serialized per generation id", async () => {
   const tempRoot = await mkdtemp(path.join(os.tmpdir(), "lecturegen-persist-"));

@@ -20,6 +20,7 @@ const PASSTHROUGH_FLAGS = [
   '--video-codec',
   '--x264-preset',
   '--workers',
+  '--max-short-edge',
   '--max-frames'
 ];
 

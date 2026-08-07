@@ -19,7 +19,12 @@ import {
   runEditJob,
 } from "./lecturegen/generation-runner.ts";
 import { createWorkspaceDownloadTransfer, openWorkspaceBundleStream } from "./lecturegen/source-bundle.ts";
-import { createSignedTransferUrl, listIntermediateKeys, resolvedAudioPrefix } from "./lecturegen/storage.ts";
+import {
+  createSignedTransferUrl,
+  listIntermediateKeys,
+  resolvedAudioPrefix,
+  resolvedObjectPrefix,
+} from "./lecturegen/storage.ts";
 import { validateLectureGenStartupConfig } from "./lecturegen/startup-config.ts";
 import { finalizeJobDeletion, removeJobManifest, retryPendingCallbacks, runLectureGenMaintenance } from "./lecturegen/reaper.ts";
 import { deleteGenerationArtifacts } from "./lecturegen/generation-runner.ts";
@@ -321,6 +326,15 @@ async function handleTransfer(
   if (body.purpose === "resolved_audio_list") {
     const prefix = `${resolvedAudioPrefix(generationId, body.sourceVersion)}/`;
     const objectKeys = await listIntermediateKeys(prefix);
+    sendJson(res, 200, { objectKeys });
+    return;
+  }
+
+  if (body.purpose === "resolved_scene_list") {
+    const prefix = resolvedObjectPrefix(generationId, body.sourceVersion);
+    const objectKeys = (await listIntermediateKeys(prefix))
+      .filter((key) => /^resolved(?:\d+)?\.html$/i.test(key.slice(prefix.length)))
+      .sort((a, b) => a.localeCompare(b, undefined, { numeric: true }));
     sendJson(res, 200, { objectKeys });
     return;
   }

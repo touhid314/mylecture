@@ -49,7 +49,8 @@ export type LectureGenTransferPurpose =
   | "workspace_download"
   | "resolved_upload"
   | "resolved_download"
-  | "resolved_audio_list";
+  | "resolved_audio_list"
+  | "resolved_scene_list";
 
 export type LectureGenCallbackPending = {
   status: "source_ready" | "failed";

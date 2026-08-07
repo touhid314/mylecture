@@ -11,6 +11,7 @@ import {
   downloadFromTransferUrl,
   isLectureGenWorkerConfigured,
   requestLectureGenResolvedAudioList,
+  requestLectureGenResolvedSceneList,
   requestLectureGenTransfer,
   resolvedObjectKey,
   uploadToTransferUrl,
@@ -18,6 +19,11 @@ import {
 import { safeExtractTarGz } from "./utils/safe-tar-extract.ts";
 import { getRenderStorage } from "./utils/storage/index.ts";
 import { isVideoJobActive } from "./video-job-db.ts";
+import { writeLectureCaptionsVtt } from "./captions-vtt.ts";
+import {
+  isIndexHtmlName,
+  resolvedSiblingPathForIndex,
+} from "./coursegen/paths.ts";
 
 const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 
@@ -550,19 +556,34 @@ async function downloadSourceHtml(
   await downloadWorkspaceIntoDir(params, workDir);
 }
 
+export async function listSourceScenePaths(workDir: string): Promise<string[]> {
+  return (await readdir(workDir))
+    .filter((name) => isIndexHtmlName(name))
+    .sort((a, b) => a.localeCompare(b, undefined, { numeric: true }))
+    .map((name) => path.join(workDir, name));
+}
+
 async function uploadResolvedArtifacts(
   params: JobParams,
-  resolvedHtml: string,
+  resolvedHtmlPaths: string[],
   audioDir: string,
   captionsPath: string,
 ): Promise<void> {
+  if (resolvedHtmlPaths.length === 0) {
+    throw new Error("No resolved HTML scenes were produced");
+  }
+
   if (!usesLectureGenPipeline(params)) {
     const { storageBase } = params;
     const resolvedHtmlPath = `${storageBase}/resolved/resolved.html`;
     const resolvedAudioPrefix = `${storageBase}/resolved/audio`;
     const captionsStoragePath = `${storageBase}/resolved/captions.vtt`;
 
-    await getRenderStorage().uploadFile(resolvedHtmlPath, resolvedHtml, "text/html");
+    await getRenderStorage().uploadFile(
+      resolvedHtmlPath,
+      resolvedHtmlPaths[0],
+      "text/html",
+    );
 
     if (await fileExists(audioDir)) {
       const audioFiles = await readdir(audioDir);
@@ -588,14 +609,20 @@ async function uploadResolvedArtifacts(
   const generationId = params.generationId!;
   const sourceVersion = params.sourceVersion!;
 
-  const resolvedKey = resolvedObjectKey(generationId, sourceVersion, "resolved.html");
-  const resolvedTransfer = await requestLectureGenTransfer({
-    generationId,
-    sourceVersion,
-    purpose: "resolved_upload",
-    objectKey: resolvedKey,
-  });
-  await uploadToTransferUrl(resolvedTransfer.url, resolvedHtml, "text/html");
+  for (const resolvedHtml of resolvedHtmlPaths) {
+    const resolvedKey = resolvedObjectKey(
+      generationId,
+      sourceVersion,
+      path.basename(resolvedHtml),
+    );
+    const resolvedTransfer = await requestLectureGenTransfer({
+      generationId,
+      sourceVersion,
+      purpose: "resolved_upload",
+      objectKey: resolvedKey,
+    });
+    await uploadToTransferUrl(resolvedTransfer.url, resolvedHtml, "text/html");
+  }
 
   if (await fileExists(audioDir)) {
     const audioFiles = await readdir(audioDir);
@@ -658,6 +685,39 @@ async function downloadResolvedHtml(
     `${params.storageBase}/resolved/resolved.html`,
     destPath,
   );
+}
+
+async function downloadResolvedScenes(
+  params: JobParams,
+  workDir: string,
+): Promise<string[]> {
+  if (!usesLectureGenPipeline(params)) {
+    const resolvedHtml = path.join(workDir, "resolved.html");
+    await downloadResolvedHtml(params, resolvedHtml);
+    return [resolvedHtml];
+  }
+
+  const objectKeys = await requestLectureGenResolvedSceneList({
+    generationId: params.generationId!,
+    sourceVersion: params.sourceVersion!,
+  });
+  if (objectKeys.length === 0) {
+    throw new Error("LectureGen produced no resolved HTML scenes");
+  }
+
+  const scenePaths: string[] = [];
+  for (const objectKey of objectKeys) {
+    const destPath = path.join(workDir, path.basename(objectKey));
+    const transfer = await requestLectureGenTransfer({
+      generationId: params.generationId!,
+      sourceVersion: params.sourceVersion!,
+      purpose: "resolved_download",
+      objectKey,
+    });
+    await downloadFromTransferUrl(transfer.url, destPath);
+    scenePaths.push(destPath);
+  }
+  return scenePaths;
 }
 
 async function downloadResolvedAudio(
@@ -760,39 +820,50 @@ async function processPreviewJob(
   try {
     workDir = await mkdtemp(path.join(os.tmpdir(), "mylecture-job-"));
     const sourceHtml = path.join(workDir, "index.html");
-    const resolvedHtml = path.join(workDir, "resolved.html");
     const previewMp4 = path.join(workDir, "preview.mp4");
     const audioDir = path.join(workDir, "audio");
     const captionsPath = path.join(workDir, "captions.vtt");
 
     await downloadSourceHtml(params, sourceHtml);
 
-    const buildResult = await runProcess(
-      [
-        "src/build-plan.ts",
-        "--input",
-        sourceHtml,
-        "--out",
-        resolvedHtml,
-        "--provider",
-        ttsProvider,
-        "--audio-workers",
-        String(audioWorkers),
-        "--voice",
-        voice,
-      ],
-      { kokoroDevice, chunkWorkers },
-    );
-    if (buildResult.code !== 0) {
-      return {
-        ok: false,
-        error: errorFromProcessResult(
-          "build:plan",
-          buildResult,
-          "Build plan failed",
-        ),
-      };
+    const sourceScenePaths = await listSourceScenePaths(workDir);
+    if (sourceScenePaths.length === 0) {
+      throw new Error("Downloaded workspace contains no index*.html scenes");
     }
+
+    const resolvedHtmlPaths: string[] = [];
+    for (const sourceScenePath of sourceScenePaths) {
+      const resolvedScenePath = resolvedSiblingPathForIndex(sourceScenePath);
+      const buildResult = await runProcess(
+        [
+          "src/build-plan.ts",
+          "--input",
+          sourceScenePath,
+          "--out",
+          resolvedScenePath,
+          "--provider",
+          ttsProvider,
+          "--audio-workers",
+          String(audioWorkers),
+          "--voice",
+          voice,
+        ],
+        { kokoroDevice, chunkWorkers },
+      );
+      if (buildResult.code !== 0) {
+        return {
+          ok: false,
+          error: errorFromProcessResult(
+            `build:plan (${path.basename(sourceScenePath)})`,
+            buildResult,
+            `Build plan failed for ${path.basename(sourceScenePath)}`,
+          ),
+        };
+      }
+      resolvedHtmlPaths.push(resolvedScenePath);
+    }
+
+    writeLectureCaptionsVtt(workDir);
 
     if (!(await ensureVideoJobActive(jobId))) {
       return jobOk(true);
@@ -809,23 +880,17 @@ async function processPreviewJob(
       return jobOk(true);
     }
 
-    const previewFramesDir = path.join(workDir, "frames");
     const renderResult = await runProcess(
       [
-        "src/render-video.ts",
-        "--html",
-        resolvedHtml,
+        "src/render-lecture.ts",
+        "--dir",
+        workDir,
         "--out",
         previewMp4,
-        "--no-auto-build",
         "--max-short-edge",
         "480",
-        "--tts-voice",
-        voice,
         "--fps",
         String(fps),
-        "--frames-dir",
-        previewFramesDir,
       ],
       { kokoroDevice, chunkWorkers },
     );
@@ -844,7 +909,12 @@ async function processPreviewJob(
       return jobOk(true);
     }
 
-    await uploadResolvedArtifacts(params, resolvedHtml, audioDir, captionsPath);
+    await uploadResolvedArtifacts(
+      params,
+      resolvedHtmlPaths,
+      audioDir,
+      captionsPath,
+    );
 
     if (usesLectureGenPipeline(params) && (await fileExists(captionsPath))) {
       await getRenderStorage().uploadFile(
@@ -939,12 +1009,11 @@ async function processFinalJob(
 
   try {
     workDir = await mkdtemp(path.join(os.tmpdir(), "mylecture-job-"));
-    const resolvedHtml = path.join(workDir, "resolved.html");
     const audioDir = path.join(workDir, "audio");
     const captionsPath = path.join(workDir, "captions.vtt");
     const finalMp4 = path.join(workDir, "final.mp4");
 
-    await downloadResolvedHtml(params, resolvedHtml);
+    await downloadResolvedScenes(params, workDir);
     await downloadResolvedAudio(params, audioDir);
     await downloadWorkspaceIntoDir(params, workDir);
 
@@ -961,21 +1030,15 @@ async function processFinalJob(
       return jobOk(true);
     }
 
-    const finalFramesDir = path.join(workDir, "frames");
     const renderResult = await runProcess(
       [
-        "src/render-video.ts",
-        "--html",
-        resolvedHtml,
+        "src/render-lecture.ts",
+        "--dir",
+        workDir,
         "--out",
         finalMp4,
-        "--no-auto-build",
-        "--tts-voice",
-        voice,
         "--fps",
         String(fps),
-        "--frames-dir",
-        finalFramesDir,
       ],
       { kokoroDevice, chunkWorkers },
     );

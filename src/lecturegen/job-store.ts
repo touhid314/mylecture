@@ -292,6 +292,22 @@ function touch(record: LectureGenJobRecord): void {
 
 }
 
+/**
+ * Keep generation IDs unique while making their R2 prefixes human-readable and
+ * lexicographically chronological. Colons and dots are replaced so the same ID
+ * is also safe as a local directory name on every supported platform.
+ */
+export function createGenerationId(
+  nowMs = Date.now(),
+  uniqueId = randomUUID(),
+): string {
+  const timestamp = new Date(nowMs)
+    .toISOString()
+    .replaceAll(":", "-")
+    .replace(".", "-");
+  return `${timestamp}_${uniqueId}`;
+}
+
 
 
 export function createJobRecord(
@@ -302,9 +318,9 @@ export function createJobRecord(
 
 ): LectureGenJobRecord {
 
-  const id = randomUUID();
-
   const now = Date.now();
+
+  const id = createGenerationId(now);
 
   const record: LectureGenJobRecord = {
 
