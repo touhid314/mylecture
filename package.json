@@ -18,6 +18,7 @@
     "render:video": "node --import tsx src/render-video.ts",
     "render:lecture": "node --import tsx src/render-lecture.ts",
     "render:server": "node --import tsx src/render-server.ts",
+    "lecturegen:server": "node --import tsx src/lecturegen-server.ts",
     "render:queue-worker": "node --import tsx src/render-queue-worker.ts",
     "subtitle:burn": "node --import tsx src/subtitle-burner.ts",
     "build:viewer": "npm --prefix packages/lecture-viewer run build",
@@ -25,6 +26,7 @@
     "rename:gens": "node --import tsx src/rename-gens.ts",
     "ide": "npm run version:sync && npm run build:viewer && node --import tsx src/ide-server.ts",
     "test": "npm run test:tts-normalize && npm run test:invoke-render && npm run test:elevenlabs-context && npm run test:visual-edit-protect && npm run test:build && npm run test:render && npm run test:visual && npm run test:narration && npm run test:viewport && npm run test:multipart",
+    "test:lecturegen": "node --import tsx --test src/utils/safe-tar-extract.test.ts src/lecturegen/*.test.ts",
     "test:tts-normalize": "node --import tsx --test src/tts-normalize.test.ts",
     "test:invoke-render": "node --import tsx src/invoke-render-section.test.ts",
     "test:elevenlabs-context": "node --import tsx src/elevenlabs-context.test.ts",
@@ -56,6 +58,7 @@
   "dependencies": {
     "@aws-sdk/client-s3": "^3.1073.0",
     "@aws-sdk/lib-storage": "^3.1073.0",
+    "@aws-sdk/s3-request-presigner": "^3.1105.0",
     "@supabase/supabase-js": "^2.108.2",
     "kokoro-js": "^1.2.1",
     "pdfjs-dist": "^6.1.200",

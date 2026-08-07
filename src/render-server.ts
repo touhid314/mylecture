@@ -315,7 +315,7 @@ async function handleJobs(
 
     scheduleJob(async () => {
       const result = await runJob(params);
-      if (!result.ok) {
+      if (result.ok === false) {
         console.error(`HTTP job ${params.jobId} failed: ${result.error}`);
       }
     });

@@ -1,5 +1,5 @@
 import { spawn } from "node:child_process";
-import { access, mkdtemp, readdir, rm } from "node:fs/promises";
+import { access, mkdir, mkdtemp, readdir, rm } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -7,6 +7,15 @@ import {
   resolveTtsProvider,
   resolveTtsVoice,
 } from "./tts-provider.ts";
+import {
+  downloadFromTransferUrl,
+  isLectureGenWorkerConfigured,
+  requestLectureGenResolvedAudioList,
+  requestLectureGenTransfer,
+  resolvedObjectKey,
+  uploadToTransferUrl,
+} from "./lecturegen-worker-client.ts";
+import { safeExtractTarGz } from "./utils/safe-tar-extract.ts";
 import { getRenderStorage } from "./utils/storage/index.ts";
 import { isVideoJobActive } from "./video-job-db.ts";
 
@@ -35,11 +44,14 @@ export type JobRequestBody = {
   userId?: string | null;
   phase?: JobPhase;
   storageBase?: string;
+  generationId?: string;
+  sourceVersion?: number;
   voice?: string;
   audioWorkers?: number;
   kokoroDevice?: string;
   chunkWorkers?: number;
   fps?: number;
+  meteringOperationId?: string;
 };
 
 export type JobParams = {
@@ -47,12 +59,15 @@ export type JobParams = {
   userId: string | null;
   phase: JobPhase;
   storageBase: string;
+  generationId: string | null;
+  sourceVersion: number | null;
   ttsProvider: string;
   voice: string;
   audioWorkers: number;
   kokoroDevice: string;
   chunkWorkers: number;
   fps: number;
+  meteringOperationId: string | null;
 };
 
 type ProcessResult = {
@@ -292,12 +307,25 @@ export async function notifyRenderJobFailed(
   jobId: string,
   phase: JobPhase,
   error: string,
+  lectureGen?: { generationId: string; sourceVersion: number } | null,
+  meteringOperationId?: string | null,
 ): Promise<void> {
+  const extras =
+    lectureGen?.generationId && lectureGen.sourceVersion != null
+      ? {
+          generationId: lectureGen.generationId,
+          sourceVersion: lectureGen.sourceVersion,
+          idempotencyKey: `${jobId}:${phase}:${lectureGen.sourceVersion}`,
+          timestamp: new Date().toISOString(),
+        }
+      : {};
   await postCallback({
     jobId,
     phase,
     status: "failed",
     error: sanitizeCallbackError(error, "Render job failed"),
+    ...(meteringOperationId ? { meteringOperationId } : {}),
+    ...extras,
   });
 }
 
@@ -348,12 +376,24 @@ export function resolveJobParams(body: JobRequestBody): JobParams {
     userId: typeof body.userId === "string" ? body.userId : null,
     phase,
     storageBase,
+    generationId:
+      typeof body.generationId === "string" && body.generationId.trim()
+        ? body.generationId.trim()
+        : null,
+    sourceVersion:
+      typeof body.sourceVersion === "number" && Number.isInteger(body.sourceVersion)
+        ? body.sourceVersion
+        : null,
     ttsProvider,
     voice,
     audioWorkers,
     kokoroDevice,
     chunkWorkers,
     fps,
+    meteringOperationId:
+      typeof body.meteringOperationId === "string" && body.meteringOperationId.trim()
+        ? body.meteringOperationId.trim()
+        : null,
   };
 }
 
@@ -361,11 +401,14 @@ export function jobParamsFromQueueRow(row: {
   videoJobId: string;
   phase: string;
   storageBase: string;
+  generationId?: string | null;
+  sourceVersion?: number | null;
   voice: string | null;
   audioWorkers: number;
   kokoroDevice: string;
   chunkWorkers: number;
   fps: number | null;
+  meteringOperationId?: string | null;
 }): JobParams {
   const phase = row.phase;
   if (phase !== "preview" && phase !== "final") {
@@ -379,6 +422,9 @@ export function jobParamsFromQueueRow(row: {
     userId: null,
     phase,
     storageBase: row.storageBase,
+    generationId: row.generationId?.trim() || null,
+    sourceVersion:
+      typeof row.sourceVersion === "number" ? row.sourceVersion : null,
     ttsProvider,
     voice: resolveTtsVoice(ttsProvider, row.voice),
     audioWorkers: clampPositiveInt(row.audioWorkers, MAX_AUDIO_WORKERS, 1),
@@ -393,6 +439,10 @@ export function jobParamsFromQueueRow(row: {
       MAX_FPS,
       phase === "preview" ? 15 : 30,
     ),
+    meteringOperationId:
+      typeof row.meteringOperationId === "string" && row.meteringOperationId.trim()
+        ? row.meteringOperationId.trim()
+        : null,
   };
 }
 
@@ -440,6 +490,208 @@ async function ensureVideoJobActive(jobId: string): Promise<boolean> {
   return true;
 }
 
+function usesLectureGenPipeline(params: JobParams): boolean {
+  return Boolean(params.generationId && params.sourceVersion);
+}
+
+function callbackExtras(params: JobParams): Record<string, unknown> {
+  const extras: Record<string, unknown> = {};
+  if (params.meteringOperationId) {
+    extras.meteringOperationId = params.meteringOperationId;
+  }
+  if (!usesLectureGenPipeline(params)) return extras;
+  return {
+    ...extras,
+    generationId: params.generationId,
+    sourceVersion: params.sourceVersion,
+    idempotencyKey: `${params.jobId}:${params.phase}:${params.sourceVersion}`,
+    timestamp: new Date().toISOString(),
+  };
+}
+
+async function downloadWorkspaceIntoDir(
+  params: JobParams,
+  destDir: string,
+): Promise<void> {
+  if (!usesLectureGenPipeline(params)) {
+    const destPath = path.join(destDir, "index.html");
+    await getRenderStorage().downloadToFile(
+      `${params.storageBase}/raw.html`,
+      destPath,
+    );
+    return;
+  }
+
+  if (!isLectureGenWorkerConfigured()) {
+    throw new Error("LectureGen worker transfers are not configured");
+  }
+
+  const transfer = await requestLectureGenTransfer({
+    generationId: params.generationId!,
+    sourceVersion: params.sourceVersion!,
+    purpose: "workspace_download",
+  });
+  const bundlePath = path.join(destDir, ".workspace-bundle.tar.gz");
+  await downloadFromTransferUrl(transfer.url, bundlePath);
+  await safeExtractTarGz(bundlePath, destDir);
+  await rm(bundlePath, { force: true }).catch(() => {});
+}
+
+async function downloadSourceHtml(
+  params: JobParams,
+  destPath: string,
+): Promise<void> {
+  const workDir = path.dirname(destPath);
+  await downloadWorkspaceIntoDir(params, workDir);
+}
+
+async function uploadResolvedArtifacts(
+  params: JobParams,
+  resolvedHtml: string,
+  audioDir: string,
+  captionsPath: string,
+): Promise<void> {
+  if (!usesLectureGenPipeline(params)) {
+    const { storageBase } = params;
+    const resolvedHtmlPath = `${storageBase}/resolved/resolved.html`;
+    const resolvedAudioPrefix = `${storageBase}/resolved/audio`;
+    const captionsStoragePath = `${storageBase}/resolved/captions.vtt`;
+
+    await getRenderStorage().uploadFile(resolvedHtmlPath, resolvedHtml, "text/html");
+
+    if (await fileExists(audioDir)) {
+      const audioFiles = await readdir(audioDir);
+      for (const name of audioFiles) {
+        await getRenderStorage().uploadFile(
+          `${resolvedAudioPrefix}/${name}`,
+          path.join(audioDir, name),
+          "audio/wav",
+        );
+      }
+    }
+
+    if (await fileExists(captionsPath)) {
+      await getRenderStorage().uploadFile(
+        captionsStoragePath,
+        captionsPath,
+        "text/vtt",
+      );
+    }
+    return;
+  }
+
+  const generationId = params.generationId!;
+  const sourceVersion = params.sourceVersion!;
+
+  const resolvedKey = resolvedObjectKey(generationId, sourceVersion, "resolved.html");
+  const resolvedTransfer = await requestLectureGenTransfer({
+    generationId,
+    sourceVersion,
+    purpose: "resolved_upload",
+    objectKey: resolvedKey,
+  });
+  await uploadToTransferUrl(resolvedTransfer.url, resolvedHtml, "text/html");
+
+  if (await fileExists(audioDir)) {
+    const audioFiles = await readdir(audioDir);
+    for (const name of audioFiles) {
+      const audioKey = resolvedObjectKey(
+        generationId,
+        sourceVersion,
+        `audio/${name}`,
+      );
+      const transfer = await requestLectureGenTransfer({
+        generationId,
+        sourceVersion,
+        purpose: "resolved_upload",
+        objectKey: audioKey,
+      });
+      await uploadToTransferUrl(
+        transfer.url,
+        path.join(audioDir, name),
+        "audio/wav",
+      );
+    }
+  }
+
+  if (await fileExists(captionsPath)) {
+    const captionsKey = resolvedObjectKey(
+      generationId,
+      sourceVersion,
+      "captions.vtt",
+    );
+    const transfer = await requestLectureGenTransfer({
+      generationId,
+      sourceVersion,
+      purpose: "resolved_upload",
+      objectKey: captionsKey,
+    });
+    await uploadToTransferUrl(transfer.url, captionsPath, "text/vtt");
+  }
+}
+
+async function downloadResolvedHtml(
+  params: JobParams,
+  destPath: string,
+): Promise<void> {
+  if (usesLectureGenPipeline(params)) {
+    const transfer = await requestLectureGenTransfer({
+      generationId: params.generationId!,
+      sourceVersion: params.sourceVersion!,
+      purpose: "resolved_download",
+      objectKey: resolvedObjectKey(
+        params.generationId!,
+        params.sourceVersion!,
+        "resolved.html",
+      ),
+    });
+    await downloadFromTransferUrl(transfer.url, destPath);
+    return;
+  }
+
+  await getRenderStorage().downloadToFile(
+    `${params.storageBase}/resolved/resolved.html`,
+    destPath,
+  );
+}
+
+async function downloadResolvedAudio(
+  params: JobParams,
+  audioDir: string,
+): Promise<void> {
+  if (usesLectureGenPipeline(params)) {
+    if (!isLectureGenWorkerConfigured()) {
+      throw new Error("LectureGen worker transfers are not configured");
+    }
+    const objectKeys = await requestLectureGenResolvedAudioList({
+      generationId: params.generationId!,
+      sourceVersion: params.sourceVersion!,
+    });
+    if (objectKeys.length === 0) {
+      return;
+    }
+    await mkdir(audioDir, { recursive: true });
+    for (const objectKey of objectKeys) {
+      const transfer = await requestLectureGenTransfer({
+        generationId: params.generationId!,
+        sourceVersion: params.sourceVersion!,
+        purpose: "resolved_download",
+        objectKey,
+      });
+      await downloadFromTransferUrl(
+        transfer.url,
+        path.join(audioDir, path.basename(objectKey)),
+      );
+    }
+    return;
+  }
+
+  await getRenderStorage().downloadPrefixToDir(
+    `${params.storageBase}/resolved/audio`,
+    audioDir,
+  );
+}
+
 async function processPreviewJob(
   params: JobParams,
   options?: { notifyOnFailure?: boolean },
@@ -466,18 +718,23 @@ async function processPreviewJob(
   if (!(await ensureVideoJobActive(jobId))) {
     return jobOk(true);
   }
-  if (await isStoredArtifactCurrent(previewVideoPath, rawHtmlPath)) {
+  if (
+    !usesLectureGenPipeline(params) &&
+    (await isStoredArtifactCurrent(previewVideoPath, rawHtmlPath))
+  ) {
     console.log(
       `Preview artifacts already exist for job ${jobId}; sending callback only`,
     );
     if (!(await ensureVideoJobActive(jobId))) {
       return jobOk(true);
     }
-    const paths: Record<string, string> = {
-      resolvedHtmlPath,
-      resolvedAudioPrefix,
-      previewVideoPath,
-    };
+    const paths: Record<string, string> = usesLectureGenPipeline(params)
+      ? { previewVideoPath }
+      : {
+          resolvedHtmlPath,
+          resolvedAudioPrefix,
+          previewVideoPath,
+        };
     if (await storage.objectExists(captionsStoragePath)) {
       paths.captionsPath = captionsStoragePath;
     }
@@ -486,6 +743,7 @@ async function processPreviewJob(
       phase,
       status: "preview_ready",
       paths,
+      ...callbackExtras(params),
     });
     return delivered
       ? jobOk()
@@ -502,7 +760,7 @@ async function processPreviewJob(
     const audioDir = path.join(workDir, "audio");
     const captionsPath = path.join(workDir, "captions.vtt");
 
-    await getRenderStorage().downloadToFile(`${storageBase}/raw.html`, sourceHtml);
+    await downloadSourceHtml(params, sourceHtml);
 
     const buildResult = await runProcess(
       [
@@ -539,6 +797,7 @@ async function processPreviewJob(
       jobId,
       phase,
       status: "rendering_preview",
+      ...callbackExtras(params),
     });
 
     if (!(await ensureVideoJobActive(jobId))) {
@@ -580,34 +839,27 @@ async function processPreviewJob(
       return jobOk(true);
     }
 
-    await getRenderStorage().uploadFile(resolvedHtmlPath, resolvedHtml, "text/html");
+    await uploadResolvedArtifacts(params, resolvedHtml, audioDir, captionsPath);
 
-    if (await fileExists(audioDir)) {
-      const audioFiles = await readdir(audioDir);
-      for (const name of audioFiles) {
-        await getRenderStorage().uploadFile(
-          `${resolvedAudioPrefix}/${name}`,
-          path.join(audioDir, name),
-          "audio/wav",
-        );
-      }
-    }
-
-    let captionsUploaded = false;
-    if (await fileExists(captionsPath)) {
-      await getRenderStorage().uploadFile(captionsStoragePath, captionsPath, "text/vtt");
-      captionsUploaded = true;
+    if (usesLectureGenPipeline(params) && (await fileExists(captionsPath))) {
+      await getRenderStorage().uploadFile(
+        captionsStoragePath,
+        captionsPath,
+        "text/vtt",
+      );
     }
 
     await getRenderStorage().uploadFile(previewVideoPath, previewMp4, "video/mp4");
 
     const durationSeconds = parseDurationSeconds(renderResult.stdout);
     const callbackPaths: Record<string, string> = {
-      resolvedHtmlPath,
-      resolvedAudioPrefix,
       previewVideoPath,
     };
-    if (captionsUploaded) {
+    if (!usesLectureGenPipeline(params)) {
+      callbackPaths.resolvedHtmlPath = resolvedHtmlPath;
+      callbackPaths.resolvedAudioPrefix = resolvedAudioPrefix;
+    }
+    if (await fileExists(captionsPath)) {
       callbackPaths.captionsPath = captionsStoragePath;
     }
     const callbackPayload: CallbackPayload = {
@@ -615,6 +867,7 @@ async function processPreviewJob(
       phase,
       status: "preview_ready",
       paths: callbackPaths,
+      ...callbackExtras(params),
     };
     if (durationSeconds !== null) {
       callbackPayload.durationSeconds = durationSeconds;
@@ -635,6 +888,7 @@ async function processPreviewJob(
         phase,
         status: "failed",
         error: message,
+        ...callbackExtras(params),
       });
     }
     return { ok: false, error: message };
@@ -657,7 +911,10 @@ async function processFinalJob(
   if (!(await ensureVideoJobActive(jobId))) {
     return jobOk(true);
   }
-  if (await isStoredArtifactCurrent(finalVideoPath, resolvedSourcePath)) {
+  if (
+    !usesLectureGenPipeline(params) &&
+    (await isStoredArtifactCurrent(finalVideoPath, resolvedSourcePath))
+  ) {
     console.log(
       `Final video already exists for job ${jobId}; sending callback only`,
     );
@@ -666,6 +923,7 @@ async function processFinalJob(
       phase,
       status: "ready",
       paths: { finalVideoPath },
+      ...callbackExtras(params),
     });
     return delivered
       ? jobOk()
@@ -681,8 +939,9 @@ async function processFinalJob(
     const captionsPath = path.join(workDir, "captions.vtt");
     const finalMp4 = path.join(workDir, "final.mp4");
 
-    await getRenderStorage().downloadToFile(`${storageBase}/resolved/resolved.html`, resolvedHtml);
-    await getRenderStorage().downloadPrefixToDir(`${storageBase}/resolved/audio`, audioDir);
+    await downloadResolvedHtml(params, resolvedHtml);
+    await downloadResolvedAudio(params, audioDir);
+    await downloadWorkspaceIntoDir(params, workDir);
 
     try {
       await getRenderStorage().downloadToFile(
@@ -738,6 +997,7 @@ async function processFinalJob(
       phase,
       status: "ready",
       paths: { finalVideoPath },
+      ...callbackExtras(params),
     };
     if (durationSeconds !== null) {
       callbackPayload.durationSeconds = durationSeconds;
@@ -758,6 +1018,7 @@ async function processFinalJob(
         phase,
         status: "failed",
         error: message,
+        ...callbackExtras(params),
       });
     }
     return { ok: false, error: message };

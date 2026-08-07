@@ -50,22 +50,22 @@ async function processClaimedJob(row: RenderQueueRow): Promise<void> {
     );
 
     const result = await runJob(params, { notifyOnFailure: false });
-    if (result.ok) {
-      const marked = await markRenderJobCompleted(row.id, workerId);
-      if (marked) {
-        console.log(`Queue job completed ${row.videoJobId} (${row.phase})`);
-      } else {
-        console.warn(
-          `Render finished for ${row.videoJobId} (${row.phase}) but queue row was preempted`,
-        );
-      }
+    if (result.ok === false) {
+      await markRenderJobFailedOrRetry(row.id, result.error);
+      console.warn(
+        `Queue job failed ${row.videoJobId} (${row.phase}): ${result.error}`,
+      );
       return;
     }
 
-    await markRenderJobFailedOrRetry(row.id, result.error);
-    console.warn(
-      `Queue job failed ${row.videoJobId} (${row.phase}): ${result.error}`,
-    );
+    const marked = await markRenderJobCompleted(row.id, workerId);
+    if (marked) {
+      console.log(`Queue job completed ${row.videoJobId} (${row.phase})`);
+    } else {
+      console.warn(
+        `Render finished for ${row.videoJobId} (${row.phase}) but queue row was preempted`,
+      );
+    }
   } catch (error) {
     const message =
       error instanceof Error ? error.message : "Render queue job failed";

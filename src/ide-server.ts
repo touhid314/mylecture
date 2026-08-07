@@ -17,6 +17,7 @@ import path from 'node:path';
 import { createViewerHtml } from '../packages/lecture-viewer/src/index.ts';
 import { EditorAgent } from '../packages/lecture-agent/src/editor-agent/coding_agent.ts';
 import { generateLecture, parseLectureGenRequest } from '../packages/lecture-agent/src/lecturegen.ts';
+import { generateLectureViaRemoteService, isIdeLectureGenRemoteEnabled } from './ide-lecturegen-client.ts';
 import { loadAppConfig, resolveConfigPath } from './config.ts';
 import {
   DEFAULT_ID_PATTERN,
@@ -2413,7 +2414,10 @@ const server = createServer(async (request, response) => {
             (async () => {
               try {
                 const parsed = parseLectureGenRequest(task, agentWorkspace);
-                const result = await generateLecture({
+                const generateFn = isIdeLectureGenRemoteEnabled()
+                  ? generateLectureViaRemoteService
+                  : generateLecture;
+                const result = await generateFn({
                   request: parsed.request,
                   model: payload.model || process.env.AGENT_MODEL || 'gemini-3.5-flash',
                   scriptModel: payload.scriptModel || undefined,

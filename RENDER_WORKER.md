@@ -47,6 +47,8 @@ The server listens on `PORT` (default `8787`).
 | `ELEVENLABS_API_KEY` | _(unset)_ | Required when `TTS_PROVIDER=elevenlabs` |
 | `ELEVENLABS_TTS_MODEL` | _(unset)_ | Required when `TTS_PROVIDER=elevenlabs`, e.g. `eleven_flash_v2_5` |
 | `ELEVENLABS_TTS_VOICE` | `bIHbv24MWmeRgasZH58o` | Default ElevenLabs voice ID when the job voice is a Kokoro name |
+| `LECTUREGEN_URL` | _(unset)_ | LectureGen HTTP service base URL (required for `pipelineVersion=lecturegen` jobs) |
+| `LECTUREGEN_WORKER_TOKEN` | _(unset)_ | Bearer token for LectureGen `/v1/jobs/*/transfers` (render worker downloads/uploads intermediates via signed URLs) |
 
 When `DATABASE_URL` is set, the render server starts a background Postgres queue
 worker automatically. It claims rows from the website's `RenderQueue` table with
@@ -138,7 +140,9 @@ Requires Supabase storage env vars (`SUPABASE_URL` + `SUPABASE_SERVICE_ROLE_KEY`
   "audioWorkers": 1,
   "kokoroDevice": "cpu",
   "chunkWorkers": 1,
-  "fps": 15
+  "fps": 15,
+  "generationId": "lecturegen-uuid",
+  "sourceVersion": 1
 }
 ```
 
@@ -146,6 +150,7 @@ Requires Supabase storage env vars (`SUPABASE_URL` + `SUPABASE_SERVICE_ROLE_KEY`
 - `userId` (optional): owning user id or `null`
 - `phase` (required): `"preview"` or `"final"`
 - `storageBase` (required): storage path prefix for this job's artifacts
+- `generationId` / `sourceVersion` (optional): when set together, the worker uses LectureGen signed transfers for source/resolved HTML and audio instead of website `raw.html` / `resolved/*` paths
 - `voice` (optional): TTS voice id (default `af_heart`)
 - `audioWorkers` (optional): parallel TTS workers for preview build (default `1`)
 - `kokoroDevice` (optional): Kokoro device override
@@ -178,15 +183,15 @@ Given `storageBase` (e.g. `"<userId>/<jobId>"`):
 
 #### Preview phase
 
-1. Download `raw.html` from storage.
+1. Download source HTML (website `raw.html` or LectureGen transfer when `generationId` + `sourceVersion` are set).
 2. Run `build-plan` to produce resolved HTML, audio, and captions.
 3. Render a low-resolution preview (`--max-short-edge 480`, default 15 fps).
-4. Upload resolved HTML, audio files, captions (if present), and preview MP4.
+4. Upload resolved HTML, audio files, captions (if present), and preview MP4 (resolved intermediates go to LectureGen when configured).
 5. POST callback with `status: "preview_ready"`.
 
 #### Final phase
 
-1. Download resolved HTML and audio from storage (captions best-effort).
+1. Download resolved HTML and audio (website storage or LectureGen transfers; captions best-effort from website storage).
 2. Render full-quality video (metadata-driven resolution, default 30 fps).
 3. Upload `final.mp4`.
 4. POST callback with `status: "ready"`.
@@ -210,7 +215,11 @@ network errors or non-2xx responses.
     "captionsPath": "<storageBase>/resolved/captions.vtt",
     "previewVideoPath": "<storageBase>/preview.mp4"
   },
-  "durationSeconds": 42.5
+  "durationSeconds": 42.5,
+  "generationId": "lecturegen-uuid",
+  "sourceVersion": 1,
+  "idempotencyKey": "<jobId>:preview:1",
+  "timestamp": "2026-08-06T12:00:00.000Z"
 }
 ```
 
@@ -224,9 +233,15 @@ network errors or non-2xx responses.
   "paths": {
     "finalVideoPath": "<storageBase>/final.mp4"
   },
-  "durationSeconds": 42.5
+  "durationSeconds": 42.5,
+  "generationId": "lecturegen-uuid",
+  "sourceVersion": 1,
+  "idempotencyKey": "<jobId>:final:1",
+  "timestamp": "2026-08-06T12:00:00.000Z"
 }
 ```
+
+LectureGen pipeline callbacks include `generationId`, `sourceVersion`, `idempotencyKey`, and `timestamp` on every status (including `rendering_preview` and `failed`) so the website can ignore stale work.
 
 **Failure (any phase)**
 

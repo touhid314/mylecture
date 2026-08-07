@@ -6,6 +6,8 @@ export type RenderQueueRow = {
   videoJobId: string;
   phase: string;
   storageBase: string;
+  generationId: string | null;
+  sourceVersion: number | null;
   voice: string | null;
   audioWorkers: number;
   kokoroDevice: string;
@@ -14,6 +16,7 @@ export type RenderQueueRow = {
   status: string;
   attempts: number;
   maxAttempts: number;
+  meteringOperationId: string | null;
   claimedAt: Date | null;
   claimedBy: string | null;
   heartbeatAt: Date | null;
@@ -61,11 +64,23 @@ function mapRow(row: Record<string, unknown>): RenderQueueRow {
     videoJobId: String(row.videoJobId),
     phase: String(row.phase),
     storageBase: String(row.storageBase),
+    generationId:
+      row.generationId === null || row.generationId === undefined
+        ? null
+        : String(row.generationId),
+    sourceVersion:
+      row.sourceVersion === null || row.sourceVersion === undefined
+        ? null
+        : Number(row.sourceVersion),
     voice: row.voice === null || row.voice === undefined ? null : String(row.voice),
     audioWorkers: Number(row.audioWorkers),
     kokoroDevice: String(row.kokoroDevice),
     chunkWorkers: Number(row.chunkWorkers),
     fps: row.fps === null || row.fps === undefined ? null : Number(row.fps),
+    meteringOperationId:
+      row.meteringOperationId === null || row.meteringOperationId === undefined
+        ? null
+        : String(row.meteringOperationId),
     status: String(row.status),
     attempts: Number(row.attempts),
     maxAttempts: Number(row.maxAttempts),
@@ -160,6 +175,23 @@ export async function markRenderJobCompleted(
   return (result.rowCount ?? 0) > 0;
 }
 
+function lectureGenCallbackContext(
+  row: Record<string, unknown>,
+): { generationId: string; sourceVersion: number } | null {
+  const generationId =
+    row.generationId === null || row.generationId === undefined
+      ? null
+      : String(row.generationId).trim();
+  const sourceVersion =
+    row.sourceVersion === null || row.sourceVersion === undefined
+      ? null
+      : Number(row.sourceVersion);
+  if (!generationId || sourceVersion === null || !Number.isInteger(sourceVersion)) {
+    return null;
+  }
+  return { generationId, sourceVersion };
+}
+
 export async function markRenderJobFailedOrRetry(
   queueId: string,
   errorMessage: string,
@@ -170,11 +202,17 @@ export async function markRenderJobFailedOrRetry(
     await client.query("BEGIN");
 
     const current = await client.query(
-      `SELECT attempts, "maxAttempts", "videoJobId", phase FROM "RenderQueue" WHERE id = $1 FOR UPDATE`,
+      `SELECT status, attempts, "maxAttempts", "videoJobId", phase, "generationId", "sourceVersion", "meteringOperationId" FROM "RenderQueue" WHERE id = $1 FOR UPDATE`,
       [queueId],
     );
 
     if (current.rowCount === 0) {
+      await client.query("COMMIT");
+      return;
+    }
+
+    const status = String(current.rows[0].status);
+    if (status === "dead" || status !== "claimed") {
       await client.query("COMMIT");
       return;
     }
@@ -186,7 +224,7 @@ export async function markRenderJobFailedOrRetry(
     const deadError = errorMessage.slice(0, 500);
 
     if (attempts >= maxAttempts) {
-      await client.query(
+      const deadResult = await client.query(
         `
         UPDATE "RenderQueue"
         SET
@@ -196,13 +234,24 @@ export async function markRenderJobFailedOrRetry(
           "claimedBy" = NULL,
           "heartbeatAt" = NULL,
           "updatedAt" = NOW()
-        WHERE id = $1
+        WHERE id = $1 AND status = 'claimed'
         `,
         [queueId, deadError],
       );
       await client.query("COMMIT");
-      if (phase === "preview" || phase === "final") {
-        void notifyRenderJobFailed(videoJobId, phase, deadError);
+      if ((deadResult.rowCount ?? 0) > 0 && (phase === "preview" || phase === "final")) {
+        const meteringOperationId =
+          current.rows[0].meteringOperationId === null ||
+          current.rows[0].meteringOperationId === undefined
+            ? null
+            : String(current.rows[0].meteringOperationId);
+        void notifyRenderJobFailed(
+          videoJobId,
+          phase,
+          deadError,
+          lectureGenCallbackContext(current.rows[0] as Record<string, unknown>),
+          meteringOperationId,
+        );
       }
       return;
     }
@@ -219,7 +268,7 @@ export async function markRenderJobFailedOrRetry(
         "claimedBy" = NULL,
         "heartbeatAt" = NULL,
         "updatedAt" = NOW()
-      WHERE id = $1
+      WHERE id = $1 AND status = 'claimed'
       `,
       [queueId, errorMessage.slice(0, 500), backoffMs],
     );
@@ -239,7 +288,7 @@ export async function reapStuckRenderJobs(): Promise<number> {
 
   const stuck = await getPool().query(
     `
-    SELECT id, attempts, "maxAttempts", "videoJobId", phase
+    SELECT id, attempts, "maxAttempts", "videoJobId", phase, "generationId", "sourceVersion", "meteringOperationId"
     FROM "RenderQueue"
     WHERE status = 'claimed'
       AND (
@@ -259,7 +308,7 @@ export async function reapStuckRenderJobs(): Promise<number> {
     const reclaimNote = "Claim timed out; job reclaimed for retry";
 
     if (attempts >= maxAttempts) {
-      await getPool().query(
+      const deadResult = await getPool().query(
         `
         UPDATE "RenderQueue"
         SET
@@ -269,12 +318,23 @@ export async function reapStuckRenderJobs(): Promise<number> {
           "claimedBy" = NULL,
           "heartbeatAt" = NULL,
           "updatedAt" = NOW()
-        WHERE id = $1
+        WHERE id = $1 AND status = 'claimed'
         `,
         [queueId, reclaimNote],
       );
-      if (phase === "preview" || phase === "final") {
-        void notifyRenderJobFailed(videoJobId, phase, reclaimNote);
+      if ((deadResult.rowCount ?? 0) > 0 && (phase === "preview" || phase === "final")) {
+        const meteringOperationId =
+          row.meteringOperationId === null ||
+          row.meteringOperationId === undefined
+            ? null
+            : String(row.meteringOperationId);
+        void notifyRenderJobFailed(
+          videoJobId,
+          phase,
+          reclaimNote,
+          lectureGenCallbackContext(row as Record<string, unknown>),
+          meteringOperationId,
+        );
       }
       continue;
     }
@@ -290,7 +350,7 @@ export async function reapStuckRenderJobs(): Promise<number> {
         "claimedBy" = NULL,
         "heartbeatAt" = NULL,
         "updatedAt" = NOW()
-      WHERE id = $1
+      WHERE id = $1 AND status = 'claimed'
       `,
       [queueId, reclaimNote],
     );
