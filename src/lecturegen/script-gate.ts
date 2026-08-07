@@ -1,8 +1,13 @@
 import { readFileSync, writeFileSync } from "node:fs";
 import path from "node:path";
+import vm from "node:vm";
 import { fileURLToPath } from "node:url";
 import { EditorAgent } from "../../packages/lecture-agent/src/editor-agent/coding_agent.ts";
 import { LLM_Model } from "../../packages/lecture-agent/src/utils/llm_model.ts";
+import {
+  matchVideoPlanConstBlock,
+  matchVideoPlanInlineBlock,
+} from "../visual-edit-protect.ts";
 
 const repoRoot = path.resolve(
   path.dirname(fileURLToPath(import.meta.url)),
@@ -58,33 +63,56 @@ function parseJsonObject(text: string): Record<string, unknown> | null {
   return null;
 }
 
-export function extractNarrationScript(html: string): string | null {
-  const segments: string[] = [];
-  const planMatch = html.match(/window\.__VIDEO_PLAN__\s*=\s*(\[[\s\S]*?\]);/);
-  if (!planMatch) return null;
-  let plan: Array<{ text?: string; narration?: string }>;
+type NarrationPlanSegment = { text?: string; narration?: string };
+
+function parseVideoPlanBlock(block: string): NarrationPlanSegment[] | null {
+  const arrayStart = block.indexOf("[");
+  const arrayEnd = block.lastIndexOf("]");
+  if (arrayStart < 0 || arrayEnd <= arrayStart) return null;
+
   try {
-    // Animator output is a JS array literal (often unquoted keys), not strict JSON.
-    plan = new Function(`"use strict"; return (${planMatch[1]});`)() as Array<{
-      text?: string;
-      narration?: string;
-    }>;
+    // Evaluate only the balanced array literal, never the surrounding generated page.
+    const plan = vm.runInNewContext(
+      `(${block.slice(arrayStart, arrayEnd + 1)})`,
+      Object.create(null),
+      { timeout: 100 },
+    );
+    return Array.isArray(plan) ? (plan as NarrationPlanSegment[]) : null;
   } catch {
-    try {
-      plan = JSON.parse(planMatch[1]) as Array<{ text?: string; narration?: string }>;
-    } catch {
-      return null;
-    }
+    return null;
   }
-  if (!Array.isArray(plan)) return null;
+}
+
+function readVideoPlanFromHtml(html: string): NarrationPlanSegment[] | null {
+  const block = matchVideoPlanInlineBlock(html) ?? matchVideoPlanConstBlock(html);
+  return block ? parseVideoPlanBlock(block) : null;
+}
+
+function narrationLinesFromPlan(plan: NarrationPlanSegment[]): string[] {
+  const segments: string[] = [];
   for (const segment of plan) {
     // Contract field is `text` (see html-input-contract.md); accept legacy `narration` too.
     const line = segment?.text?.trim() || segment?.narration?.trim();
-    if (line) {
-      segments.push(line);
-    }
+    if (line) segments.push(line);
   }
+  return segments;
+}
+
+export function extractNarrationScript(html: string): string | null {
+  const plan = readVideoPlanFromHtml(html);
+  if (!plan) return null;
+  const segments = narrationLinesFromPlan(plan);
   return segments.length > 0 ? segments.join("\n\n") : null;
+}
+
+function extractNarrationFromHtmlPaths(htmlPaths: string[]): string | null {
+  const blocks: string[] = [];
+  for (const htmlPath of htmlPaths) {
+    const html = readFileSync(htmlPath, "utf-8");
+    const narration = extractNarrationScript(html);
+    if (narration) blocks.push(narration);
+  }
+  return blocks.length > 0 ? blocks.join("\n\n") : null;
 }
 
 function normalizeReview(raw: unknown): { passed: boolean; findings: string[] } {
@@ -110,23 +138,27 @@ function normalizeReview(raw: unknown): { passed: boolean; findings: string[] } 
 function buildRepairPrompt(options: {
   userPrompt: string;
   findings: string[];
+  htmlPaths: string[];
   targetSeconds?: number;
 }): string {
   const target = options.targetSeconds ?? 60;
+  const filenames = options.htmlPaths.map((htmlPath) => path.basename(htmlPath));
   return [
-    "A narration-quality review of index.html found issues. Revise narration to fix them.",
+    "A narration-quality review of the generated lecture found issues. Revise narration to fix them.",
     `Original user request: ${options.userPrompt}`,
     `Target duration: about ${Math.round(target / 60)} minute(s)`,
+    `Video scene files: ${filenames.join(", ")}`,
     "",
     "--- findings to fix ---",
     ...options.findings.map((finding) => `- ${finding}`),
     "",
-    "Edit index.html only. Keep segment ids, visuals, and structure.",
+    "Edit only the listed video scene files. Keep segment ids, visuals, and structure.",
   ].join("\n");
 }
 
 export async function runScriptGate(options: {
   htmlPath: string;
+  htmlPaths?: string[];
   userPrompt: string;
   workspaceDir: string;
   model: string;
@@ -136,6 +168,8 @@ export async function runScriptGate(options: {
 }): Promise<{ html: string; htmlPath: string; scriptReview: ScriptReviewMeta; extraTokens: { input: number; output: number } | null }> {
   let htmlPath = options.htmlPath;
   let html = readFileSync(htmlPath, "utf-8");
+  const narrationHtmlPaths =
+    options.htmlPaths && options.htmlPaths.length > 0 ? options.htmlPaths : [htmlPath];
 
   if (!isScriptReviewEnabled()) {
     return {
@@ -147,9 +181,12 @@ export async function runScriptGate(options: {
   }
 
   options.onLog?.("Running narration quality review…");
-  const narration = extractNarrationScript(html);
+  const narration = extractNarrationFromHtmlPaths(narrationHtmlPaths);
   if (!narration) {
-    const label = path.basename(options.htmlPath) || "index.html";
+    const label =
+      narrationHtmlPaths.length === 1
+        ? path.basename(narrationHtmlPaths[0]) || "index.html"
+        : `${narrationHtmlPaths.length} scene file(s)`;
     return {
       html,
       htmlPath,
@@ -198,13 +235,13 @@ export async function runScriptGate(options: {
     buildRepairPrompt({
       userPrompt: options.userPrompt,
       findings: review.findings,
+      htmlPaths: narrationHtmlPaths,
       targetSeconds: options.targetSeconds,
     }),
     undefined,
     options.signal,
   );
 
-  htmlPath = path.join(options.workspaceDir, "index.html");
   html = readFileSync(htmlPath, "utf-8");
 
   options.onLog?.("Re-running narration quality review after repair…");
@@ -214,7 +251,7 @@ export async function runScriptGate(options: {
       options.targetSeconds ? `Target duration: ${options.targetSeconds}s` : "",
       "",
       "--- narration script ---",
-      extractNarrationScript(html) ?? "",
+      extractNarrationFromHtmlPaths(narrationHtmlPaths) ?? "",
     ]
       .filter(Boolean)
       .join("\n"),

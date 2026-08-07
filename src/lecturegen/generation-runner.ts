@@ -210,6 +210,7 @@ export async function runCreateJob(
     if (includeVideo) {
       const gate = await runScriptGate({
         htmlPath: result.entryFile,
+        htmlPaths: result.videoFiles,
         userPrompt: request.prompt,
         workspaceDir: result.workspaceDir,
         model,
