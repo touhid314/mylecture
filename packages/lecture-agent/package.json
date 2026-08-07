@@ -11,7 +11,7 @@
     "prompt-builder": "tsx src/prompt_builder.ts",
     "token-tracker": "tsx src/token-tracker/token_tracker_dashboard.ts",
     "build:world-basemap": "node scripts/build-world-basemap.mjs",
-    "test": "tsc --noEmit && node --import tsx --test src/utils/openai_reasoning.test.ts src/utils/llm_rate_limit.test.ts src/stage_models.test.ts src/script_trimmer.test.ts src/animator_repair.test.ts src/validate_layout_thresholds.test.ts src/validate_overlap_exemptions.test.ts src/validate_layout_sampling_dedupe.test.ts"
+    "test": "tsc --noEmit && node --import tsx --test src/utils/openai_reasoning.test.ts src/utils/llm_rate_limit.test.ts src/stage_models.test.ts src/script_trimmer.test.ts src/animator_repair.test.ts src/validate_layout_thresholds.test.ts src/validate_overlap_exemptions.test.ts src/validate_layout_sampling_dedupe.test.ts src/scene_layout_keys.test.ts"
   },
   "dependencies": {
     "@google/genai": "*",

@@ -644,8 +644,21 @@ function findMissingPath(keyTree, segments) {
   let node = keyTree;
   const walked = [];
   for (const seg of segments) {
+    // Leaf values (`true`) are arrays / primitives / non-object expressions in
+    // the SCENE_LAYOUT literal. Allow runtime `.length` on those leaves so
+    // `SCENE_LAYOUT.pillars.length` is not a false positive when `pillars: [...]`
+    // exists.
+    if (node === true) {
+      if (seg === 'length') {
+        walked.push(seg);
+        node = true;
+        continue;
+      }
+      walked.push(seg);
+      return `SCENE_LAYOUT.${walked.join('.')}`;
+    }
     walked.push(seg);
-    if (node === true || node === null || typeof node !== 'object') {
+    if (node === null || typeof node !== 'object') {
       return `SCENE_LAYOUT.${walked.join('.')}`;
     }
     if (!Object.prototype.hasOwnProperty.call(node, seg)) {
