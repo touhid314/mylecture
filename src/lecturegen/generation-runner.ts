@@ -198,7 +198,8 @@ export async function runCreateJob(
       includeVideo,
       includeInteractive,
       includeGame,
-      enableGetimg: request.enableGetimg,
+      // API default: off unless the client explicitly opts in (website omits this field).
+      enableGetimg: request.enableGetimg === true,
       tokenTrackerSessionId: generationId,
       onLog: (line) => appendJobLog(generationId, line),
       signal: controller.signal,

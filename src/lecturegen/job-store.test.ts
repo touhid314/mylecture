@@ -158,6 +158,23 @@ test("slimAttachmentsForManifest strips dataBase64", () => {
   ]);
 });
 
+test("createJobRecord defaults enableGetimg to false when omitted", () => {
+  const omitted = createJobRecord({ prompt: "no getimg field" }, "website");
+  assert.equal(omitted.createRequest?.enableGetimg, false);
+
+  const explicitOff = createJobRecord(
+    { prompt: "explicit off", enableGetimg: false },
+    "website",
+  );
+  assert.equal(explicitOff.createRequest?.enableGetimg, false);
+
+  const explicitOn = createJobRecord(
+    { prompt: "explicit on", enableGetimg: true },
+    "ide",
+  );
+  assert.equal(explicitOn.createRequest?.enableGetimg, true);
+});
+
 test("persisted manifest omits attachment dataBase64", async () => {
   const tempRoot = await mkdtemp(path.join(os.tmpdir(), "lecturegen-slim-"));
   const previous = process.env.LECTUREGEN_LOCAL_STORAGE_DIR;

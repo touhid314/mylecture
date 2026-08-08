@@ -20,6 +20,7 @@ export type LectureGenCreateRequest = {
   generationLength?: string;
   scriptModel?: string;
   animatorModel?: string;
+  /** When omitted, LectureGen API defaults to false (CLI/local still default on). */
   enableGetimg?: boolean;
   aspectRatio?: string;
   theme?: string;

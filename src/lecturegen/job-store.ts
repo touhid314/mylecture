@@ -344,7 +344,11 @@ export function createJobRecord(
 
     websiteStorageBase: request.websiteStorageBase?.trim() || null,
 
-    createRequest: request,
+    createRequest: {
+      ...request,
+      // Persist the effective API default (off unless explicitly true).
+      enableGetimg: request.enableGetimg === true,
+    },
 
     lastEditRequest: null,
 
