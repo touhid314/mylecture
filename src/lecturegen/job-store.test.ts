@@ -85,14 +85,37 @@ test("progress and non-resumable checkpoint persist with monotonic sequence", as
       completedScenes: 0,
       totalScenes: 2,
     });
+    const third = setJobProgress(record.id, {
+      stage: "scene-validation",
+      message: "Checking scene 1 of 2",
+      currentScene: 1,
+      completedScenes: 1,
+      totalScenes: 2,
+    });
+    const fourth = setJobProgress(record.id, {
+      stage: "scene-generation",
+      message: "Creating scene 2 of 2",
+      currentScene: 2,
+      completedScenes: 0,
+      totalScenes: 2,
+    });
+    const final = setJobProgress(record.id, {
+      stage: "source-ready",
+      message: "Preparing your video render",
+    });
     await flushPersist(record.id);
 
     const loaded = await loadJobManifest(record.id);
     assert.equal(first?.sequence, 1);
     assert.equal(second?.sequence, 2);
-    assert.equal(loaded?.progress?.sequence, 2);
+    assert.equal(third?.completedScenes, 1);
+    assert.equal(fourth?.completedScenes, 1);
+    assert.equal(final?.completedScenes, 1);
+    assert.equal(final?.totalScenes, 2);
+    assert.equal(final?.startedAt, first?.startedAt);
+    assert.equal(loaded?.progress?.sequence, 5);
     assert.equal(loaded?.checkpoint?.resumeEligible, false);
-    assert.deepEqual(loaded?.checkpoint?.completedScenes, []);
+    assert.deepEqual(loaded?.checkpoint?.completedScenes, [1]);
   } finally {
     if (previous === undefined) delete process.env.LECTUREGEN_LOCAL_STORAGE_DIR;
     else process.env.LECTUREGEN_LOCAL_STORAGE_DIR = previous;

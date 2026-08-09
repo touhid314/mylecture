@@ -13,6 +13,7 @@ test("progress callback idempotency is scoped by source version and sequence", (
       message: "Scene 2 of 4 is ready",
       currentScene: 2,
       totalScenes: 4,
+      startedAt: 100,
       updatedAt: 123,
     },
   });

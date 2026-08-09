@@ -306,6 +306,7 @@ export async function runCreateJob(
         userPrompt: request.prompt,
         workspaceDir: result.workspaceDir,
         model,
+        tokenTrackerSessionId: generationId,
         targetSeconds: request.targetSeconds,
         onLog: progress.onLog,
         signal: controller.signal,
@@ -413,6 +414,7 @@ export async function runEditJob(
     const agent = new EditorAgent({
       model,
       workspaceDir,
+      tokenTrackerSessionId: generationId,
       onLog: progress.onLog,
     });
     const session = agent.startChat();
@@ -427,6 +429,7 @@ export async function runEditJob(
         userPrompt: request.instruction,
         workspaceDir,
         model,
+        tokenTrackerSessionId: generationId,
         onLog: progress.onLog,
         signal: controller.signal,
       });

@@ -162,6 +162,7 @@ export async function runScriptGate(options: {
   userPrompt: string;
   workspaceDir: string;
   model: string;
+  tokenTrackerSessionId?: string;
   targetSeconds?: number;
   onLog?: (line: string) => void;
   signal?: AbortSignal;
@@ -202,6 +203,10 @@ export async function runScriptGate(options: {
   const rubric = readFileSync(RUBRIC_PATH, "utf8").trim();
   const reviewModel = resolveReviewModel(options.model);
   const llm = new LLM_Model(reviewModel, rubric);
+  if (options.tokenTrackerSessionId) {
+    llm.token_tracker_session_id = options.tokenTrackerSessionId;
+    llm.token_tracker_purpose = "lecturegen_narration_review";
+  }
   const reviewPrompt = [
     `User request: ${options.userPrompt}`,
     options.targetSeconds ? `Target duration: ${options.targetSeconds}s` : "",
@@ -228,6 +233,7 @@ export async function runScriptGate(options: {
   const agent = new EditorAgent({
     model: options.model,
     workspaceDir: options.workspaceDir,
+    tokenTrackerSessionId: options.tokenTrackerSessionId,
     onLog: options.onLog,
   });
   const session = agent.startChat();
@@ -245,6 +251,9 @@ export async function runScriptGate(options: {
   html = readFileSync(htmlPath, "utf-8");
 
   options.onLog?.("Re-running narration quality review after repair…");
+  if (options.tokenTrackerSessionId) {
+    llm.token_tracker_purpose = "lecturegen_narration_review_after_repair";
+  }
   const reviewAfterResponse = await llm.generate(
     [
       `User request: ${options.userPrompt}`,
@@ -273,9 +282,11 @@ export async function runScriptGate(options: {
       repaired: true,
       initialFindings: review.findings,
     },
-    extraTokens: {
-      input: repairTokens.input,
-      output: repairTokens.output,
-    },
+    extraTokens: options.tokenTrackerSessionId
+      ? null
+      : {
+          input: repairTokens.input,
+          output: repairTokens.output,
+        },
   };
 }

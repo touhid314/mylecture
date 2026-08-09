@@ -623,18 +623,29 @@ export function setJobUsage(id: string, usage: LectureGenUsage | null): void {
 
 export function setJobProgress(
   id: string,
-  update: Omit<LectureGenProgress, "sourceVersion" | "sequence" | "updatedAt">,
+  update: Omit<LectureGenProgress, "sourceVersion" | "sequence" | "startedAt" | "updatedAt">,
 ): LectureGenProgress | null {
   const record = jobs.get(id);
   if (!record) return null;
 
+  const prior =
+    record.progress?.sourceVersion === record.sourceVersion
+      ? record.progress
+      : null;
+  const completedScenes = Math.max(
+    prior?.completedScenes ?? 0,
+    update.completedScenes ?? 0,
+  );
+  const totalScenes = update.totalScenes ?? prior?.totalScenes;
   const progress: LectureGenProgress = {
     ...update,
+    ...(completedScenes > 0 || update.completedScenes !== undefined
+      ? { completedScenes }
+      : {}),
+    ...(totalScenes !== undefined ? { totalScenes } : {}),
     sourceVersion: record.sourceVersion,
-    sequence:
-      record.progress?.sourceVersion === record.sourceVersion
-        ? record.progress.sequence + 1
-        : 1,
+    sequence: prior ? prior.sequence + 1 : 1,
+    startedAt: prior?.startedAt ?? Date.now(),
     updatedAt: Date.now(),
   };
   record.progress = progress;

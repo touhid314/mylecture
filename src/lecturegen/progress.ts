@@ -2,7 +2,7 @@ import type { LectureGenProgress } from "./types.ts";
 
 export type ProgressUpdate = Omit<
   LectureGenProgress,
-  "sourceVersion" | "sequence" | "updatedAt"
+  "sourceVersion" | "sequence" | "startedAt" | "updatedAt"
 >;
 
 type ProgressInterpreterState = {

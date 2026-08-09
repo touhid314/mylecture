@@ -27,6 +27,8 @@ export type LectureGenProgressStage =
 export type LectureGenProgress = {
   sourceVersion: number;
   sequence: number;
+  /** Stable start of progress for this source version. */
+  startedAt: number;
   stage: LectureGenProgressStage;
   message: string;
   currentScene?: number;
