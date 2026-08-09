@@ -161,6 +161,10 @@ do not use CSS animations or CSS transitions for motion
 all motion must be computed from localTime/globalTime inside this function
 ```
 
+For narration-backed segments, `segment.resolvedDuration` is the authoritative duration when present. Generated phase/progress helpers must accept the active `segment` and prefer its positive finite `resolvedDuration`; per-segment duration hints may be used only while previewing unresolved source. This keeps visual progress aligned with the final narration without changing audio timestamps or segment boundaries.
+
+Adjacent beats in the same script scene are continuous by default. The next beat's state at `localTime = 0` must preserve the preceding beat's terminal camera and persistent-object state. A transient object that ends at the boundary must be carried into the next beat and faded during roughly its first 8–12%, rather than being reset from visible to hidden in one frame. An instantaneous reset is allowed only when the script explicitly requires one or the next beat begins a new scene.
+
 ## Export Mode
 
 The HTML must support:

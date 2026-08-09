@@ -141,3 +141,17 @@ window.__VIDEO_PLAN__ = [{ id: '${id}', type: 'visual-only', duration: 1 }];
     assert.ok(report.findings.some(finding => finding.category === 'aspect-ratio'));
     assert.ok(report.findings.some(finding => finding.category === 'duplicate-id'));
 });
+
+test('animator contract keeps resolved timing authoritative and bridges same-scene beats', () => {
+    const animatorPrompt = fs.readFileSync(new URL('./prompts/animator_system.md', import.meta.url), 'utf8');
+    const htmlContract = fs.readFileSync(
+        new URL('../.agents/mylecture-contracts/html-input-contract.md', import.meta.url),
+        'utf8'
+    );
+
+    assert.match(animatorPrompt, /segment\.resolvedDuration` as the authoritative beat duration/);
+    assert.match(animatorPrompt, /Bridge every same-scene beat boundary/);
+    assert.match(animatorPrompt, /fade it out over roughly the first 8–12%/);
+    assert.match(htmlContract, /segment\.resolvedDuration` is the authoritative duration/);
+    assert.match(htmlContract, /Adjacent beats in the same script scene are continuous by default/);
+});
