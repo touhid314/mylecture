@@ -2,6 +2,8 @@ import {
 
   buildLectureGenCallbackPayload,
 
+  buildLectureGenProgressCallbackPayload,
+
   postLectureGenCallback,
 
   resolveMeteringOperationId,
@@ -15,6 +17,8 @@ import {
   blockPersistWrites,
 
   clearCallbackPending,
+
+  clearProgressCallbackPending,
 
   clearPersistState,
 
@@ -81,6 +85,26 @@ export async function retryPendingCallbacks(): Promise<number> {
 
 
   for (const record of listJobRecords()) {
+
+    const progressPending = record.progressCallbackPending;
+    const progressWebsiteJobId = record.websiteJobId?.trim();
+    if (progressPending && progressWebsiteJobId) {
+      const delivered = await postLectureGenCallback(
+        buildLectureGenProgressCallbackPayload({
+          websiteJobId: progressWebsiteJobId,
+          generationId: record.id,
+          progress: progressPending.progress,
+        }),
+      );
+      if (delivered) {
+        clearProgressCallbackPending(
+          record.id,
+          progressPending.progress.sequence,
+        );
+        await flushPersist(record.id);
+        retried++;
+      }
+    }
 
     const pending = record.callbackPending;
 

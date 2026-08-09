@@ -30,9 +30,12 @@
  * maximum narration words per animator block; the minimum is half that value,
  * rounded up.
  *
- * Animator calls run sequentially in one retained LLM session so prior validated
- * generations remain in context and provider prompt caching can apply. Each
- * generated index file is validated and repaired before the next block begins.
+ * Animator calls run sequentially in one retained LLM session by default so
+ * prior validated generations remain in context and provider prompt caching can
+ * apply. A shared creative-direction packet and per-scene intent briefs preserve
+ * continuity without prescribing layouts. LECTUREGEN_PARALLEL_SCENES=true opts
+ * into isolated, bounded scene generation/validation tasks; the default remains
+ * the retained sequential path.
  *
  * Importing this module has no CLI side effects. The CLI runs only when this file
  * is executed directly.
@@ -53,6 +56,19 @@ import { getScriptTrimmerChunkSizes, trimScriptByNarration, validateAudiovisualS
 import { writeScript } from './script_writer.js';
 import type { LectureGenAttachment } from './lecturegen_shared.js';
 import {
+    buildSceneBriefs,
+    checkDeterministicContinuity,
+    createFallbackVisualDirection,
+    formatSceneBrief,
+    formatVisualDirection,
+    generateCreativeDirection,
+    getSceneOrchestrationConfig,
+    runIndependentSceneTasks,
+    writeImmutableJsonArtifact,
+    type SceneBrief,
+    type SceneTaskState
+} from './scene_orchestration.js';
+import {
     formatStageModelLog,
     isModelSlugContained,
     parseScriptCompareModels,
@@ -69,6 +85,8 @@ export type LectureGenOptions = {
     workspaceDir: string;
     tokenTrackerSessionId?: string | null;
     onLog?: (text: string) => void;
+    /** Package-local scene lifecycle hook; server callers may map this to their own persisted progress contract. */
+    onSceneTaskState?: (state: SceneTaskState) => void;
 };
 
 export type ParsedLectureGenRequest = {
@@ -299,38 +317,186 @@ export class LectureGen {
                         formatAssetDescriptions(assets),
                         uploadedAssets
                     ].filter(Boolean).join('\n');
-                    const previousHtmls: PreviousHtml[] = [];
-                    const animatorSession = new AnimatorSession(animatorCommon);
-                    log(`Using one retained animator LLM session (${stages.animatorModel}) for sequential context and prompt caching.`);
-                    for (const block of scriptBlocks) {
+                    const orchestration = getSceneOrchestrationConfig();
+                    const useCreativeDirection = orchestration.creativeDirectionEnabled || orchestration.parallelScenesEnabled;
+                    let visualDirection = createFallbackVisualDirection({
+                        request: input.request,
+                        theme: input.theme,
+                        teachingStyle: input.teachingStyle
+                    });
+                    if (useCreativeDirection) {
+                        log('Creating a shared visual direction for the scene animators...');
+                        try {
+                            visualDirection = await generateCreativeDirection({
+                                ...animatorCommon,
+                                request: input.request,
+                                script,
+                                aspectRatio: input.aspectRatio,
+                                theme: input.theme,
+                                teachingStyle: input.teachingStyle
+                            });
+                        } catch (error) {
+                            log(`Visual-direction generation failed; using deterministic request/theme guidance: ${error instanceof Error ? error.message : error}`);
+                        }
                         assertActive();
-                        const outputPath = scriptBlocks.length === 1 ? 'index.html' : `index${block.index}.html`;
-                        log(`Animating ${outputPath} from script block ${block.index}/${scriptBlocks.length} (${block.narrationWords} narration words)...`);
-                        const animatorInput = {
+                    }
+                    const sceneBriefs = buildSceneBriefs(scriptBlocks, visualDirection);
+                    if (useCreativeDirection) {
+                        writeImmutableJsonArtifact(this.options.workspaceDir, 'visual-direction.json', visualDirection);
+                        writeImmutableJsonArtifact(this.options.workspaceDir, 'scene-briefs.json', sceneBriefs);
+                    }
+                    const briefByIndex = new Map(sceneBriefs.map(brief => [brief.index, brief]));
+                    const blockByIndex = new Map(scriptBlocks.map(block => [block.index, block]));
+                    const buildAnimatorInput = (
+                        brief: SceneBrief,
+                        previousHtmls: PreviousHtml[]
+                    ) => {
+                        const block = blockByIndex.get(brief.index);
+                        if (!block) throw new Error(`Missing script block for scene ${brief.index}.`);
+                        return {
                             ...animatorCommon,
-                            request: input.request,
+                            request: useCreativeDirection
+                                ? `${input.request}\n\n# Shared Visual Direction\n${formatVisualDirection(visualDirection)}`
+                                : input.request,
                             aspectRatio: input.aspectRatio,
                             generationLength: input.generationLength,
-                            scriptBlock: block.content,
+                            scriptBlock: useCreativeDirection
+                                ? `${block.content}\n\n# Scene Intent Brief\n${formatSceneBrief(brief)}`
+                                : block.content,
                             blockIndex: block.index,
                             totalBlocks: scriptBlocks.length,
-                            outputPath,
+                            outputPath: brief.outputPath,
                             theme: input.theme,
                             teachingStyle: input.teachingStyle,
                             assetDescriptions,
                             previousHtmls: slicePreviousHtmls(previousHtmls),
                             attachments: input.attachments
                         };
-                        const generatedHtml = await animateScriptBlock(animatorInput, animatorSession);
-                        assertActive();
-                        const validHtml = await validateAndRepairHtml(
-                            animatorInput,
-                            animatorSession,
-                            this.options.workspaceDir,
-                            generatedHtml,
-                            validation => log(validation)
+                    };
+
+                    let completedHtmls: PreviousHtml[] = [];
+                    if (!orchestration.parallelScenesEnabled) {
+                        const animatorSession = new AnimatorSession(animatorCommon);
+                        log(`Using one retained animator LLM session (${stages.animatorModel}) for sequential context and prompt caching.`);
+                        for (const block of scriptBlocks) {
+                            assertActive();
+                            const brief = briefByIndex.get(block.index);
+                            if (!brief) throw new Error(`Missing scene brief for script block ${block.index}.`);
+                            this.options.onSceneTaskState?.(Object.freeze({
+                                index: brief.index,
+                                totalScenes: brief.totalScenes,
+                                outputPath: brief.outputPath,
+                                status: 'generating',
+                                repairAttempt: 0,
+                                maximumRepairs: 5
+                            }));
+                            log(`Animating ${brief.outputPath} from script block ${block.index}/${scriptBlocks.length} (${block.narrationWords} narration words)...`);
+                            const animatorInput = buildAnimatorInput(brief, completedHtmls);
+                            const generatedHtml = await animateScriptBlock(animatorInput, animatorSession);
+                            assertActive();
+                            let repairAttempt = 0;
+                            const validHtml = await validateAndRepairHtml(
+                                animatorInput,
+                                animatorSession,
+                                this.options.workspaceDir,
+                                generatedHtml,
+                                validation => {
+                                    log(validation);
+                                    const isMechanicalPreflight = validation.startsWith('Mechanical preflight:');
+                                    if (!validation.includes('validation passed')
+                                        && !validation.startsWith('Animator repair attempt failed')
+                                        && !isMechanicalPreflight) {
+                                        repairAttempt += 1;
+                                    }
+                                    this.options.onSceneTaskState?.(Object.freeze({
+                                        index: brief.index,
+                                        totalScenes: brief.totalScenes,
+                                        outputPath: brief.outputPath,
+                                        status: validation.includes('validation passed')
+                                            ? 'validating'
+                                            : isMechanicalPreflight ? 'preflight' : 'repairing',
+                                        repairAttempt,
+                                        maximumRepairs: 5,
+                                        findings: Object.freeze([validation])
+                                    }));
+                                }
+                            );
+                            completedHtmls.push({ path: brief.outputPath, content: validHtml });
+                            this.options.onSceneTaskState?.(Object.freeze({
+                                index: brief.index,
+                                totalScenes: brief.totalScenes,
+                                outputPath: brief.outputPath,
+                                status: 'complete',
+                                repairAttempt,
+                                maximumRepairs: 5
+                            }));
+                        }
+                    } else {
+                        log(
+                            `Using isolated scene sessions with per-job concurrency ${orchestration.perJobSceneConcurrency}, `
+                            + `global LLM concurrency ${orchestration.globalLlmConcurrency}, and browser-validation concurrency ${orchestration.globalBrowserValidationConcurrency}.`
                         );
-                        previousHtmls.push({ path: outputPath, content: validHtml });
+                        const sessions = new Map<number, AnimatorSession>();
+                        const animatorInputs = new Map<number, ReturnType<typeof buildAnimatorInput>>();
+                        const results = await runIndependentSceneTasks({
+                            tasks: sceneBriefs,
+                            config: orchestration,
+                            assertActive,
+                            onTaskState: state => {
+                                this.options.onSceneTaskState?.(state);
+                                if (state.status === 'generating') log(`Creating scene ${state.index}/${sceneBriefs.length} (${state.outputPath})...`);
+                                if (state.status === 'validating') log(`Checking scene ${state.index}/${sceneBriefs.length}...`);
+                                if (state.status === 'repairing') log(`Repairing scene ${state.index}/${sceneBriefs.length}, attempt ${state.repairAttempt}/${state.maximumRepairs}...`);
+                            },
+                            generate: async (brief, schedulers) => {
+                                const session = new AnimatorSession(animatorCommon, schedulers.runLlm);
+                                const animatorInput = buildAnimatorInput(brief, []);
+                                sessions.set(brief.index, session);
+                                animatorInputs.set(brief.index, animatorInput);
+                                return animateScriptBlock(animatorInput, session);
+                            },
+                            validate: async (brief, html, update, schedulers) => {
+                                const session = sessions.get(brief.index);
+                                const animatorInput = animatorInputs.get(brief.index);
+                                if (!session || !animatorInput) throw new Error(`Scene ${brief.index} lost its isolated animator state.`);
+                                let repairAttempt = 0;
+                                update('validating');
+                                return validateAndRepairHtml(
+                                    animatorInput,
+                                    session,
+                                    this.options.workspaceDir,
+                                    html,
+                                    validation => {
+                                        log(`[${brief.outputPath}] ${validation}`);
+                                        if (validation.includes('validation passed')) {
+                                            update('validating', repairAttempt);
+                                        } else if (validation.startsWith('Mechanical preflight:')) {
+                                            update('preflight', repairAttempt);
+                                        } else if (validation.startsWith('Animator repair attempt failed')) {
+                                            update('repairing', repairAttempt, [validation]);
+                                        } else {
+                                            repairAttempt += 1;
+                                            update('repairing', repairAttempt, [validation]);
+                                        }
+                                    },
+                                    5,
+                                    {
+                                        runValidation: schedulers.runBrowserValidation,
+                                        runLlm: schedulers.runLlm
+                                    }
+                                );
+                            }
+                        });
+                        completedHtmls = results.map(result => ({ path: result.state.outputPath, content: result.html }));
+                    }
+
+                    const continuity = checkDeterministicContinuity(completedHtmls, input.aspectRatio);
+                    for (const finding of continuity.findings) {
+                        log(`Continuity ${finding.severity}: ${finding.message}`);
+                    }
+                    if (!continuity.passed) {
+                        const errors = continuity.findings.filter(finding => finding.severity === 'error').map(finding => finding.message);
+                        throw new Error(`Generated scenes failed deterministic continuity checks:\n${errors.join('\n')}`);
                     }
                 } else {
                     log('Video output disabled; skipping answer, script, assets, trimmer, and animator.');
@@ -384,6 +550,7 @@ export type LectureGenerationOptions = {
     includeGame?: boolean;
     tokenTrackerSessionId?: string | null;
     onLog?: (text: string) => void;
+    onSceneTaskState?: (state: SceneTaskState) => void;
     signal?: AbortSignal;
 };
 
@@ -504,7 +671,8 @@ export async function generateLecture(options: LectureGenerationOptions): Promis
         animatorModel: options.animatorModel,
         workspaceDir: generation.path,
         tokenTrackerSessionId: options.tokenTrackerSessionId || generation.id,
-        onLog: options.onLog
+        onLog: options.onLog,
+        onSceneTaskState: options.onSceneTaskState
     });
     const session = lectureGen.startChat();
     const relayAbort = () => session.cancelTurn();
@@ -576,6 +744,15 @@ Environment:
   AGENT_MODEL                 Default/fallback model (also used by the editor agent)
   SCRIPT_MODEL                Optional override for answer + script stages
   ANIMATOR_MODEL              Optional override for animator / iagen / gamegen
+  LECTUREGEN_CREATIVE_DIRECTION
+                              Shared visual-direction packet (default: false)
+  LECTUREGEN_PARALLEL_SCENES  Isolated scene tasks instead of retained session (default: false)
+  LECTUREGEN_SCENE_LLM_CONCURRENCY
+                              Global scene LLM cap (default: 2)
+  LECTUREGEN_BROWSER_VALIDATION_CONCURRENCY
+                              Global browser-validation cap (default: 1)
+  LECTUREGEN_SCENE_CONCURRENCY_PER_JOB
+                              Per-generation scene cap (default: 2)
 
 Example:
   npm run lecturegen -- --workspace ./gens --length 2:00 --aspect-ratio 16:9 "Explain binary search"

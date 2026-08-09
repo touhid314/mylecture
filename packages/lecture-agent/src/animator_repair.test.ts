@@ -3,7 +3,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { describe, it } from 'node:test';
-import { countTemporalLayoutErrors, findInlineScriptSyntaxError, hasRewriteableLayoutValidation, isTemporalLayoutValidation, nextSyntaxCleanAnchor, revertToLastViable, shouldRequestLayoutRewrite } from './animator.js';
+import { countTemporalLayoutErrors, findInlineScriptSyntaxError, formatValidationForRepair, hasRewriteableLayoutValidation, isTemporalLayoutValidation, nextSyntaxCleanAnchor, revertToLastViable, shouldRequestLayoutRewrite, validationFindings } from './animator.js';
 
 const VALID_HTML = `<!DOCTYPE html>
 <html>
@@ -184,6 +184,31 @@ HTML contract validation failed (mode: playwright):
     it('returns false when marker appears without bullet error lines (truncated text)', () => {
         const validation = 'HTML contract validation failed (mode: playwright):\nTemporal layout check failed:';
         assert.equal(isTemporalLayoutValidation(validation), false);
+    });
+});
+
+describe('structured repair diagnostics', () => {
+    const validation = `HTML contract validation failed (mode: playwright):
+ - Temporal layout check failed: segment 's1' at localTime=0.000s: panel padding: title short of required pad by 20px
+ - Temporal layout check failed: segment 's1' at localTime=1.000s: panel padding: title short of required pad by 20px
+__VALIDATION_METRICS__ {"playwrightMs":42}`;
+
+    it('deduplicates sample-time variants under a stable category fingerprint', () => {
+        const findings = validationFindings(validation);
+        assert.equal(findings.length, 1);
+        assert.equal(findings[0].category, 'panel-padding');
+        assert.match(findings[0].fingerprint, /localTime=<sample>/);
+    });
+
+    it('removes metrics from repair prompts and marks cross-repair repeats', () => {
+        const first = formatValidationForRepair(validation);
+        assert.doesNotMatch(first.output, /VALIDATION_METRICS/);
+        assert.match(first.output, /\[panel-padding\]/);
+
+        const prior = new Set(first.findings.map(finding => finding.fingerprint));
+        const second = formatValidationForRepair(validation, prior);
+        assert.equal(second.repeatedCount, 1);
+        assert.match(second.output, /remain from an earlier repair validation/);
     });
 });
 

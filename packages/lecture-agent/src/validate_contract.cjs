@@ -9,6 +9,41 @@ const fs = require('fs');
 const path = require('path');
 const vm = require('vm');
 const { checkSceneLayoutKeys } = require('./scene_layout_keys.cjs');
+const { checkBrowserApiUsage, extractClassicInlineScripts } = require('./browser_api_preflight.cjs');
+
+const VALIDATION_METRICS_PREFIX = '__VALIDATION_METRICS__ ';
+
+function checkInlineScriptSyntax(htmlContent) {
+  const errors = [];
+  extractClassicInlineScripts(htmlContent).forEach((script, index) => {
+    try {
+      new vm.Script(script);
+    } catch (err) {
+      errors.push(`Static syntax check failed: inline script ${index + 1}: ${err.name || 'Error'}: ${err.message || err}`);
+    }
+  });
+  return errors;
+}
+
+function uniqueErrors(errors) {
+  const seen = new Set();
+  return errors.filter((error) => {
+    const key = String(error).replace(/\s+/g, ' ').trim();
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
+}
+
+function reliableVmContractErrors(errors) {
+  const hasVmScriptFailure = errors.some((error) =>
+    error.startsWith('Script execution error before contract globals:')
+  );
+  if (hasVmScriptFailure) return [];
+  return errors.filter((error) =>
+    !error.startsWith('__RENDER_SECTION__ execution failed on test call:')
+  );
+}
 
 function runChecks(windowObj) {
   const errors = [];
@@ -326,6 +361,35 @@ async function validateWithPlaywright(htmlPath) {
     const page = await browser.newPage({
       viewport: { width: 1920, height: 1080 }
     });
+    const preflightStartedAt = Date.now();
+    const browserApiInventory = await page.evaluate(() => {
+      function prototypeNames(value) {
+        const names = new Set();
+        let current = value;
+        while (current && current !== Object.prototype) {
+          for (const key of Reflect.ownKeys(current)) {
+            if (typeof key === 'string') names.add(key);
+          }
+          current = Object.getPrototypeOf(current);
+        }
+        return [...names];
+      }
+      return {
+        canvasContext2d: prototypeNames(CanvasRenderingContext2D.prototype),
+        node: prototypeNames(Node.prototype),
+        element: prototypeNames(Element.prototype),
+      };
+    });
+    const apiPreflightErrors = checkBrowserApiUsage(
+      fs.readFileSync(htmlPath, 'utf8'),
+      browserApiInventory,
+    );
+    const preflightMs = Date.now() - preflightStartedAt;
+    if (apiPreflightErrors.length > 0) {
+      return { errors: apiPreflightErrors, preflightMs, temporalMs: 0, preflightOnly: true };
+    }
+
+    const temporalStartedAt = Date.now();
     const scriptErrors = [];
     page.on('pageerror', (err) => {
       scriptErrors.push(`${err.name || 'Error'}: ${err.message || err}`);
@@ -1055,7 +1119,7 @@ async function validateWithPlaywright(htmlPath) {
             const key = `overlap|${a.source}|${a.label}|${a.text}|${b.source}|${b.label}|${b.text}|${quantizeOverlapSignature(a, b)}`;
             pushOverlapFinding(
               key,
-              `segment '${segment.id}' at localTime=${localTime.toFixed(3)}s: ${formatBox(a)} overlaps ${formatBox(b)} by ${Math.round(overlapWidth)}x${Math.round(overlapHeight)}px`
+              `segment '${segment.id}' at localTime=${localTime.toFixed(3)}s: ${formatBox(a)} overlaps ${formatBox(b)} by ${Math.round(overlapWidth)}x${Math.round(overlapHeight)}px near (${Math.round(Math.max(a.left, b.left))},${Math.round(Math.max(a.top, b.top))})`
             );
             if (overlapFindingCount >= MAX_OVERLAP_FINDINGS || layoutErrors.length >= MAX_LAYOUT_FINDINGS) return;
           }
@@ -1432,19 +1496,30 @@ async function validateWithPlaywright(htmlPath) {
       errors.push(`Temporal layout check failed: ${layoutError}`);
     }
     if (errors.some((err) => err.startsWith('Missing window.__')) && scriptErrors.length > 0) {
-      return [
+      return {
+        errors: [
         ...scriptErrors.slice(0, 5).map((err) => `Browser script error before contract globals: ${err}`),
         ...errors,
-      ];
+        ],
+        preflightMs,
+        temporalMs: Date.now() - temporalStartedAt,
+        preflightOnly: false,
+      };
     }
 
-    return errors;
+    return {
+      errors,
+      preflightMs,
+      temporalMs: Date.now() - temporalStartedAt,
+      preflightOnly: false,
+    };
   } finally {
     await browser.close();
   }
 }
 
 async function main() {
+  const validationStartedAt = Date.now();
   const htmlPath = process.argv[2];
   if (!htmlPath) {
     console.error("Usage: node validate_contract.cjs <path_to_html>");
@@ -1459,36 +1534,74 @@ async function main() {
 
   let errors = [];
   let mode = 'vm';
+  const timings = {
+    staticMs: 0,
+    vmMs: 0,
+    browserPreflightMs: 0,
+    playwrightMs: 0,
+    totalMs: 0,
+  };
 
   // 0. Static SCENE_LAYOUT key check (Node-only, before / alongside runtime checks).
   // Prefer listing these first so repair agents see "X is referenced but not defined"
   // instead of only a TypeError on `.x`.
+  const staticStartedAt = Date.now();
   const htmlContent = fs.readFileSync(absolutePath, 'utf8');
   const sceneLayoutErrors = checkSceneLayoutKeys(htmlContent);
+  const syntaxErrors = checkInlineScriptSyntax(htmlContent);
+  timings.staticMs = Date.now() - staticStartedAt;
+
+  // Syntax is a deterministic prerequisite. Do not spend a browser launch or
+  // produce misleading layout findings for source that cannot execute.
+  if (syntaxErrors.length > 0) {
+    errors = [...sceneLayoutErrors, ...syntaxErrors];
+    timings.totalMs = Date.now() - validationStartedAt;
+    console.log(`${VALIDATION_METRICS_PREFIX}${JSON.stringify(timings)}`);
+    console.error('HTML contract validation failed (mode: static):');
+    uniqueErrors(errors).forEach(err => console.error(` - ${err}`));
+    process.exit(1);
+  }
 
   // 1. Run VM check first (extremely fast, ~10ms)
+  let vmErrors = [];
+  const vmStartedAt = Date.now();
   try {
-    errors = validateWithVM(absolutePath);
+    vmErrors = validateWithVM(absolutePath);
   } catch (vmErr) {
     // If VM execution itself crashes, fallback to trying Playwright
-    errors = ["VM compilation/execution failed"];
+    vmErrors = ["VM compilation/execution failed"];
   }
+  timings.vmMs = Date.now() - vmStartedAt;
 
   // 2. Always run the browser check. Runtime animation errors often occur only
   // after localTime advances and cannot be detected by the lightweight VM mocks.
+  const playwrightStartedAt = Date.now();
   try {
-    const playwrightErrors = await validateWithPlaywright(absolutePath);
-    errors = playwrightErrors;
-    mode = 'playwright';
+    const playwrightResult = await validateWithPlaywright(absolutePath);
+    timings.browserPreflightMs = playwrightResult.preflightMs;
+    timings.playwrightMs = playwrightResult.temporalMs;
+    errors = uniqueErrors([
+      ...reliableVmContractErrors(vmErrors),
+      ...playwrightResult.errors,
+    ]);
+    mode = playwrightResult.preflightOnly ? 'browser-api-preflight' : 'playwright';
   } catch (pwErr) {
     const details = (pwErr.message || String(pwErr)).split('\n')[0].trim();
-    errors.push(`Playwright validation failed: ${details}. (Run 'npx playwright install' to ensure browser binaries are downloaded)`);
+    errors = [
+      ...reliableVmContractErrors(vmErrors),
+      `Playwright validation failed: ${details}. (Run 'npx playwright install' to ensure browser binaries are downloaded)`,
+    ];
+    timings.playwrightMs = Date.now() - playwrightStartedAt;
   }
 
   // Prepend static SCENE_LAYOUT findings so they always appear in failure output.
   if (sceneLayoutErrors.length > 0) {
     errors = [...sceneLayoutErrors, ...errors];
   }
+
+  errors = uniqueErrors(errors);
+  timings.totalMs = Date.now() - validationStartedAt;
+  console.log(`${VALIDATION_METRICS_PREFIX}${JSON.stringify(timings)}`);
 
   if (errors.length > 0) {
     console.error(`HTML contract validation failed (mode: ${mode}):`);

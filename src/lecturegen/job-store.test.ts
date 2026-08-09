@@ -11,6 +11,7 @@ import {
   flushPersist,
   getJobRecord,
   setJobStatus,
+  setJobProgress,
   slimAttachmentsForManifest,
   __testOnly_resetPersistBlocks,
   __testOnly_setPersistSaveGate,
@@ -61,6 +62,40 @@ test("persist writes are serialized per generation id", async () => {
     } else {
       process.env.LECTUREGEN_LOCAL_STORAGE_DIR = previous;
     }
+    delete process.env.LECTUREGEN_R2_BUCKET;
+    await rm(tempRoot, { recursive: true, force: true });
+  }
+});
+
+test("progress and non-resumable checkpoint persist with monotonic sequence", async () => {
+  const tempRoot = await mkdtemp(path.join(os.tmpdir(), "lecturegen-progress-"));
+  const previous = process.env.LECTUREGEN_LOCAL_STORAGE_DIR;
+  process.env.LECTUREGEN_LOCAL_STORAGE_DIR = tempRoot;
+  process.env.LECTUREGEN_R2_BUCKET = "";
+  try {
+    const record = createJobRecord({ prompt: "progress" }, "website");
+    const first = setJobProgress(record.id, {
+      stage: "script",
+      message: "Writing the video script",
+    });
+    const second = setJobProgress(record.id, {
+      stage: "scene-generation",
+      message: "Creating scene 1 of 2",
+      currentScene: 1,
+      completedScenes: 0,
+      totalScenes: 2,
+    });
+    await flushPersist(record.id);
+
+    const loaded = await loadJobManifest(record.id);
+    assert.equal(first?.sequence, 1);
+    assert.equal(second?.sequence, 2);
+    assert.equal(loaded?.progress?.sequence, 2);
+    assert.equal(loaded?.checkpoint?.resumeEligible, false);
+    assert.deepEqual(loaded?.checkpoint?.completedScenes, []);
+  } finally {
+    if (previous === undefined) delete process.env.LECTUREGEN_LOCAL_STORAGE_DIR;
+    else process.env.LECTUREGEN_LOCAL_STORAGE_DIR = previous;
     delete process.env.LECTUREGEN_R2_BUCKET;
     await rm(tempRoot, { recursive: true, force: true });
   }

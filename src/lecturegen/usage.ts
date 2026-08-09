@@ -7,6 +7,7 @@ export function buildJobUsageFromSessions(opts: {
   repairTokens?: { input: number; output: number } | null;
 }): LectureGenUsage | null {
   let inputTokens = opts.repairTokens?.input ?? 0;
+  let cachedInputTokens = 0;
   let outputTokens = opts.repairTokens?.output ?? 0;
   let estimatedCostUsd: number | null = null;
 
@@ -17,12 +18,14 @@ export function buildJobUsageFromSessions(opts: {
     ) as
       | {
           inputTokens?: number;
+          cachedInputTokens?: number;
           outputTokens?: number;
           costUsd?: number;
         }
       | undefined;
     if (!row) continue;
     inputTokens += row.inputTokens ?? 0;
+    cachedInputTokens += row.cachedInputTokens ?? 0;
     outputTokens += row.outputTokens ?? 0;
     if (typeof row.costUsd === "number" && Number.isFinite(row.costUsd)) {
       estimatedCostUsd = (estimatedCostUsd ?? 0) + row.costUsd;
@@ -36,6 +39,7 @@ export function buildJobUsageFromSessions(opts: {
   return {
     model: opts.model,
     inputTokens,
+    cachedInputTokens,
     outputTokens,
     totalTokens: inputTokens + outputTokens,
     estimatedCostUsd,

@@ -1,11 +1,16 @@
-import type { LectureGenJobRecord, LectureGenUsage } from "./types.ts";
+import type {
+  LectureGenJobRecord,
+  LectureGenProgress,
+  LectureGenUsage,
+} from "./types.ts";
 
 export type LectureGenCallbackPayload = {
   type: "lecturegen";
   jobId: string;
   generationId: string;
   sourceVersion: number;
-  status: "source_ready" | "failed";
+  status: "progress" | "source_ready" | "failed";
+  progress?: LectureGenProgress;
   usage?: LectureGenUsage | null;
   meteringOperationId?: string | null;
   error?: string;
@@ -130,6 +135,23 @@ export function buildLectureGenCallbackPayload(opts: {
     interactiveReady: opts.interactiveReady,
     gameReady: opts.gameReady,
     idempotencyKey: `${opts.generationId}:v${opts.sourceVersion}:${opts.status}`,
+    timestamp: new Date().toISOString(),
+  };
+}
+
+export function buildLectureGenProgressCallbackPayload(opts: {
+  websiteJobId: string;
+  generationId: string;
+  progress: LectureGenProgress;
+}): LectureGenCallbackPayload {
+  return {
+    type: "lecturegen",
+    jobId: opts.websiteJobId,
+    generationId: opts.generationId,
+    sourceVersion: opts.progress.sourceVersion,
+    status: "progress",
+    progress: opts.progress,
+    idempotencyKey: `${opts.generationId}:v${opts.progress.sourceVersion}:progress:${opts.progress.sequence}`,
     timestamp: new Date().toISOString(),
   };
 }

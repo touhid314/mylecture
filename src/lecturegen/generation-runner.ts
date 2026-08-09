@@ -2,15 +2,18 @@ import { createWriteStream, existsSync } from "node:fs";import { mkdir, mkdtemp,
 import os from "node:os";
 import path from "node:path";
 import { generateLecture } from "../../packages/lecture-agent/src/lecturegen.ts";
+import type { SceneTaskState } from "../../packages/lecture-agent/src/scene_orchestration.ts";
 import { EditorAgent } from "../../packages/lecture-agent/src/editor-agent/coding_agent.ts";
 import {
   buildLectureGenCallbackPayload,
+  buildLectureGenProgressCallbackPayload,
   postLectureGenCallback,
   resolveMeteringOperationId,
 } from "./callback.ts";
 import { formatGenerationLengthFromSeconds } from "./duration.ts";
 import {
   appendJobLog,
+  clearProgressCallbackPending,
   clearAbortController,
   clearCallbackPending,
   flushPersist,
@@ -19,10 +22,13 @@ import {
   registerAbortController,
   setCallbackPending,
   setJobError,
+  setJobProgress,
   setJobStatus,
   setJobUsage,
   setLastEditRequest,
+  setProgressCallbackPending,
 } from "./job-store.ts";
+import { createProgressInterpreter, type ProgressUpdate } from "./progress.ts";
 import { runScriptGate } from "./script-gate.ts";
 import { downloadWorkspaceFromStorage } from "./source-bundle.ts";
 import {
@@ -41,6 +47,88 @@ function readEnvString(name: string, fallback: string): string {
 
 function defaultModel(): string {
   return readEnvString("AGENT_MODEL", "gemini-3.5-flash");
+}
+
+function createProgressPublisher(generationId: string): {
+  emit: (update: ProgressUpdate) => void;
+  onLog: (line: string) => void;
+  onSceneTaskState: (state: SceneTaskState) => void;
+} {
+  const interpret = createProgressInterpreter();
+  const completedScenes = new Set<number>();
+  const emit = (update: ProgressUpdate): void => {
+    const progress = setJobProgress(generationId, update);
+    const record = getJobRecord(generationId);
+    if (!progress || !record?.websiteJobId) return;
+
+    setProgressCallbackPending(generationId, progress);
+    void flushPersist(generationId)
+      .then(async () => {
+        const delivered = await postLectureGenCallback(
+          buildLectureGenProgressCallbackPayload({
+            websiteJobId: record.websiteJobId!,
+            generationId,
+            progress,
+          }),
+        );
+        if (delivered) {
+          clearProgressCallbackPending(generationId, progress.sequence);
+          await flushPersist(generationId);
+        }
+      })
+      .catch((error) => {
+        const detail = error instanceof Error ? error.message : String(error);
+        appendJobLog(
+          generationId,
+          `Progress callback delivery deferred for retry: ${detail}`,
+        );
+      });
+  };
+  return {
+    emit,
+    onLog: (line: string) => {
+      appendJobLog(generationId, line);
+      const update = interpret(line);
+      if (update) emit(update);
+    },
+    onSceneTaskState: (state: SceneTaskState) => {
+      if (state.status === "failed" || state.status === "queued") return;
+      if (state.status === "complete") completedScenes.add(state.index);
+
+      const common = {
+        currentScene: state.index,
+        completedScenes: completedScenes.size,
+        totalScenes: state.totalScenes,
+      };
+      if (state.status === "generating") {
+        emit({
+          ...common,
+          stage: "scene-generation",
+          message: `Creating scene ${state.index} of ${state.totalScenes}`,
+        });
+      } else if (state.status === "preflight" || state.status === "validating") {
+        emit({
+          ...common,
+          stage: "scene-validation",
+          message: `Checking scene ${state.index} of ${state.totalScenes}`,
+        });
+      } else if (state.status === "repairing") {
+        emit({
+          ...common,
+          stage: "scene-repair",
+          message: `Refining scene ${state.index} of ${state.totalScenes}`,
+          repairAttempt: state.repairAttempt,
+          maximumRepairs: state.maximumRepairs,
+        });
+      } else if (state.status === "complete") {
+        emit({
+          ...common,
+          stage: "scene-validation",
+          message: `Scene ${state.index} of ${state.totalScenes} is ready`,
+        });
+      }
+    },
+  };
 }
 
 async function writeAttachments(
@@ -172,10 +260,12 @@ export async function runCreateJob(
   const includeVideo = request.includeVideo !== false;
   const includeInteractive = request.includeInteractive === true;
   const includeGame = request.includeGame === true;
+  const progress = createProgressPublisher(generationId);
 
   try {
     setJobStatus(generationId, "generating");
     appendJobLog(generationId, "Starting lecture generation");
+    progress.emit({ stage: "answer", message: "Understanding your request" });
 
     workspaceDir = await mkdtemp(path.join(os.tmpdir(), "lecturegen-gen-"));
     const attachmentPaths = await writeAttachments(workspaceDir, request.attachments);
@@ -201,7 +291,8 @@ export async function runCreateJob(
       // API default: off unless the client explicitly opts in (website omits this field).
       enableGetimg: request.enableGetimg === true,
       tokenTrackerSessionId: generationId,
-      onLog: (line) => appendJobLog(generationId, line),
+      onLog: progress.onLog,
+      onSceneTaskState: progress.onSceneTaskState,
       signal: controller.signal,
     });
 
@@ -216,7 +307,7 @@ export async function runCreateJob(
         workspaceDir: result.workspaceDir,
         model,
         targetSeconds: request.targetSeconds,
-        onLog: (line) => appendJobLog(generationId, line),
+        onLog: progress.onLog,
         signal: controller.signal,
       });
 
@@ -254,6 +345,10 @@ export async function runCreateJob(
     setJobUsage(generationId, usage);
 
     await markJobSourceReady(generationId, sourceVersion);
+    progress.emit({
+      stage: "source-ready",
+      message: includeVideo ? "Preparing your video render" : "Preparing your activities",
+    });
     appendJobLog(generationId, "Source ready for render");
     await notifyWebsite(generationId, sourceVersion, "source_ready", {
       usage,
@@ -294,6 +389,7 @@ export async function runEditJob(
 
   let workspaceDir: string | null = null;
   const includeVideo = record.createRequest?.includeVideo !== false;
+  const progress = createProgressPublisher(generationId);
 
   try {
     const sourceVersion = record.sourceVersion;
@@ -302,6 +398,7 @@ export async function runEditJob(
       generationId,
       `Starting edit (source v${sourceVersion}, base v${baseVersion})`,
     );
+    progress.emit({ stage: "script", message: "Applying your changes" });
 
     const restored = await downloadWorkspaceFromStorage(generationId, baseVersion);
     workspaceDir = restored.workspaceDir;
@@ -316,7 +413,7 @@ export async function runEditJob(
     const agent = new EditorAgent({
       model,
       workspaceDir,
-      onLog: (line) => appendJobLog(generationId, line),
+      onLog: progress.onLog,
     });
     const session = agent.startChat();
     await session.sendMessage(editPrompt, undefined, controller.signal);
@@ -330,7 +427,7 @@ export async function runEditJob(
         userPrompt: request.instruction,
         workspaceDir,
         model,
-        onLog: (line) => appendJobLog(generationId, line),
+        onLog: progress.onLog,
         signal: controller.signal,
       });
 
@@ -369,6 +466,7 @@ export async function runEditJob(
     setJobUsage(generationId, usage);
 
     await markJobSourceReady(generationId, sourceVersion);
+    progress.emit({ stage: "source-ready", message: "Preparing your updated preview" });
     appendJobLog(generationId, "Edited source ready for render");
     await notifyWebsite(generationId, sourceVersion, "source_ready", {
       usage,

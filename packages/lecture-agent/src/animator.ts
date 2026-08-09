@@ -6,12 +6,14 @@ import { fileURLToPath } from 'node:url';
 import { tool_edits, type RangeEdit } from './utils/file_edits.js';
 import { validate_index_html_contract, purify_content_for_path } from './utils/html_contract.js';
 import { LectureGenLlmSession, readPrompt, type LectureGenAttachment, type LectureGenLlmOptions } from './lecturegen_shared.js';
+import { normalizeMechanicalHtml } from './mechanical_html_normalization.js';
 
 const moduleDir = path.dirname(fileURLToPath(import.meta.url));
 const systemPromptPath = path.resolve(moduleDir, 'prompts', 'animator_system.md');
 const contractPath = path.resolve(moduleDir, '..', '.agents', 'mylecture-contracts', 'html-input-contract.md');
 
 export type PreviousHtml = { path: string; content: string };
+export type AnimatorAsyncGate = <T>(operation: () => Promise<T>) => Promise<T>;
 
 export type AnimatorInput = LectureGenLlmOptions & {
     request: string;
@@ -39,13 +41,16 @@ export function animatorSystemPrompt(): string {
 
 export class AnimatorSession {
     private readonly llm: LectureGenLlmSession;
+    private readonly generateGate?: AnimatorAsyncGate;
 
-    constructor(options: LectureGenLlmOptions) {
+    constructor(options: LectureGenLlmOptions, generateGate?: AnimatorAsyncGate) {
         this.llm = new LectureGenLlmSession(options, animatorSystemPrompt());
+        this.generateGate = generateGate;
     }
 
     generate(purpose: string, prompt: string, attachments: LectureGenAttachment[] = []): Promise<string> {
-        return this.llm.generate(purpose, prompt, attachments);
+        const operation = () => this.llm.generate(purpose, prompt, attachments);
+        return this.generateGate ? this.generateGate(operation) : operation();
     }
 }
 
@@ -127,7 +132,7 @@ export async function animateScriptBlock(input: AnimatorInput, session: Animator
         try {
             const response = await session.generate(`lecturegen_animator_block_${input.blockIndex}`, userPrompt, input.attachments);
             const [html] = purify_content_for_path(input.outputPath, parseAnimatorHtml(response));
-            return html;
+            return normalizeMechanicalHtml(html).html;
         } catch (err: any) {
             lastError = err;
             console.warn(`[Animator] Block ${input.blockIndex} (${input.outputPath}) attempt ${attempt}/${maxAttempts} failed: ${err.message || err}`);
@@ -203,6 +208,7 @@ export function parseAnimatorEdits(response: string, expectedPath: string): Rang
 
 const TEMPORAL_LAYOUT_MARKER = 'Temporal layout check failed:';
 const SCRIPT_BEFORE_GLOBALS_MARKER = 'Browser script error before contract globals:';
+const VALIDATION_METRICS_PREFIX = '__VALIDATION_METRICS__ ';
 /** Rewrite immediately when this many layout errors are reported (skip first JSON edit). */
 const IMMEDIATE_LAYOUT_REWRITE_ERROR_THRESHOLD = 6;
 /** After this many repair attempts, rewrite when several layout errors remain. */
@@ -222,6 +228,79 @@ export type LayoutRewriteDecisionInput = {
     consecutiveUnimprovedRepairs?: number;
     priorLayoutRewrite?: boolean;
 };
+
+export type ValidationFinding = {
+    category: 'syntax' | 'scene-layout' | 'contract' | 'unknown-api' | 'invalid-receiver' | 'runtime' | 'safe-zone' | 'panel-padding' | 'overlap' | 'other';
+    fingerprint: string;
+    message: string;
+};
+
+function validationCategory(message: string): ValidationFinding['category'] {
+    const lower = message.toLowerCase();
+    if (lower.includes('syntax check failed') || lower.includes('syntaxerror')) return 'syntax';
+    if (lower.includes('scene_layout key check failed')) return 'scene-layout';
+    if (lower.includes('unknown canvasrenderingcontext2d method')) return 'unknown-api';
+    if (lower.includes('cannot receive node.')) return 'invalid-receiver';
+    if (lower.includes('__render_section__ execution failed') || lower.includes('browser script error')) return 'runtime';
+    if (lower.includes('safe-zone') || lower.includes('outside viewport')) return 'safe-zone';
+    if (lower.includes('panel padding')) return 'panel-padding';
+    if (lower.includes('overlaps')) return 'overlap';
+    if (lower.includes('window.__') || lower.includes('plan item') || lower.includes('segment id')) return 'contract';
+    return 'other';
+}
+
+export function validationFindings(validation: string): ValidationFinding[] {
+    const findings: ValidationFinding[] = [];
+    const seen = new Set<string>();
+    for (const line of validation.split(/\r?\n/)) {
+        const trimmed = line.trim();
+        if (!trimmed.startsWith('- ')) continue;
+        const message = trimmed.slice(2).replace(/\s+/g, ' ').trim();
+        const category = validationCategory(message);
+        const fingerprint = `${category}|${message.replace(/at localTime=[\d.]+s/g, 'at localTime=<sample>')}`;
+        if (seen.has(fingerprint)) continue;
+        seen.add(fingerprint);
+        findings.push({ category, fingerprint, message });
+    }
+    return findings;
+}
+
+export function formatValidationForRepair(
+    validation: string,
+    priorFingerprints: ReadonlySet<string> = new Set(),
+): { output: string; findings: ValidationFinding[]; repeatedCount: number } {
+    const findings = validationFindings(validation);
+    if (findings.length === 0) {
+        return {
+            output: validation
+                .split(/\r?\n/)
+                .filter(line => !line.trim().startsWith(VALIDATION_METRICS_PREFIX))
+                .join('\n')
+                .trim(),
+            findings,
+            repeatedCount: 0,
+        };
+    }
+    const repeatedCount = findings.filter(finding => priorFingerprints.has(finding.fingerprint)).length;
+    const contextLines = validation
+        .split(/\r?\n/)
+        .map(line => line.trim())
+        .filter(line => line
+            && !line.startsWith('- ')
+            && !line.startsWith(VALIDATION_METRICS_PREFIX));
+    return {
+        output: [
+            ...contextLines,
+            `Validator findings (${findings.length}):`,
+            ...findings.map(finding => `- [${finding.category}] ${finding.message}`),
+            repeatedCount > 0
+                ? `${repeatedCount} finding(s) remain from an earlier repair validation.`
+                : '',
+        ].filter(Boolean).join('\n'),
+        findings,
+        repeatedCount,
+    };
+}
 
 export function countTemporalLayoutErrors(validation: string): number {
     return validation
@@ -368,21 +447,33 @@ export async function validateAndRepairHtml(
     workspaceDir: string,
     initialHtml: string,
     onValidation?: (message: string) => void,
-    maximumRepairs = 5
+    maximumRepairs = 5,
+    schedulers?: {
+        runValidation?: AnimatorAsyncGate;
+        runLlm?: AnimatorAsyncGate;
+    }
 ): Promise<string> {
     const target = path.resolve(workspaceDir, input.outputPath);
-    let html = initialHtml;
-    let lastSyntaxCleanHtml = initialHtml;
+    const initialNormalization = normalizeMechanicalHtml(initialHtml);
+    let html = initialNormalization.html;
+    let lastSyntaxCleanHtml = html;
     let previousRepairError = '';
     let consecutiveFailedRepairs = 0;
     let consecutiveUnimprovedRepairs = 0;
     let priorLayoutRewrite = false;
     let previousLayoutErrorCount: number | null = null;
     let hadRepairSinceLastValidation = false;
+    const priorFindingFingerprints = new Set<string>();
     fs.writeFileSync(target, html, 'utf8');
+    if (initialNormalization.changes.length > 0) {
+        onValidation?.(`Mechanical preflight: ${initialNormalization.changes.join('; ')}.`);
+    }
 
     for (let attempt = 0; attempt <= maximumRepairs; attempt++) {
-        const validation = validate_index_html_contract(input.outputPath, workspaceDir);
+        const runValidation = async () => validate_index_html_contract(input.outputPath, workspaceDir);
+        const validation = schedulers?.runValidation
+            ? await schedulers.runValidation(runValidation)
+            : await runValidation();
         onValidation?.(validation);
         if (validation.includes('validation passed')) return html;
         if (attempt === maximumRepairs) {
@@ -408,11 +499,16 @@ export async function validateAndRepairHtml(
 
         ({ anchor: lastSyntaxCleanHtml } = nextSyntaxCleanAnchor(html, lastSyntaxCleanHtml));
 
+        const repairValidation = formatValidationForRepair(validation, priorFindingFingerprints);
+        for (const finding of repairValidation.findings) {
+            priorFindingFingerprints.add(finding.fingerprint);
+        }
+
         const repairInput: AnimatorRepairInput = {
             ...input,
             currentHtml: html,
             validatorOutput: [
-                validation,
+                repairValidation.output,
                 previousRepairError ? `Previous repair attempt error:\n${previousRepairError}` : ''
             ].filter(Boolean).join('\n\n')
         };
@@ -432,7 +528,7 @@ export async function validateAndRepairHtml(
                     model: input.model,
                     tokenTrackerSessionId: input.tokenTrackerSessionId,
                     promptWorkspaceDir: input.promptWorkspaceDir,
-                });
+                }, schedulers?.runLlm);
                 html = await requestAnimatorLayoutRewrite(repairInput, rewriteSession);
                 fs.writeFileSync(target, html, 'utf8');
                 priorLayoutRewrite = true;
@@ -446,6 +542,13 @@ export async function validateAndRepairHtml(
             consecutiveFailedRepairs += 1;
             onValidation?.(`Animator repair attempt failed: ${previousRepairError}`);
             continue;
+        }
+
+        const normalization = normalizeMechanicalHtml(html);
+        if (normalization.changes.length > 0) {
+            html = normalization.html;
+            fs.writeFileSync(target, html, 'utf8');
+            onValidation?.(`Mechanical preflight: ${normalization.changes.join('; ')}.`);
         }
 
         const postEditSyntaxError = findInlineScriptSyntaxError(html);

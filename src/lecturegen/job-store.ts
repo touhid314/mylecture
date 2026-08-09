@@ -36,6 +36,8 @@ import type {
 
   LectureGenOwnerRole,
 
+  LectureGenProgress,
+
   LectureGenUsage,
 
 } from "./types.ts";
@@ -338,6 +340,17 @@ export function createJobRecord(
 
     usage: null,
 
+    progress: null,
+
+    checkpoint: {
+      schemaVersion: 1,
+      sourceVersion: 1,
+      resumeEligible: false,
+      stage: "queued",
+      completedScenes: [],
+      updatedAt: now,
+    },
+
     error: null,
 
     websiteJobId: request.websiteJobId?.trim() || null,
@@ -353,6 +366,8 @@ export function createJobRecord(
     lastEditRequest: null,
 
     callbackPending: null,
+
+    progressCallbackPending: null,
 
     callbackDeliveredAt: null,
 
@@ -414,6 +429,12 @@ export function countInFlightJobs(): number {
 
 export async function loadJobsFromManifests(): Promise<number> {
 
+  if (process.env.LECTUREGEN_RESUME_INTERRUPTED_JOBS?.trim() === "true") {
+    console.warn(
+      "LECTUREGEN_RESUME_INTERRUPTED_JOBS is reserved; checkpoint schema v1 is observability-only, so interrupted jobs still fail safely.",
+    );
+  }
+
   persistWrites = false;
 
   try {
@@ -444,6 +465,12 @@ export async function loadJobsFromManifests(): Promise<number> {
 
 
         callbackPending: manifest.callbackPending ?? null,
+
+        progressCallbackPending: manifest.progressCallbackPending ?? null,
+
+        progress: manifest.progress ?? null,
+
+        checkpoint: manifest.checkpoint ?? null,
 
         callbackDeliveredAt: manifest.callbackDeliveredAt ?? null,
 
@@ -594,6 +621,67 @@ export function setJobUsage(id: string, usage: LectureGenUsage | null): void {
 
 }
 
+export function setJobProgress(
+  id: string,
+  update: Omit<LectureGenProgress, "sourceVersion" | "sequence" | "updatedAt">,
+): LectureGenProgress | null {
+  const record = jobs.get(id);
+  if (!record) return null;
+
+  const progress: LectureGenProgress = {
+    ...update,
+    sourceVersion: record.sourceVersion,
+    sequence:
+      record.progress?.sourceVersion === record.sourceVersion
+        ? record.progress.sequence + 1
+        : 1,
+    updatedAt: Date.now(),
+  };
+  record.progress = progress;
+  record.checkpoint = {
+    schemaVersion: 1,
+    sourceVersion: record.sourceVersion,
+    resumeEligible: false,
+    stage: progress.stage,
+    completedScenes: Array.from(
+      { length: progress.completedScenes ?? 0 },
+      (_, index) => index + 1,
+    ),
+    updatedAt: progress.updatedAt,
+  };
+  touch(record);
+  void enqueuePersist(id);
+  return progress;
+}
+
+export function setProgressCallbackPending(
+  id: string,
+  progress: LectureGenProgress,
+): void {
+  const record = jobs.get(id);
+  if (!record) return;
+  record.progressCallbackPending = {
+    sourceVersion: progress.sourceVersion,
+    progress,
+  };
+  touch(record);
+  void enqueuePersist(id);
+}
+
+export function clearProgressCallbackPending(
+  id: string,
+  deliveredSequence: number,
+): void {
+  const record = jobs.get(id);
+  if (!record) return;
+  if (record.progressCallbackPending?.progress.sequence !== deliveredSequence) {
+    return;
+  }
+  record.progressCallbackPending = null;
+  touch(record);
+  void enqueuePersist(id);
+}
+
 
 
 export function setLastEditRequest(
@@ -625,6 +713,17 @@ export function bumpSourceVersion(id: string): number {
   if (!record) throw new Error("Job not found");
 
   record.sourceVersion += 1;
+
+  record.progress = null;
+
+  record.checkpoint = {
+    schemaVersion: 1,
+    sourceVersion: record.sourceVersion,
+    resumeEligible: false,
+    stage: "queued",
+    completedScenes: [],
+    updatedAt: Date.now(),
+  };
 
   touch(record);
 
@@ -687,6 +786,17 @@ export function tryBeginEditJob(id: string): number | null {
   record.sourceVersion = nextVersion;
 
   record.status = "generating";
+
+  record.progress = null;
+
+  record.checkpoint = {
+    schemaVersion: 1,
+    sourceVersion: nextVersion,
+    resumeEligible: false,
+    stage: "queued",
+    completedScenes: [],
+    updatedAt: Date.now(),
+  };
 
   touch(record);
 
@@ -815,6 +925,8 @@ export function publicJobView(record: LectureGenJobRecord): Record<string, unkno
     logs: record.logs,
 
     usage: record.usage,
+
+    progress: record.progress ?? null,
 
     error: record.error,
 

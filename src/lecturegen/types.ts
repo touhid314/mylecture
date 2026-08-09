@@ -7,9 +7,44 @@ export type LectureGenJobStatus =
 export type LectureGenUsage = {
   model: string;
   inputTokens: number;
+  cachedInputTokens?: number;
   outputTokens: number;
   totalTokens: number;
   estimatedCostUsd?: number | null;
+};
+
+export type LectureGenProgressStage =
+  | "answer"
+  | "script"
+  | "metadata"
+  | "scene-generation"
+  | "scene-validation"
+  | "scene-repair"
+  | "narration-review"
+  | "source-ready";
+
+/** Public-safe, monotonically ordered progress for one source version. */
+export type LectureGenProgress = {
+  sourceVersion: number;
+  sequence: number;
+  stage: LectureGenProgressStage;
+  message: string;
+  currentScene?: number;
+  completedScenes?: number;
+  totalScenes?: number;
+  repairAttempt?: number;
+  maximumRepairs?: number;
+  updatedAt: number;
+};
+
+/** Observability-only checkpoint. Version 1 is deliberately not resumable. */
+export type LectureGenCheckpoint = {
+  schemaVersion: 1;
+  sourceVersion: number;
+  resumeEligible: false;
+  stage: LectureGenProgressStage | "queued";
+  completedScenes: number[];
+  updatedAt: number;
 };
 
 export type LectureGenCreateRequest = {
@@ -62,6 +97,11 @@ export type LectureGenCallbackPending = {
   gameReady?: boolean;
 };
 
+export type LectureGenProgressCallbackPending = {
+  sourceVersion: number;
+  progress: LectureGenProgress;
+};
+
 export type LectureGenTransferRequest = {
   purpose: LectureGenTransferPurpose;
   sourceVersion: number;
@@ -80,6 +120,8 @@ export type LectureGenJobRecord = {
   lastReadySourceVersion: number;
   logs: string[];
   usage: LectureGenUsage | null;
+  progress?: LectureGenProgress | null;
+  checkpoint?: LectureGenCheckpoint | null;
   error: string | null;
   websiteJobId: string | null;
   websiteStorageBase: string | null;
@@ -89,6 +131,7 @@ export type LectureGenJobRecord = {
   manifestRevision?: number;
   /** Website callback awaiting (re)delivery. */
   callbackPending?: LectureGenCallbackPending | null;
+  progressCallbackPending?: LectureGenProgressCallbackPending | null;
   callbackDeliveredAt?: number | null;
   /** Set when DELETE is requested; reaper may remove artifacts after grace. */
   deleteRequestedAt?: number | null;
