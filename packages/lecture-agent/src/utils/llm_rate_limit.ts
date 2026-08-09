@@ -27,6 +27,12 @@ export class LlmRateLimitError extends Error {
 const RATE_LIMIT_MESSAGE_RE =
     /rate_limit|rate limit|tokens per min|RESOURCE_EXHAUSTED|\b429\b/i;
 
+const TRANSIENT_PROVIDER_MESSAGE_RE =
+    /\bUNAVAILABLE\b|high demand|temporarily unavailable|service unavailable|server overloaded|overloaded|\b50[0234]\b/i;
+
+const CAPACITY_MESSAGE_RE =
+    /\bUNAVAILABLE\b|high demand|temporarily unavailable|service unavailable|\b503\b/i;
+
 export function isLlmRateLimitError(err: unknown): boolean {
     if (err instanceof LlmRateLimitError) return true;
     if (err == null) return false;
@@ -42,6 +48,35 @@ export function isLlmRateLimitError(err: unknown): boolean {
     }
 
     return RATE_LIMIT_MESSAGE_RE.test(String(err));
+}
+
+/** Provider failures that are safe to retry on a model from the other provider. */
+export function isLlmTransientProviderError(err: unknown): boolean {
+    if (isLlmRateLimitError(err)) return true;
+    if (err == null) return false;
+
+    if (typeof err === 'object') {
+        const e = err as Record<string, unknown>;
+        const status = e.status ?? e.statusCode ?? e.code;
+        if (new Set<unknown>([500, 502, 503, 504, '500', '502', '503', '504']).has(status)) {
+            return true;
+        }
+        return TRANSIENT_PROVIDER_MESSAGE_RE.test(String(e.message ?? ''));
+    }
+
+    return TRANSIENT_PROVIDER_MESSAGE_RE.test(String(err));
+}
+
+/** Explicit provider-capacity failures that should cross providers like rate limits. */
+export function isLlmCapacityError(err: unknown): boolean {
+    if (err == null) return false;
+    if (typeof err === 'object') {
+        const e = err as Record<string, unknown>;
+        const status = e.status ?? e.statusCode ?? e.code;
+        if (status === 503 || status === '503') return true;
+        return CAPACITY_MESSAGE_RE.test(String(e.message ?? ''));
+    }
+    return CAPACITY_MESSAGE_RE.test(String(err));
 }
 
 function readHeaderValue(headers: unknown, name: string): string | null {
@@ -132,24 +167,27 @@ export function primaryCooldownUntilMs(err: unknown, nowMs = Date.now()): number
 
 export function resolveLlmFallbackModel(primaryModel: string): string | null {
     const primary = primaryModel.trim();
-    if (primary.toLowerCase().includes('gemini')) {
-        return null;
-    }
-
     const envFallback = process.env.LLM_FALLBACK_MODEL?.trim();
-    let fallback: string | null = null;
-    if (envFallback) {
-        fallback = envFallback;
-    } else if (primary.startsWith('gpt-')) {
-        fallback = 'gemini-3.5-flash';
-    } else {
-        return null;
+    const primaryIsGemini = primary.toLowerCase().includes('gemini');
+    const primaryIsOpenAi = primary.toLowerCase().startsWith('gpt-');
+
+    if (primaryIsGemini) {
+        const configuredOpenAi = process.env.OPENAI_FALLBACK_MODEL?.trim();
+        if (configuredOpenAi?.toLowerCase().startsWith('gpt-')) {
+            return configuredOpenAi;
+        }
+        if (envFallback?.toLowerCase().startsWith('gpt-')) {
+            return envFallback;
+        }
+        return 'gpt-5.6-luna';
     }
 
-    const trimmed = fallback.trim();
-    // Gemini primary already returned above, so trimmed === primary is unreachable.
-    if (!trimmed.toLowerCase().includes('gemini')) {
-        return null;
+    if (primaryIsOpenAi) {
+        if (envFallback?.toLowerCase().includes('gemini')) {
+            return envFallback;
+        }
+        return 'gemini-3.5-flash';
     }
-    return trimmed;
+
+    return null;
 }

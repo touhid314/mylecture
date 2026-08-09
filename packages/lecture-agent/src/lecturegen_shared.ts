@@ -5,6 +5,7 @@ import { build_prompt } from './prompt_builder.js';
 import { LLM_Model } from './utils/llm_model.js';
 import {
     clampLlmRetryWaitMs,
+    isLlmCapacityError,
     isLlmRateLimitError,
     parseRetryAfterMs,
     PRIMARY_RESTORE_FAILURE_PUSH_MS,
@@ -40,6 +41,10 @@ function responseText(response: any, purpose: string): string {
 function rateLimitBackoffMs(err: unknown, attempt: number): number {
     const delay = parseRetryAfterMs(err) ?? 2000 * attempt;
     return clampLlmRetryWaitMs(delay);
+}
+
+function shouldFallbackAcrossProviders(err: unknown): boolean {
+    return isLlmRateLimitError(err) || isLlmCapacityError(err);
 }
 
 type LlmRetryHandle = {
@@ -91,17 +96,18 @@ function maybeRestorePrimary(
         console.warn(
             `[LectureGen LLM] ${purpose} restore to ${handle.primaryModel} failed: ${restoreErr?.message || restoreErr}`
         );
-        // Stay on Gemini; push cooldown forward to avoid hammering.
+        // Stay on the fallback; push cooldown forward to avoid hammering.
         handle.primaryRetryAtMs = Date.now() + PRIMARY_RESTORE_FAILURE_PUSH_MS;
     }
 }
 
 /**
- * Shared LectureGen retry loop: temporary Gemini fallback on rate limit.
+ * Shared LectureGen retry loop: temporary cross-provider fallback on rate-limit
+ * or explicit provider-capacity failures.
  * Primary restore runs once per generate (start of this call), not mid-retry;
- * the next generate()/runLlm still returns to Luna after cooldown.
+ * the next generate()/runLlm returns to the configured primary after cooldown.
  * Retry-after backoff when no fallback is available / construction fails,
- * or when already on Gemini.
+ * or when already on the fallback provider.
  */
 async function generateWithRateLimitFallback(
     handle: LlmRetryHandle,
@@ -125,11 +131,11 @@ async function generateWithRateLimitFallback(
                 `[LectureGen LLM] ${purpose} attempt ${attempt}/${maxAttempts} failed: ${err.message || err}`
             );
 
-            if (isLlmRateLimitError(err) && !handle.onFallback) {
+            if (shouldFallbackAcrossProviders(err) && !handle.onFallback) {
                 const fallback = resolveLlmFallbackModel(handle.primaryModel);
                 if (fallback) {
                     console.warn(
-                        `[LectureGen LLM] ${purpose} rate-limited on ${handle.llm.model_name}; falling back to ${fallback}`
+                        `[LectureGen LLM] ${purpose} rate/capacity failure on ${handle.llm.model_name}; falling back to ${fallback}`
                     );
                     handle.primaryRetryAtMs = primaryCooldownUntilMs(err);
                     try {
@@ -137,13 +143,13 @@ async function generateWithRateLimitFallback(
                             copyHistory: options?.copyHistoryOnFallback ?? false,
                         });
                         handle.onFallback = true;
-                        // Fresh attempt budget on Gemini at most once per generate.
+                        // Fresh attempt budget on the fallback at most once per generate.
                         if (!fallbackBudgetResetUsed) {
                             fallbackBudgetResetUsed = true;
                             attempt = 0;
                             continue;
                         }
-                        // Already reset once; keep burning remaining attempts (no OpenAI wait).
+                        // Already reset once; keep burning remaining attempts.
                         continue;
                     } catch (constructErr: any) {
                         console.warn(
@@ -156,7 +162,7 @@ async function generateWithRateLimitFallback(
             }
 
             if (attempt < maxAttempts) {
-                const delayMs = isLlmRateLimitError(err)
+                const delayMs = shouldFallbackAcrossProviders(err)
                     ? rateLimitBackoffMs(err, attempt)
                     : 2000 * attempt;
                 await new Promise(resolve => setTimeout(resolve, delayMs));

@@ -4,17 +4,22 @@ import {
     DEFAULT_PRIMARY_COOLDOWN_MS,
     LlmRateLimitError,
     clampLlmRetryWaitMs,
+    isLlmCapacityError,
     isLlmRateLimitError,
+    isLlmTransientProviderError,
     parseRetryAfterMs,
     primaryCooldownUntilMs,
     resolveLlmFallbackModel,
 } from './llm_rate_limit.js';
 
 const ORIGINAL_FALLBACK = process.env.LLM_FALLBACK_MODEL;
+const ORIGINAL_OPENAI_FALLBACK = process.env.OPENAI_FALLBACK_MODEL;
 
 afterEach(() => {
     if (ORIGINAL_FALLBACK === undefined) delete process.env.LLM_FALLBACK_MODEL;
     else process.env.LLM_FALLBACK_MODEL = ORIGINAL_FALLBACK;
+    if (ORIGINAL_OPENAI_FALLBACK === undefined) delete process.env.OPENAI_FALLBACK_MODEL;
+    else process.env.OPENAI_FALLBACK_MODEL = ORIGINAL_OPENAI_FALLBACK;
 });
 
 describe('isLlmRateLimitError', () => {
@@ -54,6 +59,34 @@ describe('isLlmRateLimitError', () => {
         assert.equal(isLlmRateLimitError(new Error('server overloaded')), false);
         assert.equal(isLlmRateLimitError({ status: 500 }), false);
         assert.equal(isLlmRateLimitError(null), false);
+    });
+});
+
+describe('isLlmTransientProviderError', () => {
+    it('detects provider capacity failures', () => {
+        assert.equal(isLlmTransientProviderError({ status: 503 }), true);
+        assert.equal(
+            isLlmTransientProviderError(new Error('UNAVAILABLE: model is experiencing high demand')),
+            true
+        );
+    });
+
+    it('includes rate limits but excludes permanent errors', () => {
+        assert.equal(isLlmTransientProviderError({ status: 429 }), true);
+        assert.equal(isLlmTransientProviderError(new Error('invalid tool output')), false);
+    });
+});
+
+describe('isLlmCapacityError', () => {
+    it('detects high-demand and unavailable responses', () => {
+        assert.equal(isLlmCapacityError({ status: 503 }), true);
+        assert.equal(isLlmCapacityError(new Error('This model is currently experiencing high demand')), true);
+        assert.equal(isLlmCapacityError(new Error('UNAVAILABLE')), true);
+    });
+
+    it('does not classify unrelated provider failures as capacity errors', () => {
+        assert.equal(isLlmCapacityError({ status: 500 }), false);
+        assert.equal(isLlmCapacityError(new Error('invalid tool output')), false);
     });
 });
 
@@ -156,13 +189,22 @@ describe('resolveLlmFallbackModel', () => {
         assert.equal(resolveLlmFallbackModel('gpt-5.6-luna'), 'gemini-3.5-flash');
     });
 
-    it('returns null for gemini primary', () => {
+    it('defaults gemini primary to gpt-5.6-luna', () => {
         delete process.env.LLM_FALLBACK_MODEL;
-        assert.equal(resolveLlmFallbackModel('gemini-3.5-flash'), null);
+        delete process.env.OPENAI_FALLBACK_MODEL;
+        assert.equal(resolveLlmFallbackModel('gemini-3.5-flash'), 'gpt-5.6-luna');
         // Env override cannot create a gemini→gemini "equals primary" path:
-        // gemini primary returns null before fallback resolution.
+        // The resolver ignores that same-provider value and uses the OpenAI default.
         process.env.LLM_FALLBACK_MODEL = 'gemini-3.5-flash';
-        assert.equal(resolveLlmFallbackModel('gemini-3.5-flash'), null);
+        assert.equal(resolveLlmFallbackModel('gemini-3.5-flash'), 'gpt-5.6-luna');
+    });
+
+    it('uses OPENAI_FALLBACK_MODEL for gemini primary', () => {
+        process.env.OPENAI_FALLBACK_MODEL = 'gpt-5.6-luna-custom';
+        assert.equal(
+            resolveLlmFallbackModel('gemini-3.5-flash'),
+            'gpt-5.6-luna-custom'
+        );
     });
 
     it('uses LLM_FALLBACK_MODEL env override', () => {
@@ -170,10 +212,10 @@ describe('resolveLlmFallbackModel', () => {
         assert.equal(resolveLlmFallbackModel('gpt-5.6-luna'), 'gemini-2.5-flash');
     });
 
-    it('returns null when env fallback is another gpt model', () => {
+    it('ignores same-provider env fallback for gpt primary', () => {
         process.env.LLM_FALLBACK_MODEL = 'gpt-4o';
-        assert.equal(resolveLlmFallbackModel('gpt-5.6-luna'), null);
+        assert.equal(resolveLlmFallbackModel('gpt-5.6-luna'), 'gemini-3.5-flash');
         process.env.LLM_FALLBACK_MODEL = ' GPT-5.6-luna ';
-        assert.equal(resolveLlmFallbackModel('gpt-5.6-luna'), null);
+        assert.equal(resolveLlmFallbackModel('gpt-5.6-luna'), 'gemini-3.5-flash');
     });
 });

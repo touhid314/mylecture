@@ -1,4 +1,5 @@
-import { createWriteStream, existsSync } from "node:fs";import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { createWriteStream, existsSync } from "node:fs";
+import { mkdir, mkdtemp, readFile, readdir, rm, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { generateLecture } from "../../packages/lecture-agent/src/lecturegen.ts";
@@ -11,6 +12,10 @@ import {
   resolveMeteringOperationId,
 } from "./callback.ts";
 import { formatGenerationLengthFromSeconds } from "./duration.ts";
+import {
+  resolveEditModel,
+  runEditWithModelFallback,
+} from "./edit-model-fallback.ts";
 import {
   appendJobLog,
   clearProgressCallbackPending,
@@ -406,19 +411,61 @@ export async function runEditJob(
     const indexPath = path.join(workspaceDir, "index.html");
 
     const attachmentPaths = await writeAttachments(workspaceDir, request.attachments);
-    const model = defaultModel();
+    const primaryModel = resolveEditModel();
+    const editableFiles = (await readdir(workspaceDir)).filter((name) =>
+      /^index\d*\.html$/i.test(name),
+    );
+    const originalEditSources = new Map(
+      await Promise.all(
+        editableFiles.map(async (name) => [
+          name,
+          await readFile(path.join(workspaceDir!, name), "utf-8"),
+        ] as const),
+      ),
+    );
+    let editAttempt = 0;
     const editPrompt =
       `You are editing an existing renderer-ready lecture video. ` +
       `The current HTML is in index.html. Apply this change: ${request.instruction}`;
 
-    const agent = new EditorAgent({
-      model,
-      workspaceDir,
-      tokenTrackerSessionId: generationId,
-      onLog: progress.onLog,
+    appendJobLog(generationId, `Editing with model ${primaryModel}`);
+    const editResult = await runEditWithModelFallback({
+      primaryModel,
+      run: async (model) => {
+        if (editAttempt > 0) {
+          await Promise.all(
+            Array.from(originalEditSources, ([name, html]) =>
+              writeFile(path.join(workspaceDir!, name), html, "utf-8"),
+            ),
+          );
+          appendJobLog(generationId, "Restored pre-edit source before fallback");
+        }
+        editAttempt += 1;
+        const agent = new EditorAgent({
+          model,
+          workspaceDir,
+          tokenTrackerSessionId: generationId,
+          onLog: progress.onLog,
+        });
+        const session = agent.startChat();
+        return session.sendMessage(editPrompt, undefined, controller.signal);
+      },
+      onFallback: (failedModel, fallbackModel, error) => {
+        const detail = error instanceof Error ? error.message : String(error);
+        appendJobLog(
+          generationId,
+          `Transient model failure on ${failedModel}; retrying edit with ${fallbackModel}: ${detail}`,
+        );
+        progress.emit({
+          stage: "script",
+          message: "The primary editor is busy; trying the backup editor",
+        });
+      },
     });
-    const session = agent.startChat();
-    await session.sendMessage(editPrompt, undefined, controller.signal);
+    const model = editResult.model;
+    if (editResult.usedFallback) {
+      appendJobLog(generationId, `Edit fallback succeeded with ${model}`);
+    }
 
     let sourceHtml: string | null = null;
     let repairTokens: { input: number; output: number } | null = null;

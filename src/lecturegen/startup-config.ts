@@ -1,3 +1,5 @@
+import { resolveEditFallbackModel } from "./edit-model-fallback.ts";
+
 type Environment = NodeJS.ProcessEnv;
 
 function value(env: Environment, name: string): string {
@@ -23,11 +25,14 @@ function isPositiveInteger(raw: string): boolean {
 
 function configuredModels(env: Environment): string[] {
   const defaultModel = value(env, "AGENT_MODEL") || "gemini-3.5-flash";
+  const animatorModel = value(env, "ANIMATOR_MODEL") || defaultModel;
+  const editFallbackModel = resolveEditFallbackModel(animatorModel, env);
   return [
     defaultModel,
     value(env, "SCRIPT_MODEL") || defaultModel,
-    value(env, "ANIMATOR_MODEL") || defaultModel,
-  ];
+    animatorModel,
+    editFallbackModel,
+  ].filter((model): model is string => Boolean(model));
 }
 
 export function requiresStrictLectureGenStartupValidation(
@@ -110,4 +115,3 @@ export function validateLectureGenStartupConfig(
 
   return errors;
 }
-

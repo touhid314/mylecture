@@ -174,7 +174,9 @@ OPENAI_API_KEY="..."
 AGENT_MODEL="gemini-3.5-flash"
 # Optional LectureGen stage overrides (fall back to AGENT_MODEL / --model):
 # SCRIPT_MODEL="gpt-5.6-luna"       # answer + script writer
-# ANIMATOR_MODEL="gemini-3.5-flash" # animator, iagen, gamegen
+# ANIMATOR_MODEL="gpt-5.6-luna"     # animator, iagen, gamegen, and video edits
+# EDIT_FALLBACK_MODEL="gemini-3.5-flash" # optional opposite-provider edit fallback
+# OPENAI_FALLBACK_MODEL="gpt-5.6-luna" # optional Gemini rate-limit fallback for shared generation stages
 GPT_REASONING_EFFORT="none"
 # GPT_SERVICE_TIER="fast"  # OpenAI only; omit when unset. Prefer fast; priority is a backwards-compatible alias. Separate from GPT_REASONING_EFFORT.
 AGENT_WORKSPACE="optional editor workspace override"
@@ -184,7 +186,9 @@ GETIMG_MODEL="..."
 GETIMG_WATCHMAN_MODEL="..."
 ```
 
-`SCRIPT_MODEL` / `ANIMATOR_MODEL` (or CLI `--script-model` / `--animator-model`) split LectureGen stages so script writing can use a different model than animation. The editor agent still uses `AGENT_MODEL` / `--model` only. PracticeGen (IAGen/GameGen) also resolves `ANIMATOR_MODEL` / `--animator-model` with fallback to `--model` / `AGENT_MODEL`.
+`SCRIPT_MODEL` / `ANIMATOR_MODEL` (or CLI `--script-model` / `--animator-model`) split LectureGen stages so script writing can use a different model than animation. Cloud video edits use `ANIMATOR_MODEL`, falling back to `AGENT_MODEL` when it is unset. A transient edit-provider failure crosses to `EDIT_FALLBACK_MODEL` (or the opposite-provider default). PracticeGen (IAGen/GameGen) also resolves `ANIMATOR_MODEL` / `--animator-model` with fallback to `--model` / `AGENT_MODEL`.
+
+Shared generation calls fall back across providers for rate-limit and explicit capacity errors (`429`, `RESOURCE_EXHAUSTED`, `503`, `UNAVAILABLE`, or high-demand responses): Gemini uses `OPENAI_FALLBACK_MODEL` (default `gpt-5.6-luna`), and OpenAI uses a Gemini `LLM_FALLBACK_MODEL` (default `gemini-3.5-flash`). Other provider errors are retried on the active model and are not cross-provider fallback triggers.
 
 Side-by-side script A/B (no animator):
 

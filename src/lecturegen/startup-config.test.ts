@@ -6,7 +6,9 @@ function validProductionEnv(): NodeJS.ProcessEnv {
   return {
     NODE_ENV: "production",
     AGENT_MODEL: "gemini-3.5-flash",
+    ANIMATOR_MODEL: "gpt-5.6-luna",
     GOOGLE_API_KEY: "google-key",
+    OPENAI_API_KEY: "openai-key",
     SCRIPT_TRIMMER_CHUNK_SIZE: "75",
     LECTUREGEN_SERVICE_TOKEN: "service-token",
     LECTUREGEN_WORKER_TOKEN: "worker-token",
@@ -48,3 +50,9 @@ test("production startup rejects shared role tokens and buckets", () => {
   assert(errors.some((error) => error.includes("BUCKET") && error.includes("different")));
 });
 
+test("production startup requires both provider keys for edit fallback", () => {
+  const env = validProductionEnv();
+  delete env.GOOGLE_API_KEY;
+  const errors = validateLectureGenStartupConfig(env);
+  assert(errors.includes("GOOGLE_API_KEY is required by the configured Gemini model(s)"));
+});
