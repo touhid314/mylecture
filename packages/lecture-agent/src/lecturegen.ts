@@ -100,6 +100,8 @@ export type ParsedLectureGenRequest = {
     theme: string;
     teachingStyle: string;
     attachments: LectureGenAttachment[];
+    hasSettingsMarker?: boolean;
+    embedSubtitle?: boolean;
 };
 
 const SETTINGS_MARKER = 'if the user query is for lecture generation then follow this:';
@@ -152,7 +154,9 @@ export function parseLectureGenRequest(task: string, workspaceDir: string): Pars
         includeGame: valueAfter('output practice game', settings, 'no').toLowerCase() === 'yes',
         theme,
         teachingStyle,
-        attachments
+        attachments,
+        hasSettingsMarker: markerIndex >= 0,
+        embedSubtitle: valueAfter('embed subtitle in video', settings, 'no').toLowerCase() === 'yes'
     };
 }
 
@@ -221,7 +225,11 @@ export class LectureGen {
                                 referenceMaterial,
                                 attachments: input.attachments
                             })
-                                .then(html => ({ outputPath: 'interactive.html' as const, html }))
+                                .then(html => {
+                                    fs.writeFileSync(path.join(this.options.workspaceDir, 'interactive.html'), html, 'utf8');
+                                    log(`Finished interactive.html.`);
+                                    return { outputPath: 'interactive.html' as const, html };
+                                })
                                 .catch(error => ({ outputPath: 'interactive.html' as const, error }))
                         );
                     }
@@ -235,7 +243,11 @@ export class LectureGen {
                                 referenceMaterial,
                                 attachments: input.attachments
                             })
-                                .then(html => ({ outputPath: 'game.html' as const, html }))
+                                .then(html => {
+                                    fs.writeFileSync(path.join(this.options.workspaceDir, 'game.html'), html, 'utf8');
+                                    log(`Finished game.html.`);
+                                    return { outputPath: 'game.html' as const, html };
+                                })
                                 .catch(error => ({ outputPath: 'game.html' as const, error }))
                         );
                     }
@@ -511,8 +523,6 @@ export class LectureGen {
                         throw new Error(`${result.outputPath} generation failed: ${detail}`);
                     }
                     if (!result.html) throw new Error(`${result.outputPath} generation returned no HTML.`);
-                    fs.writeFileSync(path.join(this.options.workspaceDir, result.outputPath), result.html, 'utf8');
-                    log(`Finished ${result.outputPath}.`);
                 }
 
                 const metadata = metadataPromise ? await metadataPromise : null;

@@ -454,20 +454,9 @@ export async function validateAndRepairHtml(
     }
 ): Promise<string> {
     const target = path.resolve(workspaceDir, input.outputPath);
-    const initialNormalization = normalizeMechanicalHtml(initialHtml);
-    let html = initialNormalization.html;
-    let lastSyntaxCleanHtml = html;
+    let html = initialHtml;
     let previousRepairError = '';
-    let consecutiveFailedRepairs = 0;
-    let consecutiveUnimprovedRepairs = 0;
-    let priorLayoutRewrite = false;
-    let previousLayoutErrorCount: number | null = null;
-    let hadRepairSinceLastValidation = false;
-    const priorFindingFingerprints = new Set<string>();
     fs.writeFileSync(target, html, 'utf8');
-    if (initialNormalization.changes.length > 0) {
-        onValidation?.(`Mechanical preflight: ${initialNormalization.changes.join('; ')}.`);
-    }
 
     for (let attempt = 0; attempt <= maximumRepairs; attempt++) {
         const runValidation = async () => validate_index_html_contract(input.outputPath, workspaceDir);
@@ -479,90 +468,24 @@ export async function validateAndRepairHtml(
         if (attempt === maximumRepairs) {
             throw new Error(`${input.outputPath} still failed validation after ${maximumRepairs} animator repair attempt(s):\n${validation}`);
         }
-
-        const currentLayoutErrorCount = isTemporalLayoutValidation(validation)
-            ? countTemporalLayoutErrors(validation)
-            : null;
-        if (
-            hadRepairSinceLastValidation &&
-            previousLayoutErrorCount != null &&
-            currentLayoutErrorCount != null
-        ) {
-            if (currentLayoutErrorCount >= previousLayoutErrorCount) {
-                consecutiveUnimprovedRepairs += 1;
-            } else {
-                consecutiveUnimprovedRepairs = 0;
-            }
-        }
-        hadRepairSinceLastValidation = false;
-        previousLayoutErrorCount = currentLayoutErrorCount;
-
-        ({ anchor: lastSyntaxCleanHtml } = nextSyntaxCleanAnchor(html, lastSyntaxCleanHtml));
-
-        const repairValidation = formatValidationForRepair(validation, priorFindingFingerprints);
-        for (const finding of repairValidation.findings) {
-            priorFindingFingerprints.add(finding.fingerprint);
-        }
-
-        const repairInput: AnimatorRepairInput = {
-            ...input,
-            currentHtml: html,
-            validatorOutput: [
-                repairValidation.output,
-                previousRepairError ? `Previous repair attempt error:\n${previousRepairError}` : ''
-            ].filter(Boolean).join('\n\n')
-        };
-
-        const useLayoutRewrite = shouldRequestLayoutRewrite({
-            attempt,
-            maximumRepairs,
-            validation,
-            consecutiveFailedRepairs,
-            consecutiveUnimprovedRepairs,
-            priorLayoutRewrite,
-        });
-
+        let edits: RangeEdit[];
         try {
-            if (useLayoutRewrite) {
-                const rewriteSession = new AnimatorSession({
-                    model: input.model,
-                    tokenTrackerSessionId: input.tokenTrackerSessionId,
-                    promptWorkspaceDir: input.promptWorkspaceDir,
-                }, schedulers?.runLlm);
-                html = await requestAnimatorLayoutRewrite(repairInput, rewriteSession);
-                fs.writeFileSync(target, html, 'utf8');
-                priorLayoutRewrite = true;
-            } else {
-                const edits = await requestAnimatorRepair(repairInput, session);
-                tool_edits(input.outputPath, edits, workspaceDir);
-                html = fs.readFileSync(target, 'utf8');
-            }
+            const runLlmRepair = async () => requestAnimatorRepair({
+                ...input,
+                currentHtml: html,
+                validatorOutput: [validation, previousRepairError].filter(Boolean).join('\n\nPrevious repair attempt error:\n')
+            }, session);
+            edits = schedulers?.runLlm
+                ? await schedulers.runLlm(runLlmRepair)
+                : await runLlmRepair();
+            tool_edits(input.outputPath, edits, workspaceDir);
         } catch (error) {
             previousRepairError = error instanceof Error ? error.message : String(error);
-            consecutiveFailedRepairs += 1;
             onValidation?.(`Animator repair attempt failed: ${previousRepairError}`);
             continue;
         }
-
-        const normalization = normalizeMechanicalHtml(html);
-        if (normalization.changes.length > 0) {
-            html = normalization.html;
-            fs.writeFileSync(target, html, 'utf8');
-            onValidation?.(`Mechanical preflight: ${normalization.changes.join('; ')}.`);
-        }
-
-        const postEditSyntaxError = findInlineScriptSyntaxError(html);
-        if (postEditSyntaxError) {
-            html = revertToLastViable(target, lastSyntaxCleanHtml);
-            previousRepairError = `Repair edits introduced a JavaScript syntax error (${postEditSyntaxError}). Edits were reverted to the last viable file.`;
-            consecutiveFailedRepairs += 1;
-            onValidation?.(previousRepairError);
-            continue;
-        }
-
-        consecutiveFailedRepairs = 0;
         previousRepairError = '';
-        hadRepairSinceLastValidation = true;
+        html = fs.readFileSync(target, 'utf8');
     }
     throw new Error(`Unexpected validation loop exit for ${input.outputPath}.`);
 }

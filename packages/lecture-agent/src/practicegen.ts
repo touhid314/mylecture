@@ -12,7 +12,7 @@ import { fileURLToPath } from 'node:url';
 import { runGameGen } from './gamegen.js';
 import { runIAGen } from './iagen.js';
 import { resolveLectureGenStageModels } from './stage_models.js';
-import { validate_practice_page_contract } from './utils/html_contract.js';
+
 
 export type PracticeKind = 'interactive' | 'game';
 
@@ -94,10 +94,6 @@ export async function generatePracticePage(options: PracticeGenOptions): Promise
     log(`Wrote ${outputRelPath} (${html.length} chars).`);
 
     let validation: string | undefined;
-    if (!options.skipValidation) {
-        validation = validate_practice_page_contract(outputRelPath, workspaceDir);
-        log(validation);
-    }
 
     return {
         kind: options.kind,

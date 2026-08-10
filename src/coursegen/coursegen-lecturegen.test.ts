@@ -24,11 +24,13 @@ import {
 } from './lecture-prompt.ts';
 import type { CoursePlan, PlannedLecture } from './types.ts';
 import {
+  parseLectureGenRequest
+} from '../../packages/lecture-agent/src/lecturegen.ts';
+import {
   buildLectureGenSettingsText,
   mergeLectureGenSettings,
-  parseLectureGenRequest,
   SETTINGS_MARKER
-} from '../../packages/lecture-agent/src/lecturegen.ts';
+} from './lecturegen-settings.ts';
 import {
   defaultPracticeRelPath,
   DEFAULT_GAME_REL,

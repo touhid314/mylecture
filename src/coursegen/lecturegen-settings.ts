@@ -38,3 +38,21 @@ export function buildLectureGenSettingsText(options: {
     .filter(Boolean)
     .join('\n');
 }
+
+export function mergeLectureGenSettings(
+  explicit: any,
+  parsed: any
+) {
+  return {
+    aspectRatio: explicit.aspectRatio || parsed.aspectRatio,
+    generationLength: explicit.generationLength || parsed.generationLength,
+    embedSubtitle: explicit.embedSubtitle !== undefined ? explicit.embedSubtitle : parsed.embedSubtitle,
+    enableGetimg: explicit.enableGetimg !== undefined ? explicit.enableGetimg : parsed.enableGetimg,
+    includeVideo: explicit.includeVideo !== undefined ? explicit.includeVideo : parsed.includeVideo,
+    includeInteractive: explicit.includeInteractive !== undefined ? explicit.includeInteractive : parsed.includeInteractive,
+    includeGame: explicit.includeGame !== undefined ? explicit.includeGame : parsed.includeGame,
+    theme: explicit.theme || parsed.theme,
+    teachingStyle: explicit.teachingStyle || parsed.teachingStyle,
+    profile: explicit.profile || parsed.profile
+  };
+}

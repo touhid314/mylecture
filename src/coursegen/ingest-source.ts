@@ -300,7 +300,7 @@ export async function ingestSource(options: IngestSourceOptions): Promise<Source
     useSystemFonts: true,
     isEvalSupported: false,
     disableFontFace: true
-  });
+  } as any);
   const doc = await loadingTask.promise;
 
   try {

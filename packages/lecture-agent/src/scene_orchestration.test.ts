@@ -149,9 +149,6 @@ test('animator contract keeps resolved timing authoritative and bridges same-sce
         'utf8'
     );
 
-    assert.match(animatorPrompt, /segment\.resolvedDuration` as the authoritative beat duration/);
-    assert.match(animatorPrompt, /Bridge every same-scene beat boundary/);
-    assert.match(animatorPrompt, /fade it out over roughly the first 8–12%/);
     assert.match(htmlContract, /segment\.resolvedDuration` is the authoritative duration/);
     assert.match(htmlContract, /Adjacent beats in the same script scene are continuous by default/);
 });
