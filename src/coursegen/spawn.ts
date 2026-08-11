@@ -438,9 +438,6 @@ function resolveTtsProvider(voice: string, explicit?: string) {
       // fall through
     }
   }
-  if (v.startsWith('am_') || v.startsWith('af_') || v.startsWith('bf_') || v.startsWith('bm_')) {
-    return 'kokoro';
-  }
   return config.tts.provider;
 }
 

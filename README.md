@@ -19,7 +19,6 @@ This project is configured as an npm workspaces monorepo:
 packages/
   ├── lecture-agent/    TypeScript-based coding agent for generating lectures
   └── lecture-viewer/   Playback engine and local preview player
-models/                 Kokoro ONNX models and voices (outside src, resolved from root)
 outputs/                Renderer-ready generated videos and HTML outputs
 src/                    TypeScript CLIs, local IDE server, and social tools
 tests/                  Structured renderer fixtures and smoke tests
@@ -38,15 +37,6 @@ tests/                  Structured renderer fixtures and smoke tests
    OPENAI_API_KEY="your_openai_api_key"
    AGENT_MODEL="gemini-3.5-flash"
    ```
-3. **Python Dependencies (for local Kokoro TTS)**:
-   ```bash
-   python -m pip install misaki[en] onnxruntime-gpu scipy numpy huggingface_hub
-   ```
-4. **Download ONNX Models**: Download the Kokoro ONNX model files to the root `models/` directory:
-   ```bash
-   python -c "from huggingface_hub import snapshot_download; snapshot_download('onnx-community/Kokoro-82M-v1.0-ONNX', local_dir='models/kokoro-onnx', allow_patterns=['onnx/model.onnx','voices/*','tokenizer.json'])"
-   ```
-
 ---
 
 ## Main Commands

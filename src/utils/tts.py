@@ -5,7 +5,7 @@ Single public API:
     tts(text, provider, voice, output_path, speed, alignment, alignment_output_path)
 
 All providers write WAV files. Cloud providers generate speech remotely;
-Kokoro and OmniVoice generate speech locally.
+OmniVoice generates speech locally.
 
 Providers available via this module:
 1) openai
@@ -35,22 +35,7 @@ Providers available via this module:
    - Important: Google may add/remove voices over time; this wrapper forwards
      voice names directly and does not hard-validate them.
 
-3) kokoro (local via ONNX Runtime CUDA, with kokoro-js fallback)
-   - Provider key: "kokoro"
-   - Model, engine, voice, device, dtype, phonemizer, and worker settings are
-     configured through the KOKORO_* environment variables below.
-   - Set KOKORO_ENGINE=kokoro-js to force the old Node.js path.
-   - Long text is split at sentence boundaries and synthesized in parallel
-     before the resulting WAV chunks are concatenated.
-   - Available voices (from installed kokoro-js package):
-     af_heart, af_alloy, af_aoede, af_bella, af_jessica, af_kore,
-     af_nicole, af_nova, af_river, af_sarah, af_sky,
-     am_adam, am_echo, am_eric, am_fenrir, am_liam, am_michael,
-     am_onyx, am_puck, am_santa,
-     bf_emma, bf_isabella, bf_alice, bf_lily,
-     bm_george, bm_lewis, bm_daniel, bm_fable
-
-4) omnivoice (local zero-shot voice cloning)
+3) omnivoice (local zero-shot voice cloning)
    - Provider key: "omnivoice"
    - Loads k2-fsa/OmniVoice with PyTorch on CUDA when available, otherwise CPU.
    - Voice names resolve to folders under <project>/voices, case-insensitively.
@@ -61,7 +46,7 @@ Providers available via this module:
      characters; otherwise it selects English.
    - Writes 24 kHz WAV through soundfile.
 
-5) elevenlabs
+4) elevenlabs
    - Provider keys: "elevenlabs", "11labs" (alias)
    - API key and model are required via ELEVENLABS_API_KEY and
      ELEVENLABS_TTS_MODEL. There is no model fallback.
@@ -84,8 +69,6 @@ import base64
 import os
 import json
 import re
-import site
-import subprocess
 import sys
 import unicodedata
 
@@ -94,13 +77,11 @@ if hasattr(sys.stdout, "reconfigure"):
 if hasattr(sys.stderr, "reconfigure"):
     sys.stderr.reconfigure(encoding="utf-8")
 
-import tempfile
 import time
 import wave
-from concurrent.futures import ThreadPoolExecutor, as_completed
 from functools import lru_cache
 from pathlib import Path
-from typing import Any, NamedTuple
+from typing import Any
 from urllib.error import HTTPError, URLError
 from urllib.parse import quote, urlencode
 from urllib.request import Request, urlopen
@@ -143,22 +124,12 @@ load_dotenv()
 log = Logger()
 
 DEFAULT_OUTPUT_DIR = PROJECT_ROOT / "outputs/tts"
-DEFAULT_KOKORO_OUTPUT_DIR = PROJECT_ROOT / "outputs/tts_kokoro"
 
 def _require_env(name: str) -> str:
     value = os.getenv(name)
     if value is None or not value.strip():
         raise RuntimeError(f"Set {name} in .env")
     return value.strip()
-
-
-def _required_bool_env(name: str) -> bool:
-    value = _require_env(name).lower()
-    if value in {"1", "true", "yes"}:
-        return True
-    if value in {"0", "false", "no"}:
-        return False
-    raise RuntimeError(f"{name} must be one of: true, false, 1, 0, yes, no")
 
 
 _ALLOWED_GEMINI_MODELS = {
@@ -169,19 +140,6 @@ _ALLOWED_GEMINI_MODELS = {
 }
 
 ELEVENLABS_OUTPUT_FORMAT = "pcm_24000"
-
-
-class KokoroSettings(NamedTuple):
-    model: str
-    voice: str
-    engine: str
-    device: str
-    dtype: str
-    phonemizer: str
-    onnx_model: str
-    onnx_model_dir: Path
-    strict_gpu: bool
-    chunk_workers: int
 
 
 @lru_cache(maxsize=1)
@@ -250,110 +208,8 @@ def _truncate_elevenlabs_next_text(text: str | None) -> str | None:
 
 
 @lru_cache(maxsize=1)
-def _kokoro_settings() -> KokoroSettings:
-    onnx_model_dir = Path(_require_env("KOKORO_ONNX_MODEL_DIR"))
-    if not onnx_model_dir.is_absolute():
-        onnx_model_dir = PROJECT_ROOT / onnx_model_dir
-    chunk_workers = int(_require_env("KOKORO_CHUNK_WORKERS"))
-    if chunk_workers <= 0:
-        raise RuntimeError("KOKORO_CHUNK_WORKERS must be a positive integer")
-    return KokoroSettings(
-        model=_require_env("KOKORO_MODEL"),
-        voice=_require_env("KOKORO_DEFAULT_VOICE"),
-        engine=_require_env("KOKORO_ENGINE").lower(),
-        device=_require_env("KOKORO_DEVICE"),
-        dtype=_require_env("KOKORO_DTYPE"),
-        phonemizer=_require_env("KOKORO_PHONEMIZER").lower(),
-        onnx_model=_require_env("KOKORO_ONNX_MODEL"),
-        onnx_model_dir=onnx_model_dir,
-        strict_gpu=_required_bool_env("KOKORO_STRICT_GPU"),
-        chunk_workers=chunk_workers,
-    )
-
-KOKORO_JS = r"""
-import { KokoroTTS } from "kokoro-js";
-
-const requiredEnv = (name) => {
-  const value = process.env[name];
-  if (!value || !value.trim()) throw new Error(`Set ${name} in .env`);
-  return value.trim();
-};
-
-const model = requiredEnv("KOKORO_MODEL");
-const dtype = requiredEnv("KOKORO_DTYPE");
-const cpuFallbackDtype = requiredEnv("KOKORO_CPU_FALLBACK_DTYPE");
-const voice = requiredEnv("KOKORO_VOICE");
-const speedRaw = requiredEnv("KOKORO_SPEED");
-const speed = Number(speedRaw);
-const device = requiredEnv("KOKORO_DEVICE");
-const text = requiredEnv("KOKORO_TEXT");
-const outputPath = requiredEnv("KOKORO_OUTPUT");
-
-if (!text.trim()) {
-  throw new Error("Input text is empty.");
-}
-if (!Number.isFinite(speed) || speed <= 0) {
-  throw new Error(`Invalid KOKORO_SPEED: ${speedRaw}`);
-}
-
-const initOpts = { dtype };
-if (device) initOpts.device = device;
-
-let tts;
-try {
-  console.error(`Kokoro loading model=${model} dtype=${dtype} device=${device ?? "default"}`);
-  tts = await KokoroTTS.from_pretrained(model, initOpts);
-  console.error(`Kokoro ready device=${device ?? "default"}`);
-} catch (err) {
-  if (device && device !== "cpu") {
-    console.warn(`Kokoro device '${device}' failed; falling back to cpu. ${err?.message ?? err}`);
-    tts = await KokoroTTS.from_pretrained(model, { dtype: cpuFallbackDtype, device: "cpu" });
-    console.error(`Kokoro ready device=cpu dtype=${cpuFallbackDtype}`);
-  } else {
-    throw err;
-  }
-}
-
-const synthesize = async (engine) => {
-  const audio = await engine.generate(text, { voice, speed });
-  await audio.save(outputPath);
-};
-
-try {
-  await synthesize(tts);
-} catch (err) {
-  if (device && device !== "cpu") {
-    console.warn(`Kokoro synthesis failed on '${device}'; retrying on cpu.`);
-    const cpuTts = await KokoroTTS.from_pretrained(model, { dtype: cpuFallbackDtype, device: "cpu" });
-    await synthesize(cpuTts);
-  } else {
-    throw err;
-  }
-}
-
-console.log(outputPath);
-"""
-
-KOKORO_JS_PHONEMIZER = r"""
-import { phonemize } from "phonemizer";
-
-const requiredEnv = (name) => {
-  const value = process.env[name];
-  if (!value || !value.trim()) throw new Error(`Set ${name} in .env`);
-  return value.trim();
-};
-
-const text = requiredEnv("KOKORO_TEXT");
-const language = requiredEnv("KOKORO_LANGUAGE");
-
-const chunks = await phonemize(text, language);
-const phonemes = Array.isArray(chunks) ? chunks.join(" ") : String(chunks ?? "");
-process.stdout.write(phonemes);
-"""
-
-
 def _resolve_output_path(output_path: str | None, provider: str) -> Path:
-    base = DEFAULT_KOKORO_OUTPUT_DIR if provider == "kokoro" else DEFAULT_OUTPUT_DIR
+    base = DEFAULT_OUTPUT_DIR
     if not output_path:
         base.mkdir(parents=True, exist_ok=True)
         return base / f"tts_{provider}_{int(time.time() * 1000)}.wav"
@@ -538,153 +394,6 @@ def _run_elevenlabs(
     )
 
 
-def _concat_wavs(input_paths: list[Path], output_path: Path) -> None:
-    if not input_paths:
-        raise ValueError("No WAV chunks provided for concatenation.")
-
-    def _read_wav_chunks(path: Path) -> tuple[int, int, int, int, bytes]:
-        raw = path.read_bytes()
-        if len(raw) < 44 or raw[0:4] != b"RIFF" or raw[8:12] != b"WAVE":
-            raise RuntimeError(f"Invalid WAV file: {path}")
-
-        offset = 12
-        audio_format = None
-        channels = None
-        sample_rate = None
-        bits_per_sample = None
-        data = None
-
-        while offset + 8 <= len(raw):
-            chunk_id = raw[offset : offset + 4]
-            chunk_size = int.from_bytes(raw[offset + 4 : offset + 8], "little")
-            chunk_start = offset + 8
-            chunk_end = chunk_start + chunk_size
-            if chunk_end > len(raw):
-                break
-
-            if chunk_id == b"fmt ":
-                if chunk_size < 16:
-                    raise RuntimeError(f"Corrupt fmt chunk in WAV: {path}")
-                audio_format = int.from_bytes(raw[chunk_start : chunk_start + 2], "little")
-                channels = int.from_bytes(raw[chunk_start + 2 : chunk_start + 4], "little")
-                sample_rate = int.from_bytes(raw[chunk_start + 4 : chunk_start + 8], "little")
-                bits_per_sample = int.from_bytes(raw[chunk_start + 14 : chunk_start + 16], "little")
-            elif chunk_id == b"data":
-                data = raw[chunk_start:chunk_end]
-
-            # WAV chunks are word-aligned.
-            offset = chunk_end + (chunk_size % 2)
-
-        if (
-            audio_format is None
-            or channels is None
-            or sample_rate is None
-            or bits_per_sample is None
-            or data is None
-        ):
-            raise RuntimeError(f"Missing fmt/data chunk in WAV: {path}")
-
-        if audio_format not in (1, 3):
-            raise RuntimeError(f"Unsupported WAV format tag {audio_format} in {path}")
-
-        return audio_format, channels, sample_rate, bits_per_sample, data
-
-    def _write_wav(path: Path, audio_format: int, channels: int, sample_rate: int, bits_per_sample: int, data: bytes) -> None:
-        byte_rate = sample_rate * channels * bits_per_sample // 8
-        block_align = channels * bits_per_sample // 8
-        fmt_chunk_size = 16
-        data_chunk_size = len(data)
-        riff_size = 4 + (8 + fmt_chunk_size) + (8 + data_chunk_size)
-
-        with path.open("wb") as f:
-            f.write(b"RIFF")
-            f.write(riff_size.to_bytes(4, "little"))
-            f.write(b"WAVE")
-
-            f.write(b"fmt ")
-            f.write(fmt_chunk_size.to_bytes(4, "little"))
-            f.write(audio_format.to_bytes(2, "little"))
-            f.write(channels.to_bytes(2, "little"))
-            f.write(sample_rate.to_bytes(4, "little"))
-            f.write(byte_rate.to_bytes(4, "little"))
-            f.write(block_align.to_bytes(2, "little"))
-            f.write(bits_per_sample.to_bytes(2, "little"))
-
-            f.write(b"data")
-            f.write(data_chunk_size.to_bytes(4, "little"))
-            f.write(data)
-
-    expected: tuple[int, int, int, int] | None = None
-    all_data = bytearray()
-    for wav_path in input_paths:
-        fmt, ch, sr, bps, data = _read_wav_chunks(wav_path)
-        current = (fmt, ch, sr, bps)
-        if expected is None:
-            expected = current
-        elif current != expected:
-            raise RuntimeError(
-                f"WAV format mismatch while concatenating chunks: expected {expected}, got {current} at {wav_path}"
-            )
-        all_data.extend(data)
-
-    assert expected is not None
-    _write_wav(
-        output_path,
-        audio_format=expected[0],
-        channels=expected[1],
-        sample_rate=expected[2],
-        bits_per_sample=expected[3],
-        data=bytes(all_data),
-    )
-
-
-def _split_text_into_sentence_chunks(
-    text: str, target_words: int = 27, min_words: int = 25, max_words: int = 30
-) -> list[str]:
-    clean = re.sub(r"\s+", " ", (text or "").strip())
-    if not clean:
-        return []
-
-    # Sentence-preserving split: break only at sentence boundaries.
-    sentences = [s.strip() for s in re.split(r"(?<=[.!?])\s+", clean) if s.strip()]
-    if not sentences:
-        return [clean]
-
-    chunks: list[str] = []
-    current_sentences: list[str] = []
-    current_words = 0
-
-    for sentence in sentences:
-        sentence_words = len(sentence.split())
-        if not current_sentences:
-            current_sentences = [sentence]
-            current_words = sentence_words
-            continue
-
-        # If current chunk is already near target, close it before adding more.
-        if current_words >= min_words:
-            projected = current_words + sentence_words
-            if projected > max_words:
-                chunks.append(" ".join(current_sentences))
-                current_sentences = [sentence]
-                current_words = sentence_words
-                continue
-
-        current_sentences.append(sentence)
-        current_words += sentence_words
-
-        # If we're close to target, flush to keep chunk sizes around 25-30 words.
-        if abs(current_words - target_words) <= 2 or current_words >= max_words:
-            chunks.append(" ".join(current_sentences))
-            current_sentences = []
-            current_words = 0
-
-    if current_sentences:
-        chunks.append(" ".join(current_sentences))
-
-    return chunks
-
-
 def _openai_client() -> OpenAI:
     api_key = _require_env("OPENAI_API_KEY")
     if OpenAI is None:
@@ -697,365 +406,6 @@ def _google_client() -> genai.Client:
     if genai is None:
         raise RuntimeError("Google GenAI SDK is not available")
     return genai.Client(api_key=api_key)
-
-
-def _hashable_provider_entry(provider):
-    if isinstance(provider, (tuple, list)):
-        name = provider[0]
-        if len(provider) > 1 and isinstance(provider[1], dict):
-            return (name, tuple(sorted(provider[1].items())))
-        return name
-    return provider
-
-
-_ONNX_SESSIONS = {}
-_TOKENIZERS = {}
-_VOICES = {}
-_G2P_OBJECTS = {}
-_DLL_DIRECTORY_HANDLES: list[object] = []
-_DLL_DIRECTORIES_ADDED: set[str] = set()
-
-
-def _add_windows_nvidia_dll_directories() -> None:
-    if sys.platform != "win32":
-        return
-
-    site_packages: list[str] = []
-    try:
-        site_packages.extend(site.getsitepackages())
-    except Exception:
-        pass
-    try:
-        user_site = site.getusersitepackages()
-        if user_site:
-            site_packages.append(user_site)
-    except Exception:
-        pass
-
-    for sp in site_packages:
-        nvidia_root = Path(sp) / "nvidia"
-        if not nvidia_root.is_dir():
-            continue
-        for bin_dir in nvidia_root.glob("**/bin"):
-            if not bin_dir.is_dir():
-                continue
-            resolved = str(bin_dir.resolve())
-            if resolved in _DLL_DIRECTORIES_ADDED:
-                continue
-            try:
-                handle = os.add_dll_directory(resolved)
-                _DLL_DIRECTORY_HANDLES.append(handle)
-                _DLL_DIRECTORIES_ADDED.add(resolved)
-            except Exception as exc:
-                log.warning(f"Failed to add NVIDIA DLL directory {resolved}: {exc}")
-
-
-def _run_kokoro_onnxruntime(text: str, output_path: Path, voice: str, speed: float) -> None:
-    try:
-        import numpy as np
-        import scipy.io.wavfile as wavfile
-        import onnxruntime as ort
-        from huggingface_hub import snapshot_download
-    except Exception as exc:
-        raise RuntimeError(
-            "Python Kokoro CUDA backend requires numpy, scipy, onnxruntime-gpu, "
-            "and huggingface_hub."
-        ) from exc
-
-    _add_windows_nvidia_dll_directories()
-
-    preload_dlls = getattr(ort, "preload_dlls", None)
-    if callable(preload_dlls):
-        try:
-            preload_dlls(cuda=True, cudnn=True, msvc=True)
-        except Exception as exc:
-            log.warning(f"ONNX Runtime preload_dlls failed; continuing. {exc}")
-
-    global _ONNX_SESSIONS, _TOKENIZERS, _VOICES, _G2P_OBJECTS
-
-    k = _kokoro_settings()
-    model_dir = k.onnx_model_dir
-    if not (model_dir / "tokenizer.json").is_file() or not (model_dir / "onnx" / k.onnx_model).is_file():
-        snapshot_download(
-            "onnx-community/Kokoro-82M-v1.0-ONNX",
-            local_dir=str(model_dir),
-            allow_patterns=["onnx/model.onnx", "voices/*", "tokenizer.json"],
-        )
-
-    tokenizer_path = model_dir / "tokenizer.json"
-    voice_path = model_dir / "voices" / f"{voice}.bin"
-    model_path = model_dir / "onnx" / k.onnx_model
-    if not voice_path.is_file():
-        raise RuntimeError(f"Kokoro voice file not found: {voice_path}")
-    if not model_path.is_file():
-        raise RuntimeError(f"Kokoro ONNX model not found: {model_path}")
-
-    # Cache tokenizer/vocab
-    tok_key = str(tokenizer_path)
-    if tok_key not in _TOKENIZERS:
-        with tokenizer_path.open("r", encoding="utf-8") as f:
-            _TOKENIZERS[tok_key] = json.load(f)["model"]["vocab"]
-    vocab = _TOKENIZERS[tok_key]
-
-    british = voice.startswith("b")
-    phonemes = _run_kokoro_phonemizer(text, british)
-    missing_phonemes = sorted({p for p in phonemes if p not in vocab})
-    if missing_phonemes:
-        escaped = "".join(missing_phonemes).encode("unicode_escape").decode("ascii")
-        log.warning(f"Kokoro skipped tokenizer-missing phoneme(s): {escaped}")
-    tokens = [vocab[p] for p in phonemes if p in vocab]
-    if not tokens:
-        raise RuntimeError("Kokoro phonemizer produced no tokenizer-compatible phonemes.")
-    if len(tokens) > 510:
-        raise RuntimeError(f"Kokoro input is too long for one ONNX call: {len(tokens)} tokens")
-
-    # Cache voice binaries
-    v_key = str(voice_path)
-    if v_key not in _VOICES:
-        _VOICES[v_key] = np.fromfile(voice_path, dtype=np.float32).reshape(-1, 1, 256)
-    voices = _VOICES[v_key]
-
-    ref_s = voices[len(tokens)]
-    input_ids = np.array([[0, *tokens, 0]], dtype=np.int64)
-    speed_input = np.array([speed], dtype=np.float32)
-
-    requested_device = (k.device or "cuda").lower()
-    if requested_device == "cpu":
-        providers = ["CPUExecutionProvider"]
-    elif requested_device == "cuda":
-        providers = [
-            (
-                "CUDAExecutionProvider",
-                {
-                    "cudnn_conv_algo_search": "DEFAULT",
-                    "cudnn_conv_use_max_workspace": "1",
-                    "do_copy_in_default_stream": "1",
-                },
-            ),
-            "CPUExecutionProvider",
-        ]
-    else:
-        raise RuntimeError(
-            f"Python Kokoro ONNX backend supports KOKORO_DEVICE=cuda or cpu, got {requested_device!r}."
-        )
-
-    available = ort.get_available_providers()
-    primary_provider = providers[0][0] if isinstance(providers[0], (tuple, list)) else providers[0]
-    if primary_provider not in available:
-        if k.strict_gpu:
-            raise RuntimeError(f"ONNX Runtime provider {primary_provider} is not available. Available: {available}")
-        log.warning(f"ONNX Runtime provider {primary_provider} is not available ({available}). Falling back to CPUExecutionProvider.")
-        providers = ["CPUExecutionProvider"]
-
-    # Cache Inference Session
-    sess_key = (str(model_path), tuple(_hashable_provider_entry(p) for p in providers))
-    if sess_key not in _ONNX_SESSIONS:
-        _ONNX_SESSIONS[sess_key] = ort.InferenceSession(str(model_path), providers=providers)
-    sess = _ONNX_SESSIONS[sess_key]
-
-    active = sess.get_providers()
-    if requested_device == "cuda" and k.strict_gpu and (not active or active[0] != "CUDAExecutionProvider"):
-        raise RuntimeError(f"CUDAExecutionProvider was requested but session providers are {active}")
-
-    if k.strict_gpu:
-        disable_fallback = getattr(sess, "disable_fallback", None)
-        if callable(disable_fallback):
-            disable_fallback()
-
-    audio = sess.run(None, {"input_ids": input_ids, "style": ref_s, "speed": speed_input})[0]
-    output_path.parent.mkdir(parents=True, exist_ok=True)
-    wavfile.write(output_path, 24000, audio[0])
-
-
-def _run_kokoro_js(text: str, output_path: Path, voice: str, speed: float) -> None:
-    k = _kokoro_settings()
-    env = os.environ.copy()
-    env.update(
-        {
-            "KOKORO_TEXT": text,
-            "KOKORO_OUTPUT": str(output_path),
-            "KOKORO_MODEL": k.model,
-            "KOKORO_DTYPE": k.dtype,
-            "KOKORO_VOICE": voice,
-            "KOKORO_SPEED": str(speed),
-            "KOKORO_DEVICE": k.device,
-        }
-    )
-
-    tmp_path: Path | None = None
-    try:
-        tmp_dir = PROJECT_ROOT / ".tmp"
-        tmp_dir.mkdir(parents=True, exist_ok=True)
-        with tempfile.NamedTemporaryFile(
-            mode="w",
-            suffix=".mjs",
-            delete=False,
-            encoding="utf-8",
-            dir=str(tmp_dir),
-        ) as tmp:
-            tmp.write(KOKORO_JS)
-            tmp_path = Path(tmp.name)
-
-        result = subprocess.run(
-            ["node", str(tmp_path)],
-            cwd=str(PROJECT_ROOT),
-            env=env,
-            capture_output=True,
-            text=True,
-            timeout=600,
-        )
-    except FileNotFoundError as exc:
-        raise RuntimeError("Node.js not found on PATH. Install Node.js and retry.") from exc
-    finally:
-        if tmp_path and tmp_path.exists():
-            try:
-                tmp_path.unlink(missing_ok=True)
-            except PermissionError:
-                # Windows can briefly lock temp files after process exit.
-                pass
-
-    def _summarize_process_output(output: str) -> str:
-        lines = []
-        for line in output.splitlines():
-            clean = re.sub(r"\x1b\[[0-9;]*m", "", line).strip()
-            if not clean:
-                continue
-            if clean.startswith(("Kokoro ", "RuntimeError:", "Error:", "An error occurred")):
-                lines.append(clean)
-            elif "Status Message:" in clean:
-                lines.append(clean[:500])
-            elif "failed" in clean.lower() or "unsupported device" in clean.lower():
-                lines.append(clean[:500])
-        return "\n".join(lines[-20:]) or output.strip()[:1000] or "Unknown error"
-
-    if result.returncode != 0:
-        detail = _summarize_process_output(result.stderr or result.stdout or "")
-        raise RuntimeError(f"kokoro-js failed: {detail}")
-    if result.stderr.strip():
-        detail = _summarize_process_output(result.stderr)
-        if detail:
-            print(detail)
-
-
-def _run_js_phonemizer(text: str, british: bool) -> str:
-    env = os.environ.copy()
-    env.update(
-        {
-            "KOKORO_TEXT": text,
-            "KOKORO_LANGUAGE": "en" if british else "en-us",
-        }
-    )
-
-    tmp_path: Path | None = None
-    try:
-        tmp_dir = PROJECT_ROOT / ".tmp"
-        tmp_dir.mkdir(parents=True, exist_ok=True)
-        with tempfile.NamedTemporaryFile(
-            mode="w",
-            suffix=".mjs",
-            delete=False,
-            encoding="utf-8",
-            dir=str(tmp_dir),
-        ) as tmp:
-            tmp.write(KOKORO_JS_PHONEMIZER)
-            tmp_path = Path(tmp.name)
-
-        result = subprocess.run(
-            ["node", str(tmp_path)],
-            cwd=str(PROJECT_ROOT),
-            env=env,
-            capture_output=True,
-            text=True,
-            encoding="utf-8",
-            errors="replace",
-            timeout=120,
-        )
-    except FileNotFoundError as exc:
-        raise RuntimeError("Node.js not found on PATH. Install Node.js and retry.") from exc
-    finally:
-        if tmp_path and tmp_path.exists():
-            try:
-                tmp_path.unlink(missing_ok=True)
-            except PermissionError:
-                pass
-
-    if result.returncode != 0:
-        detail = (result.stderr or result.stdout or "").strip()[:1000]
-        raise RuntimeError(f"JS phonemizer failed: {detail or 'Unknown error'}")
-
-    phonemes = result.stdout.strip()
-    if not phonemes:
-        raise RuntimeError("JS phonemizer produced no phonemes.")
-    return phonemes.replace("dʒ", "ʤ").replace("tʃ", "ʧ")
-
-
-def _run_misaki_phonemizer(text: str, british: bool) -> str:
-    try:
-        from misaki import en
-    except Exception as exc:
-        raise RuntimeError("Misaki phonemizer requires misaki[en].") from exc
-
-    if british not in _G2P_OBJECTS:
-        _G2P_OBJECTS[british] = en.G2P(trf=False, british=british, fallback=None)
-    g2p = _G2P_OBJECTS[british]
-    phonemes, _ = g2p(text)
-    return phonemes
-
-
-def _run_kokoro_phonemizer(text: str, british: bool) -> str:
-    phonemizer = _kokoro_settings().phonemizer
-    if phonemizer in {"misaki", "python"}:
-        return _run_misaki_phonemizer(text, british)
-    if phonemizer in {"js", "node", "phonemizer"}:
-        return _run_js_phonemizer(text, british)
-    raise RuntimeError("KOKORO_PHONEMIZER must be one of: misaki, js")
-
-
-def _run_kokoro(text: str, output_path: Path, voice: str, speed: float) -> None:
-    k = _kokoro_settings()
-    if k.engine in {"onnxruntime", "onnx", "ort", "cuda"}:
-        try:
-            _run_kokoro_onnxruntime(text, output_path, voice, speed)
-            return
-        except Exception as exc:
-            if k.strict_gpu:
-                raise
-            log.warning(f"Kokoro ONNX Runtime backend failed; falling back to kokoro-js. {exc}")
-    elif k.engine not in {"kokoro-js", "node", "js"}:
-        raise RuntimeError("KOKORO_ENGINE must be one of: onnxruntime, kokoro-js")
-
-    _run_kokoro_js(text, output_path, voice, speed)
-
-
-def _run_kokoro_chunked(text: str, output_path: Path, voice: str, speed: float) -> None:
-    chunks = _split_text_into_sentence_chunks(text)
-    if len(chunks) <= 1:
-        _run_kokoro(text, output_path, voice, speed)
-        return
-
-    tmp_root = PROJECT_ROOT / ".tmp"
-    tmp_root.mkdir(parents=True, exist_ok=True)
-
-    chunk_paths: list[Path] = []
-    with tempfile.TemporaryDirectory(dir=str(tmp_root), prefix="kokoro_chunks_") as td:
-        chunk_dir = Path(td)
-        chunk_paths = [chunk_dir / f"chunk_{idx:04d}.wav" for idx in range(len(chunks))]
-        max_workers = _kokoro_settings().chunk_workers
-        max_workers = max(1, min(len(chunks), max_workers))
-
-        with ThreadPoolExecutor(max_workers=max_workers) as executor:
-            future_map = {
-                executor.submit(_run_kokoro, chunk_text, chunk_paths[idx], voice, speed): idx
-                for idx, chunk_text in enumerate(chunks)
-            }
-            for future in as_completed(future_map):
-                idx = future_map[future]
-                try:
-                    future.result()
-                except Exception as exc:
-                    raise RuntimeError(f"Kokoro chunk {idx + 1}/{len(chunks)} failed: {exc}") from exc
-
-        _concat_wavs(chunk_paths, output_path)
 
 
 _OMNIVOICE_MODEL = None
@@ -1172,16 +522,16 @@ def tts(
 
     Args:
         text: Input text to synthesize.
-        provider: One of "openai", "google", "gemini", "kokoro",
-            "omnivoice", "elevenlabs", or "11labs".
+        provider: One of "openai", "google", "gemini", "omnivoice",
+            "elevenlabs", or "11labs".
         voice: Provider voice name, voice ID, or local reference-voice folder.
             If omitted, the provider default is used.
         output_path: Output WAV file path or directory. If omitted, a timestamped
             WAV is created in the provider-specific default output directory.
             A path without a ".wav" suffix is treated as a directory.
-        speed: Optional speaking speed. Applied to Kokoro, OmniVoice, and
-            ElevenLabs and ignored by OpenAI and Google. Defaults to 1.0 for
-            Kokoro and ElevenLabs and 0.85 for OmniVoice. Must be greater than 0.
+        speed: Optional speaking speed. Applied to OmniVoice and ElevenLabs and
+            ignored by OpenAI and Google. Defaults to 1.0 for ElevenLabs and
+            0.85 for OmniVoice. Must be greater than 0.
         alignment: For ElevenLabs only, request timing data and write normalized
             character alignment plus derived word start/end timings to JSON.
         alignment_output_path: Optional ElevenLabs alignment JSON path. Defaults
@@ -1224,19 +574,6 @@ def tts(
             previous_text / next_text improve cadence across cues. Alignment is
             available only for this provider.
 
-        kokoro:
-            Uses the configured KOKORO_* model, engine, device, phonemizer, and
-            default voice settings.
-
-            af_heart, af_alloy, af_aoede, af_bella, af_jessica, af_kore,
-            af_nicole, af_nova, af_river, af_sarah, af_sky,
-            am_adam, am_echo, am_eric, am_fenrir, am_liam, am_michael,
-            am_onyx, am_puck, am_santa,
-            bf_emma, bf_isabella, bf_alice, bf_lily,
-            bm_george, bm_lewis, bm_daniel, bm_fable
-
-            kokoro voices demo: https://gregr.org/tts-samples/
-
         omnivoice:
             Accepts the name of a folder under <project>/voices. That folder
             must contain a reference WAV and may contain its transcript as TXT.
@@ -1256,12 +593,11 @@ def tts(
     if chosen_provider not in {
         "openai",
         "google",
-        "kokoro",
         "omnivoice",
         "elevenlabs",
     }:
         raise ValueError(
-            "provider must be one of: openai, google, gemini, kokoro, "
+            "provider must be one of: openai, google, gemini, "
             "omnivoice, elevenlabs, 11labs"
         )
     if alignment and chosen_provider != "elevenlabs":
@@ -1349,20 +685,6 @@ def tts(
         )
         return str(out_path)
 
-    if chosen_provider == "kokoro":
-        k = _kokoro_settings()
-        chosen_voice = (voice or k.voice).strip()
-        chosen_speed = float(speed) if speed is not None else 1.0
-        if chosen_speed <= 0:
-            raise ValueError("speed must be greater than 0")
-        log.info(
-            f"Kokoro config model={k.model} dtype={k.dtype} "
-            f"device={k.device or 'default'} voice={chosen_voice} "
-            f"speed={chosen_speed} phonemizer={k.phonemizer}"
-        )
-        _run_kokoro_chunked(clean_text, out_path, chosen_voice, chosen_speed)
-        return str(out_path)
-
     if chosen_provider == "omnivoice":
         chosen_voice = (voice or "american-male-1").strip()
         chosen_speed = float(speed) if speed is not None else 0.85
@@ -1380,13 +702,13 @@ Now, why red? Well, think about the two main rules we discussed earlier. First, 
 If you insert a black node, you immediately violate that second rule. I repeat, you violate the black-depth rule. Every single path going through that new node now has one extra black node compared to all the other paths in the tree. This black node deficiency is a global problem, and it's notoriously difficult to fix. In fact, it would basically require restructuring almost every single time.
 However, if you insert a red node, you don’t change the black node count at all! The only rule you risk breaking is the "no consecutive red nodes" rule. This is a local problem. It only happens right where you inserted the node, and as we’ll see, local problems are much, much easier to patch up.
 """
-    print(tts(sample, provider="kokoro", voice="am_liam", output_path="outputs/tts/kokoro_sample.wav", speed=0.9))
+    print(tts(sample, provider="omnivoice", voice="maruf", output_path="outputs/tts/omnivoice_sample.wav", speed=1.2))
 
 
 def _parse_cli_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         description=(
-            "Generate WAV speech with OpenAI, Google, Kokoro, OmniVoice, "
+            "Generate WAV speech with OpenAI, Google, OmniVoice, "
             "or ElevenLabs."
         )
     )
@@ -1395,7 +717,7 @@ def _parse_cli_args(argv: list[str] | None = None) -> argparse.Namespace:
         "--provider",
         default="openai",
         help=(
-            "Provider: openai, google/gemini, kokoro, omnivoice, "
+            "Provider: openai, google/gemini, omnivoice, "
             "or elevenlabs/11labs (default: openai)."
         ),
     )
@@ -1409,7 +731,7 @@ def _parse_cli_args(argv: list[str] | None = None) -> argparse.Namespace:
         "--speed",
         type=float,
         default=None,
-        help="Kokoro, OmniVoice, or ElevenLabs speaking speed.",
+        help="OmniVoice or ElevenLabs speaking speed.",
     )
     parser.add_argument(
         "--alignment",

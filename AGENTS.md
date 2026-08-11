@@ -44,7 +44,7 @@ docs/
 
 .render/                 Temporary render/test artifacts. Ignored.
 outputs/                 Generated output archives. Ignored.
-models/                  Optional local model assets, such as Kokoro ONNX. Ignored.
+models/                  Optional local model assets. Ignored.
 ```
 
 ## Main Commands
@@ -380,7 +380,7 @@ Resolve can be called from the IDE or manually:
 npm run build:plan -- --input path\to\index.html --out path\to\resolved.html
 ```
 
-TTS provider/voice/speed are normalized in `ide-server.ts` before invoking `build-plan.ts`. Kokoro-style voices use local Kokoro; OpenAI and Google voice names route to cloud providers.
+TTS provider/voice/speed are normalized in `ide-server.ts` before invoking `build-plan.ts`. OmniVoice uses local reference voices; OpenAI and Google voice names route to cloud providers.
 
 ## Render Pipeline
 
@@ -491,7 +491,7 @@ node_modules/
 .render/
 .tmp/
 outputs/
-models/kokoro-onnx/
+models/
 packages/lecture-agent/.tmp/
 packages/lecture-agent/workspace/agent-workspace/
 ```

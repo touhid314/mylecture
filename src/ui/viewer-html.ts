@@ -85,11 +85,11 @@ export function createViewerHtml(openPath, initialWidth = 1920, initialHeight = 
   const normalizedOpenPath = openPath ? openPath.replaceAll('\\', '/') : '';
   const safeInitialWidth = Number.isInteger(initialWidth) && initialWidth > 0 ? initialWidth : 1920;
   const safeInitialHeight = Number.isInteger(initialHeight) && initialHeight > 0 ? initialHeight : 1080;
-  const configuredTtsProvider = String(ttsConfig.provider || 'kokoro').trim().toLowerCase();
+  const configuredTtsProvider = String(ttsConfig.provider || 'omnivoice').trim().toLowerCase();
   const defaultTtsProvider = configuredTtsProvider === '11labs'
     ? 'elevenlabs'
     : configuredTtsProvider;
-  const defaultTtsVoice = String(ttsConfig.voice || 'af_heart');
+  const defaultTtsVoice = String(ttsConfig.voice || 'maruf');
   const elevenLabsDefaultVoice = 'bIHbv24MWmeRgasZH58o';
   const configuredElevenLabsVoiceOption = (
     defaultTtsProvider === 'elevenlabs' &&

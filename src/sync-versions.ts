@@ -14,6 +14,7 @@ import { fileURLToPath } from 'url';
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 const rootDir = path.resolve(__dirname, '..');
+const agentDir = path.resolve(rootDir, '..', 'mylecture-agent');
 
 // 1. Read versions.json
 const versionsPath = path.join(rootDir, 'versions.json');
@@ -55,16 +56,16 @@ updateFile('packages/lecture-viewer/package.json', content => {
   return JSON.stringify(pkg, null, 2) + '\n';
 });
 
-// 4. Update packages/lecture-agent/src/validate_contract.cjs
-updateFile('packages/lecture-agent/src/validate_contract.cjs', content => {
+// 4. Update the sibling lecture-agent validator
+updateFile(path.join(agentDir, 'src', 'validate_contract.cjs'), content => {
   return content.replace(
     /must be a valid version like '[^']+'/,
     `must be a valid version like '${contractVersion}'`
   );
 });
 
-// 5. Update packages/lecture-agent/.agents/mylecture-contracts/html-input-contract.md
-updateFile('packages/lecture-agent/.agents/mylecture-contracts/html-input-contract.md', content => {
+// 5. Update the sibling lecture-agent contract
+updateFile(path.join(agentDir, 'resources', 'contracts', 'html-input-contract.md'), content => {
   return content.replace(
     /^# HTML Input Contract - v\d+\.\d+/m,
     `# HTML Input Contract - v${contractVersion}`

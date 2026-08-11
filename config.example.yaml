@@ -12,7 +12,7 @@ agent:
   defaultLengthSeconds: 120
 
 tts:
-  provider: "omnivoice" # openai, google/gemini, kokoro, omnivoice, elevenlabs/11labs
+  provider: "omnivoice" # openai, google/gemini, omnivoice, elevenlabs/11labs
   voice: "maruf" # Provider voice name/ID; ElevenLabs Will: bIHbv24MWmeRgasZH58o
   speed: 1.0
 

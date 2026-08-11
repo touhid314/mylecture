@@ -36,8 +36,6 @@ const LEGACY_ELEVENLABS_VOICE_IDS: Record<string, string> = {
 
 
 
-const KOKORO_VOICE_PATTERN = /^(af|am|bf|bm)_/i;
-
 
 
 export function normalizeElevenLabsVoiceId(voice: string | null | undefined): string | null {
@@ -57,12 +55,6 @@ export function normalizeElevenLabsVoiceId(voice: string | null | undefined): st
   if (ELEVENLABS_VOICE_IDS.has(trimmed)) return trimmed;
 
 
-
-  if (KOKORO_VOICE_PATTERN.test(trimmed)) {
-
-    return DEFAULT_ELEVENLABS_VOICE_ID;
-
-  }
 
 
 

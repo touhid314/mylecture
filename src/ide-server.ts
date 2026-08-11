@@ -1059,7 +1059,7 @@ function resolveTtsProvider(options, voice) {
 
 function detectProvider(voice) {
   const v = String(voice || '').trim().toLowerCase();
-  if (!v) return 'kokoro';
+  if (!v) return 'omnivoice';
 
   if (v === 'bihbv24mwmergaszh58o') {
     return 'elevenlabs';
@@ -1089,14 +1089,11 @@ function detectProvider(voice) {
     } catch (e) {}
   }
 
-  if (v.startsWith('am_') || v.startsWith('af_') || v.startsWith('bf_') || v.startsWith('bm_')) {
-    return 'kokoro';
-  }
   const openAiVoices = new Set(['alloy', 'ash', 'ballad', 'coral', 'cedar', 'echo', 'fable', 'marin', 'nova', 'onyx', 'sage', 'shimmer', 'verse']);
   if (openAiVoices.has(v)) {
     return 'openai';
   }
-  return 'kokoro';
+  return config.tts.provider;
 }
 
 function normalizeTtsSpeed(value) {
