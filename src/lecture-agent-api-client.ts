@@ -114,6 +114,39 @@ export async function getAgentCatalog(): Promise<{
   return response.json() as Promise<any>;
 }
 
+export type AgentSelectOption = {
+  id: string;
+  label: string;
+  isDefault?: boolean;
+};
+
+export type AgentOptions = {
+  defaults: {
+    themeId: string;
+    teachingStyleId: string;
+    profileId: string;
+  };
+  themes: AgentSelectOption[];
+  teachingStyles: AgentSelectOption[];
+  profiles: AgentSelectOption[];
+  tts: {
+    defaults: { provider: string; voice: string };
+    providers: Array<{
+      id: string;
+      label: string;
+      kind: "local" | "cloud";
+      configured: boolean;
+      voices: AgentSelectOption[];
+    }>;
+  };
+};
+
+export async function getAgentOptions(): Promise<AgentOptions> {
+  const response = await fetchApi("/v1/options");
+  if (!response.ok) throw await errorFor(response, "Agent options request failed");
+  return response.json() as Promise<AgentOptions>;
+}
+
 export async function checkAgentApiHealth(): Promise<void> {
   const response = await fetchApi("/health");
   if (!response.ok) throw await errorFor(response, "Agent API health check failed");

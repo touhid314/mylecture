@@ -279,7 +279,7 @@ function getGenerationSettingsPrompt() {
   const includeVideo = !agentOutputVideo || agentOutputVideo.checked;
   const includeInteractive = Boolean(agentOutputInteractive && agentOutputInteractive.checked);
   const includeGame = Boolean(agentOutputGame && agentOutputGame.checked);
-  const lines = [
+  return [
     'if the user query is for lecture generation then follow this:',
     'aspect ratio: ' + aspectRatio,
     'generation length: ' + generationLength,
@@ -287,16 +287,7 @@ function getGenerationSettingsPrompt() {
     'output video: ' + (includeVideo ? 'yes' : 'no'),
     'output interactive: ' + (includeInteractive ? 'yes' : 'no'),
     'output practice game: ' + (includeGame ? 'yes' : 'no')
-  ];
-  const themeContent = getSelectedThemeContent();
-  if (themeContent) {
-    lines.push('theme: ' + themeContent);
-  }
-  const teachingStyleContent = getSelectedTeachingStyleContent();
-  if (teachingStyleContent) {
-    lines.push('teaching style: ' + teachingStyleContent);
-  }
-  return lines.join('\\n');
+  ].join('\\n');
 }
 
 function appendGenerationSettingsPrompt(message) {
@@ -305,67 +296,57 @@ function appendGenerationSettingsPrompt(message) {
   return base ? base + '\\n\\n' + settings : settings;
 }
 
-function getSelectedThemeContent() {
-  if (!agentTheme || !agentTheme.value) return '';
-  const selected = agentThemes.find(theme => theme.id === agentTheme.value);
-  return selected && selected.content ? selected.content.trim() : '';
+function fillAgentResourceSelect(select, options, defaultId) {
+  if (!select) return;
+  select.innerHTML = '';
+  for (const item of options) {
+    const option = document.createElement('option');
+    option.value = item.id;
+    option.textContent = item.label || item.id;
+    select.appendChild(option);
+  }
+  if (options.some(item => item.id === defaultId)) select.value = defaultId;
 }
 
-function getSelectedTeachingStyleContent() {
-  if (!agentTeachingStyle || !agentTeachingStyle.value) return '';
-  const selected = agentTeachingStyles.find(style => style.id === agentTeachingStyle.value);
-  return selected && selected.content ? selected.content.trim() : '';
-}
-
-async function loadAgentThemes() {
-  if (!agentTheme) return;
-  try {
-    const response = await fetch('/agent-themes');
-    const payload = await response.json();
-    if (!response.ok) throw new Error(payload.error || 'Failed to load themes');
-    agentThemes = Array.isArray(payload.themes) ? payload.themes : [];
-    agentDefaultThemeId = typeof payload.defaultThemeId === 'string' && payload.defaultThemeId ? payload.defaultThemeId : 'default';
-    agentTheme.innerHTML = '';
-    for (const theme of agentThemes) {
+function fillTtsVoiceSelect(select, tts) {
+  if (!select || !tts || !Array.isArray(tts.providers)) return;
+  select.innerHTML = '';
+  for (const provider of tts.providers) {
+    if (!Array.isArray(provider.voices) || provider.voices.length === 0) continue;
+    const group = document.createElement('optgroup');
+    group.label = provider.label + (provider.configured === false ? ' (not configured)' : '');
+    group.dataset.provider = provider.id;
+    group.disabled = provider.configured === false;
+    for (const voice of provider.voices) {
       const option = document.createElement('option');
-      option.value = theme.id;
-      option.textContent = theme.name || theme.fileName || theme.id;
-      agentTheme.appendChild(option);
+      option.value = voice.id;
+      option.textContent = voice.label || voice.id;
+      if (provider.id === tts.defaults.provider && voice.id === tts.defaults.voice) {
+        option.selected = true;
+      }
+      group.appendChild(option);
     }
-    if (agentThemes.some(theme => theme.id === agentDefaultThemeId)) {
-      agentTheme.value = agentDefaultThemeId;
-    }
-  } catch (error) {
-    agentThemes = [];
-    agentDefaultThemeId = 'default';
-    agentTheme.innerHTML = '<option value="' + agentDefaultThemeId + '">' + agentDefaultThemeId.replace(/\\.md$/i, '') + '</option>';
-    appendChatMessage('Could not load themes: ' + error.message, 'error');
+    select.appendChild(group);
   }
 }
 
-async function loadAgentTeachingStyles() {
-  if (!agentTeachingStyle) return;
+async function loadAgentResourceOptions() {
   try {
-    const response = await fetch('/agent-teaching-styles');
+    const response = await fetch('/agent-options');
     const payload = await response.json();
-    if (!response.ok) throw new Error(payload.error || 'Failed to load teaching styles');
+    if (!response.ok) throw new Error(payload.error || 'Failed to load agent options');
+    agentThemes = Array.isArray(payload.themes) ? payload.themes : [];
     agentTeachingStyles = Array.isArray(payload.teachingStyles) ? payload.teachingStyles : [];
-    agentDefaultTeachingStyleId = typeof payload.defaultTeachingStyleId === 'string' && payload.defaultTeachingStyleId ? payload.defaultTeachingStyleId : 'default';
-    agentTeachingStyle.innerHTML = '';
-    for (const style of agentTeachingStyles) {
-      const option = document.createElement('option');
-      option.value = style.id;
-      option.textContent = style.name || style.fileName || style.id;
-      agentTeachingStyle.appendChild(option);
-    }
-    if (agentTeachingStyles.some(style => style.id === agentDefaultTeachingStyleId)) {
-      agentTeachingStyle.value = agentDefaultTeachingStyleId;
-    }
+    agentDefaultThemeId = payload.defaults && payload.defaults.themeId || 'default';
+    agentDefaultTeachingStyleId = payload.defaults && payload.defaults.teachingStyleId || 'default';
+    fillAgentResourceSelect(agentTheme, agentThemes, agentDefaultThemeId);
+    fillAgentResourceSelect(agentTeachingStyle, agentTeachingStyles, agentDefaultTeachingStyleId);
+    fillTtsVoiceSelect(resolveTtsVoice, payload.tts);
+    fillTtsVoiceSelect(renderTtsVoice, payload.tts);
   } catch (error) {
+    agentThemes = [];
     agentTeachingStyles = [];
-    agentDefaultTeachingStyleId = 'default';
-    agentTeachingStyle.innerHTML = '<option value="' + agentDefaultTeachingStyleId + '">' + agentDefaultTeachingStyleId.replace(/\\.md$/i, '') + '</option>';
-    appendChatMessage('Could not load teaching styles: ' + error.message, 'error');
+    appendChatMessage('Could not load agent options: ' + error.message, 'error');
   }
 }
 
@@ -432,7 +413,9 @@ async function sendChat() {
         agentClientId,
         message: taskMessage,
         currentFile: currentFilePath,
-        currentDir: currentBrowserFolder
+        currentDir: currentBrowserFolder,
+        themeId: requestPhase === 'generate' && agentTheme ? agentTheme.value : undefined,
+        teachingStyleId: requestPhase === 'generate' && agentTeachingStyle ? agentTeachingStyle.value : undefined
       })
     });
     
@@ -555,8 +538,7 @@ if (agentGenerationLengthValue) {
     }
   });
 }
-loadAgentThemes();
-loadAgentTeachingStyles();
+loadAgentResourceOptions();
 if (agentChatSend) {
   agentChatSend.addEventListener('click', sendChat);
 }

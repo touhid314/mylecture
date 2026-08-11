@@ -21,7 +21,7 @@ import {
   resolveViaAgentApi,
   renderViaAgentApi,
   resetAgentApiSession,
-  getAgentCatalog,
+  getAgentOptions,
   ensureAgentApiAvailable as ensureAgentApiAvailableShared,
   stopManagedAgentApi
 } from './lecture-agent-api-client.ts';
@@ -546,78 +546,6 @@ function openFolder(filePath) {
 
 function agentUploadRoot(agentClientId = 'default') {
   return path.resolve(agentWorkspaceRoot(agentClientId), 'uploads');
-}
-
-function agentProfilesRoot() {
-  return path.resolve(rootDir, '../mylecture-agent/resources/profiles');
-}
-
-function listAgentProfiles() {
-  const profilesRoot = agentProfilesRoot();
-  if (!existsSync(profilesRoot) || !statSync(profilesRoot).isDirectory()) {
-    return [];
-  }
-
-  return readdirSync(profilesRoot, { withFileTypes: true })
-    .filter(entry => entry.isFile() && entry.name.toLowerCase().endsWith('.md'))
-    .map(entry => {
-      const fullPath = path.join(profilesRoot, entry.name);
-      return {
-        id: path.basename(entry.name, '.md'),
-        name: path.basename(entry.name, path.extname(entry.name)),
-        fileName: entry.name,
-        content: readFileSync(fullPath, 'utf8').trim()
-      };
-    })
-    .sort((a, b) => a.name.localeCompare(b.name, undefined, { sensitivity: 'base' }));
-}
-
-function agentThemesRoot() {
-  return path.resolve(rootDir, '../mylecture-agent/resources/themes');
-}
-
-function listAgentThemes() {
-  const themesRoot = agentThemesRoot();
-  if (!existsSync(themesRoot) || !statSync(themesRoot).isDirectory()) {
-    return [];
-  }
-
-  return readdirSync(themesRoot, { withFileTypes: true })
-    .filter(entry => entry.isFile() && entry.name.toLowerCase().endsWith('.md'))
-    .map(entry => {
-      const fullPath = path.join(themesRoot, entry.name);
-      return {
-        id: path.basename(entry.name, '.md'),
-        name: path.basename(entry.name, path.extname(entry.name)),
-        fileName: entry.name,
-        content: readFileSync(fullPath, 'utf8').trim()
-      };
-    })
-    .sort((a, b) => a.name.localeCompare(b.name, undefined, { sensitivity: 'base' }));
-}
-
-function agentTeachingStylesRoot() {
-  return path.resolve(rootDir, '../mylecture-agent/resources/teaching-styles');
-}
-
-function listAgentTeachingStyles() {
-  const stylesRoot = agentTeachingStylesRoot();
-  if (!existsSync(stylesRoot) || !statSync(stylesRoot).isDirectory()) {
-    return [];
-  }
-
-  return readdirSync(stylesRoot, { withFileTypes: true })
-    .filter(entry => entry.isFile() && entry.name.toLowerCase().endsWith('.md'))
-    .map(entry => {
-      const fullPath = path.join(stylesRoot, entry.name);
-      return {
-        id: path.basename(entry.name, '.md'),
-        name: path.basename(entry.name, path.extname(entry.name)),
-        fileName: entry.name,
-        content: readFileSync(fullPath, 'utf8').trim()
-      };
-    })
-    .sort((a, b) => a.name.localeCompare(b.name, undefined, { sensitivity: 'base' }));
 }
 
 function sanitizeUploadName(name) {
@@ -2302,30 +2230,33 @@ const server = createServer(async (request, response) => {
     return;
   }
 
-  // Return optional prompt profiles loaded from the lecture-agent workspace.
-  if (requestUrl.pathname === '/agent-profiles') {
+  // Proxy compact generation choices from the lecture-agent API.
+  if (requestUrl.pathname === '/agent-options') {
     try {
-      sendJson(response, 200, { ok: true, profiles: listAgentProfiles(), defaultProfileId: appConfig.agent.defaultTheme });
-    } catch (error) {
-      sendJson(response, 500, { error: error.message });
-    }
-    return;
-  }
-
-  // Return optional prompt themes
-  if (requestUrl.pathname === '/agent-themes') {
-    try {
-      sendJson(response, 200, { ok: true, themes: listAgentThemes(), defaultThemeId: appConfig.agent.defaultTheme });
-    } catch (error) {
-      sendJson(response, 500, { error: error.message });
-    }
-    return;
-  }
-
-  // Return optional prompt teaching styles
-  if (requestUrl.pathname === '/agent-teaching-styles') {
-    try {
-      sendJson(response, 200, { ok: true, teachingStyles: listAgentTeachingStyles(), defaultTeachingStyleId: appConfig.agent.defaultTeachingStyle });
+      await ensureAgentApiAvailable();
+      const options = await getAgentOptions();
+      const configuredTtsProvider = appConfig.tts.provider === '11labs'
+        ? 'elevenlabs'
+        : appConfig.tts.provider;
+      const configuredTtsVoiceExists = options.tts.providers.some(provider =>
+        provider.id === configuredTtsProvider
+        && provider.voices.some(voice => voice.id === appConfig.tts.voice)
+      );
+      sendJson(response, 200, {
+        ok: true,
+        ...options,
+        defaults: {
+          ...options.defaults,
+          themeId: appConfig.agent.defaultTheme || options.defaults.themeId,
+          teachingStyleId: appConfig.agent.defaultTeachingStyle || options.defaults.teachingStyleId,
+        },
+        tts: {
+          ...options.tts,
+          defaults: configuredTtsVoiceExists
+            ? { provider: configuredTtsProvider, voice: appConfig.tts.voice }
+            : options.tts.defaults,
+        },
+      });
     } catch (error) {
       sendJson(response, 500, { error: error.message });
     }
@@ -2433,8 +2364,8 @@ const server = createServer(async (request, response) => {
                   workspaceDir: agentWorkspace,
                   generationLength: parsed.generationLength,
                   aspectRatio: parsed.aspectRatio,
-                  theme: parsed.theme,
-                  teachingStyle: parsed.teachingStyle,
+                  ...(payload.themeId ? { themeId: payload.themeId } : { theme: parsed.theme }),
+                  ...(payload.teachingStyleId ? { teachingStyleId: payload.teachingStyleId } : { teachingStyle: parsed.teachingStyle }),
                   attachments: parsed.attachments,
                   outputs: {
                     video: parsed.includeVideo,

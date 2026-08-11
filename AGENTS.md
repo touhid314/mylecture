@@ -130,7 +130,7 @@ Important routes:
 /stop-job                 Stop active resolve/render/agent/publish job.
 /agent-new-chat           Kill active agent, clear agent workspace, mark next agent run new-session.
 /agent-upload             Save browser-selected attachments for the agent.
-/agent-profiles           Return prompt profile markdown files.
+/agent-options            Proxy resource and TTS voice choices from the lecture-agent API.
 /agent-chat               Send IDE context plus user message to the coding agent.
 /agent-log                Return buffered agent process logs.
 /pick                     Windows-native file picker.
@@ -180,7 +180,7 @@ The agent chat sidebar supports:
 - Aspect ratio selection.
 - Logarithmic generation length slider from `5s` to `15:00`.
 - Editable length text input; accepted examples include `90`, `90s`, `1:30`, `2m`.
-- Prompt profile dropdown loaded from markdown files.
+- Theme and teaching-style dropdowns loaded from the lecture-agent API.
 
 The generation controls are appended to the prompt sent to the agent, not displayed in the visible chat bubble:
 
@@ -188,27 +188,26 @@ The generation controls are appended to the prompt sent to the agent, not displa
 if the user query is for video generation then follow this:
 aspect ratio: <selected>
 generation length: <selected>
-profile: <profile markdown content, only when selected>
 ```
 
-If profile is `None`, no `profile:` line is appended.
+Theme and teaching-style IDs are sent as structured generation request fields;
+their Markdown bodies are not embedded in the browser prompt. Aspect ratio,
+length, getimg, and output selections remain local IDE settings.
 Subtitles are not generated into lecture HTML. The Render options menu owns
 subtitle burning, including font, font size, and centered distance from the
 bottom of the frame. Its defaults come from `render.burnSubtitle`,
 `render.subtitleFont`, `render.subtitleFontSize`, and
 `render.subtitleBottomPercent` in root `config.yaml`.
 
-## Agent Profiles
+## Agent Resource Options
 
-Profiles are markdown files stored under:
-
-```text
-packages/lecture-agent/.agents/mylecture-profiles/*.md
-```
-
-The IDE server exposes them through `/agent-profiles`. The viewer loads the list at startup and stores each profile's content in browser memory. Selecting a profile appends its file content to the agent prompt under `profile: ...`.
-
-The default profile is `None`.
+The IDE server exposes `/agent-options`, a local proxy for the sibling
+lecture-agent API's `/v1/options` route. The viewer uses its theme and
+teaching-style IDs and labels to populate generation selectors, and its
+provider-grouped TTS voices to populate the Resolve and Render voice selectors.
+Repository resource and voice files remain owned by the lecture-agent; the IDE
+does not read them directly. TTS speed and local UI settings such as aspect
+ratio and output toggles are not part of this API response.
 
 ## Agent Attachments
 

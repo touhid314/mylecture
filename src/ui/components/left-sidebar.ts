@@ -38,24 +38,7 @@ export function renderLeftSidebar(context = {}) {
         <div class="resolve-option">
           <label for="resolve-tts-voice">TTS voice</label>
           <select id="resolve-tts-voice">
-            <optgroup label="ElevenLabs TTS (Cloud)" data-provider="elevenlabs">
-              <option value="${elevenLabsDefaultVoice}"${selectedAttr(elevenLabsDefaultVoice, defaultTtsVoice)}>Will</option>
-              ${configuredElevenLabsVoiceOption}
-            </optgroup>
-            <optgroup label="OmniVoice TTS (Local)" data-provider="omnivoice">
-              <option value="mike"${selectedAttr('mike', defaultTtsVoice)}>mike (En)</option>
-              <option value="american-male-1"${selectedAttr('american-male-1', defaultTtsVoice)}>american-male-1 (En)</option>
-              <option value="american-male-2"${selectedAttr('american-male-2', defaultTtsVoice)}>american-male-2 (En)</option>
-              <option value="american-male-3"${selectedAttr('american-male-3', defaultTtsVoice)}>american-male-3 (En)</option>
-              <option value="johnny-harris"${selectedAttr('johnny-harris', defaultTtsVoice)}>johnny-harris (En)</option>
-              <option value="maruf"${selectedAttr('maruf', defaultTtsVoice)}>maruf (En)</option>
-            </optgroup>
-            <optgroup label="Kokoro TTS (Local)" data-provider="kokoro">
-              <option value="am_puck">am_puck</option>
-              <option value="af_heart"${selectedAttr('af_heart', defaultTtsVoice)}>af_heart</option>
-              <option value="am_adam">am_adam</option>
-              <option value="bf_emma">bf_emma</option>
-            </optgroup>
+            <option value="${escapeHtml(defaultTtsVoice)}" selected>${escapeHtml(defaultTtsVoice)}</option>
           </select>
         </div>
         <div class="resolve-option">
@@ -80,24 +63,7 @@ export function renderLeftSidebar(context = {}) {
         <div class="render-option">
           <label for="render-tts-voice">TTS voice</label>
           <select id="render-tts-voice">
-            <optgroup label="ElevenLabs TTS (Cloud)" data-provider="elevenlabs">
-              <option value="${elevenLabsDefaultVoice}"${selectedAttr(elevenLabsDefaultVoice, defaultTtsVoice)}>Will</option>
-              ${configuredElevenLabsVoiceOption}
-            </optgroup>
-            <optgroup label="OmniVoice TTS (Local)" data-provider="omnivoice">
-              <option value="mike"${selectedAttr('mike', defaultTtsVoice)}>mike (En)</option>
-              <option value="american-male-1"${selectedAttr('american-male-1', defaultTtsVoice)}>american-male-1 (En)</option>
-              <option value="american-male-2"${selectedAttr('american-male-2', defaultTtsVoice)}>american-male-2 (En)</option>
-              <option value="american-male-3"${selectedAttr('american-male-3', defaultTtsVoice)}>american-male-3 (En)</option>
-              <option value="johnny-harris"${selectedAttr('johnny-harris', defaultTtsVoice)}>johnny-harris (En)</option>
-              <option value="maruf"${selectedAttr('maruf', defaultTtsVoice)}>maruf (En)</option>
-            </optgroup>
-            <optgroup label="Kokoro TTS (Local)" data-provider="kokoro">
-              <option value="am_puck">am_puck</option>
-              <option value="af_heart"${selectedAttr('af_heart', defaultTtsVoice)}>af_heart</option>
-              <option value="am_adam">am_adam</option>
-              <option value="bf_emma">bf_emma</option>
-            </optgroup>
+            <option value="${escapeHtml(defaultTtsVoice)}" selected>${escapeHtml(defaultTtsVoice)}</option>
           </select>
         </div>
         <div class="render-option">
