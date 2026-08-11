@@ -5,7 +5,7 @@ Reusable viewer runtime for contract-compliant lecture HTML.
 This package is split into two concerns:
 
 - `src/player/index.ts`: the reusable player core.
-- `src/viewer-html.ts`: the default local viewer UI used by `src/ide-server.ts`.
+- `../../src/ui/viewer-html.ts`: the local IDE UI shell used by `src/ide-server.ts`.
 
 The player core can be embedded by an IDE, website, or custom app. The local viewer UI is only one host around that core.
 
@@ -99,21 +99,9 @@ Common state fields:
 }
 ```
 
-## Default Local Viewer
-
-`createViewerHtml()` builds the default browser viewer used by the repo's local server.
-
-```js
-import { createViewerHtml } from '@mylecture/lecture-viewer/viewer-html';
-
-const html = createViewerHtml('outputs/example/index.html', 1080, 1920);
-```
-
-That default UI includes file loading, play/pause, scrubber, subtitles, Live TTS, viewport presets, fullscreen, and metadata display.
-
 ## Local Server
 
-The package does not require `src/ide-server.ts`.
+The package does not require `src/ide-server.ts` or the repo-local UI in `src/ui/`.
 
 That script is a repo-local development host. It provides browser access to local files and conveniences that are not part of the reusable player core:
 
@@ -128,7 +116,6 @@ For a website, serve the player module and lecture HTML from your normal web ser
 
 ```js
 import { createLecturePlayer } from '@mylecture/lecture-viewer/player';
-import { createViewerHtml } from '@mylecture/lecture-viewer/viewer-html';
 ```
 
-The package root also re-exports the player helpers and `createViewerHtml()`.
+The package root also re-exports the player helpers.

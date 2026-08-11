@@ -14,10 +14,6 @@
     "./player": {
       "types": "./dist/player/index.d.ts",
       "default": "./dist/player/index.js"
-    },
-    "./viewer-html": {
-      "types": "./dist/viewer-html.d.ts",
-      "default": "./dist/viewer-html.js"
     }
   },
   "scripts": {

@@ -1,9 +1,0 @@
-{
-  "name": "lecture-agent-basemap-scripts",
-  "private": true,
-  "type": "module",
-  "dependencies": {
-    "d3-geo": "^3.1.1",
-    "topojson-client": "^3.1.0"
-  }
-}

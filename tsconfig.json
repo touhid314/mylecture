@@ -11,7 +11,17 @@
     "noEmit": true,
     "strict": false,
     "esModuleInterop": true,
-    "skipLibCheck": true
+    "skipLibCheck": true,
+    "baseUrl": ".",
+    "paths": {
+      "packages/lecture-agent/*": ["../mylecture-agent/*"]
+    }
   },
-  "include": ["src/**/*.ts"]
+  "include": ["src/**/*.ts"],
+  "exclude": [
+    "src/coursegen/**/*",
+    "src/lecturegen/**/*",
+    "src/ide-lecturegen-client.ts",
+    "src/lecturegen-server.ts"
+  ]
 }

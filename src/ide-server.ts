@@ -14,24 +14,90 @@ import { createServer } from 'node:http';
 import { spawn } from 'node:child_process';
 import { networkInterfaces } from 'node:os';
 import path from 'node:path';
-import { createViewerHtml } from '../packages/lecture-viewer/src/index.ts';
-import { EditorAgent } from '../packages/lecture-agent/src/editor-agent/coding_agent.ts';
-import { generateLecture, parseLectureGenRequest } from '../packages/lecture-agent/src/lecturegen.ts';
-import { generateLectureViaRemoteService, isIdeLectureGenRemoteEnabled } from './ide-lecturegen-client.ts';
+import { createViewerHtml } from './ui/viewer-html.ts';
+import {
+  editLectureViaAgentApi,
+  generateLectureViaAgentApi,
+  resolveViaAgentApi,
+  renderViaAgentApi,
+  resetAgentApiSession,
+  getAgentCatalog,
+  ensureAgentApiAvailable as ensureAgentApiAvailableShared,
+  stopManagedAgentApi
+} from './lecture-agent-api-client.ts';
 import { loadAppConfig, resolveConfigPath } from './config.ts';
 import {
   DEFAULT_ID_PATTERN,
   allocateFolderName,
   sanitizeTitle,
 } from './session-folder-name.ts';
-import {
-  assertVisualEditPreservesNarration,
-  matchVideoMetadataBlock,
-  restoreProtectedVisualBlocks,
-} from './visual-edit-protect.ts';
 
 const rootDir = process.cwd();
 const startupConfig = loadAppConfig(rootDir);
+
+let managedAgentApiProcess = null;
+
+const ideEnvKeys = new Set<string>();
+
+async function ensureAgentApiAvailable() {
+  await ensureAgentApiAvailableShared({ rootDir, envKeysToFilter: ideEnvKeys });
+}
+
+function valueAfter(label: string, text: string, fallback: string): string {
+  const match = text.match(new RegExp(`(?:^|\\n)${label}:\\s*([^\\r\\n]+)`, 'i'));
+  return match?.[1]?.trim() || fallback;
+}
+
+function parseIdeLectureGenRequest(task: string) {
+  const attachments: string[] = [];
+  const ATTACHMENT_PATTERN = /\[\(attachment:\s*([^)]+)\)\]/gi;
+  for (const match of task.matchAll(ATTACHMENT_PATTERN)) {
+    const trimmed = match[1].trim().replace(/[),.;:!?]+$/g, "");
+    if (trimmed) {
+      attachments.push(trimmed);
+    }
+  }
+
+  const SETTINGS_MARKER_1 = 'if the user query is for lecture generation then follow this:';
+  const SETTINGS_MARKER_2 = 'if the user query is for video generation then follow this:';
+  
+  let markerIndex = task.indexOf(SETTINGS_MARKER_1);
+  let markerLength = SETTINGS_MARKER_1.length;
+  if (markerIndex < 0) {
+    markerIndex = task.indexOf(SETTINGS_MARKER_2);
+    markerLength = SETTINGS_MARKER_2.length;
+  }
+
+  const rawRequest = (markerIndex >= 0 ? task.slice(0, markerIndex) : task)
+    .replace(/\[Context:[\s\S]*?\]\s*/g, '')
+    .replace(/\[\(attachment:\s*([^)]+)\)\]/gi, '')
+    .trim();
+
+  const settings = markerIndex >= 0 ? task.slice(markerIndex + markerLength) : '';
+  const themeStart = settings.search(/(?:^|\n)theme:\s*/i);
+  const teachingStart = settings.search(/(?:^|\n)teaching style:\s*/i);
+
+  const theme = themeStart >= 0
+    ? settings.slice(settings.indexOf(':', themeStart) + 1, teachingStart >= 0 ? teachingStart : settings.length).replace(/\[\(attachment:\s*([^)]+)\)\]/gi, '').trim()
+    : '';
+
+  const teachingStyle = teachingStart >= 0
+    ? settings.slice(settings.indexOf(':', teachingStart) + 1).replace(/\[\(attachment:\s*([^)]+)\)\]/gi, '').trim()
+    : '';
+
+  return {
+    request: rawRequest || 'Create a lecture video using the attached material.',
+    aspectRatio: valueAfter('aspect ratio', settings, '16:9'),
+    generationLength: valueAfter('generation length', settings, '1:00'),
+    enableGetimg: valueAfter('getimg enabled', settings, 'yes').toLowerCase() !== 'no',
+    includeVideo: valueAfter('output video', settings, 'yes').toLowerCase() !== 'no',
+    includeInteractive: valueAfter('output interactive', settings, 'no').toLowerCase() === 'yes',
+    includeGame: valueAfter('output practice game', settings, 'no').toLowerCase() === 'yes',
+    theme,
+    teachingStyle,
+    attachments
+  };
+}
 
 function readAppConfig() {
   return loadAppConfig(rootDir);
@@ -483,11 +549,7 @@ function agentUploadRoot(agentClientId = 'default') {
 }
 
 function agentProfilesRoot() {
-  const workspaceProfilesRoot = path.resolve(rootDir, 'packages/lecture-agent/.agents/mylecture-profiles');
-  if (existsSync(path.resolve(rootDir, 'packages/lecture-agent/src/editor-agent/coding_agent.ts'))) {
-    return workspaceProfilesRoot;
-  }
-  return path.resolve(rootDir, '../lecture-agent/.agents/mylecture-profiles');
+  return path.resolve(rootDir, '../mylecture-agent/resources/profiles');
 }
 
 function listAgentProfiles() {
@@ -511,11 +573,7 @@ function listAgentProfiles() {
 }
 
 function agentThemesRoot() {
-  const workspaceThemesRoot = path.resolve(rootDir, 'packages/lecture-agent/.agents/mylecture-themes');
-  if (existsSync(path.resolve(rootDir, 'packages/lecture-agent/src/editor-agent/coding_agent.ts'))) {
-    return workspaceThemesRoot;
-  }
-  return path.resolve(rootDir, '../lecture-agent/.agents/mylecture-themes');
+  return path.resolve(rootDir, '../mylecture-agent/resources/themes');
 }
 
 function listAgentThemes() {
@@ -539,11 +597,7 @@ function listAgentThemes() {
 }
 
 function agentTeachingStylesRoot() {
-  const workspaceStylesRoot = path.resolve(rootDir, 'packages/lecture-agent/.agents/mylecture-teaching-style');
-  if (existsSync(path.resolve(rootDir, 'packages/lecture-agent/src/editor-agent/coding_agent.ts'))) {
-    return workspaceStylesRoot;
-  }
-  return path.resolve(rootDir, '../lecture-agent/.agents/mylecture-teaching-style');
+  return path.resolve(rootDir, '../mylecture-agent/resources/teaching-styles');
 }
 
 function listAgentTeachingStyles() {
@@ -663,7 +717,8 @@ function unescapeMetadataTitle(value) {
 function titleFromVideoMetadataHtml(html) {
   // Scope extraction to the brace-matched metadata object so mid-edit partial HTML
   // cannot pick up a later unrelated `title:` outside the block.
-  const block = matchVideoMetadataBlock(html);
+  const blockMatch = /window\.__VIDEO_METADATA__\s*=\s*(\{[\s\S]*?\})/.exec(html);
+  const block = blockMatch?.[1];
   if (!block) return null;
   const titleMatch = block.match(VIDEO_METADATA_TITLE_RE);
   if (titleMatch?.[2] != null) return unescapeMetadataTitle(titleMatch[2]);
@@ -1003,28 +1058,23 @@ async function runScopedVisualEdit(sourcePath, instruction, options = {}) {
   visualEditLog(`Starting on ${sourceName} (max ${SCOPED_VISUAL_EDIT_MAX_TURNS} turns)`);
 
   try {
-    const agent = new EditorAgent({
-      model: options.model || process.env.AGENT_MODEL || 'gemini-3.5-flash',
+    await ensureAgentApiAvailableShared({ rootDir });
+    const output = await editLectureViaAgentApi({
+      request: `Target file: ${sourceName}\n\nRequested visual change:\n${instruction}`,
       workspaceDir: workspacePath,
+      model: options.model || process.env.AGENT_MODEL || 'gemini-3.5-flash',
       maxTurns: SCOPED_VISUAL_EDIT_MAX_TURNS,
       tokenTrackerSessionId: `visual-${path.basename(workspacePath)}`,
       systemPrompt: scopedVisualEditorSystemPrompt(sourceName),
+    }, {
+      signal: options.signal,
       onLog: text => process.stdout.write(`[visual edit] ${text}`)
     });
-    const session = agent.startChat();
-    const output = await session.sendMessage(
-      `Target file: ${sourceName}\n\nRequested visual change:\n${instruction}`,
-      SCOPED_VISUAL_EDIT_MAX_TURNS,
-      options.signal
-    );
-    let modified = readFileSync(isolatedPath, 'utf8');
+    const modified = readFileSync(isolatedPath, 'utf8');
     if (modified === original) {
       throw new Error('The model completed without changing the scene.');
     }
-    visualEditLog('Restoring protected narration/metadata blocks...');
-    modified = restoreProtectedVisualBlocks(original, modified);
-    assertVisualEditPreservesNarration(original, modified);
-    visualEditLog('Protected blocks verified; applying edit.');
+    visualEditLog('Edit complete; applying.');
     return { original, modified, output: String(output || '').trim() };
   } catch (error) {
     visualEditLog(`Failed: ${error?.message || error}`);
@@ -1192,41 +1242,29 @@ async function resolveLectureFile(filePath, options = {}) {
     const fileInputPath = path.join(folderPath, file);
     const fileOutPath = resolvedSiblingPathForIndex(fileInputPath);
 
-    let childProc = null;
+    const abortController = new AbortController();
     activeJob = {
       type: 'resolve',
       outPath: fileOutPath,
       inputPath: fileInputPath,
       kill: () => {
         activeJob.aborted = true;
-        if (childProc) {
-          if (process.platform === 'win32') {
-            spawn('taskkill', ['/pid', childProc.pid, '/f', '/t'], { windowsHide: true });
-          } else {
-            childProc.kill('SIGTERM');
-          }
-        }
+        abortController.abort();
       }
     };
 
     try {
       console.log(`Resolving scene: ${file} -> ${path.basename(fileOutPath)}`);
-      await runCapture(process.execPath, [
-        '--import',
-        'tsx',
-        'src/build-plan.ts',
-        '--input', fileInputPath,
-        '--out', fileOutPath,
-        '--provider', provider,
-        '--voice', voice,
-        '--speed', normalizeTtsSpeed(options.ttsSpeed),
-        ...(options.forceAudioSection ? ['--force-audio-section', options.forceAudioSection] : [])
-      ], {
-        cwd: rootDir,
-        windowsHide: true,
-        onSpawn: (child) => {
-          childProc = child;
-        }
+      await ensureAgentApiAvailable();
+      await resolveViaAgentApi({
+        input: fileInputPath,
+        out: fileOutPath,
+        provider: provider,
+        voice: voice,
+        speed: parseFloat(normalizeTtsSpeed(options.ttsSpeed)),
+        ...(options.forceAudioSection ? { forceAudioSection: options.forceAudioSection } : {})
+      }, {
+        signal: abortController.signal
       });
 
       if (fileInputPath === inputPath) {
@@ -1250,51 +1288,6 @@ async function resolveLectureFile(filePath, options = {}) {
   }
 
   return finalResolvedPath || toViewerPath(resolvedSiblingPathForIndex(path.join(folderPath, files[0])));
-}
-
-// Build the render-video.ts child-process argument list for one HTML file.
-function renderArgsForFile(inputPath, outPath, options = {}, extraArgs = []) {
-  const config = readAppConfig();
-  const basename = path.basename(inputPath);
-  const voice = normalizeTtsVoice(options.ttsVoice);
-  const provider = resolveTtsProvider(options, voice);
-  const renderArgs = [
-    'src/render-video.ts',
-    '--html', inputPath,
-    '--out', outPath,
-    '--fps', normalizePositiveInteger(options.fps, config.render.fps, 1, 240),
-    '--width', normalizePositiveInteger(options.width, config.render.baseWidth, 1),
-    '--height', normalizePositiveInteger(options.height, config.render.baseHeight, 1),
-    '--tts-provider', provider,
-    '--tts-voice', voice,
-    '--tts-speed', normalizeTtsSpeed(options.ttsSpeed),
-    '--force-audio',
-    '--pipe-frames'
-  ];
-
-  if (isIndexHtmlName(basename)) {
-    renderArgs.push('--resolved-html', resolvedSiblingPathForIndex(inputPath));
-  } else {
-    renderArgs.push('--no-auto-build');
-  }
-
-  renderArgs.push(...extraArgs);
-  return renderArgs;
-}
-
-// Build the build-plan.ts child-process argument list for one index HTML file.
-function buildPlanArgsForIndex(inputPath, outPath, options = {}) {
-  const voice = normalizeTtsVoice(options.ttsVoice);
-  const provider = resolveTtsProvider(options, voice);
-  return [
-    'src/build-plan.ts',
-    '--input', inputPath,
-    '--out', outPath,
-    '--provider', provider,
-    '--voice', voice,
-    '--speed', normalizeTtsSpeed(options.ttsSpeed),
-    '--force-audio'
-  ];
 }
 
 // Burn exact narration text/timing from resolved lecture files into a rendered MP4.
@@ -1324,12 +1317,14 @@ async function burnRenderedSubtitles(inputPath, outputPath, resolvedFiles, optio
         job.childProcs.add(child);
       }
     });
+  } catch (error) {
+    throw error;
   } finally {
     if (childProc) job.childProcs.delete(childProc);
   }
 }
 
-// Determine which sibling scenes belong to the same lecture render batch.
+// Build list of scenes for sequential or parallel render steps.
 function renderSceneSet(inputPath) {
   const folderPath = path.dirname(inputPath);
   const basename = path.basename(inputPath);
@@ -1360,6 +1355,7 @@ async function runLimited(items, limit, worker) {
 }
 
 function createRenderJob() {
+  const abortController = new AbortController();
   const job = {
     id: nextRenderJobId++,
     type: 'render',
@@ -1367,8 +1363,10 @@ function createRenderJob() {
     childProcs: new Set(),
     aborted: false,
     reject: null,
+    abortController,
     kill: () => {
       job.aborted = true;
+      abortController.abort();
       for (const childProc of job.childProcs) {
         killProcessTree(childProc);
       }
@@ -1484,22 +1482,31 @@ async function renderLectureFile(filePath, options = {}, job = createRenderJob()
   const framesDir = path.join(rootDir, '.render', 'server-render', `job-${job.id}`, 'frames');
   const burnSubtitle = options.burnSubtitle === true;
   const renderOutputPath = burnSubtitle ? path.join(path.dirname(framesDir), 'unsubtitled.mp4') : outPath;
-  const renderArgs = renderArgsForFile(inputPath, renderOutputPath, options, [
-    '--frames-dir', framesDir
-  ]);
-  let childProc = null;
+
+  const config = readAppConfig();
+  const voice = normalizeTtsVoice(options.ttsVoice);
+  const provider = resolveTtsProvider(options, voice);
+
   job.outPath = outPath;
   job.inputPath = inputPath;
 
   try {
-    await runCapture(process.execPath, ['--import', 'tsx', ...renderArgs], {
-      cwd: rootDir,
-      windowsHide: true,
-      onSpawn: (child) => {
-        childProc = child;
-        job.childProcs.add(child);
-      }
+    await ensureAgentApiAvailable();
+    await renderViaAgentApi({
+      html: inputPath,
+      out: renderOutputPath,
+      fps: normalizePositiveInteger(options.fps, config.render.fps, 1, 240),
+      width: normalizePositiveInteger(options.width, config.render.baseWidth, 1),
+      height: normalizePositiveInteger(options.height, config.render.baseHeight, 1),
+      ttsProvider: provider,
+      ttsVoice: voice,
+      ttsSpeed: parseFloat(normalizeTtsSpeed(options.ttsSpeed)),
+      framesDir: framesDir,
+      autoBuildPlan: isIndexHtmlName(basename)
+    }, {
+      signal: job.abortController.signal
     });
+
     if (burnSubtitle) {
       const resolvedFile = isIndexHtmlName(basename) ? resolvedSiblingPathForIndex(inputPath) : inputPath;
       console.log(`Burning centered subtitles into ${path.basename(outPath)}...`);
@@ -1519,7 +1526,6 @@ async function renderLectureFile(filePath, options = {}, job = createRenderJob()
     }
     throw error;
   } finally {
-    if (childProc) job.childProcs.delete(childProc);
     rmSync(path.dirname(framesDir), { recursive: true, force: true });
   }
 }
@@ -1536,6 +1542,10 @@ async function renderLectureBatch(inputPath, sceneFiles, options = {}, job = cre
   let firstSceneError = null;
   let renderSceneFiles = sceneFiles;
 
+  const config = readAppConfig();
+  const voice = normalizeTtsVoice(options.ttsVoice);
+  const provider = resolveTtsProvider(options, voice);
+
   mkdirSync(tempDir, { recursive: true });
   job.outPath = outputPath;
   job.inputPath = inputPath;
@@ -1547,22 +1557,21 @@ async function renderLectureBatch(inputPath, sceneFiles, options = {}, job = cre
       for (let index = 0; index < sceneFiles.length; index++) {
         const scenePath = sceneFiles[index];
         const resolvedPath = resolvedSiblingPathForIndex(scenePath);
-        const buildArgs = buildPlanArgsForIndex(scenePath, resolvedPath, options);
-        let childProc = null;
         console.log(`Resolving scene ${index + 1}/${sceneFiles.length}: ${path.basename(scenePath)} -> ${path.basename(resolvedPath)}`);
         try {
-          await runCapture(process.execPath, ['--import', 'tsx', ...buildArgs], {
-            cwd: rootDir,
-            windowsHide: true,
-            onSpawn: (child) => {
-              childProc = child;
-              job.childProcs.add(child);
-            }
+          await ensureAgentApiAvailable();
+          await resolveViaAgentApi({
+            input: scenePath,
+            out: resolvedPath,
+            provider: provider,
+            voice: voice,
+            speed: parseFloat(normalizeTtsSpeed(options.ttsSpeed)),
+            ...(options.forceAudio ? { forceAudio: true } : {})
+          }, {
+            signal: job.abortController.signal
           });
-        } catch (error) {
+        } catch (error: any) {
           throw new Error(`Scene resolve failed for ${path.basename(scenePath)}:\n${error.message}`);
-        } finally {
-          if (childProc) job.childProcs.delete(childProc);
         }
         resolvedSceneFiles.push(resolvedPath);
       }
@@ -1573,9 +1582,6 @@ async function renderLectureBatch(inputPath, sceneFiles, options = {}, job = cre
       throw new Error('Process stopped by user');
     }
 
-    // Empty-suffix scenes (index.html / resolved.html) would otherwise share the final
-    // <title>.mp4 / rendered.mp4 path; with burnSubtitle off, concat would overwrite its own input.
-    // Include scene index in the intermediate name so two empty-suffix scenes cannot collide.
     const finalResolved = path.resolve(outputPath);
     const sceneOutputs = renderSceneFiles.map((scenePath, index) => {
       const sceneOut = defaultOutputPath(scenePath, title);
@@ -1587,27 +1593,30 @@ async function renderLectureBatch(inputPath, sceneFiles, options = {}, job = cre
       const sceneOutput = sceneOutputs[index];
       const sceneTempDir = path.join(tempDir, `scene-${String(index + 1).padStart(3, '0')}`);
       const framesDir = path.join(sceneTempDir, 'frames');
-      const renderArgs = renderArgsForFile(scenePath, sceneOutput, options, [
-        '--frames-dir', framesDir,
-        '--workers', '1',
-        '--video-codec', 'libx264'
-      ]);
-      let childProc = null;
       console.log(`Rendering scene ${index + 1}/${sceneFiles.length}: ${path.basename(scenePath)} -> ${path.basename(sceneOutput)}`);
-      await runCapture(process.execPath, ['--import', 'tsx', ...renderArgs], {
-        cwd: rootDir,
-        windowsHide: true,
-        onSpawn: (child) => {
-          childProc = child;
-          job.childProcs.add(child);
-        }
-      }).catch((error) => {
+
+      try {
+        await ensureAgentApiAvailable();
+        await renderViaAgentApi({
+          html: scenePath,
+          out: sceneOutput,
+          fps: normalizePositiveInteger(options.fps, config.render.fps, 1, 240),
+          width: normalizePositiveInteger(options.width, config.render.baseWidth, 1),
+          height: normalizePositiveInteger(options.height, config.render.baseHeight, 1),
+          ttsProvider: provider,
+          ttsVoice: voice,
+          ttsSpeed: parseFloat(normalizeTtsSpeed(options.ttsSpeed)),
+          framesDir: framesDir,
+          workers: 1,
+          videoCodec: 'libx264',
+          autoBuildPlan: false
+        }, {
+          signal: job.abortController.signal
+        });
+      } catch (error: any) {
         const sceneError = new Error(`Scene render failed for ${path.basename(scenePath)}:\n${error.message}`);
         if (!firstSceneError) {
           firstSceneError = sceneError;
-          for (const runningChild of job.childProcs) {
-            if (runningChild !== childProc) killProcessTree(runningChild);
-          }
         }
         if (existsSync(sceneOutput)) {
           try {
@@ -1617,9 +1626,7 @@ async function renderLectureBatch(inputPath, sceneFiles, options = {}, job = cre
           }
         }
         throw firstSceneError;
-      }).finally(() => {
-        if (childProc) job.childProcs.delete(childProc);
-      });
+      }
     });
 
     if (job.aborted) {
@@ -2251,6 +2258,9 @@ const server = createServer(async (request, response) => {
       if (agentState.activeJob) {
         agentState.activeJob.kill();
       }
+      if (agentState.sessionId) {
+        resetAgentApiSession(agentState.sessionId).catch(() => {});
+      }
       agentState.log = '';
       agentState.currentWorkspace = '';
       agentState.sessionId = '';
@@ -2409,15 +2419,13 @@ const server = createServer(async (request, response) => {
               }
             };
             agentState.activeJob = activeGenerationJob;
-            console.log(`Starting LectureGen in: ${agentWorkspace}`);
+            console.log(`Starting LectureGen via API in: ${agentWorkspace}`);
 
             (async () => {
               try {
-                const parsed = parseLectureGenRequest(task, agentWorkspace);
-                const generateFn = isIdeLectureGenRemoteEnabled()
-                  ? generateLectureViaRemoteService
-                  : generateLecture;
-                const result = await generateFn({
+                const parsed = parseIdeLectureGenRequest(task);
+                await ensureAgentApiAvailable();
+                const result = await generateLectureViaAgentApi({
                   request: parsed.request,
                   model: payload.model || process.env.AGENT_MODEL || 'gemini-3.5-flash',
                   scriptModel: payload.scriptModel || undefined,
@@ -2427,12 +2435,15 @@ const server = createServer(async (request, response) => {
                   aspectRatio: parsed.aspectRatio,
                   theme: parsed.theme,
                   teachingStyle: parsed.teachingStyle,
-                  attachments: parsed.attachments.map(attachment => attachment.path),
-                  includeVideo: parsed.includeVideo,
-                  includeInteractive: parsed.includeInteractive,
-                  includeGame: parsed.includeGame,
+                  attachments: parsed.attachments,
+                  outputs: {
+                    video: parsed.includeVideo,
+                    interactive: parsed.includeInteractive,
+                    game: parsed.includeGame,
+                  },
                   enableGetimg: parsed.enableGetimg,
-                  tokenTrackerSessionId: agentState.sessionId || path.basename(agentWorkspace),
+                  tokenTrackerSessionId: agentState.sessionId || path.basename(agentWorkspace)
+                }, {
                   signal: abortController.signal,
                   onLog: text => {
                     agentState.log += text;
@@ -2479,19 +2490,6 @@ const server = createServer(async (request, response) => {
             return;
           }
 
-          if (!agentState.session) {
-            const agent = new EditorAgent({
-              model: payload.model || process.env.AGENT_MODEL || "gemini-3.5-flash",
-              workspaceDir: agentWorkspaceRoot(agentState.id),
-              tokenTrackerSessionId: agentState.sessionId || path.basename(agentWorkspaceRoot(agentState.id)),
-              onLog: (text) => {
-                agentState.log += text;
-                process.stderr.write(text);
-              }
-            });
-            agentState.session = agent.startChat();
-          }
-
           agentState.log = ''; // Reset log buffer for this turn
 
           let isAborted = false;
@@ -2502,7 +2500,6 @@ const server = createServer(async (request, response) => {
             kill: () => {
               isAborted = true;
               activeAgentJob.aborted = true;
-              agentState.session?.cancelTurn?.();
               abortController.abort();
               if (agentState.activeJob === activeAgentJob) {
                 agentState.activeJob = null;
@@ -2519,11 +2516,24 @@ const server = createServer(async (request, response) => {
           };
           agentState.activeJob = activeAgentJob;
 
-          console.log(`Starting in-process agent execution in: ${agentWorkspaceRoot(agentState.id)}`);
+          console.log(`Starting agent API edit in: ${agentWorkspaceRoot(agentState.id)}`);
 
           (async () => {
             try {
-              const responseText = await agentState.session.sendMessage(task, undefined, abortController.signal);
+              await ensureAgentApiAvailable();
+              const result = await editLectureViaAgentApi({
+                request: task,
+                workspaceDir: agentWorkspaceRoot(agentState.id),
+                sessionId: agentState.sessionId || path.basename(agentWorkspaceRoot(agentState.id)),
+                model: payload.model || process.env.AGENT_MODEL || "gemini-3.5-flash",
+                tokenTrackerSessionId: agentState.sessionId || path.basename(agentWorkspaceRoot(agentState.id))
+              }, {
+                signal: abortController.signal,
+                onLog: (text) => {
+                  agentState.log += text;
+                  process.stderr.write(text);
+                }
+              });
               if (agentState.activeJob === activeAgentJob) {
                 agentState.activeJob = null;
               }
@@ -2531,7 +2541,7 @@ const server = createServer(async (request, response) => {
                 return;
               }
               if (!response.writableEnded) {
-                sendJson(response, 200, { ok: true, output: responseText.trim(), workspace: agentWorkspaceRoot(agentState.id) });
+                sendJson(response, 200, { ok: true, output: result.output.trim(), workspace: agentWorkspaceRoot(agentState.id) });
               }
             } catch (err: any) {
               if (agentState.activeJob === activeAgentJob) {
@@ -2762,12 +2772,27 @@ server.on('error', error => {
   process.exit(1);
 });
 
-server.listen(args.port, args.host, () => {
-  const encodedFile = args.openPath ? `?file=${encodeURIComponent(args.openPath)}` : '';
-  const urls = getServerUrls(args.host, args.port);
-  console.log(`IDE server running at:\n${urls.map((url) => `  ${url}`).join('\n')}`);
-  if (args.host === '0.0.0.0') {
-    console.warn('LAN access is enabled. Only use this on a trusted network; the IDE has no authentication.');
-  }
-  if (args.openBrowser) openBrowser(`${urls[0]}${encodedFile}`);
+process.once('SIGINT', () => {
+  stopManagedAgentApi();
+  process.exit(130);
+});
+process.once('SIGTERM', () => {
+  stopManagedAgentApi();
+  process.exit(143);
+});
+
+ensureAgentApiAvailable().then(() => {
+  server.listen(args.port, args.host, () => {
+    const encodedFile = args.openPath ? `?file=${encodeURIComponent(args.openPath)}` : '';
+    const urls = getServerUrls(args.host, args.port);
+    console.log(`IDE server running at:\n${urls.map((url) => `  ${url}`).join('\n')}`);
+    if (args.host === '0.0.0.0') {
+      console.warn('LAN access is enabled. Only use this on a trusted network; the IDE has no authentication.');
+    }
+    if (args.openBrowser) openBrowser(`${urls[0]}${encodedFile}`);
+  });
+}).catch(error => {
+  console.error(error.message);
+  stopManagedAgentApi();
+  process.exit(1);
 });

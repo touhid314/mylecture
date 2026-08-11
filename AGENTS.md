@@ -142,12 +142,12 @@ Long-running jobs share one `activeJob` slot. `killProcessTree` is used on Windo
 
 ## Lecture Viewer Package
 
-`packages/lecture-viewer/` contains the browser player and generated IDE HTML.
+`packages/lecture-viewer/` contains the reusable browser player. The repo-local IDE UI lives under `src/ui/`.
 
 Key files:
 
 ```text
-packages/lecture-viewer/src/viewer-html.ts       Main IDE/viewer HTML template.
+src/ui/viewer-html.ts                            Main IDE/viewer HTML template.
 packages/lecture-viewer/src/player/index.ts      Player runtime and timeline control.
 packages/lecture-viewer/src/index.ts             Export entry.
 packages/lecture-viewer/dist/                    Built package output.
@@ -501,9 +501,9 @@ Do not revert unrelated local changes. This repo is often used interactively thr
 
 ## Development Notes For Future Agents
 
-- Prefer existing patterns in `src/ide-server.ts` and `packages/lecture-viewer/src/viewer-html.ts`; the viewer is a single generated HTML template, not a component app.
+- Prefer existing patterns in `src/ide-server.ts` and `src/ui/viewer-html.ts`; the viewer is a single generated HTML template, not a component app.
 - Use `rg` for search and `apply_patch` for manual edits.
-- After viewer UI edits, run `npm --prefix packages/lecture-viewer run build`.
+- After IDE UI edits, run `npx tsc --noEmit`. After reusable player edits, also run `npm --prefix packages/lecture-viewer run build`.
 - After TypeScript edits, run `npx tsc --noEmit`.
 - For local IDE behavior, inspect both server route code and browser template code.
 - Keep browser-visible chat text separate from hidden prompt augmentation.
