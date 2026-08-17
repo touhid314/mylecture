@@ -12,6 +12,9 @@ function normalizeCoursePlan(raw: CoursePlan): CoursePlan {
   if (raw.source?.slug && raw.source?.title) {
     plan.source = { slug: raw.source.slug, title: raw.source.title };
   }
+  if (raw.classSlug) {
+    plan.classSlug = String(raw.classSlug).trim() || undefined;
+  }
   return plan;
 }
 

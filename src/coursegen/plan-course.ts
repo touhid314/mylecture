@@ -1,7 +1,7 @@
 import { existsSync, readFileSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { LLM_Model } from '../../packages/lecture-agent/src/utils/llm_model.ts';
+import { LLM_Model } from '../../../mylecture-agent/src/utils/llm_model.ts';
 import { resolveAgentModel } from './models.ts';
 import { courseStatePath, ensureCourseDir } from './paths.ts';
 import { estimateCourseCostUsd, printPlanSummary } from './lecture-prompt.ts';
@@ -10,17 +10,36 @@ import { writeCoursePlan, writeCourseState } from './state.ts';
 import { initialCourseState, validateCoursePlan } from './types.ts';
 import type { Audience, CoursePlan, LearningIntent } from './types.ts';
 
+const INTERACTIVE_SPEC_RETRY_HINT = [
+  'interactiveSpec.activities[] must use: id, title, mode (learn|practice|challenge), visibleSetup, learnerAction, controls (non-empty string array), feedback, successCriterion.',
+  'Do NOT use quiz fields (type, question, options, correctAnswer).'
+].join(' ');
+
 export type PlanCourseOptions = {
   topic: string;
   audience?: Audience;
   intent?: LearningIntent;
   scope?: string;
   maxLectures?: number;
+  /** Validation cap when maxLectures is omitted (default 30). */
+  validationMaxLectures?: number;
+  /** When true, do not suggest a target lecture count in the planner prompt. */
+  coverageFirst?: boolean;
+  /** Module planning mode — uses coverage-first defaults when maxLectures omitted. */
+  moduleMode?: boolean;
+  /** Force the course slug (module courses use class--module). */
+  forcedSlug?: string;
+  /** Parent class slug stored on the plan. */
+  classSlug?: string;
+  /** Extra system prompt text appended for module planning. */
+  plannerSystemAddon?: string;
   model?: string;
   dryRun?: boolean;
   budgetUsd?: number;
   /** Ingested source slug under gens/sources/<slug>/ */
   source?: string;
+  /** Limit source sections passed to the planner (module scope). */
+  sourceSectionFilter?: string[];
 };
 
 function plannerPromptPath() {
@@ -41,7 +60,15 @@ function buildPlannerUserPrompt(
       : 'Learning intent: choose the best catalog placement for this topic'
   ];
   if (options.scope) lines.push(`Scope: ${options.scope}`);
-  if (options.maxLectures) lines.push(`Target lecture count: ${options.maxLectures}`);
+  if (options.forcedSlug) lines.push(`Course slug (required): ${options.forcedSlug}`);
+  if (options.coverageFirst) {
+    lines.push(
+      'Lecture count: use as many lectures as needed to cover the scoped material thoroughly (hard max 30). ' +
+        'Do not pad with filler lectures.'
+    );
+  } else if (options.maxLectures) {
+    lines.push(`Target lecture count: ${options.maxLectures}`);
+  }
 
   if (source) {
     lines.push('');
@@ -95,7 +122,10 @@ export function serializePlannerResponse(response: unknown) {
 }
 
 export async function planCourse(options: PlanCourseOptions): Promise<CoursePlan> {
-  const systemPrompt = readFileSync(plannerPromptPath(), 'utf8');
+  const basePrompt = readFileSync(plannerPromptPath(), 'utf8');
+  const systemPrompt = options.plannerSystemAddon
+    ? `${basePrompt}\n\n${options.plannerSystemAddon}`
+    : basePrompt;
   const sourceSlug = String(options.source || '').trim();
   let sourceMeta: { slug: string; title: string; sections: Array<{ id: string; title: string; charCount: number }> } | undefined;
   let knownSourceSectionIds: Set<string> | undefined;
@@ -103,20 +133,33 @@ export async function planCourse(options: PlanCourseOptions): Promise<CoursePlan
   if (sourceSlug) {
     assertValidSourceSlug(sourceSlug);
     const manifest = readSourceManifest(sourceSlug);
-    sourceMeta = {
-      slug: manifest.slug,
-      title: manifest.title,
-      sections: manifest.sections.map(section => ({
+    const filter = options.sourceSectionFilter?.length
+      ? new Set(options.sourceSectionFilter)
+      : null;
+    const sections = manifest.sections
+      .filter(section => !filter || filter.has(section.id))
+      .map(section => ({
         id: section.id,
         title: section.title,
         charCount: section.charCount
-      }))
+      }));
+    if (filter && sections.length !== filter.size) {
+      const found = new Set(sections.map(section => section.id));
+      const missing = [...filter].filter(id => !found.has(id));
+      throw new Error(`sourceSectionFilter ids not found in manifest: ${missing.join(', ')}`);
+    }
+    sourceMeta = {
+      slug: manifest.slug,
+      title: manifest.title,
+      sections
     };
-    knownSourceSectionIds = new Set(manifest.sections.map(section => section.id));
+    knownSourceSectionIds = new Set(sections.map(section => section.id));
   }
 
   const userPrompt = buildPlannerUserPrompt(options, sourceMeta);
-  const maxLectures = options.maxLectures ?? 12;
+  const coverageFirst = options.coverageFirst ?? (options.moduleMode && options.maxLectures === undefined);
+  const validationMaxLectures = options.validationMaxLectures ?? 30;
+  const maxLectures = options.maxLectures ?? (coverageFirst ? validationMaxLectures : 12);
 
   if (options.dryRun) {
     console.log('--- Planner system prompt ---\n');
@@ -135,12 +178,15 @@ export async function planCourse(options: PlanCourseOptions): Promise<CoursePlan
     const llm = new LLM_Model(model, systemPrompt, null, true);
     const prompt = attempt === 0
       ? userPrompt
-      : `${userPrompt}\n\nPrevious response was invalid: ${lastError?.message}. Return valid JSON only.`;
+      : `${userPrompt}\n\nPrevious response was invalid: ${lastError?.message}. ${INTERACTIVE_SPEC_RETRY_HINT} Return valid JSON only.`;
     rawResponse = await llm.generate(prompt, null, null, null, null, true, false);
     try {
       const parsed = normalizePlannerResponse(rawResponse);
       if (sourceMeta && (!parsed.source || typeof parsed.source !== 'object')) {
         parsed.source = { slug: sourceMeta.slug, title: sourceMeta.title };
+      }
+      if (options.forcedSlug) {
+        parsed.slug = options.forcedSlug;
       }
       const plan = validateCoursePlan(parsed, {
         maxLectures,
@@ -149,6 +195,9 @@ export async function planCourse(options: PlanCourseOptions): Promise<CoursePlan
       // Always force CLI --source onto the plan (ignore planner-invented slug/title).
       if (sourceMeta) {
         plan.source = { slug: sourceMeta.slug, title: sourceMeta.title };
+      }
+      if (options.classSlug) {
+        plan.classSlug = options.classSlug;
       }
       ensureCourseDir(plan.slug);
       writeCoursePlan(plan);

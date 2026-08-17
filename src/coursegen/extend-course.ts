@@ -1,7 +1,7 @@
 import { readFileSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { LLM_Model } from '../../packages/lecture-agent/src/utils/llm_model.ts';
+import { LLM_Model } from '../../../mylecture-agent/src/utils/llm_model.ts';
 import { resolveAgentModel } from './models.ts';
 import { ensureCourseDir } from './paths.ts';
 import { estimateCourseCostUsd, printPlanSummary } from './lecture-prompt.ts';
@@ -12,6 +12,7 @@ import { syncStateFromPlan } from './run-course.ts';
 import {
   flattenPlanLectures,
   initialCourseState,
+  resolveInteractiveSpec,
   validateCoursePlan,
   type CoursePlan,
   type PlannedModule
@@ -158,8 +159,10 @@ function exampleInteractiveSpecFromPlan(plan: CoursePlan): string | null {
   for (const module of plan.modules) {
     for (const lecture of module.lectures) {
       if (lecture.interactiveSpec?.activities?.[0]) {
-        const activity = lecture.interactiveSpec.activities[0];
-        return JSON.stringify({ activities: [activity] }, null, 2);
+        const spec = resolveInteractiveSpec(lecture);
+        if (spec) {
+          return JSON.stringify({ activities: [spec.activities[0]] }, null, 2);
+        }
       }
     }
   }

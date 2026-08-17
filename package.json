@@ -27,7 +27,8 @@
     "test:invoke-render": "node --import tsx src/invoke-render-section.test.ts",
     "test:elevenlabs-context": "node --import tsx src/elevenlabs-context.test.ts",
     "test:visual-edit-protect": "node --import tsx src/visual-edit-protect.test.ts",
-    "test:multipart": "node --import tsx tests/render-multipart.test.ts"
+    "test:multipart": "node --import tsx tests/render-multipart.test.ts",
+    "test:coursegen": "node --import tsx --test src/coursegen/*.test.ts"
   },
   "devDependencies": {
     "@types/node": "^20.19.43",

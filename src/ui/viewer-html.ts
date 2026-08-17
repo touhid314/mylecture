@@ -56,7 +56,7 @@ function viewportFromConfigAspectRatio(aspectRatio, baseWidth, baseHeight) {
 
 function generationSecondsToInitialSlider(seconds) {
   const minSeconds = 5;
-  const maxSeconds = 900;
+  const maxSeconds = 1200;
   const sliderMax = 1000;
   const raw = Number(seconds);
   const clamped = Math.max(minSeconds, Math.min(maxSeconds, Number.isFinite(raw) ? raw : 60));

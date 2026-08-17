@@ -1,7 +1,10 @@
 import { loadEnv } from './env.ts';
 import { rootDir } from './paths.ts';
 import { extendCourse, type ExtensionPlacementMode } from './extend-course.ts';
+import { generateAssessments } from './generate-assessments.ts';
+import { planClass } from './plan-class.ts';
 import { planCourse } from './plan-course.ts';
+import { planModule } from './plan-module.ts';
 import { publishCourse } from './publish-course.ts';
 import { printCourseStatus, runCourse } from './run-course.ts';
 import { runScriptLab } from './script-lab.ts';
@@ -74,11 +77,45 @@ function flagIntegerRange(flags: Record<string, string | boolean>, key: string, 
   return num;
 }
 
+const EDIT_TARGETS = ['video', 'interactive', 'game'] as const;
+
+function validateEditFlags(flags: Record<string, string | boolean>) {
+  const editTarget = flagString(flags, 'edit-target') || undefined;
+  const editPrompt = flagString(flags, 'edit-prompt') || undefined;
+  if (!editTarget && !editPrompt) {
+    return { editTarget: undefined, editPrompt: undefined };
+  }
+  if (!editTarget || !editPrompt) {
+    throw new Error('--edit-target and --edit-prompt must be used together');
+  }
+  if (!EDIT_TARGETS.includes(editTarget as (typeof EDIT_TARGETS)[number])) {
+    throw new Error(`--edit-target must be one of: ${EDIT_TARGETS.join(', ')}`);
+  }
+  if (!editPrompt.trim()) {
+    throw new Error('--edit-prompt must be non-empty');
+  }
+  if (!flagString(flags, 'force-lecture')) {
+    throw new Error('--force-lecture is required with --edit-target and --edit-prompt');
+  }
+  if (flagBool(flags, 'retry-practice')) {
+    throw new Error('--edit-target cannot be combined with --retry-practice');
+  }
+  if (flagBool(flags, 'repair-practice')) {
+    throw new Error('--edit-target cannot be combined with --repair-practice');
+  }
+  return {
+    editTarget: editTarget as (typeof EDIT_TARGETS)[number],
+    editPrompt: editPrompt.trim()
+  };
+}
+
 function printHelp() {
   console.log(`MyLecture course generator
 
 Usage:
   npm run coursegen -- ingest --pdf <path> --source <slug> [options]
+  npm run coursegen -- plan-class --topic <text> [options]
+  npm run coursegen -- plan-module --class <slug> --module <slug> [options]
   npm run coursegen -- plan --topic <text> [options]
   npm run coursegen -- extend --course <slug> [options]
   npm run coursegen -- run --course <slug> [options]
@@ -86,8 +123,11 @@ Usage:
   npm run coursegen -- render --course <slug> [options]
   npm run coursegen -- captions --course <slug> [options]
   npm run coursegen -- script --course <slug> [options]
+  npm run coursegen -- generate-assessments --course <slug> [options]
   npm run coursegen -- publish --course <slug> [options]
   npm run coursegen -- status --course <slug>
+  npm run coursegen -- ui
+  npm run coursegen:ui
 
 Audiences: ${AUDIENCES.join(', ')}
 Learning intents: ${LEARNING_INTENTS.join(', ')}
@@ -105,6 +145,32 @@ Plan options:
   --lectures <n>           Target lecture count (default 12, max 30)
   --budget <usd>           Budget cap for later run (default 5)
   --source <slug>          Ground the plan in an ingested source
+  --model <name>           Override AGENT_MODEL
+  --dry-run                Print prompts only
+
+Plan-class options:
+  --topic <text>           Class topic (required)
+  --class <slug>           Preferred class slug (optional)
+  --scope <text>           Narrow the class scope
+  --audience <level>       Optional catalog audience hint
+  --intent <name>          Optional catalog intent hint
+  --source <slug>          Ground modules in an ingested source
+  --model <name>           Override AGENT_MODEL
+  --dry-run                Print prompts only
+
+Plan-module options:
+  --class <slug>           Parent class slug (required)
+  --module <slug>          Module slug from class-plan.json (required)
+  --source <slug>          Override source slug from class plan
+  --lectures <n>           Target lecture count (omit for coverage-first, max 30)
+  --audience <level>       Override class plan audience
+  --intent <name>          Override class plan intent
+  --budget <usd>           Budget cap for later run (default 5)
+  --model <name>           Override AGENT_MODEL
+  --dry-run                Print prompts only
+
+Generate-assessments options:
+  --course <slug>          Course slug (required)
   --model <name>           Override AGENT_MODEL
   --dry-run                Print prompts only
 
@@ -127,9 +193,13 @@ Run / resume options:
   --skip-script-review     Skip narration-quality review before render (dev only)
   --lecture-timeout <min>  Kill hung agent generation after N minutes (resolve/render not covered) (default 20)
   --retry-failed           Retry failed lectures only
+  --retry-practice         Regenerate interactive/game only (keeps video). Use with --force-lecture or resume
+  --repair-practice        Keep existing practice HTML; run QA + one IAGen/GameGen repair. Use with --force-lecture or resume
   --force-lecture <slug>   Regenerate one lecture (ignores budget/attempt caps)
+  --edit-target <kind>     Edit existing HTML: video, interactive, or game (requires --edit-prompt and --force-lecture)
+  --edit-prompt <text>     Instruction for EditorAgent edit pass (requires --edit-target and --force-lecture)
   --render                 Render MP4 after resolve (default: resolve-only)
-  --tts-voice <voice>      Narration voice (default american-male-3)
+  --tts-voice <voice>      Narration voice (default Leda / Gemini TTS)
   --tts-speed <speed>
   --dry-run                Print per-lecture prompts only
 
@@ -137,7 +207,7 @@ Render options (mux MP4 from existing resolved HTML only — no agent, resolve, 
   --course <slug>          Required course slug
   --yes                    Skip confirmation prompt
   --force-lecture <slug>   Render MP4 for one lecture only
-  --tts-voice <voice>      Narration voice (default american-male-3)
+  --tts-voice <voice>      Narration voice (default Leda / Gemini TTS)
   --tts-speed <speed>
   --dry-run                List lectures that would render
 
@@ -152,8 +222,11 @@ Script lab options:
 
 Publish options:
   --yes                    Skip confirmation
-  --go-live                Publish course publicly after upload
+  --go-live                Publish course publicly; unfinished lectures stay off the catalog
   --dry-run                Print upload commands only
+
+Draft publish captures a random early video frame as thumbnail.jpg per lecture
+(same idea as the admin upload auto-thumbnail) and admin.mjs uploads it to the CDN.
 `);
 }
 
@@ -163,6 +236,11 @@ async function main() {
   try {
     if (command === 'help' || command === '--help' || command === '-h') {
       printHelp();
+      return;
+    }
+
+    if (command === 'ui') {
+      await import('./server.ts');
       return;
     }
 
@@ -178,6 +256,71 @@ async function main() {
         source,
         chapters: flagString(flags, 'chapters') || undefined,
         title: flagString(flags, 'title') || undefined
+      });
+      return;
+    }
+
+    if (command === 'plan-class') {
+      const topic = flagString(flags, 'topic');
+      if (!topic) throw new Error('--topic is required');
+      const audienceRaw = flagString(flags, 'audience');
+      const audience = audienceRaw as Audience;
+      if (audienceRaw && !AUDIENCES.includes(audience)) {
+        throw new Error(`--audience must be one of: ${AUDIENCES.join(', ')}`);
+      }
+      const intentRaw = flagString(flags, 'intent');
+      if (intentRaw && !isLearningIntent(intentRaw)) {
+        throw new Error(`--intent must be one of: ${LEARNING_INTENTS.join(', ')}`);
+      }
+      await planClass({
+        topic,
+        classSlug: flagString(flags, 'class') || undefined,
+        audience: audienceRaw ? audience : undefined,
+        intent: intentRaw && isLearningIntent(intentRaw) ? intentRaw : undefined,
+        scope: flagString(flags, 'scope') || undefined,
+        model: flagString(flags, 'model') || undefined,
+        dryRun: flagBool(flags, 'dry-run'),
+        source: flagString(flags, 'source') || undefined
+      });
+      return;
+    }
+
+    if (command === 'plan-module') {
+      const classSlug = flagString(flags, 'class');
+      const moduleSlug = flagString(flags, 'module');
+      if (!classSlug) throw new Error('--class is required');
+      if (!moduleSlug) throw new Error('--module is required');
+      const audienceRaw = flagString(flags, 'audience');
+      const audience = audienceRaw as Audience;
+      if (audienceRaw && !AUDIENCES.includes(audience)) {
+        throw new Error(`--audience must be one of: ${AUDIENCES.join(', ')}`);
+      }
+      const intentRaw = flagString(flags, 'intent');
+      if (intentRaw && !isLearningIntent(intentRaw)) {
+        throw new Error(`--intent must be one of: ${LEARNING_INTENTS.join(', ')}`);
+      }
+      const lecturesRaw = flagString(flags, 'lectures');
+      await planModule({
+        classSlug,
+        moduleSlug,
+        source: flagString(flags, 'source') || undefined,
+        maxLectures: lecturesRaw ? flagIntegerRange(flags, 'lectures', 12, 1, 30) : undefined,
+        audience: audienceRaw ? audience : undefined,
+        intent: intentRaw && isLearningIntent(intentRaw) ? intentRaw : undefined,
+        model: flagString(flags, 'model') || undefined,
+        dryRun: flagBool(flags, 'dry-run'),
+        budgetUsd: flagPositiveNumber(flags, 'budget', 5)
+      });
+      return;
+    }
+
+    if (command === 'generate-assessments' || command === 'assessments') {
+      const courseSlug = flagString(flags, 'course');
+      if (!courseSlug) throw new Error('--course is required');
+      await generateAssessments({
+        courseSlug,
+        model: flagString(flags, 'model') || undefined,
+        dryRun: flagBool(flags, 'dry-run')
       });
       return;
     }
@@ -231,11 +374,19 @@ async function main() {
     }
 
     const courseSlug = flagString(flags, 'course');
-    if (!courseSlug && command !== 'help') {
+    if (
+      !courseSlug &&
+      command !== 'help' &&
+      command !== 'plan-class' &&
+      command !== 'plan-module' &&
+      command !== 'generate-assessments' &&
+      command !== 'assessments'
+    ) {
       throw new Error('--course <slug> is required');
     }
 
     if (command === 'run' || command === 'resume') {
+      const edit = validateEditFlags(flags);
       await runCourse({
         courseSlug,
         yes: flagBool(flags, 'yes'),
@@ -246,7 +397,11 @@ async function main() {
         skipScriptReview: flagBool(flags, 'skip-script-review'),
         lectureTimeoutMinutes: flagPositiveNumber(flags, 'lecture-timeout', 20),
         retryFailed: command === 'resume' || flagBool(flags, 'retry-failed'),
+        practiceOnly: flagBool(flags, 'retry-practice'),
+        practiceRepair: flagBool(flags, 'repair-practice'),
         forceLecture: flagString(flags, 'force-lecture') || undefined,
+        editTarget: edit.editTarget,
+        editPrompt: edit.editPrompt,
         ttsVoice: flagString(flags, 'tts-voice') || undefined,
         ttsSpeed: flagString(flags, 'tts-speed') || undefined,
         model: flagString(flags, 'model') || undefined,

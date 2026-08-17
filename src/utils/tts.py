@@ -21,10 +21,12 @@ Providers available via this module:
    - Model and default voice are required via GOOGLE_TTS_MODEL and
      GOOGLE_TTS_VOICE.
    - Allowed models in this module:
+     gemini-3.1-flash-tts-preview
      gemini-3-flash-preview-tts
      gemini-3-flash-lite-preview-tts
      gemini-3-pro-tts
      gemini-2.5-flash-preview-tts
+     gemini-2.5-pro-preview-tts
    - Voice parameter maps to Google prebuilt voice_name.
    - Common Gemini voice names used in practice include:
      Achernar, Achird, Algenib, Algieba, Alnilam, Aoede, Autonoe,
@@ -38,7 +40,8 @@ Providers available via this module:
 3) omnivoice (local zero-shot voice cloning)
    - Provider key: "omnivoice"
    - Loads k2-fsa/OmniVoice with PyTorch on CUDA when available, otherwise CPU.
-   - Voice names resolve to folders under <project>/voices, case-insensitively.
+   - Voice names resolve to folders under <project>/voices (or the sibling
+     mylecture-agent/src/utils/voices tree), case-insensitively.
    - Each voice folder must contain a reference WAV and may contain a reference
      transcript TXT file.
    - Defaults to voice "american-male-1" and speed 0.85.
@@ -125,6 +128,55 @@ log = Logger()
 
 DEFAULT_OUTPUT_DIR = PROJECT_ROOT / "outputs/tts"
 
+
+def _omnivoice_voice_dir(voice: str) -> Path:
+    """Find a named OmniVoice reference folder.
+
+    Clips live in ``mylecture-agent/src/utils/voices``. LectureGen/IDE often run
+    with PROJECT_ROOT=mylecture, which historically expected ``mylecture/voices``.
+    Search both layouts plus OMNIVOICE_VOICES_DIR.
+    """
+    env_root = (os.getenv("OMNIVOICE_VOICES_DIR") or "").strip()
+    candidates = []
+    if env_root:
+        candidates.append(Path(env_root))
+    candidates.extend(
+        [
+            PROJECT_ROOT / "voices",
+            PROJECT_ROOT / "src" / "utils" / "voices",
+            PROJECT_ROOT.parent / "mylecture-agent" / "src" / "utils" / "voices",
+            PROJECT_ROOT.parent / "mylecture" / "voices",
+        ]
+    )
+
+    seen: set[str] = set()
+    roots: list[Path] = []
+    for root in candidates:
+        key = str(root).lower()
+        if key in seen:
+            continue
+        seen.add(key)
+        roots.append(root)
+
+    voice_name = (voice or "").strip()
+    for voices_root in roots:
+        if not voices_root.is_dir():
+            continue
+        direct = voices_root / voice_name
+        if voice_name and direct.is_dir():
+            return direct
+        try:
+            for item in voices_root.iterdir():
+                if item.is_dir() and item.name.lower() == voice_name.lower():
+                    return item
+        except OSError:
+            continue
+
+    searched = ", ".join(str(root / voice_name) for root in roots)
+    raise RuntimeError(
+        f"OmniVoice voice directory not found for '{voice_name}'. Looked in: {searched}"
+    )
+
 def _require_env(name: str) -> str:
     value = os.getenv(name)
     if value is None or not value.strip():
@@ -133,10 +185,12 @@ def _require_env(name: str) -> str:
 
 
 _ALLOWED_GEMINI_MODELS = {
+    "gemini-3.1-flash-tts-preview",
     "gemini-3-flash-preview-tts",
     "gemini-3-flash-lite-preview-tts",
     "gemini-3-pro-tts",
     "gemini-2.5-flash-preview-tts",
+    "gemini-2.5-pro-preview-tts",
 }
 
 ELEVENLABS_OUTPUT_FORMAT = "pcm_24000"
@@ -432,26 +486,13 @@ def _run_omnivoice(text: str, output_path: Path, voice: str, speed: float) -> No
     """
     Clone a local reference voice with OmniVoice and write a 24 kHz WAV.
 
-    ``voice`` names a directory under ``<project>/voices``. The directory must
-    contain a reference WAV and may contain a TXT transcript for that audio.
+    ``voice`` names a directory under ``<project>/voices`` or the sibling
+    ``mylecture-agent/src/utils/voices`` tree. The directory must contain a
+    reference WAV and may contain a TXT transcript for that audio.
     """
     import soundfile as sf
 
-    # Resolve the requested reference-voice folder case-insensitively.
-    voices_root = PROJECT_ROOT / "voices"
-    voice_dir = voices_root / voice
-    if not voice_dir.is_dir():
-        # Try case-insensitive lookup
-        found_dir = None
-        if voices_root.is_dir():
-            for item in voices_root.iterdir():
-                if item.is_dir() and item.name.lower() == voice.lower():
-                    found_dir = item
-                    break
-        if found_dir:
-            voice_dir = found_dir
-        else:
-            raise RuntimeError(f"OmniVoice voice directory not found: {voice_dir}")
+    voice_dir = _omnivoice_voice_dir(voice)
 
     # Use the first reference WAV and, when present, its TXT transcript.
     ref_audio = None
@@ -575,7 +616,8 @@ def tts(
             available only for this provider.
 
         omnivoice:
-            Accepts the name of a folder under <project>/voices. That folder
+            Accepts the name of a folder under <project>/voices or the sibling
+            mylecture-agent/src/utils/voices tree. That folder
             must contain a reference WAV and may contain its transcript as TXT.
             Folder lookup is case-insensitive. Defaults to
             "american-male-1". Input containing Bengali Unicode characters is
@@ -616,9 +658,10 @@ def tts(
             model=openai_model,
             voice=chosen_voice,
             input=clean_text,
-            response_format="wav",
+            response_format="pcm",
         ) as response:
-            response.stream_to_file(str(out_path))
+            pcm_data = response.read()
+        _save_wave(str(out_path), pcm_data, rate=24000)
         return str(out_path)
 
     if chosen_provider == "google":

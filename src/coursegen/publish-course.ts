@@ -1,9 +1,10 @@
 import { existsSync } from 'node:fs';
-import { writeLectureCaptionsVtt } from '../captions-vtt.ts';
-import { lectureFolderPath } from './paths.ts';
+import { writeLectureCaptionsVtt } from '../../../mylecture-agent/src/render-worker/captions-vtt.ts';
+import { assessmentsPath, lectureFolderPath } from './paths.ts';
 import { readCoursePlan, readCourseState } from './state.ts';
 import { spawnAdmin } from './spawn.ts';
 import { confirm } from './confirm.ts';
+import { ensureLectureThumbnail } from './thumbnail.ts';
 
 export type PublishCourseOptions = {
   courseSlug: string;
@@ -11,6 +12,10 @@ export type PublishCourseOptions = {
   goLive?: boolean;
   dryRun?: boolean;
 };
+
+export function lecturesReadyToGoLive<T extends { status: string }>(lectures: T[]) {
+  return lectures.filter(lecture => lecture.status === 'done');
+}
 
 function lectureSourceDir(courseSlug: string, lecture: { folderName: string; order: number; slug: string }) {
   const folderName = lecture.folderName || `${String(lecture.order).padStart(2, '0')}-${lecture.slug}`;
@@ -22,20 +27,17 @@ export async function publishCourse(options: PublishCourseOptions) {
   const state = readCourseState(options.courseSlug);
 
   const notDone = state.lectures.filter(lecture => lecture.status !== 'done');
-  const needsReview = state.lectures.filter(lecture => lecture.status === 'needs-review');
-  if (options.goLive && needsReview.length > 0) {
-    console.error(`Cannot go live: ${needsReview.length} lecture(s) need practice QA review: ${needsReview.map(l => l.slug).join(', ')}`);
-    console.error(`Re-run with: npm run coursegen -- resume --course ${options.courseSlug} after fixes, or edit activities/interactive/index.html / activities/game/index.html manually and clear needs-review.`);
-    process.exitCode = 1;
-    return;
-  }
-  if (options.goLive && notDone.length > 0) {
-    console.error(`Cannot go live: ${notDone.length} lecture(s) are not done: ${notDone.map(l => l.slug).join(', ')}`);
-    process.exitCode = 1;
-    return;
-  }
+  const readyToGoLive = lecturesReadyToGoLive(state.lectures);
   if (notDone.length > 0) {
     console.warn(`Warning: ${notDone.length} lecture(s) are not done: ${notDone.map(l => l.slug).join(', ')}`);
+    if (options.goLive) {
+      console.warn('Go-live will publish finished lectures only; unfinished ones stay off the catalog.');
+    }
+  }
+  if (options.goLive && readyToGoLive.length === 0) {
+    console.error('Cannot go live: no lecture is done yet.');
+    process.exitCode = 1;
+    return;
   }
 
   console.log(`\nPublish course: ${plan.title} (${plan.slug})`);
@@ -43,22 +45,29 @@ export async function publishCourse(options: PublishCourseOptions) {
   console.log(`Mode: ${options.goLive ? 'GO LIVE (public)' : 'DRAFT (not visible on catalog)'}`);
 
   if (options.dryRun) {
+    const assessmentsFile = assessmentsPath(options.courseSlug);
     if (options.goLive) {
-      for (const lecture of state.lectures) {
+      for (const lecture of readyToGoLive) {
         console.log(`  publish-lecture --course ${plan.slug} --slug ${lecture.slug}`);
       }
       console.log(`  publish-course --slug ${plan.slug}`);
     } else {
       for (const lecture of state.lectures) {
         const sourceDir = lectureSourceDir(options.courseSlug, lecture);
+        console.log(`  thumbnail ${sourceDir}/thumbnail.jpg`);
         console.log(`  upload-lecture --course ${plan.slug} --slug ${lecture.slug} --title "${lecture.title}" --source-dir ${sourceDir}`);
       }
+    }
+    if (existsSync(assessmentsFile)) {
+      console.log(`  upsert-course-assessments --course ${plan.slug} --file ${assessmentsFile}`);
     }
     return;
   }
 
   const confirmMessage = options.goLive
-    ? 'Publish this course live on the website?'
+    ? notDone.length > 0
+      ? `Publish this course live? ${readyToGoLive.length} finished lecture(s) will go public; ${notDone.length} unfinished stay off the catalog.`
+      : 'Publish this course live on the website?'
     : 'Upload this course to the website?';
   const ok = await confirm(confirmMessage, options.yes);
   if (!ok) {
@@ -71,7 +80,7 @@ export async function publishCourse(options: PublishCourseOptions) {
   if (options.goLive) {
     const failedLectures: string[] = [];
 
-    for (const lecture of state.lectures) {
+    for (const lecture of readyToGoLive) {
       console.log(`\nPublishing lecture: ${lecture.slug}`);
       try {
         const sourceDir = lectureSourceDir(options.courseSlug, lecture);
@@ -85,12 +94,16 @@ export async function publishCourse(options: PublishCourseOptions) {
       }
     }
 
-    if (failedLectures.length > 0) {
-      console.error(`\nGo-live failed: could not publish ${failedLectures.length} lecture(s): ${failedLectures.join(', ')}`);
+    if (failedLectures.length === readyToGoLive.length) {
+      console.error(`\nGo-live failed: could not publish any finished lecture(s): ${failedLectures.join(', ')}`);
       console.error('If a lecture was never uploaded, run publish (without --go-live) first.');
       console.error(`Fix the issues above and re-run: npm run coursegen -- publish --course ${plan.slug} --go-live`);
       process.exitCode = 1;
       return;
+    }
+    if (failedLectures.length > 0) {
+      console.warn(`\nSkipped ${failedLectures.length} finished lecture(s) that are not on the website yet: ${failedLectures.join(', ')}`);
+      console.warn('Upload draft first, then go live again to include them.');
     }
 
     await spawnAdmin(['publish-course', '--slug', plan.slug]);
@@ -111,6 +124,20 @@ export async function publishCourse(options: PublishCourseOptions) {
       const captionsPath = writeLectureCaptionsVtt(sourceDir);
       if (captionsPath) {
         console.log(`  captions: ${captionsPath}`);
+      }
+
+      try {
+        const thumbnail = await ensureLectureThumbnail(sourceDir);
+        if (thumbnail?.captured) {
+          console.log(`  thumbnail: ${thumbnail.path} @ ${thumbnail.seekSeconds?.toFixed(1)}s`);
+        } else if (thumbnail) {
+          console.log(`  thumbnail: ${thumbnail.path}`);
+        } else {
+          console.warn(`  thumbnail: skipped (no MP4 in ${sourceDir})`);
+        }
+      } catch (err) {
+        const message = err instanceof Error ? err.message : String(err);
+        console.warn(`  thumbnail: skipped (${message})`);
       }
 
       const args = [
@@ -143,8 +170,21 @@ export async function publishCourse(options: PublishCourseOptions) {
     return;
   }
 
+  const assessmentsFile = assessmentsPath(options.courseSlug);
+  if (existsSync(assessmentsFile)) {
+    console.log(`\nUploading assessments: ${assessmentsFile}`);
+    await spawnAdmin([
+      'upsert-course-assessments',
+      '--course', plan.slug,
+      '--file', assessmentsFile
+    ]);
+  }
+
   console.log('\nPublish complete.');
   if (options.goLive) {
+    if (notDone.length > 0) {
+      console.log(`Unfinished lectures were not published: ${notDone.map(l => l.slug).join(', ')}`);
+    }
     console.log(`Rollback: npm run admin -- unpublish-course --slug ${plan.slug}`);
   } else {
     console.log(`Course uploaded as draft. Review, then: npm run coursegen -- publish --course ${plan.slug} --go-live`);

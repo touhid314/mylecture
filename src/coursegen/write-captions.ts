@@ -1,5 +1,5 @@
 import path from 'node:path';
-import { writeLectureCaptionsVtt } from '../captions-vtt.ts';
+import { writeLectureCaptionsVtt } from '../../../mylecture-agent/src/render-worker/captions-vtt.ts';
 import { readCoursePlan, readCourseState } from './state.ts';
 import { lectureFolderPath } from './paths.ts';
 

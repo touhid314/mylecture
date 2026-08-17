@@ -1,7 +1,22 @@
-import { existsSync, readdirSync } from 'node:fs';
-import { coursePlanPath, courseStatePath, getCourseDir, getCoursesRoot } from './paths.ts';
-import { estimateCourseCostUsd } from './lecture-prompt.ts';
-import { lectureRenderReady } from './run-course.ts';
+import { existsSync, readdirSync, readFileSync } from 'node:fs';
+import path from 'node:path';
+import { moduleCourseSlug, validateClassPlan, type ClassPlan } from './class-types.ts';
+import {
+  assessmentsPath,
+  classPlanPath,
+  coursePlanPath,
+  courseStatePath,
+  getClassDir,
+  getClassesRoot,
+  getCourseDir,
+  getCoursesRoot,
+  isIndexHtmlName,
+  lectureFolderName,
+  lectureFolderPath
+} from './paths.ts';
+import { estimateCourseCostUsd, GAME_PRACTICE_REL, INTERACTIVE_PRACTICE_REL } from './lecture-prompt.ts';
+import { lectureHasPractice, lectureRenderReady } from './run-course.ts';
+import { lectureUsageFileExists, readLectureUsageCostUsd } from './spawn.ts';
 import { readCoursePlan, readCourseState } from './state.ts';
 import type { CoursePlan, CourseState, LectureState } from './types.ts';
 
@@ -17,6 +32,36 @@ export type CourseListItem = {
 export type LectureSummary = LectureState & {
   hasMp4: boolean;
   renderReady: boolean;
+  canRetryPractice: boolean;
+  canRepairPractice: boolean;
+  canEditVideo: boolean;
+  canEditInteractive: boolean;
+  canEditGame: boolean;
+};
+
+export type ClassListItem = {
+  slug: string;
+  title: string;
+  moduleCount: number;
+  plannedCount: number;
+  assessmentCount: number;
+};
+
+export type ClassModuleSummary = {
+  slug: string;
+  title: string;
+  summary?: string;
+  courseSlug: string;
+  hasCoursePlan: boolean;
+  hasAssessments: boolean;
+  lectureCount: number;
+  doneCount: number;
+};
+
+export type ClassSummary = {
+  plan: ClassPlan;
+  classDir: string;
+  modules: ClassModuleSummary[];
 };
 
 export type CourseSummary = {
@@ -34,6 +79,7 @@ export type CourseSummary = {
   };
   lectures: LectureSummary[];
   courseDir: string;
+  hasAssessments: boolean;
 };
 
 function countDone(state: CourseState | null) {
@@ -97,11 +143,37 @@ export function getCourseSummary(courseSlug: string): CourseSummary {
   const statePath = courseStatePath(courseSlug);
   const state = existsSync(statePath) ? readCourseState(courseSlug) : null;
 
-  const lectures: LectureSummary[] = (state?.lectures ?? []).map(lecture => ({
-    ...lecture,
-    hasMp4: Boolean(lecture.mp4Path && existsSync(lecture.mp4Path)),
-    renderReady: lectureRenderReady(plan, lecture)
-  }));
+  const lectures: LectureSummary[] = (state?.lectures ?? []).map(lecture => {
+    const folderName = lecture.folderName || lectureFolderName(lecture.order, lecture.slug);
+    const folderPath = lectureFolderPath(courseSlug, folderName);
+    const hasVideoIndex = existsSync(folderPath) && readdirSync(folderPath).some(name => isIndexHtmlName(name));
+    const liveCost = lectureUsageFileExists(folderPath)
+      ? readLectureUsageCostUsd(folderPath)
+      : lecture.costUsd;
+    return {
+      ...lecture,
+      costUsd: Number(liveCost.toFixed(4)),
+      hasMp4: Boolean(lecture.mp4Path && existsSync(lecture.mp4Path)),
+      renderReady: lectureRenderReady(plan, lecture),
+      canRetryPractice: lectureHasPractice(lecture) && Boolean(lecture.folderName),
+      canRepairPractice: lectureHasPractice(lecture) && (
+        existsSync(path.join(folderPath, INTERACTIVE_PRACTICE_REL)) ||
+        existsSync(path.join(folderPath, GAME_PRACTICE_REL)) ||
+        existsSync(path.join(folderPath, 'interactive.html')) ||
+        existsSync(path.join(folderPath, 'game.html'))
+      ),
+      canEditVideo: hasVideoIndex,
+      canEditInteractive:
+        existsSync(path.join(folderPath, INTERACTIVE_PRACTICE_REL)) ||
+        existsSync(path.join(folderPath, 'interactive.html')),
+      canEditGame:
+        existsSync(path.join(folderPath, GAME_PRACTICE_REL)) ||
+        existsSync(path.join(folderPath, 'game.html'))
+    };
+  });
+  if (state) {
+    state.spentUsd = Number(lectures.reduce((sum, lecture) => sum + lecture.costUsd, 0).toFixed(4));
+  }
 
   const progress = {
     total: lectures.length,
@@ -121,6 +193,95 @@ export function getCourseSummary(courseSlug: string): CourseSummary {
     estimatedCostUsd: estimateCourseCostUsd(plan),
     progress,
     lectures,
-    courseDir: getCourseDir(courseSlug)
+    courseDir: getCourseDir(courseSlug),
+    hasAssessments: existsSync(assessmentsPath(courseSlug))
+  };
+}
+
+function readClassPlanFile(classSlug: string): ClassPlan {
+  return validateClassPlan(JSON.parse(readFileSync(classPlanPath(classSlug), 'utf8')));
+}
+
+function moduleProgress(classSlug: string, moduleSlug: string): ClassModuleSummary {
+  const courseSlug = moduleCourseSlug(classSlug, moduleSlug);
+  const hasCoursePlan = existsSync(coursePlanPath(courseSlug));
+  const hasAssessments = existsSync(assessmentsPath(courseSlug));
+  let lectureCount = 0;
+  let doneCount = 0;
+
+  if (hasCoursePlan) {
+    try {
+      const plan = readCoursePlan(courseSlug);
+      lectureCount = plan.modules.reduce((sum, module) => sum + module.lectures.length, 0);
+    } catch {
+      lectureCount = 0;
+    }
+    try {
+      if (existsSync(courseStatePath(courseSlug))) {
+        doneCount = countDone(readCourseState(courseSlug));
+      }
+    } catch {
+      doneCount = 0;
+    }
+  }
+
+  return {
+    slug: moduleSlug,
+    title: moduleSlug,
+    courseSlug,
+    hasCoursePlan,
+    hasAssessments,
+    lectureCount,
+    doneCount
+  };
+}
+
+export function listClasses(): ClassListItem[] {
+  const root = getClassesRoot();
+  if (!existsSync(root)) return [];
+
+  const items: ClassListItem[] = [];
+  for (const entry of readdirSync(root, { withFileTypes: true })) {
+    if (!entry.isDirectory()) continue;
+    const slug = entry.name;
+    if (!existsSync(classPlanPath(slug))) continue;
+
+    let plan: ClassPlan;
+    try {
+      plan = readClassPlanFile(slug);
+    } catch {
+      continue;
+    }
+
+    let plannedCount = 0;
+    let assessmentCount = 0;
+    for (const module of plan.modules) {
+      const progress = moduleProgress(plan.slug, module.slug);
+      if (progress.hasCoursePlan) plannedCount += 1;
+      if (progress.hasAssessments) assessmentCount += 1;
+    }
+
+    items.push({
+      slug: plan.slug,
+      title: plan.title,
+      moduleCount: plan.modules.length,
+      plannedCount,
+      assessmentCount
+    });
+  }
+
+  return items.sort((a, b) => a.title.localeCompare(b.title));
+}
+
+export function getClassSummary(classSlug: string): ClassSummary {
+  const plan = readClassPlanFile(classSlug);
+  return {
+    plan,
+    classDir: getClassDir(classSlug),
+    modules: plan.modules.map(module => ({
+      ...moduleProgress(plan.slug, module.slug),
+      title: module.title,
+      summary: module.summary
+    }))
   };
 }

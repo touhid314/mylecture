@@ -1,9 +1,11 @@
-import { existsSync, mkdirSync, readdirSync, renameSync, rmSync, statSync, unlinkSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readdirSync, readFileSync, renameSync, rmSync, statSync, unlinkSync, writeFileSync } from 'node:fs';
 import { spawn } from 'node:child_process';
 import path from 'node:path';
 import { loadAppConfig } from '../config.ts';
-import { writeLectureCaptionsVtt } from '../captions-vtt.ts';
+import { writeLectureCaptionsVtt } from '../../../mylecture-agent/src/render-worker/captions-vtt.ts';
+import { calculateTokenCostUsd } from '../../../mylecture-agent/src/token-tracker/token_tracker.ts';
 import { resolveAgentModel } from './models.ts';
+import { getAgentRoot, requireAgentFile, resolveAgentSrc } from './agent-paths.ts';
 import {
   ffmpegConcatPath,
   isIndexHtmlName,
@@ -13,7 +15,92 @@ import {
   websiteRoot
 } from './paths.ts';
 
-export const DEFAULT_COURSEGEN_TTS_VOICE = 'american-male-3';
+export const DEFAULT_COURSEGEN_TTS_VOICE = 'Leda';
+export const LECTUREGEN_USAGE_FILE = '.lecturegen-usage.jsonl';
+
+export function lectureUsagePath(workspaceDir: string) {
+  return path.join(workspaceDir, LECTUREGEN_USAGE_FILE);
+}
+
+export function lectureUsageFileExists(workspaceDir: string): boolean {
+  return existsSync(lectureUsagePath(workspaceDir));
+}
+
+export function readLectureUsageCostUsd(workspaceDir: string): number {
+  const filePath = lectureUsagePath(workspaceDir);
+  if (!existsSync(filePath)) {
+    return 0;
+  }
+  try {
+    const content = readFileSync(filePath, 'utf8');
+    let total = 0;
+    for (const line of content.split(/\r?\n/)) {
+      const trimmed = line.trim();
+      if (!trimmed) continue;
+      try {
+        const parsed = JSON.parse(trimmed) as {
+          costUsd?: unknown;
+          model?: unknown;
+          inputTokens?: unknown;
+          outputTokens?: unknown;
+          cachedInputTokens?: unknown;
+        };
+        const raw = parsed?.costUsd;
+        if (raw !== null && raw !== undefined) {
+          const stored = Number(raw);
+          if (Number.isFinite(stored)) {
+            total += stored;
+            continue;
+          }
+        }
+        const estimated = calculateTokenCostUsd({
+          model: String(parsed?.model || ''),
+          inputTokens: Number(parsed?.inputTokens) || 0,
+          outputTokens: Number(parsed?.outputTokens) || 0,
+          cachedInputTokens: Number(parsed?.cachedInputTokens) || 0
+        });
+        if (typeof estimated === 'number' && Number.isFinite(estimated)) {
+          total += estimated;
+        }
+      } catch {
+        // skip invalid JSONL lines
+      }
+    }
+    return total;
+  } catch {
+    return 0;
+  }
+}
+
+export function resolveLectureCostUsd(options: {
+  jsonlExists: boolean;
+  jsonlCost: number;
+  stdoutCost: number;
+  previousCost: number;
+}): number {
+  if (options.jsonlExists) {
+    return Number(options.jsonlCost.toFixed(4));
+  }
+  if (options.stdoutCost > 0) {
+    return Number(Math.max(options.previousCost, options.stdoutCost).toFixed(4));
+  }
+  return options.previousCost;
+}
+
+function tokenTrackerSpawnEnv(workspaceDir: string): NodeJS.ProcessEnv {
+  return {
+    TOKEN_TRACKER_SESSION_ID: path.basename(workspaceDir),
+    TOKEN_TRACKER_USAGE_PATH: lectureUsagePath(workspaceDir),
+  };
+}
+
+const GEMINI_TTS_VOICES = new Set([
+  'achernar', 'achird', 'algenib', 'algieba', 'alnilam', 'aoede',
+  'autonoe', 'callirrhoe', 'charon', 'despina', 'enceladus', 'erinome',
+  'fenrir', 'gacrux', 'iapetus', 'kore', 'laomedeia', 'leda', 'orus',
+  'puck', 'pulcherrima', 'rasalgethi', 'sadachbia', 'sadaltager',
+  'schedar', 'sulafat', 'umbriel', 'vindemiatrix', 'zephyr', 'zubenelgenubi'
+]);
 
 export function killProcessTree(childProc: ReturnType<typeof spawn> | null) {
   if (!childProc || !childProc.pid) return;
@@ -22,6 +109,26 @@ export function killProcessTree(childProc: ReturnType<typeof spawn> | null) {
   } else {
     childProc.kill('SIGTERM');
   }
+}
+
+export function summarizeSpawnFailure(
+  stdout: string,
+  stderr: string,
+  command: string,
+  code: number | null
+) {
+  const lines = `${stdout}\n${stderr}`
+    .split(/\r?\n/)
+    .map(line => line.trim())
+    .filter(Boolean);
+  const useful = [...lines].reverse().find(line =>
+    /cannot find module|err_module_not_found|error \[|error:|enoent/i.test(line)
+  );
+  const tail = lines.slice(-12).join('\n');
+  if (useful && !useful.startsWith('node:internal/modules/run_main')) {
+    return useful;
+  }
+  return tail || `${command} exited with code ${code}`;
 }
 
 export function runCapture(command: string, args: string[], options: {
@@ -36,7 +143,10 @@ export function runCapture(command: string, args: string[], options: {
       stdio: ['ignore', 'pipe', 'pipe'],
       windowsHide: true,
       cwd: options.cwd || rootDir,
-      env: options.env,
+      // Use the caller env as-is. Re-merging process.env would undo spawnAdmin's
+      // R2_/DATABASE_URL strip and make admin.mjs keep mylecture/.env keys
+      // (dotenv does not override). Those keys 403 on the catalog R2 bucket.
+      env: options.env ?? process.env,
       shell: false
     });
 
@@ -60,45 +170,24 @@ export function runCapture(command: string, args: string[], options: {
         resolve(stdout.trim());
         return;
       }
-      const output = `${stdout}\n${stderr}`
-        .split(/\r?\n/)
-        .map(line => line.trim())
-        .filter(Boolean)
-        .slice(-80)
-        .join('\n');
-      reject(new Error(output || `${command} exited with code ${code}`));
+      reject(new Error(summarizeSpawnFailure(stdout, stderr, command, code)));
     });
   });
 }
 
 export function parseCostUsdFromOutput(output: string) {
-  const matches = [...output.matchAll(/cost=\$([0-9]+(?:\.[0-9]+)?)/g)];
+  const matches = [...String(output || '').matchAll(/cost=\$([0-9]+(?:\.[0-9]+)?)/g)];
   if (matches.length === 0) return 0;
-  return Number(matches[matches.length - 1][1]) || 0;
+  const amount = Number(matches[matches.length - 1][1]);
+  return Number.isFinite(amount) ? amount : 0;
 }
 
 function locateLectureGenCli() {
-  const cliPath = path.resolve(rootDir, 'packages/lecture-agent/src/lecturegen.ts');
-  if (!existsSync(cliPath)) {
-    throw new Error(`LectureGen CLI not found at ${cliPath}`);
-  }
-  return cliPath;
+  return requireAgentFile('lecturegen.ts');
 }
 
 function locateEditorAgentCli() {
-  const cliPath = path.resolve(rootDir, 'packages/lecture-agent/src/editor-agent/cli.ts');
-  if (!existsSync(cliPath)) {
-    throw new Error(`EditorAgent CLI not found at ${cliPath}`);
-  }
-  return cliPath;
-}
-
-function locatePracticeGenCli() {
-  const cliPath = path.resolve(rootDir, 'packages/lecture-agent/src/practicegen.ts');
-  if (!existsSync(cliPath)) {
-    throw new Error(`PracticeGen CLI not found at ${cliPath}`);
-  }
-  return cliPath;
+  return requireAgentFile('editor-agent', 'cli.ts');
 }
 
 export type LectureGenSpawnSettings = {
@@ -107,6 +196,12 @@ export type LectureGenSpawnSettings = {
   theme?: string;
   teachingStyle?: string;
   enableGetimg?: boolean;
+  /** When true, LectureGen skips in-pipeline resolve (coursegen resolves after script review). */
+  skipResolve?: boolean;
+  /** When true, LectureGen skips video and runs IAGen/GameGen only. */
+  skipVideo?: boolean;
+  includeInteractive?: boolean;
+  includeGame?: boolean;
 };
 
 export type SpawnAgentOptions = {
@@ -116,8 +211,13 @@ export type SpawnAgentOptions = {
   model?: string;
   scriptModel?: string;
   animatorModel?: string;
+  ttsVoice?: string;
+  ttsSpeed?: string | number;
+  ttsProvider?: string;
   /** Typed LectureGen settings — emitted as CLI flags (explicit args beat stdin marker). */
   settings?: LectureGenSpawnSettings;
+  /** Optional reference file for no-video IAGen/GameGen (--reference). */
+  referencePath?: string;
   onStdout?: (chunk: string) => void;
   onStderr?: (chunk: string) => void;
   onSpawn?: (child: ReturnType<typeof spawn>, kill: () => void) => void;
@@ -142,6 +242,18 @@ export function buildLectureGenCliFlags(settings?: LectureGenSpawnSettings): str
   if (settings.enableGetimg === false) {
     flags.push('--no-getimg');
   }
+  if (settings.skipResolve) {
+    flags.push('--no-resolve');
+  }
+  if (settings.skipVideo) {
+    flags.push('--no-video');
+  }
+  if (settings.includeInteractive) {
+    flags.push('--interactive');
+  }
+  if (settings.includeGame) {
+    flags.push('--game');
+  }
   return flags;
 }
 
@@ -164,18 +276,29 @@ export function spawnAgent(options: SpawnAgentOptions) {
     settings.teachingStyle = stylePath;
   }
 
+  const voice = normalizeTtsVoice(options.ttsVoice);
+  const provider = resolveTtsProvider(voice, options.ttsProvider);
+  const speed = normalizeTtsSpeed(options.ttsSpeed);
+
   const args = [
     '--import', 'tsx', cliPath,
     '--model', model,
     ...(scriptModel ? ['--script-model', scriptModel] : []),
     ...(animatorModel ? ['--animator-model', animatorModel] : []),
     '--workspace-dir', options.workspaceDir,
-    ...buildLectureGenCliFlags(settings)
+    '--tts-provider', provider,
+    '--tts-voice', voice,
+    '--tts-speed', speed,
+    ...buildLectureGenCliFlags(settings),
+    ...(options.referencePath && existsSync(options.referencePath)
+      ? ['--reference', options.referencePath]
+      : [])
   ];
 
   let childProc: ReturnType<typeof spawn> | null = null;
   const env = {
     ...process.env,
+    ...tokenTrackerSpawnEnv(options.workspaceDir),
     AGENT_WORKSPACE: options.workspaceDir,
     AGENT_NEW_SESSION: 'true',
     DOTENVX_LOG_LEVEL: 'error',
@@ -253,6 +376,7 @@ export function spawnEditorAgent(options: SpawnAgentOptions) {
   let childProc: ReturnType<typeof spawn> | null = null;
   const env = {
     ...process.env,
+    ...tokenTrackerSpawnEnv(options.workspaceDir),
     AGENT_WORKSPACE: options.workspaceDir,
     AGENT_NEW_SESSION: 'true',
     DOTENVX_LOG_LEVEL: 'error',
@@ -311,107 +435,20 @@ export function spawnEditorAgent(options: SpawnAgentOptions) {
   };
 }
 
-export type SpawnPracticeGenOptions = {
-  kind: 'interactive' | 'game';
-  workspaceDir: string;
-  taskMessage: string;
-  outputRelPath: string;
-  model?: string;
-  animatorModel?: string;
-  aspectRatio?: string;
-  referencePath?: string;
-  onStdout?: (chunk: string) => void;
-  onStderr?: (chunk: string) => void;
-  onSpawn?: (child: ReturnType<typeof spawn>, kill: () => void) => void;
-};
+function envTtsVoice() {
+  return String(process.env.TTS_VOICE || process.env.GOOGLE_TTS_VOICE || '').trim();
+}
 
-/**
- * Create or repair practice pages via static IAGen/GameGen (not EditorAgent).
- * EditorAgent remains index-root edit-only and cannot create nested activities paths.
- * ANIMATOR_MODEL is read by practicegen from the inherited env; pass animatorModel only
- * when an explicit override is needed.
- */
-export function spawnPracticeGen(options: SpawnPracticeGenOptions) {
-  const cliPath = locatePracticeGenCli();
-  const model = resolveAgentModel(options.model);
-  const animatorModel = String(options.animatorModel || '').trim();
-
-  const args = [
-    '--import', 'tsx', cliPath,
-    '--kind', options.kind,
-    '--model', model,
-    ...(animatorModel ? ['--animator-model', animatorModel] : []),
-    '--workspace-dir', options.workspaceDir,
-    '--output', options.outputRelPath,
-    '--aspect-ratio', options.aspectRatio || '16:9'
-  ];
-  if (options.referencePath) {
-    args.push('--reference', options.referencePath);
-  }
-
-  let childProc: ReturnType<typeof spawn> | null = null;
-  const env = {
-    ...process.env,
-    AGENT_WORKSPACE: options.workspaceDir,
-    DOTENVX_LOG_LEVEL: 'error',
-    DOTENV_LOG_LEVEL: 'error',
-    DOTENV_CONFIG_QUIET: 'true'
-  };
-
-  const promise = new Promise<string>((resolve, reject) => {
-    const child = spawn(process.execPath, args, {
-      cwd: options.workspaceDir,
-      stdio: ['pipe', 'pipe', 'pipe'],
-      windowsHide: true,
-      env,
-      shell: false
-    });
-    childProc = child;
-    options.onSpawn?.(child, () => killProcessTree(child));
-
-    let stdout = '';
-    let stderr = '';
-    child.stdin?.write(options.taskMessage);
-    child.stdin?.end();
-
-    child.stdout?.on('data', chunk => {
-      const text = chunk.toString();
-      stdout += text;
-      options.onStdout?.(text);
-      process.stdout.write(chunk);
-    });
-    child.stderr?.on('data', chunk => {
-      const text = chunk.toString();
-      stderr += text;
-      options.onStderr?.(text);
-      process.stderr.write(chunk);
-    });
-
-    child.on('error', reject);
-    child.on('close', code => {
-      if (code === 0) {
-        resolve(stdout);
-        return;
-      }
-      const output = `${stdout}\n${stderr}`
-        .split(/\r?\n/)
-        .map(line => line.trim())
-        .filter(Boolean)
-        .slice(-80)
-        .join('\n');
-      reject(new Error(output || `PracticeGen exited with code ${code}`));
-    });
-  });
-
-  return {
-    promise,
-    kill: () => killProcessTree(childProc)
-  };
+function envTtsProvider() {
+  const explicit = String(process.env.TTS_PROVIDER || '').trim().toLowerCase();
+  if (explicit) return explicit === 'gemini' ? 'google' : explicit;
+  if (process.env.GOOGLE_TTS_MODEL || process.env.GOOGLE_TTS_VOICE) return 'google';
+  return '';
 }
 
 function normalizeTtsVoice(value?: string) {
   const voice = String(value || '').trim();
-  return voice || DEFAULT_COURSEGEN_TTS_VOICE;
+  return voice || envTtsVoice() || DEFAULT_COURSEGEN_TTS_VOICE;
 }
 
 function normalizeTtsSpeed(value?: string | number) {
@@ -422,9 +459,14 @@ function normalizeTtsSpeed(value?: string | number) {
 
 function resolveTtsProvider(voice: string, explicit?: string) {
   const config = loadAppConfig(rootDir);
-  if (explicit) return explicit;
+  if (explicit) return explicit === 'gemini' ? 'google' : explicit;
+  const fromEnv = envTtsProvider();
+  if (fromEnv) return fromEnv;
   if (voice === config.tts.voice) return config.tts.provider;
   const v = voice.toLowerCase();
+  if (GEMINI_TTS_VOICES.has(v)) {
+    return 'google';
+  }
   const voicesDir = path.join(rootDir, 'voices');
   if (existsSync(voicesDir)) {
     try {
@@ -450,18 +492,21 @@ export async function spawnResolve(indexPath: string, options: { ttsVoice?: stri
   const voice = normalizeTtsVoice(options.ttsVoice);
   const provider = resolveTtsProvider(voice);
   const speed = normalizeTtsSpeed(options.ttsSpeed);
+  const agentRoot = getAgentRoot();
+  requireAgentFile('resolve-render', 'build-plan.ts');
 
   for (const file of files) {
     const inputPath = path.join(folderPath, file);
     const outPath = resolvedSiblingPathForIndex(inputPath);
     await runCapture(process.execPath, [
-      '--import', 'tsx', 'src/build-plan.ts',
+      '--import', 'tsx', 'src/resolve-render/build-plan.ts',
       '--input', inputPath,
       '--out', outPath,
       '--provider', provider,
       '--voice', voice,
-      '--speed', speed
-    ]);
+      '--speed', speed,
+      '--no-caption'
+    ], { cwd: agentRoot });
   }
 
   writeLectureCaptionsVtt(folderPath);
@@ -491,6 +536,8 @@ export async function spawnRenderLecture(folderPath: string, options: {
   ttsVoice?: string;
   ttsSpeed?: string | number;
   onSpawn?: (child: ReturnType<typeof spawn>) => void;
+  /** When true, skip captions write (e.g. resolve just ran in the same lecture pass). */
+  skipCaptions?: boolean;
 } = {}) {
   const indexFiles = readdirSync(folderPath)
     .filter(name => isIndexHtmlName(name))
@@ -505,6 +552,9 @@ export async function spawnRenderLecture(folderPath: string, options: {
   const voice = normalizeTtsVoice(options.ttsVoice);
   const provider = resolveTtsProvider(voice);
   const speed = normalizeTtsSpeed(options.ttsSpeed);
+  const agentRoot = getAgentRoot();
+  requireAgentFile('resolve-render', 'build-plan.ts');
+  requireAgentFile('resolve-render', 'render-video.ts');
 
   for (const indexPath of indexFiles) {
     const resolvedPath = resolvedSiblingPathForIndex(indexPath);
@@ -512,18 +562,20 @@ export async function spawnRenderLecture(folderPath: string, options: {
       || statSync(resolvedPath).mtimeMs < statSync(indexPath).mtimeMs;
     if (needsResolve) {
       await runCapture(process.execPath, [
-        '--import', 'tsx', 'src/build-plan.ts',
+        '--import', 'tsx', 'src/resolve-render/build-plan.ts',
         '--input', indexPath,
         '--out', resolvedPath,
         '--provider', provider,
         '--voice', voice,
         '--speed', speed,
-        '--force-audio'
-      ], { onSpawn: options.onSpawn });
+        '--no-caption'
+      ], { cwd: agentRoot, onSpawn: options.onSpawn });
     }
   }
 
-  writeLectureCaptionsVtt(folderPath);
+  if (!options.skipCaptions) {
+    writeLectureCaptionsVtt(folderPath);
+  }
 
   const resolvedFiles = indexFiles.map(indexPath => resolvedSiblingPathForIndex(indexPath));
   const sceneOutputs = resolvedFiles.map(scenePath => defaultSceneOutputPath(scenePath));
@@ -532,7 +584,7 @@ export async function spawnRenderLecture(folderPath: string, options: {
     const scenePath = resolvedFiles[index];
     const sceneOutput = sceneOutputs[index];
     await runCapture(process.execPath, [
-      '--import', 'tsx', 'src/render-video.ts',
+      '--import', 'tsx', 'src/resolve-render/render-video.ts',
       '--html', scenePath,
       '--out', sceneOutput,
       '--resolved-html', scenePath,
@@ -543,10 +595,9 @@ export async function spawnRenderLecture(folderPath: string, options: {
       '--tts-provider', provider,
       '--tts-voice', voice,
       '--tts-speed', speed,
-      '--force-audio',
       '--workers', '1',
       '--video-codec', 'libx264'
-    ], { onSpawn: options.onSpawn });
+    ], { cwd: agentRoot, onSpawn: options.onSpawn });
   }
 
   const outputPath = finalOutputPath(folderPath);

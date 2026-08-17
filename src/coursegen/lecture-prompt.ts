@@ -1,12 +1,17 @@
 import { existsSync, readFileSync } from 'node:fs';
 import path from 'node:path';
-import type { Audience, CoursePlan, GameSpec, InteractiveSpec, LearningIntent, PlannedLecture } from './types.ts';
+import type {
+  Audience,
+  CoursePlan,
+  GameSpec,
+  InteractiveSpec,
+  LearningIntent,
+  PlannedLecture
+} from './types.ts';
 import { flattenPlanLectures, resolveGameSpec, resolveInteractiveSpec } from './types.ts';
 import { DEFAULT_LEARNING_INTENT } from './types.ts';
 import { assertValidSourceSlug, readSourceManifest } from './source-manifest.ts';
 import { getSourceDir } from './paths.ts';
-import { buildLectureGenSettingsText } from './lecturegen-settings.ts';
-
 const PROMPTS_DIR = path.join(import.meta.dirname, 'prompts');
 const PROFILES_DIR = path.join(import.meta.dirname, 'profiles');
 
@@ -395,7 +400,6 @@ export function buildVideoTaskMessage(
   grounding?: string
 ) {
   const intent = plan.intent ?? DEFAULT_LEARNING_INTENT;
-  const settings = buildVideoGenerationSettings(plan, lecture);
   const requestLines = [
     `Create a ${lecture.durationMinutes}-minute video lesson for the course "${plan.title}".`,
     `Module: ${moduleTitle}`,
@@ -429,19 +433,7 @@ export function buildVideoTaskMessage(
     'Create only the video lecture (index.html and assets). Do NOT create any interactive practice or game files (no interactive.html, game.html, or anything under activities/) - those are generated in a separate pass.'
   );
 
-  const requestBody = requestLines.filter(line => line !== '').join('\n');
-  const settingsBlock = buildLectureGenSettingsText({
-    aspectRatio: settings.aspectRatio,
-    generationLength: settings.generationLength,
-    embedSubtitle: false,
-    enableGetimg: true,
-    includeVideo: true,
-    includeInteractive: false,
-    includeGame: false,
-    theme: settings.theme,
-    teachingStyle: settings.teachingStyle
-  });
-  return `${requestBody}\n\n${settingsBlock}`;
+  return requestLines.filter(line => line !== '').join('\n');
 }
 
 export function buildInteractiveTaskMessage(
@@ -454,12 +446,11 @@ export function buildInteractiveTaskMessage(
   if (!spec) {
     throw new Error(`Lecture ${lecture.slug} has no interactive spec`);
   }
-  const practiceSpec = loadPromptFile('interactive-practice.md');
   const intent = plan.intent ?? DEFAULT_LEARNING_INTENT;
   const profileContent = loadProfileContent(plan.audience, intent);
 
   return [
-    `Create the interactive practice page at ${INTERACTIVE_PRACTICE_REL} for the course "${plan.title}".`,
+    `Create the interactive practice for the course "${plan.title}".`,
     `Module: ${moduleTitle}`,
     `Lecture: ${lecture.title}`,
     `Learning objective: ${lecture.objective}`,
@@ -470,15 +461,15 @@ export function buildInteractiveTaskMessage(
     'The video lesson already exists in this workspace. Match its topic and terminology.',
     `Video file: ${path.basename(videoIndexPath)}`,
     '',
-    '--- interactive-practice spec (mandatory) ---',
-    practiceSpec,
+    'Follow iagen_system.md: build a playground / step-through interaction, not a quiz.',
+    'Implement the interactiveSpec below as the interaction design.',
     '',
     '--- interactiveSpec (implement exactly these activities) ---',
     formatInteractiveSpec(spec),
     '',
     `profile: ${profileContent}`,
     '',
-    `Output ${INTERACTIVE_PRACTICE_REL} only. Do not modify the video index file.`
+    'LectureGen writes interactive.html at the workspace root. Do not modify the video index file.'
   ].join('\n');
 }
 
@@ -492,12 +483,11 @@ export function buildGameTaskMessage(
   if (!spec) {
     throw new Error(`Lecture ${lecture.slug} has no game spec`);
   }
-  const practiceSpec = loadPromptFile('interactive-practice.md');
   const intent = plan.intent ?? DEFAULT_LEARNING_INTENT;
   const profileContent = loadProfileContent(plan.audience, intent);
 
   return [
-    `Create the game practice page at ${GAME_PRACTICE_REL} for the course "${plan.title}".`,
+    `Create the game practice for the course "${plan.title}".`,
     `Module: ${moduleTitle}`,
     `Lecture: ${lecture.title}`,
     `Learning objective: ${lecture.objective}`,
@@ -507,16 +497,53 @@ export function buildGameTaskMessage(
     'The video lesson already exists in this workspace. Match its topic and terminology.',
     `Video file: ${path.basename(videoIndexPath)}`,
     '',
+    'Follow gamegen_system.md: challenge-mode game with a brief start overlay or intro card, score out of 100, and a clear win condition.',
+    '',
     '--- game spec ---',
     formatGameSpec(spec),
     '',
-    'Use challenge mode rules from the practice spec (brief start overlay or intro card, score out of 100, clear win condition).',
-    '--- interactive-practice spec (layout + challenge rules) ---',
-    practiceSpec,
-    '',
     `profile: ${profileContent}`,
     '',
-    `Output ${GAME_PRACTICE_REL} only. Do not modify the video index file.`
+    'LectureGen writes game.html at the workspace root. Do not modify the video index file.'
+  ].join('\n');
+}
+
+export type HtmlEditTarget = 'video' | 'interactive' | 'game';
+
+export function buildHtmlEditTaskMessage(options: {
+  target: HtmlEditTarget;
+  prompt: string;
+  objective: string;
+  title: string;
+}) {
+  const targetFile =
+    options.target === 'video'
+      ? 'index.html or indexN.html'
+      : options.target === 'interactive'
+        ? 'interactive.html'
+        : 'game.html';
+  const scopeLines =
+    options.target === 'video'
+      ? [
+          'Edit the existing video lecture HTML only (index.html / indexN.html).',
+          'Do NOT create or modify interactive.html, game.html, or anything under activities/.'
+        ]
+      : options.target === 'interactive'
+        ? ['Edit interactive.html only.', 'Do NOT modify index*.html, game.html, or activities/.']
+        : ['Edit game.html only.', 'Do NOT modify index*.html, interactive.html, or activities/.'];
+
+  return [
+    `Edit the existing ${options.target} HTML for this lecture.`,
+    `Lecture: ${options.title}`,
+    `Learning objective: ${options.objective}`,
+    '',
+    'Apply the requested change to the current page. Do not regenerate the lesson from scratch.',
+    `Target file: ${targetFile}`,
+    '',
+    ...scopeLines,
+    '',
+    'User instruction:',
+    options.prompt.trim()
   ].join('\n');
 }
 
@@ -526,10 +553,11 @@ export function buildPracticeRepairMessage(options: {
   findings: string[];
   specText: string;
 }) {
-  const practiceSpec = loadPromptFile('interactive-practice.md');
   return [
     `Fix ${options.fileName} based on QA review findings.`,
     `Learning objective: ${options.objective}`,
+    '',
+    'Follow iagen_system.md for interactives or gamegen_system.md for games. Fix the findings without breaking the interaction design.',
     '',
     '--- findings to fix ---',
     ...options.findings.map(finding => `- ${finding}`),
@@ -537,10 +565,7 @@ export function buildPracticeRepairMessage(options: {
     '--- activity spec ---',
     options.specText,
     '',
-    '--- interactive-practice spec ---',
-    practiceSpec,
-    '',
-    `Edit ${options.fileName} only. Do not change the video index file.`
+    'LectureGen writes interactive.html or game.html at the workspace root. Do not change the video index file.'
   ].join('\n');
 }
 

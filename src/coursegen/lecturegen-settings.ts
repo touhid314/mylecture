@@ -1,7 +1,7 @@
 /**
  * LectureGen settings-block text for coursegen prompts.
- * Kept in coursegen so we do not patch packages/lecture-agent lecturegen on this branch.
- * Marker string must match packages/lecture-agent/src/lecturegen.ts SETTINGS_MARKER.
+ * Kept in coursegen so we do not patch mylecture-agent lecturegen on this branch.
+ * Marker string must match mylecture-agent/src/lecturegen.ts SETTINGS_MARKER.
  */
 
 export const SETTINGS_MARKER =

@@ -2,9 +2,9 @@ import { mkdirSync, readFileSync, rmSync } from 'node:fs';
 import path from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { chromium, type Page } from 'playwright';
-import { LLM_Model } from '../../packages/lecture-agent/src/utils/llm_model.ts';
+import { LLM_Model } from '../../../mylecture-agent/src/utils/llm_model.ts';
 import { tryResolveReviewModel } from './models.ts';
-import { collectInlineCssParseFindings, ensurePracticeChromeStyles } from './practice-chrome.ts';
+import { collectInlineCssParseFindings } from './practice-chrome.ts';
 import type { GameSpec, InteractiveSpec } from './types.ts';
 
 const PROMPTS_DIR = path.join(import.meta.dirname, 'prompts');
@@ -20,8 +20,7 @@ export type ScreenshotCaptureResult = {
   readabilityFindings: string[];
 };
 
-// Computed typography requirements enforced by automated QA. Keep aligned with
-// prompts/interactive-practice.md.
+// Computed typography requirements enforced by automated QA.
 const MIN_VISIBLE_TEXT_PX = 14;
 const MIN_BODY_TEXT_PX = 16;
 const MAX_FINDINGS_PER_CATEGORY = 3;
@@ -42,9 +41,11 @@ async function collectReadabilityFindings(page: Page, context: string): Promise<
 
     const internalScroll: string[] = [];
     const ignoreScrollSelector = 'html, body, pre, code, textarea, select, option, .katex-mathml, .katex-mathml *';
+    const allowedInternalScrollSelector = '.teaching-column, .left-panel, #left-panel, #info-panel, .guide-panel, .playground-left, aside.guide, [data-teaching-column]';
     const allElements = Array.from(body.querySelectorAll<HTMLElement>('*'));
     for (const el of allElements) {
       if (el.matches(ignoreScrollSelector)) continue;
+      if (el.matches(allowedInternalScrollSelector)) continue;
       const style = getComputedStyle(el);
       if (style.display === 'none' || style.visibility === 'hidden' || Number(style.opacity) === 0) continue;
       const rect = el.getBoundingClientRect();
@@ -56,12 +57,18 @@ async function collectReadabilityFindings(page: Page, context: string): Promise<
       const clipsOrScrollsY = style.overflowY !== 'visible';
       const clipsOrScrollsX = style.overflowX !== 'visible';
       if (verticalOverflow > 4 && clipsOrScrollsY) {
+        if (style.overflowY === 'auto' && el.matches('aside, .panel, [class*="teach"], [class*="guide"], [class*="left"]')) {
+          continue;
+        }
         const label = el.id
           ? `#${el.id}`
           : `${el.tagName.toLowerCase()}${Array.from(el.classList).slice(0, 2).map(name => `.${name}`).join('')}`;
         internalScroll.push(`${label} has internal vertical overflow (${el.scrollHeight}px content, ${el.clientHeight}px visible)`);
       }
       if (horizontalOverflow > 4 && clipsOrScrollsX) {
+        if (style.overflowX === 'auto' && el.matches('aside, .panel, [class*="teach"], [class*="guide"], [class*="left"]')) {
+          continue;
+        }
         const label = el.id
           ? `#${el.id}`
           : `${el.tagName.toLowerCase()}${Array.from(el.classList).slice(0, 2).map(name => `.${name}`).join('')}`;
@@ -76,8 +83,11 @@ async function collectReadabilityFindings(page: Page, context: string): Promise<
     const undersizedBody: string[] = [];
     const seen = new Set<Element>();
     const walker = document.createTreeWalker(body, NodeFilter.SHOW_TEXT);
-    const controlSelector = 'button, input, select, textarea, [role="tab"], [data-activity-tab], .badge, .chip, .tag, .axis, .tick, .caption, .label, svg';
-    const bodySelector = 'p, li, #activity-instructions, #activity-stage, #activity-controls, main, aside, section, article, .prompt, .instructions, .feedback, .question, .card';
+      const controlSelector = 'button, input, select, textarea, [role="tab"], [data-activity-tab], .badge, .chip, .tag, .axis, .tick, .caption, .label, .control-label, svg';
+      const headingSelector = 'h1, h2, h3, h4, h5, h6, [class*="title"], [class*="heading"], [class*="label"]';
+      // Do not include #activity-stage / main / aside — that made every 18-char
+      // step title inside the stage count as body text and fail at 15px.
+      const bodySelector = 'p, li, #activity-instructions, .prompt, .instructions, .feedback, .question';
 
     while (walker.nextNode()) {
       const text = (walker.currentNode.textContent || '').replace(/\s+/g, ' ').trim();
@@ -93,7 +103,8 @@ async function collectReadabilityFindings(page: Page, context: string): Promise<
       const fontSize = Number.parseFloat(style.fontSize);
       if (!Number.isFinite(fontSize)) continue;
       const controlLike = Boolean(el.closest(controlSelector));
-      const bodyLike = text.length >= 18 && !controlLike && Boolean(el.closest(bodySelector));
+      const headingLike = Boolean(el.closest(headingSelector));
+      const bodyLike = text.length >= 18 && !controlLike && !headingLike && Boolean(el.closest(bodySelector));
       if (fontSize < minVisibleTextPx) {
         tiny.push(`"${text.slice(0, 40)}" renders at ${fontSize.toFixed(1)}px`);
       } else if (fontSize < minBodyTextPx && bodyLike) {
@@ -245,8 +256,7 @@ export async function reviewPracticeWithRubric(options: {
   screenshotDir: string;
   model?: string;
 }): Promise<RubricResult> {
-  // Fail-fast on author CSS brace bugs. Chrome style (if already present) is
-  // skipped by id inside collectInlineCssParseFindings.
+  // Fail-fast on author CSS brace bugs.
   const htmlForCssParse = readFileSync(options.htmlPath, 'utf8');
   const cssParseFindings = collectInlineCssParseFindings(htmlForCssParse);
   if (cssParseFindings.length > 0) {
@@ -257,8 +267,6 @@ export async function reviewPracticeWithRubric(options: {
       )
     };
   }
-
-  ensurePracticeChromeStyles(options.htmlPath);
 
   const { screenshotPaths, pageErrors, readabilityFindings } = await capturePracticeScreenshots(options.htmlPath, options.screenshotDir);
   if (pageErrors.length > 0) {

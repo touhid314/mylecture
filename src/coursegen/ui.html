@@ -106,6 +106,30 @@
     }
     .course-item strong { display: block; font-size: 0.95rem; }
     .course-item span { color: var(--muted); font-size: 0.8rem; }
+    .sidebar-tabs {
+      display: flex;
+      gap: 0.35rem;
+    }
+    .sidebar-tabs button {
+      flex: 1;
+      padding: 0.4rem 0.5rem;
+      font-size: 0.82rem;
+    }
+    .sidebar-tabs button.active {
+      border-color: var(--accent);
+      background: #243044;
+    }
+    .module-card {
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      background: var(--panel-2);
+      padding: 0.75rem 0.85rem;
+      display: grid;
+      gap: 0.45rem;
+    }
+    .module-card h4 { margin: 0; font-size: 0.98rem; }
+    .module-card .meta { color: var(--muted); font-size: 0.8rem; line-height: 1.4; }
+    .module-actions { display: flex; flex-wrap: wrap; gap: 0.4rem; }
     .main {
       padding: 1.2rem 1.4rem 1.4rem;
       display: grid;
@@ -320,6 +344,120 @@
       font-size: 0.78rem;
       margin-top: 0.2rem;
     }
+    .test-overlay {
+      display: none;
+      position: fixed;
+      inset: 0;
+      z-index: 40;
+      background: rgba(8, 12, 18, 0.72);
+      padding: 1.25rem;
+      overflow: auto;
+    }
+    .test-overlay.open { display: block; }
+    .edit-overlay {
+      display: none;
+      position: fixed;
+      inset: 0;
+      z-index: 41;
+      background: rgba(8, 12, 18, 0.72);
+      padding: 1.25rem;
+      overflow: auto;
+    }
+    .edit-overlay.open { display: block; }
+    .edit-sheet {
+      max-width: 520px;
+      margin: 0 auto;
+      background: var(--panel);
+      border: 1px solid var(--border);
+      border-radius: 14px;
+      box-shadow: var(--shadow);
+      padding: 1.1rem 1.2rem 1.3rem;
+    }
+    .edit-sheet h2 { margin: 0 0 0.75rem; font-size: 1.15rem; }
+    .edit-sheet label {
+      display: block;
+      margin-bottom: 0.75rem;
+      font-size: 0.85rem;
+      color: var(--muted);
+    }
+    .edit-sheet select,
+    .edit-sheet textarea {
+      display: block;
+      width: 100%;
+      margin-top: 0.35rem;
+      box-sizing: border-box;
+    }
+    .edit-sheet textarea { min-height: 7rem; resize: vertical; }
+    .edit-actions {
+      display: flex;
+      justify-content: flex-end;
+      gap: 0.5rem;
+      margin-top: 0.5rem;
+    }
+    .test-sheet {
+      max-width: 820px;
+      margin: 0 auto;
+      background: var(--panel);
+      border: 1px solid var(--border);
+      border-radius: 14px;
+      box-shadow: var(--shadow);
+      padding: 1.1rem 1.2rem 1.3rem;
+    }
+    .test-toolbar {
+      display: flex;
+      justify-content: space-between;
+      gap: 0.75rem;
+      align-items: flex-start;
+      flex-wrap: wrap;
+      margin-bottom: 1rem;
+    }
+    .test-toolbar h2 { margin: 0 0 0.25rem; font-size: 1.25rem; }
+    .test-toolbar .meta { margin: 0; }
+    .test-phase-tabs { display: flex; gap: 0.4rem; flex-wrap: wrap; }
+    .test-phase-tabs button.active {
+      border-color: var(--accent);
+      background: #243044;
+    }
+    .test-item {
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      background: var(--panel-2);
+      padding: 0.85rem 0.95rem;
+      margin-bottom: 0.75rem;
+    }
+    .test-item.correct { border-color: rgba(62, 207, 142, 0.45); }
+    .test-item.incorrect { border-color: rgba(240, 113, 120, 0.45); }
+    .test-item h3 {
+      margin: 0 0 0.55rem;
+      font-size: 0.98rem;
+      line-height: 1.45;
+    }
+    .test-choice {
+      display: flex;
+      align-items: flex-start;
+      gap: 0.55rem;
+      padding: 0.45rem 0.5rem;
+      border-radius: 8px;
+      margin-top: 0.25rem;
+      cursor: pointer;
+    }
+    .test-choice:hover { background: rgba(91, 156, 245, 0.08); }
+    .test-choice input { width: auto; margin-top: 0.2rem; }
+    .test-choice.picked { background: rgba(91, 156, 245, 0.12); }
+    .test-choice.key { outline: 1px solid rgba(62, 207, 142, 0.45); }
+    .test-choice.miss { outline: 1px solid rgba(240, 113, 120, 0.45); }
+    .test-item-meta {
+      margin-top: 0.55rem;
+      color: var(--muted);
+      font-size: 0.8rem;
+      line-height: 1.4;
+    }
+    .test-score {
+      display: flex;
+      gap: 0.75rem;
+      flex-wrap: wrap;
+      margin-bottom: 0.9rem;
+    }
     @media (max-width: 980px) {
       .layout { grid-template-columns: 1fr; }
       .sidebar { min-height: auto; }
@@ -334,26 +472,58 @@
       <div class="brand">
         <div>
           <h1>Coursegen</h1>
-          <p>Plan, run, publish</p>
+          <p>Class, course, tests</p>
         </div>
         <button id="refreshCoursesBtn" title="Refresh course list">↻</button>
       </div>
+      <div class="sidebar-tabs">
+        <button class="active" id="classesTabBtn" type="button">Classes</button>
+        <button id="coursesTabBtn" type="button">Courses</button>
+      </div>
       <div class="row" style="display:flex; gap:0.45rem; flex-wrap:wrap;">
-        <button class="primary" id="newCourseBtn" style="flex:1;">+ New course</button>
-        <button id="addReferenceBtn" style="flex:1;">+ Reference</button>
+        <button class="primary" id="newClassBtn" style="flex:1;">+ Class</button>
+        <button class="primary" id="newCourseBtn" style="flex:1;">+ Course</button>
+        <button id="addReferenceBtn" style="flex:1;">+ Ref</button>
       </div>
       <div class="course-list" id="courseList"></div>
     </aside>
 
     <main class="main">
       <section class="panel" id="heroPanel">
-        <div class="empty">Select a course or create a new one.</div>
+        <div class="empty">Create a class (modules + tests) or a standalone course.</div>
       </section>
 
       <section class="grid-2">
         <div class="panel" id="leftPanel"></div>
         <div class="panel" id="rightPanel"></div>
       </section>
+
+      <div class="test-overlay" id="testOverlay" hidden>
+        <div class="test-sheet" id="testSheet"></div>
+      </div>
+
+      <div class="edit-overlay" id="editOverlay" hidden>
+        <div class="edit-sheet" id="editSheet">
+          <h2 id="editTitle">Edit lecture HTML</h2>
+          <p class="meta" id="editSubtitle"></p>
+          <label>
+            Target
+            <select id="editTargetSelect">
+              <option value="video">Video (index.html)</option>
+              <option value="interactive">Interactive (interactive.html)</option>
+              <option value="game">Game (game.html)</option>
+            </select>
+          </label>
+          <label>
+            Instruction
+            <textarea id="editPromptInput" placeholder="Describe the change to apply to the existing HTML…"></textarea>
+          </label>
+          <div class="edit-actions">
+            <button type="button" id="editCancelBtn">Cancel</button>
+            <button type="button" class="primary" id="editApplyBtn">Apply</button>
+          </div>
+        </div>
+      </div>
 
       <section class="panel">
         <div class="log-toolbar">
@@ -370,15 +540,21 @@
 
   <script>
     const state = {
+      sidebar: 'classes',
       courses: [],
+      classes: [],
       sources: [],
       selectedSlug: null,
+      selectedClassSlug: null,
       summary: null,
+      classSummary: null,
       meta: null,
       activeJobId: null,
       activeJobCommand: null,
       logLines: [],
-      pollTimer: null
+      pollTimer: null,
+      testViewer: null,
+      editLectureSlug: null
     };
 
     const els = {
@@ -391,7 +567,12 @@
       clearLogBtn: document.getElementById('clearLogBtn'),
       refreshCoursesBtn: document.getElementById('refreshCoursesBtn'),
       newCourseBtn: document.getElementById('newCourseBtn'),
-      addReferenceBtn: document.getElementById('addReferenceBtn')
+      newClassBtn: document.getElementById('newClassBtn'),
+      addReferenceBtn: document.getElementById('addReferenceBtn'),
+      classesTabBtn: document.getElementById('classesTabBtn'),
+      coursesTabBtn: document.getElementById('coursesTabBtn'),
+      testOverlay: document.getElementById('testOverlay'),
+      testSheet: document.getElementById('testSheet')
     };
 
     async function api(path, options) {
@@ -410,8 +591,31 @@
     }
 
     function renderLog() {
+      const pinToBottom = els.jobLog.scrollHeight - els.jobLog.scrollTop - els.jobLog.clientHeight < 32;
       els.jobLog.textContent = state.logLines.length ? state.logLines.join('\n') : 'No jobs yet.';
-      els.jobLog.scrollTop = els.jobLog.scrollHeight;
+      if (pinToBottom) els.jobLog.scrollTop = els.jobLog.scrollHeight;
+    }
+
+    function withPreservedScroll(fn) {
+      const lectures = document.querySelector('#rightPanel .lectures');
+      const saved = {
+        windowY: window.scrollY,
+        lectures: lectures ? lectures.scrollTop : 0,
+        rightPanel: els.rightPanel.scrollTop,
+        leftPanel: els.leftPanel.scrollTop,
+        courseList: els.courseList.scrollTop
+      };
+      fn();
+      const restore = () => {
+        const nextLectures = document.querySelector('#rightPanel .lectures');
+        if (nextLectures) nextLectures.scrollTop = saved.lectures;
+        els.rightPanel.scrollTop = saved.rightPanel;
+        els.leftPanel.scrollTop = saved.leftPanel;
+        els.courseList.scrollTop = saved.courseList;
+        window.scrollTo(0, saved.windowY);
+      };
+      restore();
+      requestAnimationFrame(restore);
     }
 
     function setLog(lines) {
@@ -441,7 +645,20 @@
     async function loadCourses() {
       const payload = await api('/api/courses');
       state.courses = payload.courses || [];
-      renderCourseList();
+      renderSidebarList();
+    }
+
+    async function loadClasses() {
+      const payload = await api('/api/classes');
+      state.classes = payload.classes || [];
+      renderSidebarList();
+    }
+
+    function setSidebar(mode) {
+      state.sidebar = mode;
+      els.classesTabBtn.classList.toggle('active', mode === 'classes');
+      els.coursesTabBtn.classList.toggle('active', mode === 'courses');
+      renderSidebarList();
     }
 
     function sourceOptionsHtml() {
@@ -461,7 +678,28 @@
       renderMain();
     }
 
-    function renderCourseList() {
+    function renderSidebarList() {
+      withPreservedScroll(() => renderSidebarListNow());
+    }
+
+    function renderSidebarListNow() {
+      if (state.sidebar === 'classes') {
+        if (!state.classes.length) {
+          els.courseList.innerHTML = '<div class="empty">No classes yet.</div>';
+          return;
+        }
+        els.courseList.innerHTML = state.classes.map(item => `
+          <button class="course-item ${item.slug === state.selectedClassSlug ? 'active' : ''}" data-class-slug="${item.slug}">
+            <strong>${escapeHtml(item.title)}</strong>
+            <span>${escapeHtml(item.slug)} · ${item.plannedCount}/${item.moduleCount} courses · ${item.assessmentCount} tests</span>
+          </button>
+        `).join('');
+        els.courseList.querySelectorAll('[data-class-slug]').forEach(button => {
+          button.addEventListener('click', () => selectClass(button.dataset.classSlug));
+        });
+        return;
+      }
+
       if (!state.courses.length) {
         els.courseList.innerHTML = '<div class="empty">No courses yet.</div>';
         return;
@@ -485,25 +723,233 @@
         .replaceAll('"', '&quot;');
     }
 
+    function closeTestViewer() {
+      state.testViewer = null;
+      els.testOverlay.classList.remove('open');
+      els.testOverlay.hidden = true;
+      els.testSheet.innerHTML = '';
+    }
+
+    function scorePhase(phase, answers) {
+      const results = (phase.items || []).map(item => {
+        const selectedChoiceId = String(answers[item.id] || '').trim();
+        return {
+          itemId: item.id,
+          selectedChoiceId,
+          correct: Boolean(selectedChoiceId) && selectedChoiceId === item.correctChoiceId,
+          correctChoiceId: item.correctChoiceId,
+          objectiveId: item.objectiveId
+        };
+      });
+      return {
+        correct: results.filter(row => row.correct).length,
+        total: results.length,
+        results
+      };
+    }
+
+    function objectiveLabel(assessments, objectiveId) {
+      const objective = (assessments.objectives || []).find(row => row.id === objectiveId);
+      if (!objective) return objectiveId;
+      return `${objective.statement} (${objective.lectureSlug})`;
+    }
+
+    function renderTestViewer() {
+      const viewer = state.testViewer;
+      if (!viewer) {
+        closeTestViewer();
+        return;
+      }
+      const phase = viewer.assessments[viewer.phase];
+      const items = phase?.items || [];
+      const isReview = viewer.mode === 'review';
+      const isResult = viewer.mode === 'result';
+      const resultById = Object.fromEntries((viewer.score?.results || []).map(row => [row.itemId, row]));
+      const unanswered = items.filter(item => !viewer.answers[item.id]).length;
+
+      els.testOverlay.hidden = false;
+      els.testOverlay.classList.add('open');
+      els.testSheet.innerHTML = `
+        <div class="test-toolbar">
+          <div>
+            <h2>${escapeHtml(viewer.courseTitle)}</h2>
+            <p class="meta">${escapeHtml(viewer.courseSlug)} · ${items.length} questions</p>
+          </div>
+          <div class="row">
+            <button type="button" data-test-action="close">Close</button>
+          </div>
+        </div>
+        <div class="test-phase-tabs">
+          <button type="button" class="${viewer.phase === 'pre' ? 'active' : ''}" data-test-action="phase" data-phase="pre">Pre-test</button>
+          <button type="button" class="${viewer.phase === 'post' ? 'active' : ''}" data-test-action="phase" data-phase="post">Post-test</button>
+          <button type="button" class="${isReview ? 'active' : ''}" data-test-action="review">${isReview ? 'Reviewing key' : 'Review key'}</button>
+        </div>
+        <p class="meta" style="margin:0.75rem 0 0.9rem;">${escapeHtml(phase?.title || (viewer.phase === 'pre' ? 'Pre-test' : 'Post-test'))}</p>
+        ${isResult ? `
+          <div class="test-score">
+            <div class="stat"><strong>${viewer.score.correct}/${viewer.score.total}</strong><span>correct</span></div>
+            <div class="stat"><strong>${viewer.score.total ? Math.round((viewer.score.correct / viewer.score.total) * 100) : 0}%</strong><span>score</span></div>
+          </div>
+        ` : ''}
+        ${items.map((item, index) => {
+          const scored = resultById[item.id];
+          const itemClass = isResult
+            ? (scored?.correct ? 'correct' : 'incorrect')
+            : '';
+          return `
+            <article class="test-item ${itemClass}">
+              <h3>${index + 1}. ${escapeHtml(item.prompt)}</h3>
+              ${(item.choices || []).map(choice => {
+                const picked = viewer.answers[item.id] === choice.id;
+                const showKey = isReview || isResult;
+                const isKey = showKey && choice.id === item.correctChoiceId;
+                const isMiss = isResult && picked && !isKey;
+                return `
+                  <label class="test-choice${picked ? ' picked' : ''}${isKey ? ' key' : ''}${isMiss ? ' miss' : ''}">
+                    <input type="radio" name="${escapeHtml(item.id)}" value="${escapeHtml(choice.id)}" ${picked ? 'checked' : ''} ${isReview ? 'disabled' : ''} />
+                    <span>${escapeHtml(choice.text)}</span>
+                  </label>
+                `;
+              }).join('')}
+              ${isReview || isResult ? `<div class="test-item-meta">Objective: ${escapeHtml(objectiveLabel(viewer.assessments, item.objectiveId))}</div>` : ''}
+            </article>
+          `;
+        }).join('')}
+        <div class="row" style="margin-top:0.4rem;">
+          ${isReview || isResult ? '' : `<button class="primary" type="button" data-test-action="submit">Submit answers</button>`}
+          ${isResult ? '<button type="button" data-test-action="retake">Clear and retake</button>' : ''}
+          ${!isReview && unanswered && !isResult ? `<span class="meta">${unanswered} unanswered</span>` : ''}
+        </div>
+      `;
+
+      els.testSheet.querySelectorAll('[data-test-action]').forEach(button => {
+        button.addEventListener('click', () => onTestAction(button.dataset.testAction, button.dataset.phase));
+      });
+      els.testSheet.querySelectorAll('input[type="radio"]').forEach(input => {
+        input.addEventListener('change', () => {
+          if (!state.testViewer || state.testViewer.mode === 'review') return;
+          state.testViewer.answers[input.name] = input.value;
+          if (state.testViewer.mode === 'result') state.testViewer.mode = 'take';
+          renderTestViewer();
+        });
+      });
+    }
+
+    function onTestAction(action, phase) {
+      const viewer = state.testViewer;
+      if (!viewer) return;
+      if (action === 'close') {
+        closeTestViewer();
+        return;
+      }
+      if (action === 'phase' && (phase === 'pre' || phase === 'post')) {
+        viewer.phase = phase;
+        viewer.mode = 'take';
+        viewer.answers = {};
+        viewer.score = null;
+        renderTestViewer();
+        return;
+      }
+      if (action === 'review') {
+        viewer.mode = viewer.mode === 'review' ? 'take' : 'review';
+        viewer.score = null;
+        renderTestViewer();
+        return;
+      }
+      if (action === 'retake') {
+        viewer.mode = 'take';
+        viewer.answers = {};
+        viewer.score = null;
+        renderTestViewer();
+        return;
+      }
+      if (action === 'submit') {
+        const bundle = viewer.assessments[viewer.phase];
+        viewer.score = scorePhase(bundle, viewer.answers);
+        viewer.mode = 'result';
+        renderTestViewer();
+      }
+    }
+
+    async function openTestViewer(courseSlug, courseTitle, phase = 'pre') {
+      const payload = await api(`/api/courses/${encodeURIComponent(courseSlug)}/assessments`);
+      state.testViewer = {
+        courseSlug,
+        courseTitle: courseTitle || courseSlug,
+        assessments: payload.assessments,
+        phase: phase === 'post' ? 'post' : 'pre',
+        mode: 'take',
+        answers: {},
+        score: null
+      };
+      renderTestViewer();
+    }
+
+    function rememberSelection() {
+      try {
+        if (state.selectedClassSlug) {
+          localStorage.setItem('coursegen.selectedClass', state.selectedClassSlug);
+          localStorage.removeItem('coursegen.selectedCourse');
+        } else if (state.selectedSlug) {
+          localStorage.setItem('coursegen.selectedCourse', state.selectedSlug);
+          localStorage.removeItem('coursegen.selectedClass');
+        }
+      } catch {
+        // ignore storage failures
+      }
+    }
+
     async function selectCourse(slug) {
       state.selectedSlug = slug;
-      renderCourseList();
+      state.selectedClassSlug = null;
+      state.classSummary = null;
+      rememberSelection();
+      setSidebar('courses');
       await loadSummary(slug);
+    }
+
+    async function selectClass(slug) {
+      state.selectedClassSlug = slug;
+      state.selectedSlug = null;
+      state.summary = null;
+      rememberSelection();
+      setSidebar('classes');
+      await loadClassSummary(slug);
+    }
+
+    async function loadClassSummary(slug) {
+      state.classSummary = await api(`/api/classes/${encodeURIComponent(slug)}`);
+      renderClassMain();
     }
 
     function showPlanForm() {
       state.selectedSlug = null;
       state.summary = null;
-      renderCourseList();
+      state.selectedClassSlug = null;
+      state.classSummary = null;
+      setSidebar('courses');
       renderPlanForm();
-      els.heroPanel.innerHTML = '<div class="hero"><div><h2>New course</h2><p class="meta">Plan a syllabus with the course planner. Generation runs after you pick the course from the sidebar.</p></div></div>';
+      els.heroPanel.innerHTML = '<div class="hero"><div><h2>New course</h2><p class="meta">Plan a standalone syllabus. For a full class with modules and tests, use + Class.</p></div></div>';
       els.rightPanel.innerHTML = '<div class="empty">After planning, select the new course to run generation.</div>';
+    }
+
+    function showClassPlanForm() {
+      state.selectedSlug = null;
+      state.summary = null;
+      state.selectedClassSlug = null;
+      state.classSummary = null;
+      setSidebar('classes');
+      renderClassPlanForm();
+      els.heroPanel.innerHTML = '<div class="hero"><div><h2>New class</h2><p class="meta">The planner breaks a topic into modules. Each module becomes a course with its own pre/post tests.</p></div></div>';
+      els.rightPanel.innerHTML = '<div class="empty">After the class plan lands, open it from the sidebar to plan each module and generate tests.</div>';
     }
 
     function showIngestForm() {
       state.selectedSlug = null;
       state.summary = null;
-      renderCourseList();
+      state.selectedClassSlug = null;
+      state.classSummary = null;
+      renderSidebarList();
       renderIngestForm();
       els.heroPanel.innerHTML = '<div class="hero"><div><h2>Add reference</h2><p class="meta">Ingest an open-licensed PDF into <code>gens/sources/</code>. Attach it when planning for textbook-grounded courses.</p></div></div>';
       const sources = state.sources || [];
@@ -641,6 +1087,226 @@
       document.getElementById('planForm').addEventListener('submit', onPlanSubmit);
     }
 
+    function renderClassPlanForm() {
+      const audiences = ['', ...(state.meta?.audiences || [])];
+      const intents = ['', ...(state.meta?.intents || [])];
+      els.leftPanel.innerHTML = `
+        <h3 class="section-title">Plan class</h3>
+        <form class="plan-form" id="classPlanForm">
+          <label>Topic
+            <input name="topic" placeholder="Arithmetic from scratch" required />
+          </label>
+          <label>Preferred class slug (optional)
+            <input name="classSlug" pattern="[a-z0-9]+(?:-[a-z0-9]+)*" placeholder="arithmetic-from-scratch" />
+          </label>
+          <label>Scope (optional)
+            <textarea name="scope" placeholder="Whole numbers through fractions, no decimals yet"></textarea>
+          </label>
+          <label>Reference source
+            <select name="source">
+              ${sourceOptionsHtml()}
+            </select>
+          </label>
+          <div class="row-2">
+            <label>Audience
+              <select name="audience">
+                ${audiences.map(value => `<option value="${value}">${value || 'Auto (planner chooses)'}</option>`).join('')}
+              </select>
+            </label>
+            <label>Intent
+              <select name="intent">
+                ${intents.map(value => `<option value="${value}">${value || 'Auto (planner chooses)'}</option>`).join('')}
+              </select>
+            </label>
+          </div>
+          <label>Model (optional)
+            <input name="model" placeholder="${escapeHtml(state.meta?.defaultModel || 'AGENT_MODEL')}" />
+          </label>
+          <label class="checkbox"><input type="checkbox" name="dryRun" /> Dry run (print prompts only)</label>
+          <button class="primary" type="submit">Plan class</button>
+        </form>
+      `;
+      document.getElementById('classPlanForm').addEventListener('submit', onClassPlanSubmit);
+    }
+
+    async function onClassPlanSubmit(event) {
+      event.preventDefault();
+      const form = event.target;
+      await startJob({
+        command: 'plan-class',
+        topic: form.topic.value.trim(),
+        classSlug: form.classSlug.value.trim() || undefined,
+        scope: form.scope.value.trim() || undefined,
+        audience: form.audience.value || undefined,
+        intent: form.intent.value || undefined,
+        model: form.model.value.trim() || undefined,
+        source: form.source.value || undefined,
+        dryRun: form.dryRun.checked
+      });
+    }
+
+    function renderClassMain() {
+      if (!state.classSummary) return;
+      withPreservedScroll(() => renderClassMainNow());
+    }
+
+    function renderClassMainNow() {
+      if (!state.classSummary) return;
+      const { plan, modules, classDir } = state.classSummary;
+      const planned = modules.filter(row => row.hasCoursePlan).length;
+      const tested = modules.filter(row => row.hasAssessments).length;
+
+      els.heroPanel.innerHTML = `
+        <div class="hero">
+          <div>
+            <h2>${escapeHtml(plan.title)}</h2>
+            <p class="meta">
+              <strong>${escapeHtml(plan.slug)}</strong>
+              ${plan.audience ? ` · ${escapeHtml(plan.audience)}` : ''}
+              ${plan.intent ? ` · ${escapeHtml(plan.intent)}` : ''}<br />
+              ${escapeHtml(plan.summary)}
+              ${plan.description ? `<br />${escapeHtml(plan.description)}` : ''}
+              ${plan.source ? `<br />Reference: ${escapeHtml(plan.source.title)} (${escapeHtml(plan.source.slug)})` : ''}
+            </p>
+            <div class="progress"><div style="width:${modules.length ? Math.round((planned / modules.length) * 100) : 0}%"></div></div>
+          </div>
+          <div class="stats">
+            <div class="stat"><strong>${planned}/${modules.length}</strong><span>courses planned</span></div>
+            <div class="stat"><strong>${tested}/${modules.length}</strong><span>tests written</span></div>
+          </div>
+        </div>
+      `;
+
+      els.leftPanel.innerHTML = `
+        <h3 class="section-title">Class actions</h3>
+        <div class="actions">
+          <div class="row">
+            <button class="primary" data-class-action="plan-all">Plan next missing course</button>
+            <button data-class-action="tests-all">Generate next missing tests</button>
+          </div>
+          <div class="row">
+            <button data-class-action="refresh">Refresh</button>
+            <button data-class-action="open-folder">Open folder</button>
+          </div>
+          <p class="meta" style="margin:0.4rem 0 0; font-size:0.8rem;">
+            Plan a module to create its course. Generate tests after the course plan exists. Then open the course to run lectures.
+          </p>
+        </div>
+      `;
+      els.leftPanel.querySelectorAll('[data-class-action]').forEach(button => {
+        button.addEventListener('click', () => onClassAction(button.dataset.classAction));
+      });
+
+      els.rightPanel.innerHTML = `
+        <h3 class="section-title">Modules</h3>
+        <div class="lectures" style="display:grid; gap:0.65rem;">
+          ${modules.map(module => `
+            <div class="module-card">
+              <div>
+                <h4>${escapeHtml(module.title)}</h4>
+                <div class="meta">
+                  ${escapeHtml(module.courseSlug)}
+                  ${module.summary ? `<br />${escapeHtml(module.summary)}` : ''}<br />
+                  ${module.hasCoursePlan ? `${module.doneCount}/${module.lectureCount} lectures` : 'Course not planned'}
+                  · ${module.hasAssessments ? 'Tests ready' : 'No tests'}
+                </div>
+              </div>
+              <div class="module-actions">
+                <button data-module="${escapeHtml(module.slug)}" data-module-action="plan-module" ${module.hasCoursePlan ? '' : 'class="primary"'}>
+                  ${module.hasCoursePlan ? 'Replan course' : 'Plan course'}
+                </button>
+                <button data-module="${escapeHtml(module.slug)}" data-module-action="generate-assessments" ${module.hasCoursePlan ? '' : 'disabled title="Plan the course first"'}>
+                  ${module.hasAssessments ? 'Regenerate tests' : 'Generate tests'}
+                </button>
+                <button data-module="${escapeHtml(module.slug)}" data-module-action="open-course" ${module.hasCoursePlan ? '' : 'disabled'}>
+                  Open course
+                </button>
+                <button data-module="${escapeHtml(module.slug)}" data-module-action="take-tests" ${module.hasAssessments ? '' : 'disabled title="Generate tests first"'}>
+                  Take tests
+                </button>
+              </div>
+            </div>
+          `).join('')}
+        </div>
+        <p class="meta" style="margin-top:0.75rem;">Folder: ${escapeHtml(classDir)}</p>
+      `;
+      els.rightPanel.querySelectorAll('[data-module-action]').forEach(button => {
+        button.addEventListener('click', () => onModuleAction(button.dataset.moduleAction, button.dataset.module));
+      });
+    }
+
+    async function onClassAction(action) {
+      if (!state.selectedClassSlug || !state.classSummary) return;
+      if (action === 'refresh') {
+        await loadClassSummary(state.selectedClassSlug);
+        return;
+      }
+      if (action === 'open-folder') {
+        await api(`/api/open-class-folder/${encodeURIComponent(state.selectedClassSlug)}`);
+        return;
+      }
+      if (action === 'plan-all') {
+        const missing = state.classSummary.modules.filter(row => !row.hasCoursePlan);
+        if (!missing.length) {
+          alert('Every module already has a course plan.');
+          return;
+        }
+        if (!confirm(`Plan the next missing course: "${missing[0].title}"? (${missing.length} still unplanned)`)) return;
+        await startJob({
+          command: 'plan-module',
+          classSlug: state.selectedClassSlug,
+          moduleSlug: missing[0].slug
+        });
+        return;
+      }
+      if (action === 'tests-all') {
+        const missing = state.classSummary.modules.filter(row => row.hasCoursePlan && !row.hasAssessments);
+        if (!missing.length) {
+          alert('No planned courses are missing tests.');
+          return;
+        }
+        if (!confirm(`Generate tests for ${missing[0].title}? This runs one assessment job.`)) return;
+        await startJob({
+          command: 'generate-assessments',
+          courseSlug: missing[0].courseSlug,
+          classSlug: state.selectedClassSlug
+        });
+      }
+    }
+
+    async function onModuleAction(action, moduleSlug) {
+      if (!state.selectedClassSlug || !moduleSlug) return;
+      const module = (state.classSummary?.modules || []).find(row => row.slug === moduleSlug);
+      if (action === 'open-course') {
+        if (!module?.hasCoursePlan) return;
+        await selectCourse(module.courseSlug);
+        return;
+      }
+      if (action === 'plan-module') {
+        if (module?.hasCoursePlan && !confirm(`Replan "${module.title}"? This overwrites the course plan.`)) return;
+        await startJob({
+          command: 'plan-module',
+          classSlug: state.selectedClassSlug,
+          moduleSlug
+        });
+        return;
+      }
+      if (action === 'generate-assessments') {
+        if (!module?.hasCoursePlan) return;
+        if (module.hasAssessments && !confirm(`Regenerate tests for "${module.title}"?`)) return;
+        await startJob({
+          command: 'generate-assessments',
+          courseSlug: module.courseSlug,
+          classSlug: state.selectedClassSlug
+        });
+        return;
+      }
+      if (action === 'take-tests') {
+        if (!module?.hasAssessments) return;
+        await openTestViewer(module.courseSlug, module.title);
+      }
+    }
+
     async function onPlanSubmit(event) {
       event.preventDefault();
       const form = event.target;
@@ -660,6 +1326,11 @@
     }
 
     function renderMain() {
+      if (!state.summary) return;
+      withPreservedScroll(() => renderMainNow());
+    }
+
+    function renderMainNow() {
       if (!state.summary) return;
       const { plan, state: courseState, progress, lectures, estimatedCostUsd, courseDir } = state.summary;
       const pct = progress.total ? Math.round((progress.done / progress.total) * 100) : 0;
@@ -696,6 +1367,11 @@
           <div class="row">
             <button data-action="render" ${renderReady ? '' : 'disabled title="No resolved lectures without MP4"'}>Render MP4${renderReady ? ` (${renderReady})` : ''}</button>
             <button data-action="script">Script lab</button>
+          </div>
+          <div class="row">
+            <button data-action="assessments">${state.summary.hasAssessments ? 'Regenerate tests' : 'Generate tests'}</button>
+            <button data-action="take-pre" ${state.summary.hasAssessments ? '' : 'disabled title="Generate tests first"'}>Take pre-test</button>
+            <button data-action="take-post" ${state.summary.hasAssessments ? '' : 'disabled title="Generate tests first"'}>Take post-test</button>
           </div>
           <div class="row">
             <button data-action="publish">Upload draft</button>
@@ -744,7 +1420,7 @@
               <label>Max turns<input id="maxTurns" type="number" min="1" value="60" /></label>
               <label>Practice turns<input id="maxPracticeTurns" type="number" min="1" value="40" /></label>
               <label>Lecture timeout (min)<input id="lectureTimeout" type="number" min="1" value="20" /></label>
-              <label>TTS voice<input id="ttsVoice" placeholder="${escapeHtml(state.meta?.defaultTtsVoice || 'american-male-3')} (default)" /></label>
+              <label>TTS voice<input id="ttsVoice" placeholder="${escapeHtml(state.meta?.defaultTtsVoice || 'Leda')} (default)" /></label>
             </div>
             <div style="margin-top:0.65rem; display:grid; gap:0.35rem;">
               <label class="checkbox"><input type="checkbox" id="renderMp4" /> After run/resume, render MP4 too (still regenerates targeted lectures)</label>
@@ -778,6 +1454,13 @@
             <tbody>
               ${lectures.map(lecture => {
                 const canRender = Boolean(lecture.renderReady);
+                const canRetryPractice = Boolean(lecture.canRetryPractice);
+                const canRepairPractice = Boolean(lecture.canRepairPractice);
+                const canEdit = Boolean(lecture.canEditVideo || lecture.canEditInteractive || lecture.canEditGame);
+                const isFailed = lecture.status === 'failed';
+                const needsPracticeReview = lecture.status === 'needs-review';
+                const regenAction = isFailed ? 'retry' : 'run';
+                const regenLabel = isFailed ? 'Retry' : 'Run';
                 return `
                 <tr>
                   <td>${lecture.order}</td>
@@ -792,7 +1475,10 @@
                   <td>$${Number(lecture.costUsd || 0).toFixed(2)}</td>
                   <td>
                     <div class="lecture-actions">
-                      <button type="button" data-lecture-action="run" data-slug="${escapeHtml(lecture.slug)}">Run</button>
+                      <button type="button" data-lecture-action="edit" data-slug="${escapeHtml(lecture.slug)}"${canEdit ? '' : ' disabled title="Needs existing video, interactive, or game HTML"'}>Edit</button>
+                      <button type="button" ${isFailed ? 'class="primary"' : ''} data-lecture-action="${regenAction}" data-slug="${escapeHtml(lecture.slug)}">${regenLabel}</button>
+                      <button type="button" ${needsPracticeReview ? 'class="primary"' : ''} data-lecture-action="repair-practice" data-slug="${escapeHtml(lecture.slug)}"${canRepairPractice ? '' : ' disabled title="Needs an existing interactive or game HTML file"'}>Repair practice</button>
+                      <button type="button" data-lecture-action="retry-practice" data-slug="${escapeHtml(lecture.slug)}"${canRetryPractice ? '' : ' disabled title="Needs a generated lecture folder with interactive or game"'}>Retry practice</button>
                       <button type="button" data-lecture-action="render" data-slug="${escapeHtml(lecture.slug)}"${canRender ? '' : ' disabled title="Needs resolved HTML with no MP4 yet"'}>Render</button>
                     </div>
                   </td>
@@ -911,20 +1597,148 @@
       return body;
     }
 
+    function closeEditOverlay() {
+      const overlay = document.getElementById('editOverlay');
+      if (!overlay) return;
+      overlay.classList.remove('open');
+      overlay.hidden = true;
+      state.editLectureSlug = null;
+      const promptInput = document.getElementById('editPromptInput');
+      if (promptInput) promptInput.value = '';
+    }
+
+    function openEditOverlay(slug) {
+      const lecture = (state.summary?.lectures || []).find(row => row.slug === slug);
+      if (!lecture) return;
+      const canVideo = Boolean(lecture.canEditVideo);
+      const canInteractive = Boolean(lecture.canEditInteractive);
+      const canGame = Boolean(lecture.canEditGame);
+      if (!canVideo && !canInteractive && !canGame) return;
+
+      state.editLectureSlug = slug;
+      const overlay = document.getElementById('editOverlay');
+      const title = document.getElementById('editTitle');
+      const subtitle = document.getElementById('editSubtitle');
+      const select = document.getElementById('editTargetSelect');
+      if (!overlay || !title || !subtitle || !select) return;
+
+      title.textContent = `Edit: ${lecture.title}`;
+      subtitle.textContent = `${slug} — applies your instruction to existing HTML via EditorAgent (no full regeneration).`;
+
+      for (const option of select.options) {
+        const enabled =
+          (option.value === 'video' && canVideo) ||
+          (option.value === 'interactive' && canInteractive) ||
+          (option.value === 'game' && canGame);
+        option.disabled = !enabled;
+      }
+      const firstEnabled = Array.from(select.options).find(option => !option.disabled);
+      if (firstEnabled) select.value = firstEnabled.value;
+
+      overlay.hidden = false;
+      overlay.classList.add('open');
+      document.getElementById('editPromptInput')?.focus();
+    }
+
+    async function submitEditOverlay() {
+      const slug = state.editLectureSlug;
+      if (!slug) return;
+      const lecture = (state.summary?.lectures || []).find(row => row.slug === slug);
+      const target = document.getElementById('editTargetSelect')?.value;
+      const prompt = document.getElementById('editPromptInput')?.value?.trim() || '';
+      if (!target || !prompt) {
+        alert('Choose a target and enter a non-empty instruction.');
+        return;
+      }
+      if (!lecture) return;
+      const canVideo = Boolean(lecture.canEditVideo);
+      const canInteractive = Boolean(lecture.canEditInteractive);
+      const canGame = Boolean(lecture.canEditGame);
+      if (
+        (target === 'video' && !canVideo) ||
+        (target === 'interactive' && !canInteractive) ||
+        (target === 'game' && !canGame)
+      ) {
+        alert('That edit target is not available for this lecture.');
+        return;
+      }
+      const title = lecture.title || slug;
+      if (!confirm(
+        `Edit "${title}" (${slug})?\n\n` +
+        `Target: ${target}. EditorAgent will edit the existing HTML — it does not regenerate from scratch.`
+      )) return;
+
+      const advanced = readAdvanced();
+      const command = state.summary?.state ? 'resume' : 'run';
+      closeEditOverlay();
+      await startJob(buildJobBody(advanced, {
+        forceLecture: slug,
+        editTarget: target,
+        editPrompt: prompt,
+        command,
+        render: false
+      }));
+    }
+
     async function onLectureAction(action, slug) {
       if (!state.selectedSlug || !slug) return;
       const lecture = (state.summary?.lectures || []).find(row => row.slug === slug);
       const title = lecture?.title || slug;
       const advanced = readAdvanced();
 
-      if (action === 'run') {
-        const renderNote = advanced.render ? '\n\nThen it will also render MP4.' : '';
+      if (action === 'edit') {
+        openEditOverlay(slug);
+        return;
+      }
+
+      if (action === 'repair-practice') {
+        if (!lecture?.canRepairPractice) return;
         if (!confirm(
-          `FULL REGEN for "${title}" (${slug})?\n\n` +
-          `This deletes existing index.html, resolved.html, audio, and MP4 for this lecture, then regenerates from scratch.\n\n` +
-          `It ignores attempt/budget caps. Use Render if you only want MP4 from existing resolved HTML.` +
-          renderNote
+          `Repair practice for "${title}" (${slug})?\n\n` +
+          `Keeps the current interactive/game HTML. Runs QA, then one IAGen/GameGen edit pass if it fails.\n\n` +
+          `Video files stay in place. Use Retry practice only if you want a brand-new page.`
         )) return;
+        const command = state.summary?.state ? 'resume' : 'run';
+        await startJob(buildJobBody(advanced, {
+          forceLecture: slug,
+          practiceRepair: true,
+          practiceOnly: false,
+          command,
+          render: false
+        }));
+        return;
+      }
+
+      if (action === 'retry-practice') {
+        if (!lecture?.canRetryPractice) return;
+        if (!confirm(
+          `Retry practice for "${title}" (${slug})?\n\n` +
+          `This deletes activities/interactive and activities/game (and root interactive.html/game.html), then regenerates them with IAGen/GameGen.\n\n` +
+          `Video HTML, audio, and MP4 are left alone.`
+        )) return;
+        const command = state.summary?.state ? 'resume' : 'run';
+        await startJob(buildJobBody(advanced, {
+          forceLecture: slug,
+          practiceOnly: true,
+          command,
+          render: false
+        }));
+        return;
+      }
+
+      if (action === 'run' || action === 'retry') {
+        const renderNote = advanced.render ? '\n\nThen it will also render MP4.' : '';
+        const isRetry = action === 'retry' || lecture?.status === 'failed';
+        const confirmText = isRetry
+          ? `Retry "${title}" (${slug})?\n\n` +
+            `This regenerates the failed lecture from scratch (deletes its HTML, audio, and MP4) and ignores attempt/budget caps.\n\n` +
+            `Use Render if the lecture already resolved and you only want MP4.` +
+            renderNote
+          : `FULL REGEN for "${title}" (${slug})?\n\n` +
+            `This deletes existing index.html, resolved.html, audio, and MP4 for this lecture, then regenerates from scratch.\n\n` +
+            `It ignores attempt/budget caps. Use Render if you only want MP4 from existing resolved HTML.` +
+            renderNote;
+        if (!confirm(confirmText)) return;
         const command = state.summary?.state ? 'resume' : 'run';
         await startJob(buildJobBody(advanced, { forceLecture: slug, command }));
         return;
@@ -952,7 +1766,15 @@
         await api(`/api/open-folder/${encodeURIComponent(state.selectedSlug)}`);
         return;
       }
-
+      if (action === 'take-pre' || action === 'take-post') {
+        if (!state.summary?.hasAssessments) return;
+        await openTestViewer(
+          state.selectedSlug,
+          state.summary.plan?.title || state.selectedSlug,
+          action === 'take-post' ? 'post' : 'pre'
+        );
+        return;
+      }
       const renderReadyCount = state.summary?.progress?.renderReady ?? 0;
       const messages = {
         run: 'Start full course generation? This can take a long time and spend API budget.',
@@ -961,8 +1783,9 @@
           : 'Resume generation and retry failed lectures?',
         render: `Render MP4 from existing resolved HTML only (no re-resolve)? ${renderReadyCount} lecture(s) ready.`,
         script: 'Run script lab for this course?',
+        assessments: 'Generate pre/post tests from this course plan?',
         publish: 'Upload course as a draft to the website package?',
-        'go-live': 'Publish this course live on the catalog?'
+        'go-live': 'Publish this course live? Finished lectures go on the catalog; unfinished ones stay off until they are done.'
       };
       if (!confirm(messages[action] || 'Run this action?')) return;
 
@@ -975,6 +1798,7 @@
         stripRenderOnlyFlags(body);
       }
       else if (action === 'script') body.command = 'script';
+      else if (action === 'assessments') body.command = 'generate-assessments';
       else if (action === 'publish') body.command = 'publish';
       else if (action === 'go-live') {
         body.command = 'publish';
@@ -985,6 +1809,9 @@
     }
 
     async function startJob(body) {
+      if (body.command === 'plan-class') {
+        state.classSlugsBeforeJob = (state.classes || []).map(item => item.slug);
+      }
       const job = await api('/api/jobs', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -1006,7 +1833,9 @@
 
         if (job.status === 'running' || job.status === 'queued') {
           if (state.selectedSlug) await loadSummary(state.selectedSlug);
+          if (state.selectedClassSlug) await loadClassSummary(state.selectedClassSlug);
           await loadCourses();
+          await loadClasses();
           return;
         }
 
@@ -1016,11 +1845,28 @@
           await loadSources();
           showIngestForm();
         }
+        await loadClasses();
+        if (job.command === 'plan-class' || state.activeJobCommand === 'plan-class') {
+          const known = new Set(state.classSlugsBeforeJob || []);
+          const classSlug = job.classSlug
+            || state.classes.find(item => !known.has(item.slug))?.slug
+            || state.selectedClassSlug;
+          if (classSlug) {
+            await selectClass(classSlug);
+            return;
+          }
+        }
+        if (job.classSlug && (job.command === 'plan-module' || job.command === 'generate-assessments')) {
+          await selectClass(job.classSlug);
+          return;
+        }
         if (job.courseSlug) {
           state.selectedSlug = job.courseSlug;
           await loadSummary(job.courseSlug);
         } else if (state.selectedSlug) {
           await loadSummary(state.selectedSlug);
+        } else if (state.selectedClassSlug) {
+          await loadClassSummary(state.selectedClassSlug);
         }
       } catch (error) {
         appendLog(`Poll error: ${error.message}`);
@@ -1046,8 +1892,32 @@
       await pollJob();
     });
 
+    els.testOverlay.addEventListener('click', event => {
+      if (event.target === els.testOverlay) closeTestViewer();
+    });
+    document.getElementById('editOverlay')?.addEventListener('click', event => {
+      if (event.target === document.getElementById('editOverlay')) closeEditOverlay();
+    });
+    document.getElementById('editCancelBtn')?.addEventListener('click', closeEditOverlay);
+    document.getElementById('editApplyBtn')?.addEventListener('click', () => { void submitEditOverlay(); });
+    document.addEventListener('keydown', event => {
+      if (event.key === 'Escape') {
+        if (state.editLectureSlug) closeEditOverlay();
+        else if (state.testViewer) closeTestViewer();
+      }
+    });
     els.clearLogBtn.addEventListener('click', () => setLog([]));
-    els.refreshCoursesBtn.addEventListener('click', loadCourses);
+    els.refreshCoursesBtn.addEventListener('click', async () => {
+      await Promise.all([loadCourses(), loadClasses()]);
+      if (state.selectedClassSlug) await loadClassSummary(state.selectedClassSlug);
+      else if (state.selectedSlug) await loadSummary(state.selectedSlug);
+    });
+    els.classesTabBtn.addEventListener('click', () => setSidebar('classes'));
+    els.coursesTabBtn.addEventListener('click', () => setSidebar('courses'));
+    els.newClassBtn.addEventListener('click', async () => {
+      await loadSources();
+      showClassPlanForm();
+    });
     els.newCourseBtn.addEventListener('click', async () => {
       await loadSources();
       showPlanForm();
@@ -1060,8 +1930,27 @@
     async function boot() {
       try {
         await loadMeta();
-        await loadCourses();
-        showPlanForm();
+        await Promise.all([loadCourses(), loadClasses()]);
+        let savedClass = '';
+        let savedCourse = '';
+        try {
+          savedClass = localStorage.getItem('coursegen.selectedClass') || '';
+          savedCourse = localStorage.getItem('coursegen.selectedCourse') || '';
+        } catch {
+          savedClass = '';
+          savedCourse = '';
+        }
+        if (savedClass && state.classes.some(item => item.slug === savedClass)) {
+          await selectClass(savedClass);
+        } else if (state.classes.length) {
+          await selectClass(state.classes[0].slug);
+        } else if (savedCourse && state.courses.some(item => item.slug === savedCourse)) {
+          await selectCourse(savedCourse);
+        } else if (state.courses.length) {
+          await selectCourse(state.courses[0].slug);
+        } else {
+          showClassPlanForm();
+        }
       } catch (error) {
         els.heroPanel.innerHTML = `<div class="empty">Failed to connect: ${escapeHtml(error.message)}</div>`;
       }

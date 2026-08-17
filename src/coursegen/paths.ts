@@ -1,19 +1,32 @@
 import { mkdirSync } from 'node:fs';
 import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { loadAppConfig, resolveConfigPath } from '../config.ts';
 
-export const rootDir = process.cwd();
+/** mylecture package root — not process.cwd() (UI/jobs can start from the workspace). */
+export const rootDir = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..');
+
+/** IDE one-offs (`config.agent.generationDir`, often gens/outputs). */
+export function getGenerationRoot() {
+  const config = loadAppConfig(rootDir);
+  return resolveConfigPath(rootDir, config.agent.generationDir);
+}
+
+/** Coursegen catalog artifacts stay under gens/, not the IDE output dir. */
+function getCoursegenRoot() {
+  return path.join(rootDir, 'gens');
+}
 
 export function getCoursesRoot() {
-  const config = loadAppConfig(rootDir);
-  const generationDir = resolveConfigPath(rootDir, config.agent.generationDir);
-  return path.join(generationDir, 'courses');
+  return path.join(getCoursegenRoot(), 'courses');
 }
 
 export function getSourcesRoot() {
-  const config = loadAppConfig(rootDir);
-  const generationDir = resolveConfigPath(rootDir, config.agent.generationDir);
-  return path.join(generationDir, 'sources');
+  return path.join(getCoursegenRoot(), 'sources');
+}
+
+export function getClassesRoot() {
+  return path.join(getCoursegenRoot(), 'classes');
 }
 
 export function getSourceDir(sourceSlug: string) {
@@ -38,6 +51,24 @@ export function coursePlanPath(courseSlug: string) {
 
 export function courseStatePath(courseSlug: string) {
   return path.join(getCourseDir(courseSlug), 'course-state.json');
+}
+
+export function assessmentsPath(courseSlug: string) {
+  return path.join(getCourseDir(courseSlug), 'assessments.json');
+}
+
+export function getClassDir(classSlug: string) {
+  return path.join(getClassesRoot(), classSlug);
+}
+
+export function classPlanPath(classSlug: string) {
+  return path.join(getClassDir(classSlug), 'class-plan.json');
+}
+
+export function ensureClassDir(classSlug: string) {
+  const dir = getClassDir(classSlug);
+  mkdirSync(dir, { recursive: true });
+  return dir;
 }
 
 export function lectureFolderPath(courseSlug: string, folderName: string) {

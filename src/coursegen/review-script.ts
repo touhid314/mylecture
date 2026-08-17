@@ -1,6 +1,6 @@
 import { existsSync, readFileSync, readdirSync } from 'node:fs';
 import path from 'node:path';
-import { LLM_Model } from '../../packages/lecture-agent/src/utils/llm_model.ts';
+import { LLM_Model } from '../../../mylecture-agent/src/utils/llm_model.ts';
 import { tryResolveReviewModel } from './models.ts';
 import { isIndexHtmlName } from './paths.ts';
 import type { Audience, LearningIntent } from './types.ts';

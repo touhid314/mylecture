@@ -68,6 +68,8 @@ export type CoursePlan = {
   modules: PlannedModule[];
   /** Optional ingested textbook this plan is grounded in. */
   source?: CoursePlanSource;
+  /** Parent class slug when this course is a module under a class plan. */
+  classSlug?: string;
 };
 
 export type LectureStatus =
@@ -113,8 +115,13 @@ export type CourseState = {
   lectures: LectureState[];
 };
 
-/** Lowercase hyphenated slug (courses, sources, lecture/activity ids). */
+/** Lowercase hyphenated slug (sources, lecture/activity ids, class/module ids). */
 export const SLUG_RE = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;
+
+/** Course slugs: standalone `topic` or class-module `class--module`. */
+export const COURSE_SLUG_RE = /^[a-z0-9]+(?:-[a-z0-9]+)*(?:--[a-z0-9]+(?:-[a-z0-9]+)*)?$/;
+
+export const MAX_SPEC_LIST_ITEMS = 6;
 
 function isAudience(value: unknown): value is Audience {
   return typeof value === 'string' && (AUDIENCES as readonly string[]).includes(value);
@@ -140,7 +147,7 @@ function validateStringArray(raw: unknown, path: string): string[] {
   if (values.length === 0) {
     throw new Error(`${path}: must include at least one non-empty item`);
   }
-  return values.slice(0, 6);
+  return values.slice(0, MAX_SPEC_LIST_ITEMS);
 }
 
 function validateInteractiveActivity(raw: unknown, path: string): InteractiveActivitySpec {
@@ -165,10 +172,19 @@ function validateInteractiveActivity(raw: unknown, path: string): InteractiveAct
   if (!feedback) throw new Error(`${path}: feedback required`);
   if (!successCriterion) throw new Error(`${path}: successCriterion required`);
 
-  return { id, title, mode, visibleSetup, learnerAction, controls, feedback, successCriterion };
+  return {
+    id,
+    title,
+    mode,
+    visibleSetup,
+    learnerAction,
+    controls,
+    feedback,
+    successCriterion
+  };
 }
 
-function validateInteractiveSpec(raw: unknown, path: string): InteractiveSpec {
+export function validateInteractiveSpec(raw: unknown, path: string): InteractiveSpec {
   if (!raw || typeof raw !== 'object') {
     throw new Error(`${path}: interactiveSpec must be an object`);
   }
@@ -193,7 +209,7 @@ function validateInteractiveSpec(raw: unknown, path: string): InteractiveSpec {
   return { activities };
 }
 
-function validateGameSpec(raw: unknown, path: string): GameSpec {
+export function validateGameSpec(raw: unknown, path: string): GameSpec {
   if (!raw || typeof raw !== 'object') {
     throw new Error(`${path}: gameSpec must be an object`);
   }
@@ -209,10 +225,19 @@ function validateGameSpec(raw: unknown, path: string): GameSpec {
   if (!learnerAction) throw new Error(`${path}: learnerAction required`);
   if (!feedback) throw new Error(`${path}: feedback required`);
   if (!successCriterion) throw new Error(`${path}: successCriterion required`);
-  return { mission, visibleSetup, learnerAction, controls, feedback, successCriterion };
+
+  return {
+    mission,
+    visibleSetup,
+    learnerAction,
+    controls,
+    feedback,
+    successCriterion
+  };
 }
 
 export function defaultInteractiveSpec(lecture: Pick<PlannedLecture, 'objective' | 'title'>): InteractiveSpec {
+  const successCriterion = 'Answer 3 questions correctly';
   return {
     activities: [
       {
@@ -223,20 +248,21 @@ export function defaultInteractiveSpec(lecture: Pick<PlannedLecture, 'objective'
         learnerAction: `Practice the skill from this lesson: ${lecture.objective}`,
         controls: ['Response control', 'Check answer', 'Next question'],
         feedback: 'After each submission, say whether the answer is correct and show one concrete hint or explanation.',
-        successCriterion: 'Answer 3 questions correctly'
+        successCriterion
       }
     ]
   };
 }
 
 export function defaultGameSpec(lecture: Pick<PlannedLecture, 'objective'>): GameSpec {
+  const successCriterion = `Score at least 70 out of 100 by applying: ${lecture.objective}`;
   return {
     mission: `Master the lesson objective through a scored challenge.`,
     visibleSetup: 'Show the challenge target, the current problem, the score, and the controls needed to answer before the first attempt.',
     learnerAction: `Apply the lesson objective in a sequence of scored challenges: ${lecture.objective}`,
     controls: ['Response controls', 'Check challenge', 'Next challenge', 'Restart challenge'],
     feedback: 'After each attempt, show correctness, the correct reasoning, and the updated score.',
-    successCriterion: `Score at least 70 out of 100 by applying: ${lecture.objective}`
+    successCriterion
   };
 }
 
@@ -314,7 +340,11 @@ function validateLecture(
   const title = String(lecture.title || '').trim();
   const objective = String(lecture.objective || '').trim();
   const durationMinutes = Number(lecture.durationMinutes);
-  const formats = Array.isArray(lecture.formats) ? lecture.formats.filter(isFormat) : [];
+  const formats = Array.isArray(lecture.formats)
+    ? lecture.formats
+        .map(format => (format === 'practice' ? 'interactive' : format))
+        .filter(isFormat)
+    : [];
   const promptNotes = String(lecture.promptNotes || '').trim();
 
   if (!slug || !SLUG_RE.test(slug)) throw new Error(`${path}: invalid slug`);
@@ -377,7 +407,9 @@ export function validateCoursePlan(
   const source = validateCoursePlanSource(plan.source);
 
   if (!title) throw new Error('title required');
-  if (!slug || !SLUG_RE.test(slug)) throw new Error('invalid slug');
+  if (!slug || !COURSE_SLUG_RE.test(slug)) {
+    throw new Error(`invalid slug "${slug}"`);
+  }
   if (!isAudience(audience)) throw new Error('invalid audience');
   if (!isLearningIntent(intent)) throw new Error('invalid intent');
   if (!summary) throw new Error('summary required');

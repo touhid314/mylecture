@@ -8,6 +8,9 @@ button, .btn, .tab-button, [role="tab"], input[type="button"], input[type="submi
   font-size: 16px !important;
   font-family: inherit !important;
 }
+#activity-instructions, #activity-instructions p, p, .prompt, .instructions, .feedback, .question {
+  font-size: 16px !important;
+}
 `;
 
 const MAX_CSS_PARSE_FINDINGS = 3;

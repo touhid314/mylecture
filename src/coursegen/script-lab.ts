@@ -1,6 +1,6 @@
 import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
-import { LLM_Model } from '../../packages/lecture-agent/src/utils/llm_model.ts';
+import { LLM_Model } from '../../../mylecture-agent/src/utils/llm_model.ts';
 import { getCourseDir } from './paths.ts';
 import { formatLectureSequenceContext, loadLectureGrounding, loadProfileContent } from './lecture-prompt.ts';
 import { resolveAgentModel } from './models.ts';

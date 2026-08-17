@@ -205,7 +205,7 @@ function buildUserAttachmentDisplay(message, files) {
 }
 
 const generationLengthMinSeconds = 5;
-const generationLengthMaxSeconds = 900;
+const generationLengthMaxSeconds = 1200;
 const generationLengthSliderMax = 1000;
 
 function formatGenerationLength(seconds) {

@@ -1093,6 +1093,17 @@ function detectProvider(voice) {
   if (openAiVoices.has(v)) {
     return 'openai';
   }
+
+  const googleVoices = new Set([
+    'achernar', 'achird', 'algenib', 'algieba', 'alnilam', 'aoede',
+    'autonoe', 'callirrhoe', 'charon', 'despina', 'enceladus', 'erinome',
+    'fenrir', 'gacrux', 'iapetus', 'kore', 'laomedeia', 'leda', 'orus',
+    'puck', 'pulcherrima', 'rasalgethi', 'sadachbia', 'sadaltager',
+    'schedar', 'sulafat', 'umbriel', 'vindemiatrix', 'zephyr', 'zubenelgenubi',
+  ]);
+  if (googleVoices.has(v)) {
+    return 'google';
+  }
   return config.tts.provider;
 }
 
@@ -2239,6 +2250,11 @@ const server = createServer(async (request, response) => {
         provider.id === configuredTtsProvider
         && provider.voices.some(voice => voice.id === appConfig.tts.voice)
       );
+      const envSpecifiesTts = Boolean(
+        String(process.env.TTS_PROVIDER || '').trim()
+        || process.env.GOOGLE_TTS_MODEL
+        || process.env.GOOGLE_TTS_VOICE
+      );
       sendJson(response, 200, {
         ok: true,
         ...options,
@@ -2249,9 +2265,11 @@ const server = createServer(async (request, response) => {
         },
         tts: {
           ...options.tts,
-          defaults: configuredTtsVoiceExists
-            ? { provider: configuredTtsProvider, voice: appConfig.tts.voice }
-            : options.tts.defaults,
+          defaults: envSpecifiesTts
+            ? options.tts.defaults
+            : configuredTtsVoiceExists
+              ? { provider: configuredTtsProvider, voice: appConfig.tts.voice }
+              : options.tts.defaults,
         },
       });
     } catch (error) {

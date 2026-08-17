@@ -1,4 +1,5 @@
 node_modules/
+voices/
 .render/
 .tmp/
 __pycache__/

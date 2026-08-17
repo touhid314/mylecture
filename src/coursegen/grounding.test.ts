@@ -6,12 +6,19 @@ import {
   truncateProportionally
 } from './lecture-prompt.ts';
 import { readSourceManifest } from './source-manifest.ts';
-import { SLUG_RE, validateCoursePlan } from './types.ts';
+import { COURSE_SLUG_RE, SLUG_RE, validateCoursePlan } from './types.ts';
 
 describe('SLUG_RE / source.slug validation', () => {
   it('accepts hyphenated lowercase slugs', () => {
     assert.equal(SLUG_RE.test('udl-book'), true);
     assert.equal(SLUG_RE.test('a'), true);
+    assert.equal(SLUG_RE.test('foundational-arithmetic--whole-numbers'), false);
+    assert.equal(COURSE_SLUG_RE.test('foundational-arithmetic'), true);
+    assert.equal(
+      COURSE_SLUG_RE.test('foundational-arithmetic--whole-numbers-and-operations'),
+      true
+    );
+    assert.equal(COURSE_SLUG_RE.test('Foo--bar'), false);
   });
 
   it('rejects path traversal and uppercase', () => {
@@ -121,6 +128,48 @@ describe('SLUG_RE / source.slug validation', () => {
       ]
     });
     assert.deepEqual(plan.modules[0].lectures[0].sourceSections, ['01-intro', '02-next']);
+  });
+
+  it('accepts class--module course slugs and maps practice format to interactive', () => {
+    const plan = validateCoursePlan({
+      title: 'T',
+      slug: 'foundational-arithmetic--whole-numbers-and-operations',
+      audience: 'middle',
+      intent: 'foundation',
+      summary: 's',
+      description: 'd',
+      modules: [
+        {
+          title: 'M',
+          lectures: [
+            {
+              slug: 'lec-1',
+              title: 'L',
+              objective: 'o',
+              durationMinutes: 5,
+              formats: ['video', 'practice'],
+              promptNotes: 'n',
+              interactiveSpec: {
+                activities: [
+                  {
+                    id: 'act-1',
+                    title: 'A',
+                    mode: 'practice',
+                    visibleSetup: 'setup',
+                    learnerAction: 'act',
+                    controls: ['Check'],
+                    feedback: 'ok',
+                    successCriterion: 'done'
+                  }
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    });
+    assert.equal(plan.slug, 'foundational-arithmetic--whole-numbers-and-operations');
+    assert.deepEqual(plan.modules[0].lectures[0].formats, ['video', 'interactive']);
   });
 });
 

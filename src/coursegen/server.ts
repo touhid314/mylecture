@@ -18,9 +18,12 @@ import { spawn, type ChildProcessWithoutNullStreams } from 'node:child_process';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { loadEnv } from './env.ts';
-import { getSourcesRoot, rootDir } from './paths.ts';
+import { getCoursesRoot, getSourcesRoot, rootDir } from './paths.ts';
 import { assertValidSourceSlug, listSources } from './source-manifest.ts';
-import { getCourseSummary, listCourses } from './status-api.ts';
+import { moduleCourseSlug } from './class-types.ts';
+import { getClassDir } from './paths.ts';
+import { readCourseAssessments } from './generate-assessments.ts';
+import { getClassSummary, getCourseSummary, listClasses, listCourses } from './status-api.ts';
 import { DEFAULT_COURSEGEN_TTS_VOICE } from './spawn.ts';
 import { AUDIENCES, LEARNING_INTENTS } from './types.ts';
 
@@ -41,6 +44,7 @@ type Job = {
   id: string;
   command: string;
   courseSlug?: string;
+  classSlug?: string;
   status: JobStatus;
   log: string[];
   exitCode: number | null;
@@ -117,11 +121,12 @@ function appendLog(job: Job, line: string) {
   }
 }
 
-function createJob(command: string, courseSlug?: string): Job {
+function createJob(command: string, courseSlug?: string, classSlug?: string): Job {
   const job: Job = {
     id: `job-${++jobCounter}`,
     command,
     courseSlug,
+    classSlug,
     status: 'queued',
     log: [],
     exitCode: null,
@@ -205,8 +210,14 @@ function failJob(job: Job, message: string) {
 
 function startJobFromBody(body: Record<string, unknown>) {
   const command = String(body.command || '');
-  const courseSlug = body.courseSlug ? String(body.courseSlug) : undefined;
-  const job = createJob(command, courseSlug);
+  const classSlug = body.classSlug ? String(body.classSlug) : undefined;
+  const moduleSlug = body.moduleSlug ? String(body.moduleSlug) : undefined;
+  const courseSlug = body.courseSlug
+    ? String(body.courseSlug)
+    : command === 'plan-module' && classSlug && moduleSlug
+      ? moduleCourseSlug(classSlug, moduleSlug)
+      : undefined;
+  const job = createJob(command, courseSlug, classSlug);
   const args: string[] = [command];
 
   if (command === 'ingest') {
@@ -223,6 +234,29 @@ function startJobFromBody(body: Record<string, unknown>) {
     pushFlag(args, 'budget', body.budget as number);
     pushFlag(args, 'model', body.model as string);
     pushFlag(args, 'source', body.source as string);
+    pushFlag(args, 'dry-run', body.dryRun as boolean);
+  } else if (command === 'plan-class') {
+    pushFlag(args, 'topic', body.topic as string);
+    pushFlag(args, 'class', classSlug);
+    pushFlag(args, 'audience', body.audience as string);
+    pushFlag(args, 'intent', body.intent as string);
+    pushFlag(args, 'scope', body.scope as string);
+    pushFlag(args, 'model', body.model as string);
+    pushFlag(args, 'source', body.source as string);
+    pushFlag(args, 'dry-run', body.dryRun as boolean);
+  } else if (command === 'plan-module') {
+    pushFlag(args, 'class', classSlug);
+    pushFlag(args, 'module', moduleSlug);
+    pushFlag(args, 'source', body.source as string);
+    pushFlag(args, 'lectures', body.lectures as number);
+    pushFlag(args, 'audience', body.audience as string);
+    pushFlag(args, 'intent', body.intent as string);
+    pushFlag(args, 'budget', body.budget as number);
+    pushFlag(args, 'model', body.model as string);
+    pushFlag(args, 'dry-run', body.dryRun as boolean);
+  } else if (command === 'generate-assessments') {
+    pushFlag(args, 'course', courseSlug);
+    pushFlag(args, 'model', body.model as string);
     pushFlag(args, 'dry-run', body.dryRun as boolean);
   } else if (command === 'extend') {
     pushFlag(args, 'course', courseSlug);
@@ -261,6 +295,10 @@ function startJobFromBody(body: Record<string, unknown>) {
     pushFlag(args, 'skip-script-review', body.skipScriptReview as boolean);
     pushFlag(args, 'no-review', body.noReview as boolean);
     pushFlag(args, 'retry-failed', body.retryFailed as boolean);
+    pushFlag(args, 'retry-practice', body.practiceOnly as boolean);
+    pushFlag(args, 'repair-practice', body.practiceRepair as boolean);
+    pushFlag(args, 'edit-target', body.editTarget as string);
+    pushFlag(args, 'edit-prompt', body.editPrompt as string);
     pushFlag(args, 'render', body.render as boolean);
   }
 
@@ -298,6 +336,19 @@ function startJobFromBody(body: Record<string, unknown>) {
     return failJob(job, 'topic is required.');
   }
 
+  if (command === 'plan-class' && !body.topic) {
+    return failJob(job, 'topic is required.');
+  }
+
+  if (command === 'plan-module') {
+    if (!classSlug) return failJob(job, 'classSlug is required.');
+    if (!moduleSlug) return failJob(job, 'moduleSlug is required.');
+  }
+
+  if (command === 'generate-assessments' && !courseSlug) {
+    return failJob(job, 'course slug is required.');
+  }
+
   if (command === 'extend' && !courseSlug) {
     return failJob(job, 'course slug is required.');
   }
@@ -306,7 +357,15 @@ function startJobFromBody(body: Record<string, unknown>) {
     return failJob(job, 'course slug is required.');
   }
 
-  if (command !== 'plan' && command !== 'extend' && command !== 'captions' && !courseSlug) {
+  if (
+    command !== 'plan' &&
+    command !== 'plan-class' &&
+    command !== 'plan-module' &&
+    command !== 'generate-assessments' &&
+    command !== 'extend' &&
+    command !== 'captions' &&
+    !courseSlug
+  ) {
     return failJob(job, 'course slug is required.');
   }
 
@@ -319,6 +378,7 @@ function serializeJob(job: Job) {
     id: job.id,
     command: job.command,
     courseSlug: job.courseSlug,
+    classSlug: job.classSlug,
     status: job.status,
     log: job.log,
     exitCode: job.exitCode,
@@ -373,13 +433,49 @@ const server = createServer(async (request, response) => {
       return;
     }
 
-    if (request.method === 'GET' && url.pathname.startsWith('/api/courses/')) {
-      const slug = decodeURIComponent(url.pathname.slice('/api/courses/'.length));
+    if (request.method === 'GET' && url.pathname === '/api/classes') {
+      sendJson(response, 200, { classes: listClasses() });
+      return;
+    }
+
+    if (request.method === 'GET' && url.pathname.startsWith('/api/classes/')) {
+      const slug = decodeURIComponent(url.pathname.slice('/api/classes/'.length));
       if (!slug) {
+        sendJson(response, 400, { error: 'Missing class slug' });
+        return;
+      }
+      try {
+        sendJson(response, 200, getClassSummary(slug));
+      } catch (error) {
+        sendJson(response, 404, {
+          error: error instanceof Error ? error.message : 'Class not found'
+        });
+      }
+      return;
+    }
+
+    if (request.method === 'GET' && url.pathname.startsWith('/api/courses/')) {
+      const rest = decodeURIComponent(url.pathname.slice('/api/courses/'.length));
+      const assessmentsMatch = rest.match(/^([^/]+)\/assessments$/);
+      if (assessmentsMatch) {
+        const slug = assessmentsMatch[1];
+        try {
+          sendJson(response, 200, {
+            courseSlug: slug,
+            assessments: readCourseAssessments(slug)
+          });
+        } catch (error) {
+          const message = error instanceof Error ? error.message : String(error);
+          sendJson(response, /not found/i.test(message) ? 404 : 400, { error: message });
+        }
+        return;
+      }
+
+      if (!rest || rest.includes('/')) {
         sendJson(response, 400, { error: 'Missing course slug' });
         return;
       }
-      sendJson(response, 200, getCourseSummary(slug));
+      sendJson(response, 200, getCourseSummary(rest));
       return;
     }
 
@@ -464,6 +560,23 @@ const server = createServer(async (request, response) => {
       return;
     }
 
+    if (request.method === 'GET' && url.pathname.startsWith('/api/open-class-folder/')) {
+      const slug = decodeURIComponent(url.pathname.slice('/api/open-class-folder/'.length));
+      const folder = getClassDir(slug);
+      if (!existsSync(folder)) {
+        sendJson(response, 404, { error: 'Folder not found' });
+        return;
+      }
+      const opener = process.platform === 'win32'
+        ? spawn('explorer', [folder], { shell: true, windowsHide: true })
+        : process.platform === 'darwin'
+          ? spawn('open', [folder])
+          : spawn('xdg-open', [folder]);
+      opener.unref();
+      sendJson(response, 200, { ok: true, folder });
+      return;
+    }
+
     if (request.method === 'GET' && url.pathname.startsWith('/api/open-folder/')) {
       const slug = decodeURIComponent(url.pathname.slice('/api/open-folder/'.length));
       const summary = getCourseSummary(slug);
@@ -491,5 +604,6 @@ const server = createServer(async (request, response) => {
 
 server.listen(PORT, HOST, () => {
   console.log(`Coursegen UI: http://${HOST}:${PORT}`);
-  console.log(`Courses: ${path.join(rootDir, 'gens', 'courses')}`);
+  console.log(`Courses: ${getCoursesRoot()}`);
+  console.log(`Sources: ${getSourcesRoot()}`);
 });
