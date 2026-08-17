@@ -23,6 +23,29 @@ body.fullscreen-active #folder-sidebar {
   padding: 13px 14px 10px;
   border-bottom: 1px solid var(--line);
 }
+#sidebar-brand {
+  grid-column: 1 / -1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  min-width: 0;
+  margin-bottom: 5px;
+}
+#sidebar-brand-logo {
+  width: 108px;
+  height: 42px;
+  object-fit: contain;
+  flex: 0 0 auto;
+  margin: -9px -3px -8px -3px;
+}
+#sidebar-brand-title {
+  color: var(--text);
+  font-size: 16px;
+  font-weight: 700;
+  letter-spacing: -0.01em;
+  white-space: nowrap;
+}
 #sidebar-title {
   font-size: 12px;
   font-weight: 650;

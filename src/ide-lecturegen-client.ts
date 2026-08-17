@@ -1,7 +1,7 @@
 import { mkdtemp, readFile, rm } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
-import type { LectureGenerationResult } from "../packages/lecture-agent/src/lecturegen.ts";
+import type { LectureGenerationResult } from "../../mylecture-agent/src/lecturegen.ts";
 import { safeExtractTarGz } from "./utils/safe-tar-extract.ts";
 
 function lectureGenUrl(): string {

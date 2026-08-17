@@ -22,17 +22,8 @@ export async function publishCourse(options: PublishCourseOptions) {
   const state = readCourseState(options.courseSlug);
 
   const notDone = state.lectures.filter(lecture => lecture.status !== 'done');
-  const needsReview = state.lectures.filter(lecture => lecture.status === 'needs-review');
-  if (options.goLive && needsReview.length > 0) {
-    console.error(`Cannot go live: ${needsReview.length} lecture(s) need practice QA review: ${needsReview.map(l => l.slug).join(', ')}`);
-    console.error(`Re-run with: npm run coursegen -- resume --course ${options.courseSlug} after fixes, or edit activities/interactive/index.html / activities/game/index.html manually and clear needs-review.`);
-    process.exitCode = 1;
-    return;
-  }
   if (options.goLive && notDone.length > 0) {
-    console.error(`Cannot go live: ${notDone.length} lecture(s) are not done: ${notDone.map(l => l.slug).join(', ')}`);
-    process.exitCode = 1;
-    return;
+    throw new Error(`Cannot go live: ${notDone.length} lecture(s) are not done: ${notDone.map(l => l.slug).join(', ')}`);
   }
   if (notDone.length > 0) {
     console.warn(`Warning: ${notDone.length} lecture(s) are not done: ${notDone.map(l => l.slug).join(', ')}`);
@@ -86,11 +77,7 @@ export async function publishCourse(options: PublishCourseOptions) {
     }
 
     if (failedLectures.length > 0) {
-      console.error(`\nGo-live failed: could not publish ${failedLectures.length} lecture(s): ${failedLectures.join(', ')}`);
-      console.error('If a lecture was never uploaded, run publish (without --go-live) first.');
-      console.error(`Fix the issues above and re-run: npm run coursegen -- publish --course ${plan.slug} --go-live`);
-      process.exitCode = 1;
-      return;
+      throw new Error(`Go-live failed: could not publish ${failedLectures.length} lecture(s): ${failedLectures.join(', ')}`);
     }
 
     await spawnAdmin(['publish-course', '--slug', plan.slug]);
@@ -102,10 +89,6 @@ export async function publishCourse(options: PublishCourseOptions) {
         console.error(`Skipping ${lecture.slug}: folder not found (${sourceDir})`);
         skippedSlugs.push(lecture.slug);
         continue;
-      }
-
-      if (lecture.status === 'needs-review') {
-        console.warn(`Warning: ${lecture.slug} has needs-review status — practice QA not passed; draft upload may ship incomplete activities.`);
       }
 
       const captionsPath = writeLectureCaptionsVtt(sourceDir);
@@ -138,16 +121,14 @@ export async function publishCourse(options: PublishCourseOptions) {
   }
 
   if (skippedSlugs.length > 0) {
-    console.error(`\nPublish failed: skipped ${skippedSlugs.length} lecture(s) with missing folders: ${skippedSlugs.join(', ')}`);
-    process.exitCode = 1;
-    return;
+    throw new Error(`Publish failed: skipped ${skippedSlugs.length} lecture(s) with missing folders: ${skippedSlugs.join(', ')}`);
   }
 
   console.log('\nPublish complete.');
   if (options.goLive) {
     console.log(`Rollback: npm run admin -- unpublish-course --slug ${plan.slug}`);
   } else {
-    console.log(`Course uploaded as draft. Review, then: npm run coursegen -- publish --course ${plan.slug} --go-live`);
+    console.log('Course uploaded as draft. Review it before using the go-live operation.');
     console.log(`Per-lecture rollback: npm run admin -- unpublish-lecture --course ${plan.slug} --slug <lecture-slug> --purge-assets true`);
   }
 }

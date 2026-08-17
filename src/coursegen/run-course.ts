@@ -1,6 +1,6 @@
 import { existsSync, mkdirSync, readdirSync, rmSync } from 'node:fs';
 import path from 'node:path';
-import type { CoursePlan, CourseState, LectureState, PracticeReviewStatus } from './types.ts';
+import type { CoursePlan, CourseState, LectureState } from './types.ts';
 import {
   getCourseDir,
   isIndexHtmlName,
@@ -10,92 +10,47 @@ import {
   resolvedSiblingPathForIndex
 } from './paths.ts';
 import {
-  buildGameTaskMessage,
-  buildInteractiveTaskMessage,
-  buildPracticeRepairMessage,
   buildVideoGenerationSettings,
   buildVideoTaskMessage,
   estimateCourseCostUsd,
-  formatLectureSequenceContext,
-  formatGameSpec,
-  formatInteractiveSpec,
   loadLectureGrounding,
-  GAME_PRACTICE_REL,
-  INTERACTIVE_PRACTICE_REL,
   printPlanSummary,
-  type LectureGrounding,
-  type PracticeHtmlRelPath
+  type LectureGrounding
 } from './lecture-prompt.ts';
 import { readCoursePlan, readCourseState, writeCourseState } from './state.ts';
-import { DEFAULT_LEARNING_INTENT, flattenPlanLectures, initialCourseState, resolveGameSpec, resolveInteractiveSpec } from './types.ts';
+import { DEFAULT_LEARNING_INTENT, flattenPlanLectures, initialCourseState } from './types.ts';
 import {
   parseCostUsdFromOutput,
   spawnAgent,
-  spawnEditorAgent,
-  spawnPracticeGen,
   spawnRenderLecture,
   spawnResolve,
   type LectureGenSpawnSettings
 } from './spawn.ts';
 import { confirm } from './confirm.ts';
-import { ensurePracticeChromeStyles } from './practice-chrome.ts';
-import { cleanupScreenshotDir, reviewPracticeWithRubric, type RubricResult } from './review-practice.ts';
-import { buildScriptRepairMessage, reviewScriptWithRubric, type ScriptReviewResult } from './review-script.ts';
 
 export type RunCourseOptions = {
   courseSlug: string;
   yes?: boolean;
   budgetUsd?: number;
-  maxTurns?: number;
-  maxPracticeTurns?: number;
   lectureTimeoutMinutes?: number;
   retryFailed?: boolean;
   forceLecture?: string;
-  skipPracticeReview?: boolean;
-  skipScriptReview?: boolean;
+  ttsProvider?: string;
   ttsVoice?: string;
   ttsSpeed?: string;
   model?: string;
   dryRun?: boolean;
   /** When true, mux resolved HTML to MP4 after resolve. Default: false (resolve-only). */
   render?: boolean;
-  /** When true, only mux existing resolved HTML to MP4 — no agent, resolve, or practice. */
+  /** When true, only mux existing resolved HTML to MP4 — no generation or resolve. */
   renderOnly?: boolean;
 };
-
-type PracticeKind = 'interactive' | 'game';
-
-const LEGACY_TOP_LEVEL_PRACTICE_FILES = ['interactive.html', 'game.html'] as const;
-
-function setPracticeReview(
-  lectureState: LectureState,
-  kind: PracticeKind,
-  status: PracticeReviewStatus,
-  notes: string
-) {
-  if (kind === 'interactive') {
-    lectureState.interactiveReview = status;
-    lectureState.interactiveReviewNotes = notes;
-  } else {
-    lectureState.gameReview = status;
-    lectureState.gameReviewNotes = notes;
-  }
-}
 
 function makeCostRecorder(lectureState: LectureState, state: CourseState) {
   return (costUsd: number) => {
     lectureState.costUsd = Number((lectureState.costUsd + costUsd).toFixed(4));
     state.spentUsd = Number((state.spentUsd + costUsd).toFixed(4));
   };
-}
-
-function defaultReviewFields(lecture: Partial<LectureState>) {
-  return {
-    interactiveReview: lecture.interactiveReview ?? 'not-required',
-    interactiveReviewNotes: lecture.interactiveReviewNotes ?? '',
-    gameReview: lecture.gameReview ?? 'not-required',
-    gameReviewNotes: lecture.gameReviewNotes ?? ''
-  } as const;
 }
 
 export function syncStateFromPlan(state: CourseState, plan: CoursePlan) {
@@ -105,7 +60,6 @@ export function syncStateFromPlan(state: CourseState, plan: CoursePlan) {
     const existing = bySlug.get(row.slug);
     if (existing) {
       const synced = {
-        ...defaultReviewFields(existing),
         ...existing,
         title: row.title,
         module: row.module,
@@ -114,14 +68,6 @@ export function syncStateFromPlan(state: CourseState, plan: CoursePlan) {
         durationMinutes: row.durationMinutes,
         formats: row.formats
       };
-      if (!row.formats.includes('interactive')) {
-        synced.interactiveReview = 'not-required';
-        synced.interactiveReviewNotes = '';
-      }
-      if (!row.formats.includes('game')) {
-        synced.gameReview = 'not-required';
-        synced.gameReviewNotes = '';
-      }
       return synced;
     }
     return {
@@ -137,8 +83,7 @@ export function syncStateFromPlan(state: CourseState, plan: CoursePlan) {
       attempts: 0,
       costUsd: 0,
       error: '',
-      mp4Path: '',
-      ...defaultReviewFields({})
+      mp4Path: ''
     };
   });
   return state;
@@ -153,18 +98,6 @@ function findPlannedLecture(plan: CoursePlan, slug: string) {
     }
   }
   return null;
-}
-
-function practiceReviewPending(lecture: LectureState) {
-  const interactivePending =
-    lecture.formats.includes('interactive') &&
-    lecture.interactiveReview !== 'passed' &&
-    lecture.interactiveReview !== 'needs-review';
-  const gamePending =
-    lecture.formats.includes('game') &&
-    lecture.gameReview !== 'passed' &&
-    lecture.gameReview !== 'needs-review';
-  return interactivePending || gamePending;
 }
 
 function wantsRender(options: RunCourseOptions) {
@@ -209,17 +142,13 @@ function shouldRunLecture(lecture: LectureState, plan: CoursePlan, options: RunC
   if (
     lecture.status === 'generating' ||
     lecture.status === 'resolving' ||
-    lecture.status === 'rendering' ||
-    lecture.status === 'generating-practice' ||
-    lecture.status === 'reviewing'
+    lecture.status === 'rendering'
   ) {
     return true;
   }
-  if (lecture.status === 'needs-review') return Boolean(options.retryFailed);
   if (lecture.status === 'done' && wantsRender(options) && lecture.formats.includes('video')) {
     if (!lecture.mp4Path || !existsSync(lecture.mp4Path)) return true;
   }
-  if (lecture.status === 'done' && practiceReviewPending(lecture)) return true;
   return lecture.status === 'pending';
 }
 
@@ -227,28 +156,12 @@ function findIndexFile(folderPath: string) {
   return findLatestIndexFile(folderPath);
 }
 
-function cleanupLegacyTopLevelPracticeFiles(folderPath: string) {
-  for (const fileName of LEGACY_TOP_LEVEL_PRACTICE_FILES) {
-    const filePath = path.join(folderPath, fileName);
-    if (!existsSync(filePath)) continue;
-    rmSync(filePath, { force: true });
-    console.log(`  Removed legacy top-level practice file: ${fileName}`);
-  }
-}
-
-function cleanupCourseLegacyPracticeFiles(plan: CoursePlan, state: CourseState) {
-  for (const lecture of state.lectures) {
-    const folderName = lecture.folderName || lectureFolderName(lecture.order, lecture.slug);
-    cleanupLegacyTopLevelPracticeFiles(lectureFolderPath(plan.slug, folderName));
-  }
-}
-
-function cleanupVideoArtifactsForRerun(folderPath: string) {
+function cleanupLectureArtifactsForRerun(folderPath: string) {
   if (!existsSync(folderPath)) return;
   for (const entry of readdirSync(folderPath, { withFileTypes: true })) {
     const entryPath = path.join(folderPath, entry.name);
     if (entry.isDirectory()) {
-      if (entry.name === 'audio') {
+      if (entry.name === 'audio' || entry.name === 'activities') {
         rmSync(entryPath, { recursive: true, force: true });
       }
       continue;
@@ -256,6 +169,8 @@ function cleanupVideoArtifactsForRerun(folderPath: string) {
     if (
       isIndexHtmlName(entry.name) ||
       isResolvedHtmlName(entry.name) ||
+      entry.name.toLowerCase() === 'interactive.html' ||
+      entry.name.toLowerCase() === 'game.html' ||
       entry.name.toLowerCase().endsWith('.mp4')
     ) {
       rmSync(entryPath, { force: true });
@@ -266,12 +181,12 @@ function cleanupVideoArtifactsForRerun(folderPath: string) {
 async function runAgentTask(options: {
   workspaceDir: string;
   taskMessage: string;
-  maxTurns: number;
   model?: string;
+  ttsProvider?: string;
+  ttsVoice?: string;
+  ttsSpeed?: string;
   timeoutMinutes: number;
   onCost: (costUsd: number) => void;
-  /** LectureGen for new videos; EditorAgent for index edits (script repair). */
-  mode?: 'generate' | 'edit';
   /** Typed LectureGen settings (generation length, aspect, theme, teaching style). */
   settings?: LectureGenSpawnSettings;
 }) {
@@ -283,12 +198,13 @@ async function runAgentTask(options: {
 
   let agentOutput = '';
   try {
-    const spawn = options.mode === 'edit' ? spawnEditorAgent : spawnAgent;
-    const { promise, kill } = spawn({
+    const { promise, kill } = spawnAgent({
       workspaceDir: options.workspaceDir,
       taskMessage: options.taskMessage,
-      maxTurns: options.maxTurns,
       model: options.model,
+      ttsProvider: options.ttsProvider,
+      ttsVoice: options.ttsVoice,
+      ttsSpeed: options.ttsSpeed,
       settings: options.settings,
       onStdout: chunk => { agentOutput += chunk; },
       onStderr: chunk => { agentOutput += chunk; }
@@ -305,355 +221,7 @@ async function runAgentTask(options: {
   return agentOutput;
 }
 
-async function runPracticeGenTask(options: {
-  kind: PracticeKind;
-  workspaceDir: string;
-  taskMessage: string;
-  outputRelPath: PracticeHtmlRelPath;
-  model?: string;
-  timeoutMinutes: number;
-  onCost: (costUsd: number) => void;
-  referencePath?: string;
-}) {
-  const timeoutMs = options.timeoutMinutes * 60 * 1000;
-  let killAgent: (() => void) | null = null;
-  const timeout = setTimeout(() => {
-    killAgent?.();
-  }, timeoutMs);
-
-  let agentOutput = '';
-  try {
-    const { promise, kill } = spawnPracticeGen({
-      kind: options.kind,
-      workspaceDir: options.workspaceDir,
-      taskMessage: options.taskMessage,
-      outputRelPath: options.outputRelPath,
-      model: options.model,
-      aspectRatio: '16:9',
-      referencePath: options.referencePath,
-      onStdout: chunk => { agentOutput += chunk; },
-      onStderr: chunk => { agentOutput += chunk; }
-    });
-    killAgent = kill;
-    await promise;
-  } finally {
-    clearTimeout(timeout);
-    killAgent = null;
-  }
-
-  const costUsd = parseCostUsdFromOutput(agentOutput);
-  options.onCost(costUsd);
-  return agentOutput;
-}
-
-async function reviewOnePracticeFile(options: {
-  lectureState: LectureState;
-  state: CourseState;
-  folderPath: string;
-  fileName: PracticeHtmlRelPath;
-  kind: PracticeKind;
-  specText: string;
-  spec: NonNullable<ReturnType<typeof resolveInteractiveSpec>> | NonNullable<ReturnType<typeof resolveGameSpec>>;
-  runOptions: RunCourseOptions;
-  allowRepair: boolean;
-}): Promise<'passed' | 'needs-review'> {
-  const htmlPath = path.join(options.folderPath, options.fileName);
-  const screenshotDir = path.join(options.folderPath, '.practice-review', options.kind);
-
-  if (!existsSync(htmlPath)) {
-    setPracticeReview(options.lectureState, options.kind, 'needs-review', `${options.fileName} not found after generation`);
-    writeCourseState(options.state);
-    return 'needs-review';
-  }
-
-  try {
-    let result: RubricResult;
-    try {
-      result = await reviewPracticeWithRubric({
-        objective: options.lectureState.objective,
-        htmlPath,
-        kind: options.kind,
-        spec: options.spec,
-        screenshotDir,
-        model: options.runOptions.model
-      });
-    } catch (error) {
-      const message = error instanceof Error ? error.message : String(error);
-      setPracticeReview(options.lectureState, options.kind, 'needs-review', `QA infrastructure error: ${message}`);
-      writeCourseState(options.state);
-      return 'needs-review';
-    }
-
-    if (!result.passed && options.allowRepair) {
-      console.log(`  Practice QA failed for ${options.fileName}; running one repair pass...`);
-      result.findings.forEach(finding => console.log(`    - ${finding}`));
-      const repairMessage = buildPracticeRepairMessage({
-        fileName: options.fileName,
-        objective: options.lectureState.objective,
-        findings: result.findings,
-        specText: options.specText
-      });
-      try {
-        // EditorAgent is index-root only — practice repair goes through PracticeGen.
-        await runPracticeGenTask({
-          kind: options.kind,
-          workspaceDir: options.folderPath,
-          taskMessage: repairMessage,
-          outputRelPath: options.fileName,
-          model: options.runOptions.model,
-          timeoutMinutes: options.runOptions.lectureTimeoutMinutes ?? 20,
-          onCost: makeCostRecorder(options.lectureState, options.state),
-          referencePath: existsSync(htmlPath) ? htmlPath : undefined
-        });
-      } catch (error) {
-        const message = error instanceof Error ? error.message : String(error);
-        setPracticeReview(options.lectureState, options.kind, 'needs-review', `QA infrastructure error: ${message}`);
-        writeCourseState(options.state);
-        return 'needs-review';
-      }
-
-      cleanupScreenshotDir(screenshotDir);
-      try {
-        result = await reviewPracticeWithRubric({
-          objective: options.lectureState.objective,
-          htmlPath,
-          kind: options.kind,
-          spec: options.spec,
-          screenshotDir,
-          model: options.runOptions.model
-        });
-      } catch (error) {
-        const message = error instanceof Error ? error.message : String(error);
-        setPracticeReview(options.lectureState, options.kind, 'needs-review', `QA infrastructure error: ${message}`);
-        writeCourseState(options.state);
-        return 'needs-review';
-      }
-    }
-
-    if (result.passed) {
-      setPracticeReview(options.lectureState, options.kind, 'passed', '');
-      writeCourseState(options.state);
-      return 'passed';
-    }
-
-    setPracticeReview(options.lectureState, options.kind, 'needs-review', result.findings.join('; '));
-    writeCourseState(options.state);
-    return 'needs-review';
-  } finally {
-    cleanupScreenshotDir(screenshotDir);
-  }
-}
-
-/**
- * Narration-quality gate: review the generated script before paying for TTS
- * and render. Fails soft - after one revision pass, generation continues even
- * if the reviewer is still unhappy, since narration style is subjective and a
- * stalled pipeline is worse than an imperfect script.
- */
-async function runScriptReviewPhase(
-  plan: CoursePlan,
-  planned: NonNullable<ReturnType<typeof findPlannedLecture>>,
-  lectureState: LectureState,
-  state: CourseState,
-  folderPath: string,
-  options: RunCourseOptions,
-  grounding: LectureGrounding | null
-) {
-  const reviewOptions = {
-    folderPath,
-    objective: lectureState.objective,
-    audience: plan.audience,
-    intent: plan.intent ?? DEFAULT_LEARNING_INTENT,
-    durationMinutes: planned.lecture.durationMinutes,
-    courseContext: formatLectureSequenceContext(plan, planned.lecture),
-    sourceContext: grounding?.reviewContext,
-    model: options.model
-  };
-
-  console.log('  Reviewing narration script...');
-  let result: ScriptReviewResult;
-  try {
-    result = await reviewScriptWithRubric(reviewOptions);
-  } catch (error) {
-    const message = error instanceof Error ? error.message : String(error);
-    console.log(`  Script review skipped (infrastructure error): ${message}`);
-    return;
-  }
-
-  if (result.passed) {
-    console.log('  Script review: passed');
-    return;
-  }
-
-  console.log('  Script review failed; running one narration revision pass...');
-  result.findings.forEach(finding => console.log(`    - ${finding}`));
-
-  try {
-    await runAgentTask({
-      workspaceDir: folderPath,
-      taskMessage: buildScriptRepairMessage({
-        objective: lectureState.objective,
-        findings: result.findings,
-        grounded: Boolean(grounding)
-      }),
-      maxTurns: options.maxTurns ?? 60,
-      model: options.model,
-      timeoutMinutes: options.lectureTimeoutMinutes ?? 20,
-      onCost: makeCostRecorder(lectureState, state),
-      mode: 'edit'
-    });
-    writeCourseState(state);
-  } catch (error) {
-    const message = error instanceof Error ? error.message : String(error);
-    console.log(`  Narration revision failed: ${message}. Continuing with original narration.`);
-    return;
-  }
-
-  try {
-    result = await reviewScriptWithRubric(reviewOptions);
-  } catch (error) {
-    const message = error instanceof Error ? error.message : String(error);
-    console.log(`  Script re-review skipped (infrastructure error): ${message}`);
-    return;
-  }
-
-  if (result.passed) {
-    console.log('  Script review: passed after revision');
-    return;
-  }
-  console.log('  Script review still failing after one revision; continuing to render. Remaining findings:');
-  result.findings.forEach(finding => console.log(`    - ${finding}`));
-}
-
-async function runPracticePhase(
-  plan: CoursePlan,
-  state: CourseState,
-  lectureState: LectureState,
-  planned: NonNullable<ReturnType<typeof findPlannedLecture>>,
-  folderPath: string,
-  indexPath: string,
-  options: RunCourseOptions
-) {
-  const needsInteractive = planned.lecture.formats.includes('interactive');
-  const needsGame = planned.lecture.formats.includes('game');
-  if (!needsInteractive && !needsGame) return;
-
-  cleanupLegacyTopLevelPracticeFiles(folderPath);
-
-  lectureState.status = 'generating-practice';
-  writeCourseState(state);
-
-  const interactivePath = path.join(folderPath, INTERACTIVE_PRACTICE_REL);
-  const gamePath = path.join(folderPath, GAME_PRACTICE_REL);
-  const regenAll = Boolean(options.forceLecture);
-
-  if (needsInteractive && (regenAll || !existsSync(interactivePath))) {
-    console.log(`  Generating ${INTERACTIVE_PRACTICE_REL}...`);
-    const taskMessage = buildInteractiveTaskMessage(plan, planned.lecture, planned.moduleTitle, indexPath);
-    try {
-      await runPracticeGenTask({
-        kind: 'interactive',
-        workspaceDir: folderPath,
-        taskMessage,
-        outputRelPath: INTERACTIVE_PRACTICE_REL,
-        model: options.model,
-        timeoutMinutes: options.lectureTimeoutMinutes ?? 20,
-        onCost: makeCostRecorder(lectureState, state),
-        referencePath: existsSync(indexPath) ? indexPath : undefined
-      });
-      if (existsSync(interactivePath)) {
-        ensurePracticeChromeStyles(interactivePath);
-      }
-    } catch (error) {
-      const message = error instanceof Error ? error.message : String(error);
-      setPracticeReview(lectureState, 'interactive', 'needs-review', `generation failed: ${message}`);
-      writeCourseState(state);
-    }
-  } else if (needsInteractive && existsSync(interactivePath)) {
-    ensurePracticeChromeStyles(interactivePath);
-  }
-
-  if (needsGame && (regenAll || !existsSync(gamePath))) {
-    console.log(`  Generating ${GAME_PRACTICE_REL}...`);
-    const taskMessage = buildGameTaskMessage(plan, planned.lecture, planned.moduleTitle, indexPath);
-    try {
-      await runPracticeGenTask({
-        kind: 'game',
-        workspaceDir: folderPath,
-        taskMessage,
-        outputRelPath: GAME_PRACTICE_REL,
-        model: options.model,
-        timeoutMinutes: options.lectureTimeoutMinutes ?? 20,
-        onCost: makeCostRecorder(lectureState, state),
-        referencePath: existsSync(indexPath) ? indexPath : undefined
-      });
-      if (existsSync(gamePath)) {
-        ensurePracticeChromeStyles(gamePath);
-      }
-    } catch (error) {
-      const message = error instanceof Error ? error.message : String(error);
-      setPracticeReview(lectureState, 'game', 'needs-review', `generation failed: ${message}`);
-      writeCourseState(state);
-    }
-  } else if (needsGame && existsSync(gamePath)) {
-    ensurePracticeChromeStyles(gamePath);
-  }
-
-  if (options.skipPracticeReview) {
-    if (needsInteractive) lectureState.interactiveReview = 'passed';
-    if (needsGame) lectureState.gameReview = 'passed';
-    return;
-  }
-
-  lectureState.status = 'reviewing';
-  writeCourseState(state);
-
-  const interactiveSpec = resolveInteractiveSpec(planned.lecture);
-  const gameSpec = resolveGameSpec(planned.lecture);
-
-  if (needsInteractive && lectureState.interactiveReview !== 'passed' && interactiveSpec) {
-    console.log(`  Reviewing ${INTERACTIVE_PRACTICE_REL}...`);
-    await reviewOnePracticeFile({
-      lectureState,
-      state,
-      folderPath,
-      fileName: INTERACTIVE_PRACTICE_REL,
-      kind: 'interactive',
-      specText: formatInteractiveSpec(interactiveSpec),
-      spec: interactiveSpec,
-      runOptions: options,
-      allowRepair: true
-    });
-  }
-
-  if (needsGame && lectureState.gameReview !== 'passed' && gameSpec) {
-    console.log(`  Reviewing ${GAME_PRACTICE_REL}...`);
-    await reviewOnePracticeFile({
-      lectureState,
-      state,
-      folderPath,
-      fileName: GAME_PRACTICE_REL,
-      kind: 'game',
-      specText: formatGameSpec(gameSpec),
-      spec: gameSpec,
-      runOptions: options,
-      allowRepair: true
-    });
-  }
-}
-
 function finalizeLectureStatus(lectureState: LectureState) {
-  const practiceFailed =
-    (lectureState.formats.includes('interactive') && lectureState.interactiveReview === 'needs-review') ||
-    (lectureState.formats.includes('game') && lectureState.gameReview === 'needs-review');
-  if (practiceFailed) {
-    lectureState.status = 'needs-review';
-    lectureState.error = [
-      lectureState.interactiveReviewNotes && `interactive: ${lectureState.interactiveReviewNotes}`,
-      lectureState.gameReviewNotes && `game: ${lectureState.gameReviewNotes}`
-    ].filter(Boolean).join(' | ');
-    return;
-  }
   lectureState.status = 'done';
   lectureState.error = '';
 }
@@ -696,17 +264,13 @@ async function runOneLecture(
     writeCourseState(state);
     try {
       const mp4Path = await spawnRenderLecture(folderPath, {
+        ttsProvider: options.ttsProvider,
         ttsVoice: options.ttsVoice,
         ttsSpeed: options.ttsSpeed
       });
       lectureState.mp4Path = mp4Path;
-      if (priorStatus === 'needs-review') {
-        lectureState.status = 'needs-review';
-        lectureState.error = priorError;
-      } else {
-        lectureState.status = 'done';
-        lectureState.error = '';
-      }
+      lectureState.status = priorStatus === 'failed' ? 'failed' : 'done';
+      lectureState.error = priorStatus === 'failed' ? priorError : '';
     } catch (error) {
       lectureState.status = 'failed';
       lectureState.error = `Render failed: ${error instanceof Error ? error.message : String(error)}`;
@@ -754,13 +318,7 @@ async function runOneLecture(
 
   if (options.dryRun) {
     if (!skipVideo) {
-      console.log(`\n--- ${lectureState.title} (video) ---\n${buildVideoTaskMessage(plan, planned.lecture, planned.moduleTitle, grounding?.block)}\n`);
-    }
-    if (planned.lecture.formats.includes('interactive')) {
-      console.log(`\n--- ${lectureState.title} (interactive) ---\n${buildInteractiveTaskMessage(plan, planned.lecture, planned.moduleTitle, existingIndex || 'index.html')}\n`);
-    }
-    if (planned.lecture.formats.includes('game')) {
-      console.log(`\n--- ${lectureState.title} (game) ---\n${buildGameTaskMessage(plan, planned.lecture, planned.moduleTitle, existingIndex || 'index.html')}\n`);
+      console.log(`\n--- ${lectureState.title} (${planned.lecture.formats.join(', ')}) ---\n${buildVideoTaskMessage(plan, planned.lecture, planned.moduleTitle, grounding?.block)}\n`);
     }
     return;
   }
@@ -769,11 +327,7 @@ async function runOneLecture(
   lectureState.folderName = folderName;
 
   if (options.forceLecture) {
-    cleanupVideoArtifactsForRerun(folderPath);
-    lectureState.interactiveReview = 'not-required';
-    lectureState.interactiveReviewNotes = '';
-    lectureState.gameReview = 'not-required';
-    lectureState.gameReviewNotes = '';
+    cleanupLectureArtifactsForRerun(folderPath);
     lectureState.mp4Path = '';
   }
 
@@ -785,6 +339,7 @@ async function runOneLecture(
     writeCourseState(state);
     try {
       const mp4Path = await spawnRenderLecture(folderPath, {
+        ttsProvider: options.ttsProvider,
         ttsVoice: options.ttsVoice,
         ttsSpeed: options.ttsSpeed
       });
@@ -798,11 +353,10 @@ async function runOneLecture(
     indexPath = findLatestIndexFile(folderPath);
     if (!indexPath) {
       lectureState.status = 'failed';
-      lectureState.error = 'Video index missing; cannot generate practice assets';
+      lectureState.error = 'Video index missing after render';
       writeCourseState(state);
       return;
     }
-    await runPracticePhase(plan, state, lectureState, planned, folderPath, indexPath, options);
     finalizeLectureStatus(lectureState);
     writeCourseState(state);
     return;
@@ -820,8 +374,10 @@ async function runOneLecture(
       await runAgentTask({
         workspaceDir: folderPath,
         taskMessage,
-        maxTurns: options.maxTurns ?? 60,
         model: options.model,
+        ttsProvider: options.ttsProvider,
+        ttsVoice: options.ttsVoice,
+        ttsSpeed: options.ttsSpeed,
         timeoutMinutes: options.lectureTimeoutMinutes ?? 20,
         onCost: makeCostRecorder(lectureState, state),
         settings
@@ -834,7 +390,6 @@ async function runOneLecture(
     }
 
     indexPath = findIndexFile(folderPath);
-    cleanupLegacyTopLevelPracticeFiles(folderPath);
     if (!indexPath) {
       lectureState.status = 'failed';
       lectureState.error = 'No index*.html generated';
@@ -842,15 +397,11 @@ async function runOneLecture(
       return;
     }
 
-    if (!options.skipScriptReview) {
-      await runScriptReviewPhase(plan, planned, lectureState, state, folderPath, options, grounding);
-      indexPath = findIndexFile(folderPath) ?? indexPath;
-    }
-
     lectureState.status = 'resolving';
     writeCourseState(state);
     try {
       await spawnResolve(indexPath, {
+        ttsProvider: options.ttsProvider,
         ttsVoice: options.ttsVoice,
         ttsSpeed: options.ttsSpeed
       });
@@ -866,6 +417,7 @@ async function runOneLecture(
       writeCourseState(state);
       try {
         const mp4Path = await spawnRenderLecture(folderPath, {
+          ttsProvider: options.ttsProvider,
           ttsVoice: options.ttsVoice,
           ttsSpeed: options.ttsSpeed
         });
@@ -881,12 +433,10 @@ async function runOneLecture(
     }
   } else if (!indexPath) {
     lectureState.status = 'failed';
-    lectureState.error = 'Video index missing; cannot generate practice assets';
+    lectureState.error = 'Video index missing after lecture generation';
     writeCourseState(state);
     return;
   }
-
-  await runPracticePhase(plan, state, lectureState, planned, folderPath, indexPath, options);
 
   finalizeLectureStatus(lectureState);
   writeCourseState(state);
@@ -910,7 +460,6 @@ export async function runCourse(options: RunCourseOptions) {
   state = syncStateFromPlan(state, plan);
   if (!options.dryRun) {
     writeCourseState(state);
-    cleanupCourseLegacyPracticeFiles(plan, state);
   }
 
   const pending = state.lectures.filter(lecture => shouldRunLecture(lecture, plan, options));
@@ -918,7 +467,7 @@ export async function runCourse(options: RunCourseOptions) {
     if (options.renderOnly) {
       console.log('No lectures ready to render. Each lecture needs resolved HTML and no existing MP4.');
     } else {
-      console.log('No lectures to run. Use --retry-failed, --force-lecture <slug>, or resume after needs-review.');
+      console.log('No lectures to run. Use --retry-failed or --force-lecture <slug>.');
     }
     return state;
   }
@@ -970,10 +519,9 @@ export async function runCourse(options: RunCourseOptions) {
 
   const done = state.lectures.filter(l => l.status === 'done').length;
   const failed = state.lectures.filter(l => l.status === 'failed').length;
-  const needsReview = state.lectures.filter(l => l.status === 'needs-review').length;
   const summary = options.renderOnly
-    ? `\nRender complete: ${done} done, ${failed} failed, ${needsReview} needs-review`
-    : `\nRun complete: ${done} done, ${failed} failed, ${needsReview} needs-review, spent ~$${state.spentUsd.toFixed(2)} / $${state.budgetUsd.toFixed(2)}`;
+    ? `\nRender complete: ${done} done, ${failed} failed`
+    : `\nRun complete: ${done} done, ${failed} failed, spent ~$${state.spentUsd.toFixed(2)} / $${state.budgetUsd.toFixed(2)}`;
   console.log(summary);
   console.log(`Course folder: ${getCourseDir(options.courseSlug)}`);
   return state;
@@ -985,18 +533,8 @@ export function printCourseStatus(courseSlug: string) {
   printPlanSummary(plan);
   console.log('\nLecture status:');
   for (const lecture of state.lectures) {
-    const reviews: string[] = [];
-    if (lecture.formats.includes('interactive') && lecture.interactiveReview !== 'not-required') {
-      reviews.push(`interactive=${lecture.interactiveReview}`);
-    }
-    if (lecture.formats.includes('game') && lecture.gameReview !== 'not-required') {
-      reviews.push(`game=${lecture.gameReview}`);
-    }
-    const reviewSuffix = reviews.length > 0 ? ` [${reviews.join(', ')}]` : '';
-    console.log(`  [${lecture.status}] ${lecture.order}. ${lecture.title} (attempts=${lecture.attempts}, cost=$${lecture.costUsd.toFixed(2)})${reviewSuffix}`);
+    console.log(`  [${lecture.status}] ${lecture.order}. ${lecture.title} (attempts=${lecture.attempts}, cost=$${lecture.costUsd.toFixed(2)})`);
     if (lecture.error) console.log(`    error: ${lecture.error.split('\n')[0]}`);
-    if (lecture.interactiveReviewNotes) console.log(`    interactive QA: ${lecture.interactiveReviewNotes.split(';')[0]}`);
-    if (lecture.gameReviewNotes) console.log(`    game QA: ${lecture.gameReviewNotes.split(';')[0]}`);
     if (lecture.mp4Path && existsSync(lecture.mp4Path)) console.log(`    mp4: ${lecture.mp4Path}`);
   }
   console.log(`\nSpent: $${state.spentUsd.toFixed(2)} / $${state.budgetUsd.toFixed(2)}`);

@@ -35,6 +35,7 @@ import {
 
 const rootDir = process.cwd();
 const startupConfig = loadAppConfig(rootDir);
+const brandLogoPath = path.join(rootDir, 'assets', 'logo-lockup.png');
 
 let managedAgentApiProcess = null;
 
@@ -370,6 +371,15 @@ const agentUploadExtensions = new Set([
 // Small response helpers keep route handlers readable.
 function sendText(response, status, body, contentType = 'text/plain; charset=utf-8') {
   response.writeHead(status, { 'content-type': contentType });
+  response.end(body);
+}
+
+function sendBuffer(response, status, body, contentType) {
+  response.writeHead(status, {
+    'content-type': contentType,
+    'content-length': body.length,
+    'cache-control': 'public, max-age=3600'
+  });
   response.end(body);
 }
 
@@ -1836,6 +1846,15 @@ async function pushFileToExistingViewer(args) {
 const server = createServer(async (request, response) => {
   const appConfig = readAppConfig();
   const requestUrl = new URL(request.url, 'http://localhost');
+
+  if (requestUrl.pathname === '/assets/logo-lockup.png') {
+    if (!existsSync(brandLogoPath)) {
+      sendText(response, 404, 'MyLecture logo not found');
+      return;
+    }
+    sendBuffer(response, 200, readFileSync(brandLogoPath), 'image/png');
+    return;
+  }
 
   // Serve the IDE shell. The actual lecture preview is loaded through iframes/assets.
   if (requestUrl.pathname === '/' || requestUrl.pathname === '/viewer') {

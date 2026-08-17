@@ -1,7 +1,7 @@
 import { existsSync, readFileSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { LLM_Model } from '../../packages/lecture-agent/src/utils/llm_model.ts';
+import { LLM_Model } from '../../../mylecture-agent/src/utils/llm_model.ts';
 import { resolveAgentModel } from './models.ts';
 import { courseStatePath, ensureCourseDir } from './paths.ts';
 import { estimateCourseCostUsd, printPlanSummary } from './lecture-prompt.ts';

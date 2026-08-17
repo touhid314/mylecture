@@ -2,7 +2,11 @@ import { existsSync, mkdirSync, readdirSync, renameSync, rmSync, statSync, unlin
 import { spawn } from 'node:child_process';
 import path from 'node:path';
 import { loadAppConfig } from '../config.ts';
-import { writeLectureCaptionsVtt } from '../captions-vtt.ts';
+import {
+  generateLectureViaAgentApi,
+  renderViaAgentApi,
+  resolveViaAgentApi
+} from '../lecture-agent-api-client.ts';
 import { resolveAgentModel } from './models.ts';
 import {
   ffmpegConcatPath,
@@ -13,7 +17,7 @@ import {
   websiteRoot
 } from './paths.ts';
 
-export const DEFAULT_COURSEGEN_TTS_VOICE = 'american-male-3';
+export const DEFAULT_COURSEGEN_TTS_VOICE = 'maruf';
 
 export function killProcessTree(childProc: ReturnType<typeof spawn> | null) {
   if (!childProc || !childProc.pid) return;
@@ -77,337 +81,66 @@ export function parseCostUsdFromOutput(output: string) {
   return Number(matches[matches.length - 1][1]) || 0;
 }
 
-function locateLectureGenCli() {
-  const cliPath = path.resolve(rootDir, 'packages/lecture-agent/src/lecturegen.ts');
-  if (!existsSync(cliPath)) {
-    throw new Error(`LectureGen CLI not found at ${cliPath}`);
-  }
-  return cliPath;
-}
-
-function locateEditorAgentCli() {
-  const cliPath = path.resolve(rootDir, 'packages/lecture-agent/src/editor-agent/cli.ts');
-  if (!existsSync(cliPath)) {
-    throw new Error(`EditorAgent CLI not found at ${cliPath}`);
-  }
-  return cliPath;
-}
-
-function locatePracticeGenCli() {
-  const cliPath = path.resolve(rootDir, 'packages/lecture-agent/src/practicegen.ts');
-  if (!existsSync(cliPath)) {
-    throw new Error(`PracticeGen CLI not found at ${cliPath}`);
-  }
-  return cliPath;
-}
-
 export type LectureGenSpawnSettings = {
   generationLength?: string;
   aspectRatio?: string;
-  theme?: string;
-  teachingStyle?: string;
   enableGetimg?: boolean;
+  outputs?: { video: boolean; interactive: boolean; game: boolean };
 };
 
 export type SpawnAgentOptions = {
   workspaceDir: string;
   taskMessage: string;
-  maxTurns: number;
   model?: string;
-  scriptModel?: string;
-  animatorModel?: string;
-  /** Typed LectureGen settings — emitted as CLI flags (explicit args beat stdin marker). */
+  ttsProvider?: string;
+  ttsVoice?: string;
+  ttsSpeed?: string | number;
+  /** Structured settings sent to the mylecture-agent generation API. */
   settings?: LectureGenSpawnSettings;
   onStdout?: (chunk: string) => void;
   onStderr?: (chunk: string) => void;
-  onSpawn?: (child: ReturnType<typeof spawn>, kill: () => void) => void;
+  onSpawn?: (_child: null, kill: () => void) => void;
 };
 
-/** Build LectureGen CLI argv from typed settings (process-boundary flags only). */
-export function buildLectureGenCliFlags(settings?: LectureGenSpawnSettings): string[] {
-  if (!settings) return [];
-  const flags: string[] = [];
-  if (settings.generationLength) {
-    flags.push('--length', settings.generationLength);
-  }
-  if (settings.aspectRatio) {
-    flags.push('--aspect-ratio', settings.aspectRatio);
-  }
-  if (settings.theme) {
-    flags.push('--theme', settings.theme);
-  }
-  if (settings.teachingStyle) {
-    flags.push('--teaching-style', settings.teachingStyle);
-  }
-  if (settings.enableGetimg === false) {
-    flags.push('--no-getimg');
-  }
-  return flags;
+function apiJob<T>(
+  run: (signal: AbortSignal, onLog: (text: string) => void) => Promise<T>,
+  options: Pick<SpawnAgentOptions, 'onStdout' | 'onStderr' | 'onSpawn'>
+) {
+  const controller = new AbortController();
+  const onLog = (text: string) => {
+    options.onStdout?.(text);
+    process.stdout.write(text);
+  };
+  options.onSpawn?.(null, () => controller.abort());
+  return {
+    promise: run(controller.signal, onLog),
+    kill: () => controller.abort()
+  };
 }
 
-/** Full lecture generation via LectureGen (not the edit-only EditorAgent). */
+/** Full lecture generation through the sibling mylecture-agent HTTP API. */
 export function spawnAgent(options: SpawnAgentOptions) {
-  const cliPath = locateLectureGenCli();
   const model = resolveAgentModel(options.model);
-  const scriptModel = String(options.scriptModel || '').trim();
-  const animatorModel = String(options.animatorModel || '').trim();
-
-  const settings = options.settings ? { ...options.settings } : undefined;
-  if (settings?.theme && !existsSync(settings.theme) && settings.theme.includes('\n')) {
-    const themePath = path.join(options.workspaceDir, '.coursegen-theme.md');
-    writeFileSync(themePath, settings.theme, 'utf8');
-    settings.theme = themePath;
-  }
-  if (settings?.teachingStyle && !existsSync(settings.teachingStyle) && settings.teachingStyle.includes('\n')) {
-    const stylePath = path.join(options.workspaceDir, '.coursegen-teaching-style.md');
-    writeFileSync(stylePath, settings.teachingStyle, 'utf8');
-    settings.teachingStyle = stylePath;
-  }
-
-  const args = [
-    '--import', 'tsx', cliPath,
-    '--model', model,
-    ...(scriptModel ? ['--script-model', scriptModel] : []),
-    ...(animatorModel ? ['--animator-model', animatorModel] : []),
-    '--workspace-dir', options.workspaceDir,
-    ...buildLectureGenCliFlags(settings)
-  ];
-
-  let childProc: ReturnType<typeof spawn> | null = null;
-  const env = {
-    ...process.env,
-    AGENT_WORKSPACE: options.workspaceDir,
-    AGENT_NEW_SESSION: 'true',
-    DOTENVX_LOG_LEVEL: 'error',
-    DOTENV_LOG_LEVEL: 'error',
-    DOTENV_CONFIG_QUIET: 'true'
-  };
-
-  const promise = new Promise<string>((resolve, reject) => {
-    const child = spawn(process.execPath, args, {
-      cwd: options.workspaceDir,
-      stdio: ['pipe', 'pipe', 'pipe'],
-      windowsHide: true,
-      env,
-      shell: false
-    });
-    childProc = child;
-    options.onSpawn?.(child, () => killProcessTree(child));
-
-    let stdout = '';
-    let stderr = '';
-    child.stdin?.write(options.taskMessage);
-    child.stdin?.end();
-
-    child.stdout?.on('data', chunk => {
-      const text = chunk.toString();
-      stdout += text;
-      options.onStdout?.(text);
-      process.stdout.write(chunk);
-    });
-    child.stderr?.on('data', chunk => {
-      const text = chunk.toString();
-      stderr += text;
-      options.onStderr?.(text);
-      process.stderr.write(chunk);
-    });
-
-    child.on('error', reject);
-    child.on('close', code => {
-      if (code === 0) {
-        resolve(stdout);
-        return;
-      }
-      const output = `${stdout}\n${stderr}`
-        .split(/\r?\n/)
-        .map(line => line.trim())
-        .filter(Boolean)
-        .slice(-80)
-        .join('\n');
-      reject(new Error(output || `LectureGen exited with code ${code}`));
-    });
-  });
-
-  return {
-    promise,
-    kill: () => killProcessTree(childProc)
-  };
+  const settings = options.settings || {};
+  return apiJob(async (signal, onLog) => {
+    const result = await generateLectureViaAgentApi({
+      request: options.taskMessage,
+      workspaceDir: options.workspaceDir,
+      outputs: settings.outputs || { video: true, interactive: false, game: false },
+      model,
+      ...(options.ttsProvider ? { ttsProvider: options.ttsProvider } : {}),
+      ...(options.ttsVoice ? { ttsVoice: options.ttsVoice } : {}),
+      ...(options.ttsSpeed ? { ttsSpeed: Number(options.ttsSpeed) } : {}),
+      generationLength: settings.generationLength || '1:00',
+      aspectRatio: settings.aspectRatio || '16:9',
+      enableGetimg: settings.enableGetimg !== false
+    }, { signal, onLog });
+    return JSON.stringify(result);
+  }, options);
 }
 
 /** Alias — preferred name at coursegen call sites. */
 export const spawnLectureGen = spawnAgent;
-
-/** Edit / practice / repair turns via EditorAgent (tool loops). */
-export function spawnEditorAgent(options: SpawnAgentOptions) {
-  const cliPath = locateEditorAgentCli();
-  const model = resolveAgentModel(options.model);
-
-  const args = [
-    '--import', 'tsx', cliPath,
-    '--model', model,
-    '--max-turns', String(options.maxTurns),
-    '--workspace', options.workspaceDir,
-    '--new-session'
-  ];
-
-  let childProc: ReturnType<typeof spawn> | null = null;
-  const env = {
-    ...process.env,
-    AGENT_WORKSPACE: options.workspaceDir,
-    AGENT_NEW_SESSION: 'true',
-    DOTENVX_LOG_LEVEL: 'error',
-    DOTENV_LOG_LEVEL: 'error',
-    DOTENV_CONFIG_QUIET: 'true'
-  };
-
-  const promise = new Promise<string>((resolve, reject) => {
-    const child = spawn(process.execPath, args, {
-      cwd: options.workspaceDir,
-      stdio: ['pipe', 'pipe', 'pipe'],
-      windowsHide: true,
-      env,
-      shell: false
-    });
-    childProc = child;
-    options.onSpawn?.(child, () => killProcessTree(child));
-
-    let stdout = '';
-    let stderr = '';
-    child.stdin?.write(options.taskMessage);
-    child.stdin?.end();
-
-    child.stdout?.on('data', chunk => {
-      const text = chunk.toString();
-      stdout += text;
-      options.onStdout?.(text);
-      process.stdout.write(chunk);
-    });
-    child.stderr?.on('data', chunk => {
-      const text = chunk.toString();
-      stderr += text;
-      options.onStderr?.(text);
-      process.stderr.write(chunk);
-    });
-
-    child.on('error', reject);
-    child.on('close', code => {
-      if (code === 0) {
-        resolve(stdout);
-        return;
-      }
-      const output = `${stdout}\n${stderr}`
-        .split(/\r?\n/)
-        .map(line => line.trim())
-        .filter(Boolean)
-        .slice(-80)
-        .join('\n');
-      reject(new Error(output || `EditorAgent exited with code ${code}`));
-    });
-  });
-
-  return {
-    promise,
-    kill: () => killProcessTree(childProc)
-  };
-}
-
-export type SpawnPracticeGenOptions = {
-  kind: 'interactive' | 'game';
-  workspaceDir: string;
-  taskMessage: string;
-  outputRelPath: string;
-  model?: string;
-  animatorModel?: string;
-  aspectRatio?: string;
-  referencePath?: string;
-  onStdout?: (chunk: string) => void;
-  onStderr?: (chunk: string) => void;
-  onSpawn?: (child: ReturnType<typeof spawn>, kill: () => void) => void;
-};
-
-/**
- * Create or repair practice pages via static IAGen/GameGen (not EditorAgent).
- * EditorAgent remains index-root edit-only and cannot create nested activities paths.
- * ANIMATOR_MODEL is read by practicegen from the inherited env; pass animatorModel only
- * when an explicit override is needed.
- */
-export function spawnPracticeGen(options: SpawnPracticeGenOptions) {
-  const cliPath = locatePracticeGenCli();
-  const model = resolveAgentModel(options.model);
-  const animatorModel = String(options.animatorModel || '').trim();
-
-  const args = [
-    '--import', 'tsx', cliPath,
-    '--kind', options.kind,
-    '--model', model,
-    ...(animatorModel ? ['--animator-model', animatorModel] : []),
-    '--workspace-dir', options.workspaceDir,
-    '--output', options.outputRelPath,
-    '--aspect-ratio', options.aspectRatio || '16:9'
-  ];
-  if (options.referencePath) {
-    args.push('--reference', options.referencePath);
-  }
-
-  let childProc: ReturnType<typeof spawn> | null = null;
-  const env = {
-    ...process.env,
-    AGENT_WORKSPACE: options.workspaceDir,
-    DOTENVX_LOG_LEVEL: 'error',
-    DOTENV_LOG_LEVEL: 'error',
-    DOTENV_CONFIG_QUIET: 'true'
-  };
-
-  const promise = new Promise<string>((resolve, reject) => {
-    const child = spawn(process.execPath, args, {
-      cwd: options.workspaceDir,
-      stdio: ['pipe', 'pipe', 'pipe'],
-      windowsHide: true,
-      env,
-      shell: false
-    });
-    childProc = child;
-    options.onSpawn?.(child, () => killProcessTree(child));
-
-    let stdout = '';
-    let stderr = '';
-    child.stdin?.write(options.taskMessage);
-    child.stdin?.end();
-
-    child.stdout?.on('data', chunk => {
-      const text = chunk.toString();
-      stdout += text;
-      options.onStdout?.(text);
-      process.stdout.write(chunk);
-    });
-    child.stderr?.on('data', chunk => {
-      const text = chunk.toString();
-      stderr += text;
-      options.onStderr?.(text);
-      process.stderr.write(chunk);
-    });
-
-    child.on('error', reject);
-    child.on('close', code => {
-      if (code === 0) {
-        resolve(stdout);
-        return;
-      }
-      const output = `${stdout}\n${stderr}`
-        .split(/\r?\n/)
-        .map(line => line.trim())
-        .filter(Boolean)
-        .slice(-80)
-        .join('\n');
-      reject(new Error(output || `PracticeGen exited with code ${code}`));
-    });
-  });
-
-  return {
-    promise,
-    kill: () => killProcessTree(childProc)
-  };
-}
 
 function normalizeTtsVoice(value?: string) {
   const voice = String(value || '').trim();
@@ -444,30 +177,28 @@ function resolveTtsProvider(voice: string, explicit?: string) {
   return config.tts.provider;
 }
 
-export async function spawnResolve(indexPath: string, options: { ttsVoice?: string; ttsSpeed?: string | number } = {}) {
+export async function spawnResolve(indexPath: string, options: { ttsProvider?: string; ttsVoice?: string; ttsSpeed?: string | number } = {}) {
   const folderPath = path.dirname(indexPath);
   const files = readdirSync(folderPath)
     .filter(name => isIndexHtmlName(name))
     .sort((a, b) => a.localeCompare(b, undefined, { numeric: true, sensitivity: 'base' }));
 
   const voice = normalizeTtsVoice(options.ttsVoice);
-  const provider = resolveTtsProvider(voice);
+  const provider = resolveTtsProvider(voice, options.ttsProvider);
   const speed = normalizeTtsSpeed(options.ttsSpeed);
 
   for (const file of files) {
     const inputPath = path.join(folderPath, file);
     const outPath = resolvedSiblingPathForIndex(inputPath);
-    await runCapture(process.execPath, [
-      '--import', 'tsx', 'src/build-plan.ts',
-      '--input', inputPath,
-      '--out', outPath,
-      '--provider', provider,
-      '--voice', voice,
-      '--speed', speed
-    ]);
+    await resolveViaAgentApi({
+      input: inputPath,
+      out: outPath,
+      provider,
+      voice,
+      speed: Number(speed),
+      writeCaption: true
+    }, { onLog: text => process.stdout.write(text) });
   }
-
-  writeLectureCaptionsVtt(folderPath);
 }
 
 function descriptiveBaseName(folderPath: string) {
@@ -491,6 +222,7 @@ function finalOutputPath(folderPath: string) {
 }
 
 export async function spawnRenderLecture(folderPath: string, options: {
+  ttsProvider?: string;
   ttsVoice?: string;
   ttsSpeed?: string | number;
   onSpawn?: (child: ReturnType<typeof spawn>) => void;
@@ -506,7 +238,7 @@ export async function spawnRenderLecture(folderPath: string, options: {
 
   const config = loadAppConfig(rootDir);
   const voice = normalizeTtsVoice(options.ttsVoice);
-  const provider = resolveTtsProvider(voice);
+  const provider = resolveTtsProvider(voice, options.ttsProvider);
   const speed = normalizeTtsSpeed(options.ttsSpeed);
 
   for (const indexPath of indexFiles) {
@@ -514,19 +246,17 @@ export async function spawnRenderLecture(folderPath: string, options: {
     const needsResolve = !existsSync(resolvedPath)
       || statSync(resolvedPath).mtimeMs < statSync(indexPath).mtimeMs;
     if (needsResolve) {
-      await runCapture(process.execPath, [
-        '--import', 'tsx', 'src/build-plan.ts',
-        '--input', indexPath,
-        '--out', resolvedPath,
-        '--provider', provider,
-        '--voice', voice,
-        '--speed', speed,
-        '--force-audio'
-      ], { onSpawn: options.onSpawn });
+      await resolveViaAgentApi({
+        input: indexPath,
+        out: resolvedPath,
+        provider,
+        voice,
+        speed: Number(speed),
+        forceAudio: true,
+        writeCaption: true
+      }, { onLog: text => process.stdout.write(text) });
     }
   }
-
-  writeLectureCaptionsVtt(folderPath);
 
   const resolvedFiles = indexFiles.map(indexPath => resolvedSiblingPathForIndex(indexPath));
   const sceneOutputs = resolvedFiles.map(scenePath => defaultSceneOutputPath(scenePath));
@@ -534,22 +264,20 @@ export async function spawnRenderLecture(folderPath: string, options: {
   for (let index = 0; index < resolvedFiles.length; index++) {
     const scenePath = resolvedFiles[index];
     const sceneOutput = sceneOutputs[index];
-    await runCapture(process.execPath, [
-      '--import', 'tsx', 'src/render-video.ts',
-      '--html', scenePath,
-      '--out', sceneOutput,
-      '--resolved-html', scenePath,
-      '--no-auto-build',
-      '--fps', String(config.render.fps),
-      '--width', String(config.render.baseWidth),
-      '--height', String(config.render.baseHeight),
-      '--tts-provider', provider,
-      '--tts-voice', voice,
-      '--tts-speed', speed,
-      '--force-audio',
-      '--workers', '1',
-      '--video-codec', 'libx264'
-    ], { onSpawn: options.onSpawn });
+    await renderViaAgentApi({
+      html: scenePath,
+      out: sceneOutput,
+      resolvedHtml: scenePath,
+      autoBuildPlan: false,
+      fps: config.render.fps,
+      width: config.render.baseWidth,
+      height: config.render.baseHeight,
+      ttsProvider: provider,
+      ttsVoice: voice,
+      ttsSpeed: Number(speed),
+      workers: 1,
+      videoCodec: 'libx264'
+    }, { onLog: text => process.stdout.write(text) });
   }
 
   const outputPath = finalOutputPath(folderPath);

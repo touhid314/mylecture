@@ -35,13 +35,7 @@ Given a topic and any optional audience/intent overrides, output a single JSON o
 - Default 6-10 lectures unless the user specifies `--lectures` or `--scope`.
 - `durationMinutes` must be an integer between 2 and 10.
 - `promptNotes` are internal guidance for the lesson generator (not shown to learners).
-- When `formats` includes `"interactive"`, include `interactiveSpec` with 1-3 activities. Each activity needs `id`, `title`, `mode` (`learn`|`practice`|`challenge`), `visibleSetup`, `learnerAction`, `controls`, `feedback`, and `successCriterion`.
-- When `formats` includes `"game"`, include `gameSpec` with `mission`, `visibleSetup`, `learnerAction`, `controls`, `feedback`, and `successCriterion` (score target out of 100).
-- `visibleSetup` must name the exact visible scenario, prompt, state, or cue the learner sees before acting.
-- `learnerAction` must be one concrete action chain, not a broad goal (e.g. "sort each example into a category, then press Check" instead of "practice the topic").
-- `controls` must list the learner-facing controls/buttons/draggable items needed to complete the activity.
-- `feedback` must describe what the page shows after a correct attempt and after a wrong attempt.
-- Use `learn` for exploration sandboxes, `practice` for hidden-answer drills, `challenge` for scored games inside the interactive page (rare - prefer separate `game` format).
+- Coursegen chooses only the top-level output formats. Do not design activities, controls, scoring, feedback, interaction mechanics, or game rules; the lecture agent owns those decisions.
 - `summary` is one plain learner-facing line including audience level. State what learners will be able to do; avoid marketing adjectives such as "engaging", "exciting", "fun", "comprehensive", or "interactive".
 - `description` is a concise learner-facing syllabus: concrete outcomes first, then a module/lecture outline (plain text, use newlines). Avoid fluffy framing, exclamation marks, and sales copy.
 - `objective` is learner-facing and becomes the lecture description on the course page.
@@ -114,39 +108,7 @@ Choose formats by learning need, not by novelty:
           "durationMinutes": 4,
           "formats": ["video", "interactive"],
           "promptNotes": "Internal notes for the generator",
-          "sourceSections": ["01-introduction"],
-          "interactiveSpec": {
-            "activities": [
-              {
-                "id": "classify-examples",
-                "title": "Classify examples",
-                "mode": "practice",
-                "visibleSetup": "One unlabeled example appears in the stage with a small set of possible categories in the controls",
-                "learnerAction": "Choose the category that best matches the example, then press Check answer",
-                "controls": ["Category choices", "Check answer", "Next example"],
-                "feedback": "Correct attempts explain the key clue; wrong attempts point to the relevant feature and invite one retry before revealing",
-                "successCriterion": "Classify 3 examples correctly"
-              },
-              {
-                "id": "explore-variables",
-                "title": "Explore variables",
-                "mode": "learn",
-                "visibleSetup": "A simple model with adjustable inputs and a live explanation panel",
-                "learnerAction": "Change one input at a time and observe how the model and explanation update",
-                "controls": ["Input controls", "Reset model", "Try example"],
-                "feedback": "The page updates the explanation and highlights what changed after each input adjustment",
-                "successCriterion": "Try at least 3 different input settings"
-              }
-            ]
-          },
-          "gameSpec": {
-            "mission": "Complete a sequence of topic challenges accurately",
-            "visibleSetup": "A challenge card, a workspace for the learner's response, visible controls, and a score meter",
-            "learnerAction": "Build or choose a response for the current challenge, then press Check challenge",
-            "controls": ["Response controls", "Check challenge", "Clear response", "Next challenge"],
-            "feedback": "A correct response adds points and explains the key idea; a wrong response highlights the missed clue and invites a retry",
-            "successCriterion": "Score 70+ by completing the challenges accurately"
-          }
+          "sourceSections": ["01-introduction"]
         }
       ]
     }

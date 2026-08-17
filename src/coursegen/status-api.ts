@@ -27,7 +27,6 @@ export type CourseSummary = {
     total: number;
     done: number;
     failed: number;
-    needsReview: number;
     inProgress: number;
     pending: number;
     renderReady: number;
@@ -107,9 +106,8 @@ export function getCourseSummary(courseSlug: string): CourseSummary {
     total: lectures.length,
     done: lectures.filter(lecture => lecture.status === 'done').length,
     failed: lectures.filter(lecture => lecture.status === 'failed').length,
-    needsReview: lectures.filter(lecture => lecture.status === 'needs-review').length,
     inProgress: lectures.filter(lecture =>
-      !['done', 'failed', 'needs-review', 'pending'].includes(lecture.status)
+      !['done', 'failed', 'pending'].includes(lecture.status)
     ).length,
     pending: lectures.filter(lecture => lecture.status === 'pending').length,
     renderReady: lectures.filter(lecture => lecture.renderReady).length

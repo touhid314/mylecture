@@ -1,4 +1,4 @@
-import { isLlmTransientProviderError } from "../../packages/lecture-agent/src/utils/llm_rate_limit.ts";
+import { isLlmTransientProviderError } from "../../../mylecture-agent/src/utils/llm_rate_limit.ts";
 
 export const EDIT_MODELS_UNAVAILABLE_MESSAGE =
   "The video editing models are temporarily unavailable. Please try again in a few minutes.";

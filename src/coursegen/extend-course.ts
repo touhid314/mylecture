@@ -1,7 +1,7 @@
 import { readFileSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { LLM_Model } from '../../packages/lecture-agent/src/utils/llm_model.ts';
+import { LLM_Model } from '../../../mylecture-agent/src/utils/llm_model.ts';
 import { resolveAgentModel } from './models.ts';
 import { ensureCourseDir } from './paths.ts';
 import { estimateCourseCostUsd, printPlanSummary } from './lecture-prompt.ts';
@@ -82,54 +82,7 @@ function summarizeExistingPlan(plan: CoursePlan) {
   return lines.join('\n');
 }
 
-const INTERACTIVE_SPEC_RETRY_HINT = [
-  'interactiveSpec.activities[] must use: id, title, mode (learn|practice|challenge), visibleSetup, learnerAction, controls (non-empty string array), feedback, successCriterion.',
-  'Do NOT use quiz fields (type, question, options, correctAnswer).'
-].join(' ');
-
-function hasValidInteractiveSpec(raw: unknown): boolean {
-  if (!raw || typeof raw !== 'object') return false;
-  const activities = (raw as Record<string, unknown>).activities;
-  if (!Array.isArray(activities) || activities.length === 0) return false;
-  return activities.every(activity => {
-    if (!activity || typeof activity !== 'object') return false;
-    const act = activity as Record<string, unknown>;
-    const controls = act.controls;
-    return (
-      String(act.id || '').trim() &&
-      String(act.title || '').trim() &&
-      ['learn', 'practice', 'challenge'].includes(String(act.mode || '')) &&
-      Array.isArray(controls) &&
-      controls.length > 0 &&
-      controls.every(c => typeof c === 'string' && c.trim())
-    );
-  });
-}
-
-function hasValidGameSpec(raw: unknown): boolean {
-  if (!raw || typeof raw !== 'object') return false;
-  const spec = raw as Record<string, unknown>;
-  const controls = spec.controls;
-  return (
-    String(spec.mission || '').trim() &&
-    Array.isArray(controls) &&
-    controls.length > 0 &&
-    controls.every(c => typeof c === 'string' && c.trim())
-  );
-}
-
 function sanitizeExtensionLecture(lecture: Record<string, unknown>) {
-  const formats = Array.isArray(lecture.formats)
-    ? lecture.formats.map(value => String(value))
-    : [];
-
-  if (formats.includes('interactive') && !hasValidInteractiveSpec(lecture.interactiveSpec)) {
-    delete lecture.interactiveSpec;
-  }
-  if (formats.includes('game') && !hasValidGameSpec(lecture.gameSpec)) {
-    delete lecture.gameSpec;
-  }
-
   const duration = Number(lecture.durationMinutes);
   if (!Number.isFinite(duration) || duration < 2 || duration > 10) {
     const rounded = Number.isFinite(duration) ? Math.round(duration) : 6;
@@ -152,18 +105,6 @@ function sanitizeExtensionModules(modulesRaw: unknown): unknown {
     }
     return module;
   });
-}
-
-function exampleInteractiveSpecFromPlan(plan: CoursePlan): string | null {
-  for (const module of plan.modules) {
-    for (const lecture of module.lectures) {
-      if (lecture.interactiveSpec?.activities?.[0]) {
-        const activity = lecture.interactiveSpec.activities[0];
-        return JSON.stringify({ activities: [activity] }, null, 2);
-      }
-    }
-  }
-  return null;
 }
 
 function buildExtendUserPrompt(
@@ -214,14 +155,6 @@ function buildExtendUserPrompt(
     );
   }
 
-  const exampleSpec = exampleInteractiveSpecFromPlan(plan);
-  if (exampleSpec) {
-    lines.push(
-      '',
-      'When you include interactive lectures, match this interactiveSpec shape from an existing lecture in this course:',
-      exampleSpec
-    );
-  }
   lines.push(
     '',
     'Return JSON with the placement decision, only the new lecture content, plus optional updated summary/description for the whole course.',
@@ -395,7 +328,7 @@ export async function extendCourse(options: ExtendCourseOptions): Promise<Course
     const llm = new LLM_Model(model, systemPrompt, null, true);
     const prompt = attempt === 0
       ? userPrompt
-      : `${userPrompt}\n\nPrevious response was invalid: ${lastError?.message}. ${INTERACTIVE_SPEC_RETRY_HINT} Return valid JSON only.`;
+      : `${userPrompt}\n\nPrevious response was invalid: ${lastError?.message}. Return valid JSON only.`;
     rawResponse = await llm.generate(prompt, null, null, null, null, true, false);
     try {
       const parsed = normalizePlannerResponse(rawResponse);

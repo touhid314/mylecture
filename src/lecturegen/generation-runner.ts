@@ -2,9 +2,8 @@ import { createWriteStream, existsSync } from "node:fs";
 import { mkdir, mkdtemp, readFile, readdir, rm, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
-import { generateLecture } from "../../packages/lecture-agent/src/lecturegen.ts";
-import type { SceneTaskState } from "../../packages/lecture-agent/src/scene_orchestration.ts";
-import { EditorAgent } from "../../packages/lecture-agent/src/editor-agent/coding_agent.ts";
+import { generateLecture, type LectureGenSceneTaskState as SceneTaskState } from "../../../mylecture-agent/src/lecturegen.ts";
+import { EditorAgent } from "../../../mylecture-agent/src/editor-agent/coding_agent.ts";
 import {
   buildLectureGenCallbackPayload,
   buildLectureGenProgressCallbackPayload,

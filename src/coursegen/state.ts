@@ -15,14 +15,11 @@ function normalizeCoursePlan(raw: CoursePlan): CoursePlan {
   return plan;
 }
 
-function normalizeLectureState(raw: LectureState): LectureState {
-  return {
-    ...raw,
-    interactiveReview: raw.interactiveReview ?? 'not-required',
-    interactiveReviewNotes: raw.interactiveReviewNotes ?? '',
-    gameReview: raw.gameReview ?? 'not-required',
-    gameReviewNotes: raw.gameReviewNotes ?? ''
-  };
+function normalizeLectureState(raw: LectureState & { status: string }): LectureState {
+  if (['generating-practice', 'reviewing', 'needs-review'].includes(raw.status)) {
+    return { ...raw, status: 'pending', error: '' };
+  }
+  return raw;
 }
 
 function normalizeCourseState(raw: CourseState): CourseState {

@@ -1,4 +1,4 @@
-import { getTokenTrackerSummary } from "../../packages/lecture-agent/src/token-tracker/token_tracker.ts";
+import { getTokenTrackerSummary } from "../../../mylecture-agent/src/token-tracker/token_tracker.ts";
 import type { LectureGenUsage } from "./types.ts";
 
 export function buildJobUsageFromSessions(opts: {

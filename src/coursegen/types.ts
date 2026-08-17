@@ -8,33 +8,6 @@ export const DEFAULT_LEARNING_INTENT: LearningIntent = 'foundation';
 export const LECTURE_FORMATS = ['video', 'interactive', 'game'] as const;
 export type LectureFormat = (typeof LECTURE_FORMATS)[number];
 
-export const INTERACTIVE_MODES = ['learn', 'practice', 'challenge'] as const;
-export type InteractiveMode = (typeof INTERACTIVE_MODES)[number];
-
-export type InteractiveActivitySpec = {
-  id: string;
-  title: string;
-  mode: InteractiveMode;
-  visibleSetup: string;
-  learnerAction: string;
-  controls: string[];
-  feedback: string;
-  successCriterion: string;
-};
-
-export type InteractiveSpec = {
-  activities: InteractiveActivitySpec[];
-};
-
-export type GameSpec = {
-  mission: string;
-  visibleSetup: string;
-  learnerAction: string;
-  controls: string[];
-  feedback: string;
-  successCriterion: string;
-};
-
 export type PlannedLecture = {
   slug: string;
   title: string;
@@ -42,8 +15,6 @@ export type PlannedLecture = {
   durationMinutes: number;
   formats: LectureFormat[];
   promptNotes: string;
-  interactiveSpec?: InteractiveSpec;
-  gameSpec?: GameSpec;
   /** Optional source section ids from an ingested textbook (e.g. "01-introduction"). */
   sourceSections?: string[];
 };
@@ -75,13 +46,8 @@ export type LectureStatus =
   | 'generating'
   | 'resolving'
   | 'rendering'
-  | 'generating-practice'
-  | 'reviewing'
   | 'done'
-  | 'failed'
-  | 'needs-review';
-
-export type PracticeReviewStatus = 'not-required' | 'passed' | 'needs-review';
+  | 'failed';
 
 export type LectureState = {
   slug: string;
@@ -97,10 +63,6 @@ export type LectureState = {
   costUsd: number;
   error: string;
   mp4Path: string;
-  interactiveReview: PracticeReviewStatus;
-  interactiveReviewNotes: string;
-  gameReview: PracticeReviewStatus;
-  gameReviewNotes: string;
 };
 
 export type CourseState = {
@@ -126,128 +88,6 @@ export function isLearningIntent(value: unknown): value is LearningIntent {
 
 function isFormat(value: unknown): value is LectureFormat {
   return typeof value === 'string' && (LECTURE_FORMATS as readonly string[]).includes(value);
-}
-
-function isInteractiveMode(value: unknown): value is InteractiveMode {
-  return typeof value === 'string' && (INTERACTIVE_MODES as readonly string[]).includes(value);
-}
-
-function validateStringArray(raw: unknown, path: string): string[] {
-  if (!Array.isArray(raw) || raw.length === 0) {
-    throw new Error(`${path}: must be a non-empty array`);
-  }
-  const values = raw.map(item => String(item || '').trim()).filter(Boolean);
-  if (values.length === 0) {
-    throw new Error(`${path}: must include at least one non-empty item`);
-  }
-  return values.slice(0, 6);
-}
-
-function validateInteractiveActivity(raw: unknown, path: string): InteractiveActivitySpec {
-  if (!raw || typeof raw !== 'object') {
-    throw new Error(`${path}: activity must be an object`);
-  }
-  const activity = raw as Record<string, unknown>;
-  const id = String(activity.id || '').trim();
-  const title = String(activity.title || '').trim();
-  const mode = activity.mode;
-  const visibleSetup = String(activity.visibleSetup || '').trim();
-  const learnerAction = String(activity.learnerAction || '').trim();
-  const controls = validateStringArray(activity.controls, `${path}.controls`);
-  const feedback = String(activity.feedback || '').trim();
-  const successCriterion = String(activity.successCriterion || '').trim();
-
-  if (!id || !SLUG_RE.test(id)) throw new Error(`${path}: invalid activity id`);
-  if (!title) throw new Error(`${path}: title required`);
-  if (!isInteractiveMode(mode)) throw new Error(`${path}: invalid mode`);
-  if (!visibleSetup) throw new Error(`${path}: visibleSetup required`);
-  if (!learnerAction) throw new Error(`${path}: learnerAction required`);
-  if (!feedback) throw new Error(`${path}: feedback required`);
-  if (!successCriterion) throw new Error(`${path}: successCriterion required`);
-
-  return { id, title, mode, visibleSetup, learnerAction, controls, feedback, successCriterion };
-}
-
-function validateInteractiveSpec(raw: unknown, path: string): InteractiveSpec {
-  if (!raw || typeof raw !== 'object') {
-    throw new Error(`${path}: interactiveSpec must be an object`);
-  }
-  const spec = raw as Record<string, unknown>;
-  const activitiesRaw = spec.activities;
-  if (!Array.isArray(activitiesRaw) || activitiesRaw.length === 0) {
-    throw new Error(`${path}: interactiveSpec.activities must be a non-empty array`);
-  }
-  if (activitiesRaw.length > 3) {
-    throw new Error(`${path}: interactiveSpec.activities max is 3`);
-  }
-  const activities = activitiesRaw.map((activityRaw, index) =>
-    validateInteractiveActivity(activityRaw, `${path}.activities[${index}]`)
-  );
-  const seenIds = new Set<string>();
-  for (const activity of activities) {
-    if (seenIds.has(activity.id)) {
-      throw new Error(`${path}: duplicate activity id: ${activity.id}`);
-    }
-    seenIds.add(activity.id);
-  }
-  return { activities };
-}
-
-function validateGameSpec(raw: unknown, path: string): GameSpec {
-  if (!raw || typeof raw !== 'object') {
-    throw new Error(`${path}: gameSpec must be an object`);
-  }
-  const spec = raw as Record<string, unknown>;
-  const mission = String(spec.mission || '').trim();
-  const visibleSetup = String(spec.visibleSetup || '').trim();
-  const learnerAction = String(spec.learnerAction || '').trim();
-  const controls = validateStringArray(spec.controls, `${path}.controls`);
-  const feedback = String(spec.feedback || '').trim();
-  const successCriterion = String(spec.successCriterion || '').trim();
-  if (!mission) throw new Error(`${path}: mission required`);
-  if (!visibleSetup) throw new Error(`${path}: visibleSetup required`);
-  if (!learnerAction) throw new Error(`${path}: learnerAction required`);
-  if (!feedback) throw new Error(`${path}: feedback required`);
-  if (!successCriterion) throw new Error(`${path}: successCriterion required`);
-  return { mission, visibleSetup, learnerAction, controls, feedback, successCriterion };
-}
-
-export function defaultInteractiveSpec(lecture: Pick<PlannedLecture, 'objective' | 'title'>): InteractiveSpec {
-  return {
-    activities: [
-      {
-        id: 'main',
-        title: lecture.title,
-        mode: 'practice',
-        visibleSetup: 'Show a clear prompt, one worked visual area, and controls labeled with the action the learner should take.',
-        learnerAction: `Practice the skill from this lesson: ${lecture.objective}`,
-        controls: ['Response control', 'Check answer', 'Next question'],
-        feedback: 'After each submission, say whether the answer is correct and show one concrete hint or explanation.',
-        successCriterion: 'Answer 3 questions correctly'
-      }
-    ]
-  };
-}
-
-export function defaultGameSpec(lecture: Pick<PlannedLecture, 'objective'>): GameSpec {
-  return {
-    mission: `Master the lesson objective through a scored challenge.`,
-    visibleSetup: 'Show the challenge target, the current problem, the score, and the controls needed to answer before the first attempt.',
-    learnerAction: `Apply the lesson objective in a sequence of scored challenges: ${lecture.objective}`,
-    controls: ['Response controls', 'Check challenge', 'Next challenge', 'Restart challenge'],
-    feedback: 'After each attempt, show correctness, the correct reasoning, and the updated score.',
-    successCriterion: `Score at least 70 out of 100 by applying: ${lecture.objective}`
-  };
-}
-
-export function resolveInteractiveSpec(lecture: PlannedLecture): InteractiveSpec | null {
-  if (!lecture.formats.includes('interactive')) return null;
-  return lecture.interactiveSpec ?? defaultInteractiveSpec(lecture);
-}
-
-export function resolveGameSpec(lecture: PlannedLecture): GameSpec | null {
-  if (!lecture.formats.includes('game')) return null;
-  return lecture.gameSpec ?? defaultGameSpec(lecture);
 }
 
 function validateSourceSections(
@@ -327,24 +167,6 @@ function validateLecture(
     throw new Error(`${path}: every lecture must include "video" in formats`);
   }
 
-  let interactiveSpec: InteractiveSpec | undefined;
-  if (formats.includes('interactive')) {
-    if (lecture.interactiveSpec) {
-      interactiveSpec = validateInteractiveSpec(lecture.interactiveSpec, `${path}.interactiveSpec`);
-    }
-  } else if (lecture.interactiveSpec) {
-    throw new Error(`${path}: interactiveSpec only allowed when formats includes interactive`);
-  }
-
-  let gameSpec: GameSpec | undefined;
-  if (formats.includes('game')) {
-    if (lecture.gameSpec) {
-      gameSpec = validateGameSpec(lecture.gameSpec, `${path}.gameSpec`);
-    }
-  } else if (lecture.gameSpec) {
-    throw new Error(`${path}: gameSpec only allowed when formats includes game`);
-  }
-
   const sourceSections = validateSourceSections(
     lecture.sourceSections,
     `${path}.sourceSections`,
@@ -352,8 +174,6 @@ function validateLecture(
   );
 
   const result: PlannedLecture = { slug, title, objective, durationMinutes, formats, promptNotes };
-  if (interactiveSpec) result.interactiveSpec = interactiveSpec;
-  if (gameSpec) result.gameSpec = gameSpec;
   if (sourceSections) result.sourceSections = sourceSections;
   return result;
 }
@@ -479,11 +299,7 @@ export function initialCourseState(plan: CoursePlan, budgetUsd: number): CourseS
       attempts: 0,
       costUsd: 0,
       error: '',
-      mp4Path: '',
-      interactiveReview: 'not-required',
-      interactiveReviewNotes: '',
-      gameReview: 'not-required',
-      gameReviewNotes: ''
+      mp4Path: ''
     }))
   };
 }

@@ -2,19 +2,17 @@ import { readFileSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import vm from "node:vm";
 import { fileURLToPath } from "node:url";
-import { EditorAgent } from "../../packages/lecture-agent/src/editor-agent/coding_agent.ts";
-import { LLM_Model } from "../../packages/lecture-agent/src/utils/llm_model.ts";
+import { EditorAgent } from "../../../mylecture-agent/src/editor-agent/coding_agent.ts";
+import { LLM_Model } from "../../../mylecture-agent/src/utils/llm_model.ts";
 import {
   matchVideoPlanConstBlock,
   matchVideoPlanInlineBlock,
-} from "../visual-edit-protect.ts";
+} from "../../../mylecture-agent/src/lecturegen/visual-edit-protect.ts";
 
-const repoRoot = path.resolve(
+const RUBRIC_PATH = path.resolve(
   path.dirname(fileURLToPath(import.meta.url)),
-  "../..",
+  "../../../mylecture-agent/src/lecturegen/prompts/script-rubric.md",
 );
-
-const RUBRIC_PATH = path.join(repoRoot, "src/coursegen/prompts/script-rubric.md");
 
 export type ScriptReviewMeta = {
   passed: boolean;

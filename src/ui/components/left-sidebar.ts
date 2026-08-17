@@ -4,6 +4,10 @@ export function renderLeftSidebar(context = {}) {
   return `<!-- Left panel: local folder browser plus resolve/render/publish actions. -->
 <aside id="folder-sidebar">
   <div id="sidebar-header">
+    <div id="sidebar-brand" aria-label="MyLecture Local IDE">
+      <img id="sidebar-brand-logo" src="/assets/logo-lockup.png" alt="MyLecture" draggable="false">
+      <span id="sidebar-brand-title">Local IDE</span>
+    </div>
     <div>
       <div id="sidebar-title">Folder</div>
       <div style="display: flex; align-items: center; gap: 6px;">
