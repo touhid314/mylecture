@@ -47,8 +47,8 @@ const defaultConfig: AppConfig = {
   },
   tts: {
     provider: 'omnivoice',
-    voice: 'mike',
-    speed: 1
+    voice: 'maruf',
+    speed: 1.2
   },
   render: {
     fps: 30,

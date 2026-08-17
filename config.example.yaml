@@ -14,7 +14,7 @@ agent:
 tts:
   provider: "omnivoice" # openai, google/gemini, kokoro, omnivoice, elevenlabs/11labs
   voice: "maruf" # Provider voice name/ID; ElevenLabs Will: bIHbv24MWmeRgasZH58o
-  speed: 1.0
+  speed: 1.2
 
 render:
   fps: 30

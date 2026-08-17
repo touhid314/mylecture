@@ -26,6 +26,7 @@ import {
   stopManagedAgentApi
 } from './lecture-agent-api-client.ts';
 import { loadAppConfig, resolveConfigPath } from './config.ts';
+import { writeLectureCaptionsVttIfMissing } from './captions-vtt.ts';
 import {
   DEFAULT_ID_PATTERN,
   allocateFolderName,
@@ -1100,8 +1101,10 @@ function detectProvider(voice) {
 }
 
 function normalizeTtsSpeed(value) {
-  const speed = Number(value);
-  if (!Number.isFinite(speed) || speed <= 0) return '1';
+  const configuredSpeed = Number(readAppConfig().tts.speed);
+  const fallbackSpeed = Number.isFinite(configuredSpeed) && configuredSpeed > 0 ? configuredSpeed : 1;
+  const speed = value === undefined || value === null || value === '' ? fallbackSpeed : Number(value);
+  if (!Number.isFinite(speed) || speed <= 0) return String(fallbackSpeed);
   return String(Math.max(0.5, Math.min(2, speed)));
 }
 
@@ -1420,6 +1423,22 @@ async function renderLectureFile(filePath, options = {}, job = createRenderJob()
 
   try {
     await ensureAgentApiAvailable();
+    if (isResolvedHtmlName(basename)) {
+      const sourcePath = sourceSiblingPathForLecture(inputPath);
+      if (existsSync(sourcePath)) {
+        console.log(`Checking resolved narration against ${voice} @ ${normalizeTtsSpeed(options.ttsSpeed)}x before render...`);
+        await resolveViaAgentApi({
+          input: sourcePath,
+          out: inputPath,
+          provider: provider,
+          voice: voice,
+          speed: parseFloat(normalizeTtsSpeed(options.ttsSpeed)),
+          writeCaption: false
+        }, {
+          signal: job.abortController.signal
+        });
+      }
+    }
     await renderViaAgentApi({
       html: inputPath,
       out: renderOutputPath,
@@ -1479,13 +1498,18 @@ async function renderLectureBatch(inputPath, sceneFiles, options = {}, job = cre
   job.inputPath = inputPath;
 
   try {
-    if (isIndexHtmlName(path.basename(inputPath))) {
-      console.log(`Resolving ${sceneFiles.length} index scene(s) before batch render...`);
+    const sourceSceneFiles = isIndexHtmlName(path.basename(inputPath))
+      ? sceneFiles
+      : sceneFiles.map(scenePath => sourceSiblingPathForLecture(scenePath));
+    const shouldResolveBeforeRender = isIndexHtmlName(path.basename(inputPath))
+      || sourceSceneFiles.every(sourcePath => existsSync(sourcePath));
+    if (shouldResolveBeforeRender) {
+      console.log(`Checking ${sourceSceneFiles.length} scene(s) against ${voice} @ ${normalizeTtsSpeed(options.ttsSpeed)}x before batch render...`);
       const resolvedSceneFiles = [];
-      for (let index = 0; index < sceneFiles.length; index++) {
-        const scenePath = sceneFiles[index];
+      for (let index = 0; index < sourceSceneFiles.length; index++) {
+        const scenePath = sourceSceneFiles[index];
         const resolvedPath = resolvedSiblingPathForIndex(scenePath);
-        console.log(`Resolving scene ${index + 1}/${sceneFiles.length}: ${path.basename(scenePath)} -> ${path.basename(resolvedPath)}`);
+        console.log(`Resolving scene ${index + 1}/${sourceSceneFiles.length}: ${path.basename(scenePath)} -> ${path.basename(resolvedPath)}`);
         try {
           await ensureAgentApiAvailable();
           await resolveViaAgentApi({
@@ -1494,6 +1518,7 @@ async function renderLectureBatch(inputPath, sceneFiles, options = {}, job = cre
             provider: provider,
             voice: voice,
             speed: parseFloat(normalizeTtsSpeed(options.ttsSpeed)),
+            writeCaption: false,
             ...(options.forceAudio ? { forceAudio: true } : {})
           }, {
             signal: job.abortController.signal
@@ -1505,6 +1530,9 @@ async function renderLectureBatch(inputPath, sceneFiles, options = {}, job = cre
       }
       renderSceneFiles = resolvedSceneFiles;
     }
+
+    const captionsPath = writeLectureCaptionsVttIfMissing(path.dirname(inputPath));
+    if (captionsPath) console.log(`Using lecture captions: ${path.basename(captionsPath)}`);
 
     if (job.aborted) {
       throw new Error('Process stopped by user');
@@ -1537,7 +1565,8 @@ async function renderLectureBatch(inputPath, sceneFiles, options = {}, job = cre
           framesDir: framesDir,
           workers: 1,
           videoCodec: 'libx264',
-          autoBuildPlan: false
+          autoBuildPlan: false,
+          writeCaption: false
         }, {
           signal: job.abortController.signal
         });
@@ -2355,12 +2384,20 @@ const server = createServer(async (request, response) => {
             (async () => {
               try {
                 const parsed = parseIdeLectureGenRequest(task);
+                const generationTtsVoice = normalizeTtsVoice(payload.ttsVoice);
+                const generationTtsProvider = resolveTtsProvider(
+                  { ttsProvider: payload.ttsProvider },
+                  generationTtsVoice
+                );
                 await ensureAgentApiAvailable();
                 const result = await generateLectureViaAgentApi({
                   request: parsed.request,
                   model: payload.model || process.env.AGENT_MODEL || 'gemini-3.5-flash',
                   scriptModel: payload.scriptModel || undefined,
                   animatorModel: payload.animatorModel || undefined,
+                  ttsProvider: generationTtsProvider,
+                  ttsVoice: generationTtsVoice,
+                  ttsSpeed: parseFloat(normalizeTtsSpeed(payload.ttsSpeed)),
                   workspaceDir: agentWorkspace,
                   generationLength: parsed.generationLength,
                   aspectRatio: parsed.aspectRatio,
