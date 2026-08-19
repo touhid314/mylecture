@@ -35,13 +35,33 @@ async function errorFor(response: Response, context: string): Promise<Error> {
   return new Error(`${context} (${response.status})${detail}`);
 }
 
-async function fetchApi(path: string, init: RequestInit = {}): Promise<Response> {
-  try {
-    return await fetch(`${apiUrl()}${path}`, { ...init, headers: { ...headers(), ...init.headers } });
-  } catch (error) {
-    const message = error instanceof Error ? error.message : String(error);
-    throw new Error(`Cannot reach the MyLecture Agent API at ${apiUrl()}. Start it with "npm run api" in the mylecture-agent repo. ${message}`);
+function networkErrorMessage(error: unknown): string {
+  if (!(error instanceof Error)) return String(error);
+  const cause = error.cause as { code?: unknown; message?: unknown } | undefined;
+  const causeText = cause
+    ? [cause.code, cause.message].filter(Boolean).map(String).join(": ")
+    : "";
+  return causeText ? `${error.message} (${causeText})` : error.message;
+}
+
+async function fetchApi(path: string, init: RequestInit = {}, retryNetworkFailures = true): Promise<Response> {
+  const method = String(init.method || "GET").toUpperCase();
+  const maximumAttempts = retryNetworkFailures && method === "GET" ? 8 : 1;
+  let lastError: unknown;
+  for (let attempt = 1; attempt <= maximumAttempts; attempt++) {
+    try {
+      return await fetch(`${apiUrl()}${path}`, { ...init, headers: { ...headers(), ...init.headers } });
+    } catch (error) {
+      if (init.signal?.aborted) throw error;
+      lastError = error;
+      if (attempt < maximumAttempts) {
+        await new Promise((resolve) => setTimeout(resolve, Math.min(1_000, attempt * 200)));
+      }
+    }
   }
+  const message = networkErrorMessage(lastError);
+  const exitDetail = lastManagedAgentApiExit ? ` ${lastManagedAgentApiExit}` : "";
+  throw new Error(`Cannot reach the MyLecture Agent API at ${apiUrl()}.${exitDetail} ${message}`);
 }
 
 async function runJob(
@@ -148,13 +168,35 @@ export async function getAgentOptions(): Promise<AgentOptions> {
 }
 
 export async function checkAgentApiHealth(): Promise<void> {
-  const response = await fetchApi("/health");
+  const response = await fetchApi("/health", {}, false);
   if (!response.ok) throw await errorFor(response, "Agent API health check failed");
 }
 
 let managedAgentApiProcess: ChildProcess | null = null;
+let managedAgentApiStartup: Promise<void> | null = null;
+let lastManagedAgentApiExit = "";
+let stoppingManagedAgentApi = false;
+let managedAgentApiRestartTimer: NodeJS.Timeout | null = null;
+
+function scheduleManagedAgentApiRestart(options: { rootDir: string; envKeysToFilter?: Set<string> }): void {
+  if (stoppingManagedAgentApi || managedAgentApiRestartTimer) return;
+  managedAgentApiRestartTimer = setTimeout(() => {
+    managedAgentApiRestartTimer = null;
+    if (stoppingManagedAgentApi) return;
+    void ensureAgentApiAvailable(options).catch((error) => {
+      console.error(`Managed Agent API restart failed: ${error instanceof Error ? error.message : String(error)}`);
+      scheduleManagedAgentApiRestart(options);
+    });
+  }, 1_000);
+  managedAgentApiRestartTimer.unref();
+}
 
 export function stopManagedAgentApi(): void {
+  stoppingManagedAgentApi = true;
+  if (managedAgentApiRestartTimer) {
+    clearTimeout(managedAgentApiRestartTimer);
+    managedAgentApiRestartTimer = null;
+  }
   if (managedAgentApiProcess?.exitCode === null) {
     if (process.platform === "win32") {
       spawn("taskkill", ["/pid", String(managedAgentApiProcess.pid), "/f", "/t"], { windowsHide: true });
@@ -166,6 +208,14 @@ export function stopManagedAgentApi(): void {
 }
 
 export async function ensureAgentApiAvailable(options: { rootDir: string; envKeysToFilter?: Set<string> }): Promise<void> {
+  if (managedAgentApiStartup) return managedAgentApiStartup;
+  managedAgentApiStartup = ensureAgentApiAvailableOnce(options).finally(() => {
+    managedAgentApiStartup = null;
+  });
+  return managedAgentApiStartup;
+}
+
+async function ensureAgentApiAvailableOnce(options: { rootDir: string; envKeysToFilter?: Set<string> }): Promise<void> {
   try {
     await checkAgentApiHealth();
     return;
@@ -188,19 +238,33 @@ export async function ensureAgentApiAvailable(options: { rootDir: string; envKey
       !options.envKeysToFilter?.has(key) || key.startsWith("MYLECTURE_AGENT_API_")
     )
   );
-  managedAgentApiProcess = spawn(process.execPath, ["--import", "tsx", "src/api-server.ts"], {
+  stoppingManagedAgentApi = false;
+  lastManagedAgentApiExit = "";
+  const child = spawn(process.execPath, ["--import", "tsx", "src/api-server.ts"], {
     cwd: agentRepo,
     env: agentEnvironment,
     stdio: "inherit",
     windowsHide: true,
   });
-  for (let attempt = 0; attempt < 40; attempt++) {
+  managedAgentApiProcess = child;
+  child.once("error", (error) => {
+    lastManagedAgentApiExit = `The managed API process could not start: ${error.message}.`;
+    console.error(lastManagedAgentApiExit);
+  });
+  child.once("exit", (code, signal) => {
+    if (managedAgentApiProcess === child) managedAgentApiProcess = null;
+    if (stoppingManagedAgentApi) return;
+    lastManagedAgentApiExit = `The managed API process exited unexpectedly (code ${code ?? "none"}, signal ${signal ?? "none"}).`;
+    console.error(lastManagedAgentApiExit);
+    scheduleManagedAgentApiRestart(options);
+  });
+  for (let attempt = 0; attempt < 80; attempt++) {
     await new Promise((resolve) => setTimeout(resolve, 250));
     try {
       await checkAgentApiHealth();
       return;
     } catch {}
-    if (managedAgentApiProcess.exitCode !== null) break;
+    if (child.exitCode !== null) break;
   }
-  throw new Error('MyLecture Agent API did not become ready. Run "npm run api" in the mylecture-agent repo to inspect the startup error.');
+  throw new Error(`MyLecture Agent API did not become ready.${lastManagedAgentApiExit ? ` ${lastManagedAgentApiExit}` : " Check the startup log above."}`);
 }

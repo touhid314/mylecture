@@ -17,7 +17,7 @@
     "build:viewer": "npm --prefix packages/lecture-viewer run build",
     "version:sync": "node --import tsx src/sync-versions.ts",
     "rename:gens": "node --import tsx src/rename-gens.ts",
-    "ide": "npm run version:sync && npm run build:viewer && node --import tsx src/ide-server.ts",
+    "ide": "node --import tsx src/ide-start.ts",
     "lecturegen:server": "node --import tsx src/lecturegen-server.ts",
     "coursegen": "node --import tsx src/coursegen/cli.ts",
     "coursegen:ui": "node --import tsx src/coursegen/ui/server.ts",
