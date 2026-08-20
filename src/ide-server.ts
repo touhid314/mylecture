@@ -26,7 +26,7 @@ import {
   stopManagedAgentApi
 } from './lecture-agent-api-client.ts';
 import { loadAppConfig, resolveConfigPath } from './config.ts';
-import { writeLectureCaptionsVttIfMissing } from './captions-vtt.ts';
+import { writeLectureCaptionsVtt } from './captions-vtt.ts';
 import { isElevenLabsCatalogVoice } from './voice-allowlist.ts';
 import {
   DEFAULT_ID_PATTERN,
@@ -1128,22 +1128,6 @@ function normalizePositiveInteger(value, fallback, min = 1, max = Number.MAX_SAF
   return String(number);
 }
 
-function normalizeSubtitleFont(value) {
-  const font = String(value || 'Arial').trim();
-  if (!font || font.length > 80 || !/^[\p{L}\p{N} ._-]+$/u.test(font)) {
-    throw new Error('Subtitle font must be a valid font-family name.');
-  }
-  return font;
-}
-
-function normalizeSubtitleNumber(value, fallback, min, max, label) {
-  const number = value === null || value === undefined || value === '' ? fallback : Number(value);
-  if (!Number.isFinite(number) || number < min || number > max) {
-    throw new Error(`${label} must be between ${min} and ${max}.`);
-  }
-  return number;
-}
-
 function envPositiveInteger(name, fallback, min = 1, max = Number.MAX_SAFE_INTEGER) {
   const value = Number(process.env[name]);
   if (!Number.isInteger(value) || value < min || value > max) return fallback;
@@ -1232,41 +1216,10 @@ async function resolveLectureFile(filePath, options = {}) {
     }
   }
 
+  const captionsPath = writeLectureCaptionsVtt(folderPath);
+  if (captionsPath) console.log(`Updated lecture captions: ${path.basename(captionsPath)}`);
+
   return finalResolvedPath || toViewerPath(resolvedSiblingPathForIndex(path.join(folderPath, files[0])));
-}
-
-// Burn exact narration text/timing from resolved lecture files into a rendered MP4.
-async function burnRenderedSubtitles(inputPath, outputPath, resolvedFiles, options, job) {
-  const config = readAppConfig();
-  const args = [
-    '--import',
-    'tsx',
-    'src/subtitle-burner.ts',
-    '--input', inputPath,
-    '--out', outputPath,
-    '--font', normalizeSubtitleFont(options.subtitleFont || config.render.subtitleFont),
-    '--font-size', String(normalizeSubtitleNumber(options.subtitleFontSize, config.render.subtitleFontSize, 12, 200, 'Subtitle font size')),
-    '--bottom-percent', String(normalizeSubtitleNumber(options.subtitleBottomPercent, config.render.subtitleBottomPercent, 0, 50, 'Subtitle distance from bottom'))
-  ];
-  for (const resolvedFile of resolvedFiles) {
-    args.push('--resolved-html', resolvedFile);
-  }
-
-  let childProc = null;
-  try {
-    await runCapture(process.execPath, args, {
-      cwd: rootDir,
-      windowsHide: true,
-      onSpawn: (child) => {
-        childProc = child;
-        job.childProcs.add(child);
-      }
-    });
-  } catch (error) {
-    throw error;
-  } finally {
-    if (childProc) job.childProcs.delete(childProc);
-  }
 }
 
 // Build list of scenes for sequential or parallel render steps.
@@ -1425,8 +1378,6 @@ async function renderLectureFile(filePath, options = {}, job = createRenderJob()
 
   const outPath = defaultOutputPath(inputPath, folderTitle);
   const framesDir = path.join(rootDir, '.render', 'server-render', `job-${job.id}`, 'frames');
-  const burnSubtitle = options.burnSubtitle === true;
-  const renderOutputPath = burnSubtitle ? path.join(path.dirname(framesDir), 'unsubtitled.mp4') : outPath;
 
   const config = readAppConfig();
   const voice = normalizeTtsVoice(options.ttsVoice);
@@ -1455,7 +1406,7 @@ async function renderLectureFile(filePath, options = {}, job = createRenderJob()
     }
     await renderViaAgentApi({
       html: inputPath,
-      out: renderOutputPath,
+      out: outPath,
       fps: normalizePositiveInteger(options.fps, config.render.fps, 1, 240),
       width: normalizePositiveInteger(options.width, config.render.baseWidth, 1),
       height: normalizePositiveInteger(options.height, config.render.baseHeight, 1),
@@ -1468,11 +1419,9 @@ async function renderLectureFile(filePath, options = {}, job = createRenderJob()
       signal: job.abortController.signal
     });
 
-    if (burnSubtitle) {
-      const resolvedFile = isIndexHtmlName(basename) ? resolvedSiblingPathForIndex(inputPath) : inputPath;
-      console.log(`Burning centered subtitles into ${path.basename(outPath)}...`);
-      await burnRenderedSubtitles(renderOutputPath, outPath, [resolvedFile], options, job);
-    }
+    const captionsPath = writeLectureCaptionsVtt(path.dirname(inputPath));
+    if (captionsPath) console.log(`Updated lecture captions: ${path.basename(captionsPath)}`);
+
     return toViewerPath(outPath);
   } catch (error) {
     if (existsSync(outPath)) {
@@ -1545,7 +1494,7 @@ async function renderLectureBatch(inputPath, sceneFiles, options = {}, job = cre
       renderSceneFiles = resolvedSceneFiles;
     }
 
-    const captionsPath = writeLectureCaptionsVttIfMissing(path.dirname(inputPath));
+    const captionsPath = writeLectureCaptionsVtt(path.dirname(inputPath));
     if (captionsPath) console.log(`Using lecture captions: ${path.basename(captionsPath)}`);
 
     if (job.aborted) {
@@ -1604,15 +1553,9 @@ async function renderLectureBatch(inputPath, sceneFiles, options = {}, job = cre
       throw new Error('Process stopped by user');
     }
 
-    const burnSubtitle = options.burnSubtitle === true;
-    const concatenatedPath = burnSubtitle ? path.join(tempDir, 'unsubtitled.mp4') : outputPath;
-    console.log(`Joining ${sceneOutputs.length} rendered scene files -> ${path.basename(concatenatedPath)}`);
-    await concatRenderedScenes(sceneOutputs, concatenatedPath, concatListPath);
+    console.log(`Joining ${sceneOutputs.length} rendered scene files -> ${path.basename(outputPath)}`);
+    await concatRenderedScenes(sceneOutputs, outputPath, concatListPath);
     deleteIntermediateSceneRenders(sceneOutputs, outputPath);
-    if (burnSubtitle) {
-      console.log(`Burning centered subtitles into ${path.basename(outputPath)}...`);
-      await burnRenderedSubtitles(concatenatedPath, outputPath, renderSceneFiles, options, job);
-    }
     return toViewerPath(outputPath);
   } catch (error) {
     if (existsSync(outputPath)) {
@@ -2035,7 +1978,6 @@ const server = createServer(async (request, response) => {
       const newText = String(payload.newText || '').trim();
       if (!requestedPath) throw new Error('Missing file path.');
       if (!oldText) throw new Error('Text to replace cannot be empty.');
-      if (!newText) throw new Error('Replacement text cannot be empty.');
       if (oldText.length > 10000 || newText.length > 10000) {
         throw new Error('Visual text is too long.');
       }
@@ -2179,13 +2121,7 @@ const server = createServer(async (request, response) => {
         ttsSpeed: requestUrl.searchParams.get('ttsSpeed'),
         fps: requestUrl.searchParams.get('fps'),
         width: requestUrl.searchParams.get('width'),
-        height: requestUrl.searchParams.get('height'),
-        burnSubtitle: requestUrl.searchParams.has('burnSubtitle')
-          ? requestUrl.searchParams.get('burnSubtitle') === '1'
-          : appConfig.render.burnSubtitle,
-        subtitleFont: requestUrl.searchParams.get('subtitleFont'),
-        subtitleFontSize: requestUrl.searchParams.get('subtitleFontSize'),
-        subtitleBottomPercent: requestUrl.searchParams.get('subtitleBottomPercent')
+        height: requestUrl.searchParams.get('height')
       }, job), requestedPath);
 
       sendJson(response, 200, {

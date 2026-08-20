@@ -100,22 +100,6 @@ export function createViewerHtml(openPath, initialWidth = 1920, initialHeight = 
     : '';
   const defaultTtsSpeed = String(ttsConfig.speed || 1);
   const defaultFps = String(renderConfig.fps || 60);
-  const defaultBurnSubtitle = renderConfig.burnSubtitle === true;
-  const defaultSubtitleFont = String(renderConfig.subtitleFont || 'Arial');
-  const defaultSubtitleFontSize = Number(renderConfig.subtitleFontSize) || 48;
-  const defaultSubtitleBottomPercent = Number.isFinite(Number(renderConfig.subtitleBottomPercent))
-    ? Number(renderConfig.subtitleBottomPercent)
-    : 8;
-  const subtitleFontOptions = [...new Set([
-    defaultSubtitleFont,
-    'Arial',
-    'Inter',
-    'Verdana',
-    'Georgia',
-    'Times New Roman'
-  ])].map(font => `<option value="${escapeHtml(font)}"${selectedAttr(font, defaultSubtitleFont)}>${escapeHtml(font)}</option>`).join('');
-  const burnSubtitleChecked = defaultBurnSubtitle ? ' checked' : '';
-  const subtitleOptionsVisible = defaultBurnSubtitle ? ' class="visible"' : '';
   const defaultAspectRatio = String(agentConfig.defaultAspectRatio || '16:9');
   const defaultLengthSeconds = Number(agentConfig.defaultLengthSeconds) || 60;
   const defaultLengthSliderValue = generationSecondsToInitialSlider(defaultLengthSeconds);
@@ -129,7 +113,6 @@ export function createViewerHtml(openPath, initialWidth = 1920, initialHeight = 
   const getimgChecked = agentConfig.enableGetimgTool ? ' checked' : '';
   const context = {
     agentConfig,
-    burnSubtitleChecked,
     configuredElevenLabsVoiceOption,
     defaultAspectRatio,
     defaultFps,
@@ -138,8 +121,6 @@ export function createViewerHtml(openPath, initialWidth = 1920, initialHeight = 
     defaultLengthSliderValue,
     defaultRenderResolution,
     defaultRenderViewport,
-    defaultSubtitleBottomPercent,
-    defaultSubtitleFontSize,
     defaultTtsProvider,
     defaultTtsSpeed,
     defaultTtsVoice,
@@ -151,8 +132,6 @@ export function createViewerHtml(openPath, initialWidth = 1920, initialHeight = 
     safeInitialHeight,
     safeInitialWidth,
     selectedAttr,
-    subtitleFontOptions,
-    subtitleOptionsVisible,
     viewerVersion,
   };
   return [

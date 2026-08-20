@@ -1,6 +1,6 @@
 // @ts-nocheck
 export function renderLeftSidebar(context = {}) {
-  const { agentConfig, burnSubtitleChecked, configuredElevenLabsVoiceOption, defaultAspectRatio, defaultFps, defaultLengthLabel, defaultLengthSeconds, defaultLengthSliderValue, defaultRenderResolution, defaultRenderViewport, defaultSubtitleBottomPercent, defaultSubtitleFontSize, defaultTtsProvider, defaultTtsSpeed, defaultTtsVoice, elevenLabsDefaultVoice, escapeHtml, escapeJsString, getimgChecked, normalizedOpenPath, safeInitialHeight, safeInitialWidth, selectedAttr, subtitleFontOptions, subtitleOptionsVisible, viewerVersion } = context;
+  const { agentConfig, configuredElevenLabsVoiceOption, defaultAspectRatio, defaultFps, defaultLengthLabel, defaultLengthSeconds, defaultLengthSliderValue, defaultRenderResolution, defaultRenderViewport, defaultTtsProvider, defaultTtsSpeed, defaultTtsVoice, elevenLabsDefaultVoice, escapeHtml, escapeJsString, getimgChecked, normalizedOpenPath, safeInitialHeight, safeInitialWidth, selectedAttr, viewerVersion } = context;
   return `<!-- Left panel: local folder browser plus resolve/render/publish actions. -->
 <aside id="folder-sidebar">
   <div id="sidebar-header">
@@ -97,28 +97,6 @@ export function renderLeftSidebar(context = {}) {
             <option value="1080x1920">1080x1920</option>
             <option value="720x1280">720x1280</option>
           </select>
-        </div>
-        <div class="render-option render-subtitle-toggle">
-          <label for="render-burn-subtitle">
-            <input id="render-burn-subtitle" type="checkbox"${burnSubtitleChecked}>
-            <span>Burn subtitle</span>
-          </label>
-        </div>
-        <div id="render-subtitle-options"${subtitleOptionsVisible}>
-          <div class="render-option">
-            <label for="render-subtitle-font">Subtitle font</label>
-            <select id="render-subtitle-font">
-              ${subtitleFontOptions}
-            </select>
-          </div>
-          <div class="render-option">
-            <label for="render-subtitle-font-size">Font size</label>
-            <input id="render-subtitle-font-size" type="number" min="12" max="200" step="1" value="${escapeHtml(String(defaultSubtitleFontSize))}">
-          </div>
-          <div class="render-option">
-            <label for="render-subtitle-bottom-percent">Distance from bottom (%)</label>
-            <input id="render-subtitle-bottom-percent" type="number" min="0" max="50" step="0.5" value="${escapeHtml(String(defaultSubtitleBottomPercent))}">
-          </div>
         </div>
       </div>
     </div>

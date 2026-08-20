@@ -1,8 +1,16 @@
 import { existsSync, readdirSync, readFileSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
+import { trimAuthoredCaptionText } from '../../mylecture-agent/src/resolve-render/subtitle-maker.js';
 
-type AudioCue = { start?: number; duration?: number; text?: string };
-type ResolvedTimeline = { duration?: number; audioTimeline?: AudioCue[] };
+type AudioCue = { start?: number; duration?: number; text?: string; sectionId?: string };
+type SubtitleCue = { start?: number; end?: number; text?: string; sectionId?: string };
+type VideoCue = { start?: number; end?: number; duration?: number; sectionId?: string; item?: { id?: string; text?: string } };
+type ResolvedTimeline = {
+  duration?: number;
+  audioTimeline?: AudioCue[];
+  subtitleTimeline?: SubtitleCue[];
+  videoTimeline?: VideoCue[];
+};
 type CaptionCue = { start: number; end: number; text: string };
 
 function resolvedSceneNumber(name: string): number | null {
@@ -64,6 +72,54 @@ function serialize(cues: CaptionCue[]): string {
   return `${lines.join('\n').trimEnd()}\n`;
 }
 
+function buildSubtitleCues(timeline: ResolvedTimeline): CaptionCue[] {
+  const subtitleTimeline = Array.isArray(timeline.subtitleTimeline) ? timeline.subtitleTimeline : [];
+  const audioTimeline = Array.isArray(timeline.audioTimeline) ? timeline.audioTimeline : [];
+  const videoTimeline = Array.isArray(timeline.videoTimeline) ? timeline.videoTimeline : [];
+
+  const audioSubtitleCues = subtitleTimeline.length > 0
+    ? subtitleTimeline
+      .map(cue => ({
+        start: Number(cue.start) || 0,
+        end: Number(cue.end) || 0,
+        text: trimAuthoredCaptionText(cue.text),
+        sectionId: cue.sectionId || ''
+      }))
+      .filter(cue => cue.text && cue.end > cue.start)
+    : audioTimeline
+      .map(cue => {
+        const text = trimAuthoredCaptionText(cue.text);
+        const start = Number(cue.start);
+        const duration = Number(cue.duration);
+        if (!text || !Number.isFinite(start) || !Number.isFinite(duration) || duration <= 0) return null;
+        return {
+          start,
+          end: start + duration,
+          text,
+          sectionId: cue.sectionId || ''
+        };
+      })
+      .filter((cue): cue is { start: number; end: number; text: string; sectionId: string } => cue !== null);
+
+  const audioSectionIds = new Set(audioSubtitleCues.map(cue => cue.sectionId).filter(Boolean));
+  const videoSubtitleCues = videoTimeline
+    .filter(cue => String(cue.item?.text || '').trim())
+    .filter(cue => {
+      const sectionId = cue.item?.id || cue.sectionId;
+      return !sectionId || !audioSectionIds.has(sectionId);
+    })
+    .map(cue => ({
+      start: Number(cue.start) || 0,
+      end: Number(cue.end) || ((Number(cue.start) || 0) + (Number(cue.duration) || 0)),
+      text: trimAuthoredCaptionText(cue.item?.text)
+    }))
+    .filter(cue => cue.text && cue.end > cue.start);
+
+  return [...audioSubtitleCues, ...videoSubtitleCues]
+    .sort((a, b) => a.start - b.start)
+    .map(({ start, end, text }) => ({ start, end, text }));
+}
+
 /** Write one combined caption track for the complete lecture. */
 export function writeLectureCaptionsVtt(folderPath: string): string | null {
   const resolvedFiles = readdirSync(folderPath)
@@ -76,12 +132,12 @@ export function writeLectureCaptionsVtt(folderPath: string): string | null {
   for (const file of resolvedFiles) {
     const timeline = extractResolvedTimeline(path.join(folderPath, file.name));
     if (!timeline) continue;
-    for (const cue of Array.isArray(timeline.audioTimeline) ? timeline.audioTimeline : []) {
-      const text = String(cue.text || '').trim();
-      const start = Number(cue.start);
-      const duration = Number(cue.duration);
-      if (!text || !Number.isFinite(start) || !Number.isFinite(duration) || duration <= 0) continue;
-      cues.push({ start: offset + start, end: offset + start + duration, text });
+    for (const cue of buildSubtitleCues(timeline)) {
+      cues.push({
+        start: offset + cue.start,
+        end: offset + cue.end,
+        text: cue.text
+      });
     }
     offset += Number(timeline.duration) || 0;
   }

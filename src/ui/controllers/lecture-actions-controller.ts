@@ -1,6 +1,6 @@
 // @ts-nocheck
 export function renderLectureActionsController(context = {}) {
-  const { agentConfig, burnSubtitleChecked, configuredElevenLabsVoiceOption, defaultAspectRatio, defaultFps, defaultLengthLabel, defaultLengthSeconds, defaultLengthSliderValue, defaultRenderResolution, defaultRenderViewport, defaultSubtitleBottomPercent, defaultSubtitleFontSize, defaultTtsProvider, defaultTtsSpeed, defaultTtsVoice, elevenLabsDefaultVoice, escapeHtml, escapeJsString, getimgChecked, normalizedOpenPath, safeInitialHeight, safeInitialWidth, selectedAttr, subtitleFontOptions, subtitleOptionsVisible, viewerVersion } = context;
+  const { agentConfig, configuredElevenLabsVoiceOption, defaultAspectRatio, defaultFps, defaultLengthLabel, defaultLengthSeconds, defaultLengthSliderValue, defaultRenderResolution, defaultRenderViewport, defaultTtsProvider, defaultTtsSpeed, defaultTtsVoice, elevenLabsDefaultVoice, escapeHtml, escapeJsString, getimgChecked, normalizedOpenPath, safeInitialHeight, safeInitialWidth, selectedAttr, viewerVersion } = context;
   return `
 // Folder browsing is delegated to ide-server because browser JavaScript cannot
 // directly list arbitrary local directories.
@@ -155,8 +155,7 @@ async function runRender() {
     'Rendering ' + sourceName +
     ' at ' + renderFps.value + ' FPS, ' +
     renderResolution.value +
-    ', ' + renderTtsVoice.value + ' @ ' + renderTtsSpeed.value + 'x' +
-    (renderBurnSubtitle.checked ? ', burning subtitles' : '')
+    ', ' + renderTtsVoice.value + ' @ ' + renderTtsSpeed.value + 'x'
   );
   try {
     const response = await fetch('/render-file?' + renderQuery(), { method: 'POST' });

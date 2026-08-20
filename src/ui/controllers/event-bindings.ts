@@ -1,6 +1,6 @@
 // @ts-nocheck
 export function renderEventBindings(context = {}) {
-  const { agentConfig, burnSubtitleChecked, configuredElevenLabsVoiceOption, defaultAspectRatio, defaultFps, defaultLengthLabel, defaultLengthSeconds, defaultLengthSliderValue, defaultRenderResolution, defaultRenderViewport, defaultSubtitleBottomPercent, defaultSubtitleFontSize, defaultTtsProvider, defaultTtsSpeed, defaultTtsVoice, elevenLabsDefaultVoice, escapeHtml, escapeJsString, getimgChecked, normalizedOpenPath, safeInitialHeight, safeInitialWidth, selectedAttr, subtitleFontOptions, subtitleOptionsVisible, viewerVersion } = context;
+  const { agentConfig, configuredElevenLabsVoiceOption, defaultAspectRatio, defaultFps, defaultLengthLabel, defaultLengthSeconds, defaultLengthSliderValue, defaultRenderResolution, defaultRenderViewport, defaultTtsProvider, defaultTtsSpeed, defaultTtsVoice, elevenLabsDefaultVoice, escapeHtml, escapeJsString, getimgChecked, normalizedOpenPath, safeInitialHeight, safeInitialWidth, selectedAttr, viewerVersion } = context;
   return `
 // DOM event wiring lives together so future UI changes can audit behavior from
 // one place instead of chasing listeners across helper functions.
@@ -54,9 +54,6 @@ renderMenuToggle.addEventListener('click', event => {
 });
 renderOptions.addEventListener('click', event => {
   event.stopPropagation();
-});
-renderBurnSubtitle.addEventListener('change', () => {
-  renderSubtitleOptions.classList.toggle('visible', renderBurnSubtitle.checked);
 });
 document.addEventListener('click', () => {
   setResolveOptionsVisible(false);

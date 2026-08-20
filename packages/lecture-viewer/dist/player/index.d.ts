@@ -12,7 +12,7 @@ export declare function buildPreviewTimeline(win: any): any;
 export declare function buildInteractiveTimeline(win: any): any[];
 export declare function buildGameTimeline(win: any): any[];
 export declare function buildAudioTimeline(win: any, videoTimeline: any): any;
-export declare function buildSubtitleTimeline(audioTimeline: any, videoTimeline: any): any[];
+export declare function buildSubtitleTimeline(audioTimeline: any, videoTimeline: any, resolvedTimeline: any): any[];
 declare class LecturePlayer {
     constructor(options?: {});
     createInitialState(): {

@@ -1,6 +1,6 @@
 // @ts-nocheck
 export function renderUiHelpers(context = {}) {
-  const { agentConfig, burnSubtitleChecked, configuredElevenLabsVoiceOption, defaultAspectRatio, defaultFps, defaultLengthLabel, defaultLengthSeconds, defaultLengthSliderValue, defaultRenderResolution, defaultRenderViewport, defaultSubtitleBottomPercent, defaultSubtitleFontSize, defaultTtsProvider, defaultTtsSpeed, defaultTtsVoice, elevenLabsDefaultVoice, escapeHtml, escapeJsString, getimgChecked, normalizedOpenPath, safeInitialHeight, safeInitialWidth, selectedAttr, subtitleFontOptions, subtitleOptionsVisible, viewerVersion } = context;
+  const { agentConfig, configuredElevenLabsVoiceOption, defaultAspectRatio, defaultFps, defaultLengthLabel, defaultLengthSeconds, defaultLengthSliderValue, defaultRenderResolution, defaultRenderViewport, defaultTtsProvider, defaultTtsSpeed, defaultTtsVoice, elevenLabsDefaultVoice, escapeHtml, escapeJsString, getimgChecked, normalizedOpenPath, safeInitialHeight, safeInitialWidth, selectedAttr, viewerVersion } = context;
   return `
 // Status helpers keep labels, busy state, and long-running job timers aligned.
 function setStatus(message) {
@@ -68,12 +68,6 @@ function renderQuery() {
   params.set('fps', renderFps.value || configuredDefaults.fps);
   params.set('width', width || String(configuredDefaults.renderWidth));
   params.set('height', height || String(configuredDefaults.renderHeight));
-  params.set('burnSubtitle', renderBurnSubtitle.checked ? '1' : '0');
-  if (renderBurnSubtitle.checked) {
-    params.set('subtitleFont', renderSubtitleFont.value);
-    params.set('subtitleFontSize', renderSubtitleFontSize.value);
-    params.set('subtitleBottomPercent', renderSubtitleBottomPercent.value);
-  }
   return params.toString();
 }
 

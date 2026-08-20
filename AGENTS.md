@@ -26,7 +26,6 @@ src/
   ide-server.ts          Local HTTP server for the IDE and agent bridge.
   build-plan.ts          Resolves source HTML plans into timeline-ready HTML.
   render-video.ts        Deterministic browser-frame renderer and MP4 muxer.
-  subtitle-burner.ts     Burns subtitles into video outputs.
   sync-versions.ts       Keeps version constants/contracts synchronized.
   utils/tts.py           Python TTS helper used by the resolve/render pipeline.
   social/                Upload/token helper scripts.
@@ -193,11 +192,8 @@ generation length: <selected>
 Theme and teaching-style IDs are sent as structured generation request fields;
 their Markdown bodies are not embedded in the browser prompt. Aspect ratio,
 length, getimg, and output selections remain local IDE settings.
-Subtitles are not generated into lecture HTML. The Render options menu owns
-subtitle burning, including font, font size, and centered distance from the
-bottom of the frame. Its defaults come from `render.burnSubtitle`,
-`render.subtitleFont`, `render.subtitleFontSize`, and
-`render.subtitleBottomPercent` in root `config.yaml`.
+Subtitles are not generated into lecture HTML. Player captions use WebVTT sidecars
+written during resolve/render; the Render menu no longer burns subtitles into MP4.
 
 ## Agent Resource Options
 

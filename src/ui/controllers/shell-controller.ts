@@ -1,6 +1,6 @@
 // @ts-nocheck
 export function renderShellController(context = {}) {
-  const { agentConfig, burnSubtitleChecked, configuredElevenLabsVoiceOption, defaultAspectRatio, defaultFps, defaultLengthLabel, defaultLengthSeconds, defaultLengthSliderValue, defaultRenderResolution, defaultRenderViewport, defaultSubtitleBottomPercent, defaultSubtitleFontSize, defaultTtsProvider, defaultTtsSpeed, defaultTtsVoice, elevenLabsDefaultVoice, escapeHtml, escapeJsString, getimgChecked, normalizedOpenPath, safeInitialHeight, safeInitialWidth, selectedAttr, subtitleFontOptions, subtitleOptionsVisible, viewerVersion } = context;
+  const { agentConfig, configuredElevenLabsVoiceOption, defaultAspectRatio, defaultFps, defaultLengthLabel, defaultLengthSeconds, defaultLengthSliderValue, defaultRenderResolution, defaultRenderViewport, defaultTtsProvider, defaultTtsSpeed, defaultTtsVoice, elevenLabsDefaultVoice, escapeHtml, escapeJsString, getimgChecked, normalizedOpenPath, safeInitialHeight, safeInitialWidth, selectedAttr, viewerVersion } = context;
   return `<script type="module">
 import { createLecturePlayer, lectureViewerVersion } from '/lecture-viewer/player/index.mjs';
 
@@ -72,11 +72,6 @@ const renderTtsVoice = document.getElementById('render-tts-voice');
 const renderTtsSpeed = document.getElementById('render-tts-speed');
 const renderFps = document.getElementById('render-fps');
 const renderResolution = document.getElementById('render-resolution');
-const renderBurnSubtitle = document.getElementById('render-burn-subtitle');
-const renderSubtitleOptions = document.getElementById('render-subtitle-options');
-const renderSubtitleFont = document.getElementById('render-subtitle-font');
-const renderSubtitleFontSize = document.getElementById('render-subtitle-font-size');
-const renderSubtitleBottomPercent = document.getElementById('render-subtitle-bottom-percent');
 const frameWrap = document.getElementById('frame-wrap');
 const previewShell = document.getElementById('preview-shell');
 let frame = document.getElementById('preview');

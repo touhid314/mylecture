@@ -179,8 +179,38 @@ export function buildAudioTimeline(win, videoTimeline) {
     }));
 }
 
-// Prefer audio cue text, then fill gaps from visual sections that have narration.
-export function buildSubtitleTimeline(audioTimeline, videoTimeline) {
+// Prefer alignment subtitle cues, then audio cue text, then visual gaps.
+export function buildSubtitleTimeline(audioTimeline, videoTimeline, resolvedTimeline) {
+  const subtitleTimeline = Array.isArray(resolvedTimeline?.subtitleTimeline)
+    ? resolvedTimeline.subtitleTimeline
+    : [];
+
+  if (subtitleTimeline.length > 0) {
+    const audioSubtitleCues = subtitleTimeline
+      .filter(cue => String(cue.text || '').trim())
+      .map(cue => ({
+        start: Number(cue.start) || 0,
+        end: Number(cue.end) || 0,
+        text: String(cue.text || '').trim(),
+        sectionId: cue.sectionId || ''
+      }))
+      .filter(cue => cue.end > cue.start);
+
+    const audioSectionIds = new Set(audioSubtitleCues.map(cue => cue.sectionId).filter(Boolean));
+    const videoSubtitleCues = videoTimeline
+      .filter(cue => String(cue.item?.text || '').trim())
+      .filter(cue => !audioSectionIds.has(cue.item?.id))
+      .map(cue => ({
+        start: Number(cue.start) || 0,
+        end: Number(cue.end) || ((Number(cue.start) || 0) + (Number(cue.duration) || 0)),
+        text: String(cue.item.text || '').trim(),
+        sectionId: cue.item.id || ''
+      }))
+      .filter(cue => cue.end > cue.start);
+
+    return [...audioSubtitleCues, ...videoSubtitleCues].sort((a, b) => a.start - b.start);
+  }
+
   const audioSubtitleCues = audioTimeline
     .filter(cue => String(cue.text || '').trim())
     .map(cue => ({
@@ -450,7 +480,7 @@ class LecturePlayer {
       // estimated preview timing until build-plan.ts resolves audio durations.
       const timeline = buildPreviewTimeline(win);
       const audioTimeline = buildAudioTimeline(win, timeline);
-      const subtitleTimeline = buildSubtitleTimeline(audioTimeline, timeline);
+      const subtitleTimeline = buildSubtitleTimeline(audioTimeline, timeline, win.__RESOLVED_TIMELINE__);
       const interactiveTimeline = buildInteractiveTimeline(win);
       const gameTimeline = buildGameTimeline(win);
       const duration = Number(win.__VIDEO_DURATION__) ||

@@ -199,8 +199,8 @@ def _elevenlabs_settings() -> tuple[str, str]:
     model = _require_env("ELEVENLABS_TTS_MODEL")
     voice = os.getenv(
         "ELEVENLABS_TTS_VOICE",
-        os.getenv("ELEVENLABS_VOICE_ID", "bIHbv24MWmeRgasZH58o"),
-    ).strip()  # Will
+        os.getenv("ELEVENLABS_VOICE_ID", "iP95p4xoKVk53GoZ742B"),
+    ).strip()  # Chris
     return model, voice
 
 
@@ -228,7 +228,8 @@ def _elevenlabs_voice_settings_base() -> dict[str, float]:
     }
 
 
-ELEVENLABS_CONTEXT_MAX_CHARS = 500
+# Keep in sync: elevenlabs-context.ts, tts.py (both packages).
+ELEVENLABS_CONTEXT_MAX_CHARS = 10000
 
 
 def _truncate_elevenlabs_previous_text(text: str | None) -> str | None:
@@ -1186,8 +1187,8 @@ def tts(
             character alignment plus derived word start/end timings to JSON.
         alignment_output_path: Optional ElevenLabs alignment JSON path. Defaults
             to the audio path with an ".alignment.json" suffix.
-        previous_text: ElevenLabs only. Tail-truncated prior cue for continuity.
-        next_text: ElevenLabs only. Head-truncated following cue for continuity.
+        previous_text: ElevenLabs only. Tail-truncated prior narration (prior scenes and cues) for continuity.
+        next_text: ElevenLabs only. Head-truncated following narration (later cues and scenes) for continuity.
 
     Returns:
         The generated WAV path as a string.

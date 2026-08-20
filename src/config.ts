@@ -24,10 +24,6 @@ export type AppConfig = {
     fps: number;
     baseWidth: number;
     baseHeight: number;
-    burnSubtitle: boolean;
-    subtitleFont: string;
-    subtitleFontSize: number;
-    subtitleBottomPercent: number;
   };
 };
 
@@ -46,18 +42,14 @@ const defaultConfig: AppConfig = {
     defaultLengthSeconds: 60
   },
   tts: {
-    provider: 'omnivoice',
-    voice: 'maruf',
-    speed: 1.2
+    provider: 'elevenlabs',
+    voice: 'iP95p4xoKVk53GoZ742B',
+    speed: 1
   },
   render: {
     fps: 30,
     baseWidth: 1920,
-    baseHeight: 1080,
-    burnSubtitle: false,
-    subtitleFont: 'Arial',
-    subtitleFontSize: 48,
-    subtitleBottomPercent: 8
+    baseHeight: 1080
   }
 };
 
@@ -143,11 +135,7 @@ function mergeConfig(raw: Record<string, Record<string, unknown>>): AppConfig {
     render: {
       fps: Math.round(numberValue(raw.render?.fps, defaultConfig.render.fps, 1, 240)),
       baseWidth: Math.round(numberValue(raw.render?.baseWidth, defaultConfig.render.baseWidth, 1)),
-      baseHeight: Math.round(numberValue(raw.render?.baseHeight, defaultConfig.render.baseHeight, 1)),
-      burnSubtitle: booleanValue(raw.render?.burnSubtitle, defaultConfig.render.burnSubtitle),
-      subtitleFont: stringValue(raw.render?.subtitleFont, defaultConfig.render.subtitleFont),
-      subtitleFontSize: numberValue(raw.render?.subtitleFontSize, defaultConfig.render.subtitleFontSize, 12, 200),
-      subtitleBottomPercent: numberValue(raw.render?.subtitleBottomPercent, defaultConfig.render.subtitleBottomPercent, 0, 50)
+      baseHeight: Math.round(numberValue(raw.render?.baseHeight, defaultConfig.render.baseHeight, 1))
     }
   };
 }

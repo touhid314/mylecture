@@ -1,6 +1,6 @@
 // @ts-nocheck
 export function renderDialogs(context = {}) {
-  const { agentConfig, burnSubtitleChecked, configuredElevenLabsVoiceOption, defaultAspectRatio, defaultFps, defaultLengthLabel, defaultLengthSeconds, defaultLengthSliderValue, defaultRenderResolution, defaultRenderViewport, defaultSubtitleBottomPercent, defaultSubtitleFontSize, defaultTtsProvider, defaultTtsSpeed, defaultTtsVoice, elevenLabsDefaultVoice, escapeHtml, escapeJsString, getimgChecked, normalizedOpenPath, safeInitialHeight, safeInitialWidth, selectedAttr, subtitleFontOptions, subtitleOptionsVisible, viewerVersion } = context;
+  const { agentConfig, configuredElevenLabsVoiceOption, defaultAspectRatio, defaultFps, defaultLengthLabel, defaultLengthSeconds, defaultLengthSliderValue, defaultRenderResolution, defaultRenderViewport, defaultTtsProvider, defaultTtsSpeed, defaultTtsVoice, elevenLabsDefaultVoice, escapeHtml, escapeJsString, getimgChecked, normalizedOpenPath, safeInitialHeight, safeInitialWidth, selectedAttr, viewerVersion } = context;
   return `<!-- Focused narration editor: one timeline cue, one spoken-text override, one regenerated WAV. -->
 <div id="narration-dialog" role="dialog" aria-modal="true" aria-labelledby="narration-title">
   <div id="narration-panel">
@@ -67,9 +67,9 @@ export function renderDialogs(context = {}) {
         </div>
         <div class="visual-text-field">
           <label for="visual-text-replacement">Replacement</label>
-          <textarea id="visual-text-replacement" spellcheck="true" placeholder="Correct wording"></textarea>
+          <textarea id="visual-text-replacement" spellcheck="true" placeholder="New wording, or leave empty to delete"></textarea>
         </div>
-        <div id="visual-text-help">The exact match is changed in this scene and in script.md when present. No model is used.</div>
+        <div id="visual-text-help">The exact match is changed in this scene and in script.md when present. Leave replacement empty to remove the text. No model is used.</div>
       </div>
       <div id="visual-text-status" role="status" aria-live="polite"></div>
       <div id="visual-text-actions">

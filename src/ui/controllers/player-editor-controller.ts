@@ -1,6 +1,6 @@
 // @ts-nocheck
 export function renderPlayerEditorController(context = {}) {
-  const { agentConfig, burnSubtitleChecked, configuredElevenLabsVoiceOption, defaultAspectRatio, defaultFps, defaultLengthLabel, defaultLengthSeconds, defaultLengthSliderValue, defaultRenderResolution, defaultRenderViewport, defaultSubtitleBottomPercent, defaultSubtitleFontSize, defaultTtsProvider, defaultTtsSpeed, defaultTtsVoice, elevenLabsDefaultVoice, escapeHtml, escapeJsString, getimgChecked, normalizedOpenPath, safeInitialHeight, safeInitialWidth, selectedAttr, subtitleFontOptions, subtitleOptionsVisible, viewerVersion } = context;
+  const { agentConfig, configuredElevenLabsVoiceOption, defaultAspectRatio, defaultFps, defaultLengthLabel, defaultLengthSeconds, defaultLengthSliderValue, defaultRenderResolution, defaultRenderViewport, defaultTtsProvider, defaultTtsSpeed, defaultTtsVoice, elevenLabsDefaultVoice, escapeHtml, escapeJsString, getimgChecked, normalizedOpenPath, safeInitialHeight, safeInitialWidth, selectedAttr, viewerVersion } = context;
   return `
 // Page-level state mirrors the current file, viewport, folder contents, scene
 // list, and active server job. The player keeps its own playback state.
@@ -353,8 +353,8 @@ async function applyVisualTextEdit(event) {
   event?.preventDefault();
   const oldText = visualTextFind.value.trim();
   const newText = visualTextReplacement.value.trim();
-  if (!oldText || !newText) {
-    visualTextStatus.textContent = 'Choose or enter the current text and its replacement.';
+  if (!oldText) {
+    visualTextStatus.textContent = 'Choose or enter the current text to replace. Leave replacement empty to delete it.';
     visualTextStatus.className = 'error';
     return;
   }

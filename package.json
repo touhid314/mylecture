@@ -26,7 +26,6 @@
     "test:lecturegen": "node --import tsx --test tests/utils/safe-tar-extract.test.ts \"tests/lecturegen/*.test.ts\"",
     "test:tts-normalize": "node --import tsx --test src/tts-normalize.test.ts",
     "test:invoke-render": "node --import tsx src/invoke-render-section.test.ts",
-    "test:elevenlabs-context": "node --import tsx src/elevenlabs-context.test.ts",
     "test:visual-edit-protect": "node --import tsx src/visual-edit-protect.test.ts",
     "test:multipart": "node --import tsx --test tests/render-multipart.test.ts"
   },
