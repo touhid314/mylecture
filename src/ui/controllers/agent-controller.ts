@@ -311,7 +311,9 @@ function fillAgentResourceSelect(select, options, defaultId) {
 function fillTtsVoiceSelect(select, tts) {
   if (!select || !tts || !Array.isArray(tts.providers)) return;
   select.innerHTML = '';
+  let hasSelection = false;
   for (const provider of tts.providers) {
+    if (provider.id !== 'omnivoice' && provider.id !== 'elevenlabs') continue;
     if (!Array.isArray(provider.voices) || provider.voices.length === 0) continue;
     const group = document.createElement('optgroup');
     group.label = provider.label + (provider.configured === false ? ' (not configured)' : '');
@@ -321,12 +323,22 @@ function fillTtsVoiceSelect(select, tts) {
       const option = document.createElement('option');
       option.value = voice.id;
       option.textContent = voice.label || voice.id;
-      if (provider.id === tts.defaults.provider && voice.id === tts.defaults.voice) {
+      if (provider.configured !== false && provider.id === tts.defaults.provider && voice.id === tts.defaults.voice) {
         option.selected = true;
+        hasSelection = true;
       }
       group.appendChild(option);
     }
     select.appendChild(group);
+  }
+  if (!hasSelection) {
+    for (const group of select.querySelectorAll('optgroup:not([disabled])')) {
+      const firstOption = group.querySelector('option');
+      if (firstOption) {
+        firstOption.selected = true;
+        break;
+      }
+    }
   }
 }
 
@@ -341,8 +353,7 @@ async function loadAgentResourceOptions() {
     agentDefaultTeachingStyleId = payload.defaults && payload.defaults.teachingStyleId || 'default';
     fillAgentResourceSelect(agentTheme, agentThemes, agentDefaultThemeId);
     fillAgentResourceSelect(agentTeachingStyle, agentTeachingStyles, agentDefaultTeachingStyleId);
-    fillTtsVoiceSelect(resolveTtsVoice, payload.tts);
-    fillTtsVoiceSelect(renderTtsVoice, payload.tts);
+    [resolveTtsVoice, renderTtsVoice, agentTtsVoice].forEach(select => fillTtsVoiceSelect(select, payload.tts));
   } catch (error) {
     agentThemes = [];
     agentTeachingStyles = [];
@@ -415,7 +426,18 @@ async function sendChat() {
         currentFile: currentFilePath,
         currentDir: currentBrowserFolder,
         themeId: requestPhase === 'generate' && agentTheme ? agentTheme.value : undefined,
-        teachingStyleId: requestPhase === 'generate' && agentTeachingStyle ? agentTeachingStyle.value : undefined
+        teachingStyleId: requestPhase === 'generate' && agentTeachingStyle ? agentTeachingStyle.value : undefined,
+        ...(requestPhase === 'generate' ? (
+          agentTtsVoice && agentTtsVoice.value
+            ? {
+                ttsVoice: agentTtsVoice.value,
+                ttsProvider: selectedTtsProvider(agentTtsVoice)
+              }
+            : {
+                ttsVoice: configuredDefaults.ttsVoice,
+                ttsProvider: configuredDefaults.ttsProvider
+              }
+        ) : {})
       })
     });
     

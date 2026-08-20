@@ -2,6 +2,7 @@ import { existsSync, mkdirSync, readdirSync, renameSync, rmSync, statSync, unlin
 import { spawn } from 'node:child_process';
 import path from 'node:path';
 import { loadAppConfig } from '../config.ts';
+import { isElevenLabsCatalogVoice } from '../voice-allowlist.ts';
 import {
   generateLectureViaAgentApi,
   renderViaAgentApi,
@@ -156,6 +157,9 @@ function normalizeTtsSpeed(value?: string | number) {
 function resolveTtsProvider(voice: string, explicit?: string) {
   const config = loadAppConfig(rootDir);
   if (explicit) return explicit;
+  if (isElevenLabsCatalogVoice(voice)) {
+    return 'elevenlabs';
+  }
   if (voice === config.tts.voice) return config.tts.provider;
   const v = voice.toLowerCase();
   const voicesDir = path.join(rootDir, 'voices');

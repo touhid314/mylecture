@@ -42,6 +42,7 @@ const agentGenerationControls = document.getElementById('agent-generation-contro
 const agentAspectRatio = document.getElementById('agent-aspect-ratio');
 const agentGenerationLength = document.getElementById('agent-generation-length');
 const agentGenerationLengthValue = document.getElementById('agent-generation-length-value');
+const agentTtsVoice = document.getElementById('agent-tts-voice');
 const agentEnableGetimg = document.getElementById('agent-enable-getimg');
 const agentOutputVideo = document.getElementById('agent-output-video');
 const agentOutputInteractive = document.getElementById('agent-output-interactive');

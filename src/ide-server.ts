@@ -27,6 +27,7 @@ import {
 } from './lecture-agent-api-client.ts';
 import { loadAppConfig, resolveConfigPath } from './config.ts';
 import { writeLectureCaptionsVttIfMissing } from './captions-vtt.ts';
+import { isElevenLabsCatalogVoice } from './voice-allowlist.ts';
 import {
   DEFAULT_ID_PATTERN,
   allocateFolderName,
@@ -1062,6 +1063,9 @@ function resolveTtsProvider(options, voice) {
   if (options.ttsProvider) {
     return normalizeTtsProvider(options.ttsProvider);
   }
+  if (isElevenLabsCatalogVoice(voice)) {
+    return 'elevenlabs';
+  }
   if (voice === config.tts.voice) {
     return config.tts.provider;
   }
@@ -1072,7 +1076,7 @@ function detectProvider(voice) {
   const v = String(voice || '').trim().toLowerCase();
   if (!v) return 'kokoro';
 
-  if (v === 'bihbv24mwmergaszh58o') {
+  if (isElevenLabsCatalogVoice(voice)) {
     return 'elevenlabs';
   }
 

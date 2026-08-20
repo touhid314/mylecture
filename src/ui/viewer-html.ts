@@ -1,4 +1,5 @@
 // @ts-nocheck
+import { DEFAULT_ELEVENLABS_VOICE_ID } from '../voice-allowlist.ts';
 import { renderDocumentHead } from './document-shell.js';
 import { renderBaseStyles } from './styles/base-styles.js';
 import { renderLeftSidebarStyles } from './styles/left-sidebar-styles.js';
@@ -90,7 +91,7 @@ export function createViewerHtml(openPath, initialWidth = 1920, initialHeight = 
     ? 'elevenlabs'
     : configuredTtsProvider;
   const defaultTtsVoice = String(ttsConfig.voice || 'af_heart');
-  const elevenLabsDefaultVoice = 'bIHbv24MWmeRgasZH58o';
+  const elevenLabsDefaultVoice = DEFAULT_ELEVENLABS_VOICE_ID;
   const configuredElevenLabsVoiceOption = (
     defaultTtsProvider === 'elevenlabs' &&
     defaultTtsVoice !== elevenLabsDefaultVoice

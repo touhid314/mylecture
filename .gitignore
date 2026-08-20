@@ -11,7 +11,8 @@ tests/fixtures/*/resolved.html
 tests/fixtures/*/audio/
 outputs/
 *.mp4
-assets/
+assets/*
+!assets/logo-lockup.png
 !packages/lecture-agent/assets/
 !packages/lecture-agent/assets/world-basemap.svg
 models/kokoro-onnx/

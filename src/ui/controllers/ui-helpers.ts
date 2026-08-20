@@ -39,6 +39,7 @@ function setRenderOptionsVisible(visible) {
 }
 
 function selectedTtsProvider(select) {
+  if (!select) return configuredDefaults.ttsProvider;
   const option = select.options[select.selectedIndex];
   const group = option && option.closest('optgroup');
   return (group && group.dataset.provider) || configuredDefaults.ttsProvider;

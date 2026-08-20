@@ -28,6 +28,12 @@ export function renderRightSidebar(context = {}) {
             <input id="agent-generation-length-value" class="agent-range-value" type="text" value="${escapeHtml(defaultLengthLabel)}" aria-label="Generation length">
           </div>
         </div>
+        <label class="agent-field agent-voice-field" for="agent-tts-voice">
+          <span class="agent-field-label">Voice</span>
+          <select id="agent-tts-voice" class="agent-select">
+            <option value="${escapeHtml(defaultTtsVoice)}" selected>${escapeHtml(defaultTtsVoice)}</option>
+          </select>
+        </label>
         <label class="agent-field" for="agent-aspect-ratio">
           <span class="agent-field-label">AR</span>
           <select id="agent-aspect-ratio" class="agent-select">

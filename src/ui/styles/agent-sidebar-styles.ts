@@ -276,10 +276,9 @@ body.fullscreen-active #agent-bar {
   cursor: pointer;
   user-select: none;
 }
-.agent-theme-field {
-  grid-column: 1 / -1;
-}
-.agent-teaching-style-field {
+.agent-theme-field,
+.agent-teaching-style-field,
+.agent-voice-field {
   grid-column: 1 / -1;
 }
 .agent-checkbox {

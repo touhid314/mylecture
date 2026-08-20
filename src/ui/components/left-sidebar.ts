@@ -5,7 +5,7 @@ export function renderLeftSidebar(context = {}) {
 <aside id="folder-sidebar">
   <div id="sidebar-header">
     <div id="sidebar-brand" aria-label="MyLecture Local IDE">
-      <img id="sidebar-brand-logo" src="/assets/logo-lockup.png" alt="MyLecture" draggable="false">
+      <img id="sidebar-brand-logo" src="/assets/logo-lockup.png?v=4" alt="MyLecture" draggable="false">
       <span id="sidebar-brand-title">Local IDE</span>
     </div>
     <div>
