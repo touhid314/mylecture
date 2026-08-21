@@ -252,9 +252,10 @@ body.fullscreen-active #agent-bar {
   justify-self: end;
 }
 .agent-generation-toggle-group {
+  grid-column: 1 / -1;
   display: flex;
   align-items: center;
-  justify-content: flex-end;
+  justify-content: flex-start;
   gap: 12px;
   min-width: 0;
   flex-wrap: wrap;

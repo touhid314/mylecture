@@ -193,7 +193,8 @@ Theme and teaching-style IDs are sent as structured generation request fields;
 their Markdown bodies are not embedded in the browser prompt. Aspect ratio,
 length, getimg, and output selections remain local IDE settings.
 Subtitles are not generated into lecture HTML. Player captions use WebVTT sidecars
-written during resolve/render; the Render menu no longer burns subtitles into MP4.
+written during resolve/render. The Lecture Agent Embed captions checkbox puts a fixed HTML overlay in the lecture preview (Raw and Resolved) and in rendered frames.
+caption overlay into captured MP4 frames; player CC still uses WebVTT.
 
 ## Agent Resource Options
 

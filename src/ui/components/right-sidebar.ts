@@ -47,6 +47,10 @@ export function renderRightSidebar(context = {}) {
         </label>
         <div class="agent-generation-toggle-group">
           <label class="agent-subtitle-row">
+            <input id="render-burn-subtitle" class="agent-checkbox" type="checkbox" checked>
+            <span class="agent-check-label">Embed captions</span>
+          </label>
+          <label class="agent-subtitle-row">
             <input id="agent-enable-getimg" class="agent-checkbox" type="checkbox"${getimgChecked}>
             <span class="agent-check-label">Image download</span>
           </label>

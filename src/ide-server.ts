@@ -27,7 +27,7 @@ import {
 } from './lecture-agent-api-client.ts';
 import { loadAppConfig, resolveConfigPath } from './config.ts';
 import { writeLectureCaptionsVtt } from './captions-vtt.ts';
-import { isElevenLabsCatalogVoice } from './voice-allowlist.ts';
+import { isElevenLabsCatalogVoice, isInworldCatalogVoice, normalizeInworldVoiceId } from './voice-allowlist.ts';
 import {
   DEFAULT_ID_PATTERN,
   allocateFolderName,
@@ -1049,7 +1049,8 @@ function syncResolvedVisualFromSource(sourcePath, modifiedSource) {
 function normalizeTtsVoice(value) {
   const config = readAppConfig();
   const voice = String(value || '').trim();
-  return voice || config.tts.voice;
+  const resolved = voice || config.tts.voice;
+  return normalizeInworldVoiceId(resolved) ?? resolved;
 }
 
 function normalizeTtsProvider(value) {
@@ -1066,6 +1067,9 @@ function resolveTtsProvider(options, voice) {
   if (isElevenLabsCatalogVoice(voice)) {
     return 'elevenlabs';
   }
+  if (isInworldCatalogVoice(voice)) {
+    return 'inworld';
+  }
   if (voice === config.tts.voice) {
     return config.tts.provider;
   }
@@ -1078,6 +1082,10 @@ function detectProvider(voice) {
 
   if (isElevenLabsCatalogVoice(voice)) {
     return 'elevenlabs';
+  }
+
+  if (isInworldCatalogVoice(voice)) {
+    return 'inworld';
   }
 
   const omniVoices = new Set([
@@ -2309,6 +2317,9 @@ const server = createServer(async (request, response) => {
             task += `[Context: The folder browser is currently in the directory "${displayDirForAgent}" of the repository.]\n\n`;
           }
           task += message;
+          task += payload.embedCaptions
+            ? '\n\n[Embed captions: ON]'
+            : '\n\n[Embed captions: OFF]';
 
           if (isGenerationRequest) {
             if (agentState.activeJob) {

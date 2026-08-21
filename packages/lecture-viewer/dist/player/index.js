@@ -1046,15 +1046,12 @@ class LecturePlayer {
         this.emit('statechange', this.snapshot());
     }
     updateSubtitleOverlay() {
+        const activeSubtitle = this.state.subtitleTimeline.find(cue => this.state.time >= cue.start && this.state.time < cue.end);
+        const text = (!this.subtitlesEnabled || this.state.interactiveActive || this.state.gameActive)
+            ? ''
+            : (activeSubtitle?.text || '');
         if (!this.subtitleElement)
             return;
-        if (!this.subtitlesEnabled || this.state.interactiveActive || this.state.gameActive) {
-            this.subtitleElement.textContent = '';
-            this.subtitleElement.classList.remove('visible');
-            return;
-        }
-        const activeSubtitle = this.state.subtitleTimeline.find(cue => this.state.time >= cue.start && this.state.time < cue.end);
-        const text = activeSubtitle?.text || '';
         this.subtitleElement.textContent = text;
         this.subtitleElement.classList.toggle('visible', Boolean(text));
     }

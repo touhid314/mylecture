@@ -75,6 +75,18 @@ Providers available via this module:
      audio transcoding.
    - Optional alignment writes normalized character timings and derived word
      start/end timings to JSON.
+
+6) inworld
+   - Provider key: "inworld"
+   - API key is required via INWORLD_API_KEY (Authorization: Basic).
+   - Model defaults to inworld-tts-2 via INWORLD_TTS_MODEL.
+   - Voice defaults to happy-oriole-5206__mike (Mike) via INWORLD_TTS_VOICE.
+   - deliveryMode is CREATIVE for happy-oriole-5206__mike (Mike); otherwise
+     INWORLD_TTS_DELIVERY_MODE or BALANCED.
+   - language defaults to AUTO via INWORLD_TTS_LANGUAGE.
+   - previous_text maps to synthesisContext.previousRequests for cadence.
+   - Requests 24 kHz PCM and wraps it in a WAV container without transcoding.
+   - Optional alignment writes word start/end timings to JSON (timestampType WORD).
 """
 
 from __future__ import annotations
@@ -532,6 +544,165 @@ def _run_elevenlabs(
         "character_cost": character_cost,
         "words": _elevenlabs_word_alignment(chosen_alignment),
         "characters": chosen_alignment,
+    }
+    timing_path.write_text(
+        json.dumps(timing_data, ensure_ascii=False, indent=2) + "\n",
+        encoding="utf-8",
+    )
+
+
+@lru_cache(maxsize=1)
+def _inworld_settings() -> tuple[str, str]:
+    model = os.getenv("INWORLD_TTS_MODEL", "inworld-tts-2").strip()
+    voice = os.getenv("INWORLD_TTS_VOICE", "happy-oriole-5206__mike").strip()
+    return model, voice
+
+
+def _inworld_auth_header() -> str:
+    api_key = _require_env("INWORLD_API_KEY")
+    token = api_key[6:].strip() if api_key.lower().startswith("basic ") else api_key.strip()
+    return f"Basic {token}"
+
+
+_INWORLD_MIKE_VOICE_ID = "happy-oriole-5206__mike"
+
+
+def _inworld_delivery_mode(voice: str | None = None) -> str:
+    if (voice or "").strip().lower() == _INWORLD_MIKE_VOICE_ID:
+        return "CREATIVE"
+    return os.getenv("INWORLD_TTS_DELIVERY_MODE", "BALANCED").strip() or "BALANCED"
+
+
+def _inworld_language() -> str:
+    return os.getenv("INWORLD_TTS_LANGUAGE", "AUTO").strip()
+
+
+def _clamp_inworld_speaking_rate(speed: float) -> float:
+    return max(0.5, min(1.5, speed))
+
+
+def _inworld_word_alignment(word_alignment: Any) -> list[dict[str, Any]]:
+    words: list[dict[str, Any]] = []
+
+    if isinstance(word_alignment, dict):
+        words_raw = word_alignment.get("words")
+        starts = word_alignment.get("wordStartTimeSeconds")
+        ends = word_alignment.get("wordEndTimeSeconds")
+        if not all(isinstance(values, list) for values in (words_raw, starts, ends)):
+            raise RuntimeError("Inworld returned incomplete word alignment data.")
+        if not (len(words_raw) == len(starts) == len(ends)):
+            raise RuntimeError("Inworld returned mismatched word alignment arrays.")
+        for word, start, end in zip(words_raw, starts, ends):
+            word = str(word)
+            if not word.strip():
+                continue
+            words.append(
+                {
+                    "word": word,
+                    "start_seconds": float(start),
+                    "end_seconds": float(end),
+                }
+            )
+        return words
+
+    raise RuntimeError("Inworld returned no word alignment data.")
+
+
+def _run_inworld(
+    text: str,
+    output_path: Path,
+    voice: str,
+    speed: float,
+    alignment: bool,
+    alignment_output_path: str | None,
+    previous_text: str | None = None,
+    next_text: str | None = None,
+) -> None:
+    inworld_model, _ = _inworld_settings()
+    delivery_mode = _inworld_delivery_mode(voice)
+    language = _inworld_language()
+    speaking_rate = _clamp_inworld_speaking_rate(speed)
+
+    payload: dict[str, Any] = {
+        "text": text,
+        "voiceId": voice,
+        "modelId": inworld_model,
+        "audioConfig": {
+            "audioEncoding": "PCM",
+            "sampleRateHertz": 24000,
+            "speakingRate": speaking_rate,
+        },
+        "deliveryMode": delivery_mode,
+        "language": language,
+    }
+    if alignment:
+        payload["timestampType"] = "WORD"
+
+    prev = _truncate_elevenlabs_previous_text(previous_text)
+    if prev:
+        payload["synthesisContext"] = {"previousRequests": [{"text": prev}]}
+
+    request = Request(
+        "https://api.inworld.ai/tts/v1/voice",
+        data=json.dumps(payload).encode("utf-8"),
+        headers={
+            "Accept": "application/json",
+            "Content-Type": "application/json",
+            "Authorization": _inworld_auth_header(),
+        },
+        method="POST",
+    )
+
+    try:
+        with urlopen(request, timeout=120) as response:
+            response_body = response.read()
+    except HTTPError as exc:
+        detail = exc.read().decode("utf-8", errors="replace")
+        try:
+            detail = json.dumps(json.loads(detail), ensure_ascii=False)
+        except json.JSONDecodeError:
+            detail = detail[:1000]
+        raise RuntimeError(f"Inworld request failed ({exc.code}): {detail}") from exc
+    except URLError as exc:
+        raise RuntimeError(f"Could not reach Inworld: {exc.reason}") from exc
+
+    try:
+        response_json = json.loads(response_body)
+        audio_bytes = base64.b64decode(response_json["audioContent"], validate=True)
+    except (json.JSONDecodeError, KeyError, TypeError, ValueError) as exc:
+        raise RuntimeError("Inworld returned an invalid synthesis response.") from exc
+
+    parsed_words: list[dict[str, Any]] | None = None
+    timestamp_info: dict[str, Any] | None = None
+    if alignment:
+        timestamp_info_raw = response_json.get("timestampInfo")
+        if not isinstance(timestamp_info_raw, dict):
+            raise RuntimeError("Inworld returned no alignment data.")
+
+        word_alignment = timestamp_info_raw.get("wordAlignment")
+        if word_alignment is None:
+            raise RuntimeError("Inworld returned no word alignment data.")
+
+        parsed_words = _inworld_word_alignment(word_alignment)
+        timestamp_info = timestamp_info_raw
+
+    _save_wave(str(output_path), audio_bytes, rate=24000)
+
+    if not alignment:
+        return
+
+    timing_path = (
+        Path(alignment_output_path)
+        if alignment_output_path
+        else output_path.with_suffix(".alignment.json")
+    )
+    timing_path.parent.mkdir(parents=True, exist_ok=True)
+    timing_data = {
+        "text": text,
+        "voice_id": voice,
+        "model_id": inworld_model,
+        "words": parsed_words,
+        "timestampInfo": timestamp_info,
     }
     timing_path.write_text(
         json.dumps(timing_data, ensure_ascii=False, indent=2) + "\n",
@@ -1174,21 +1345,23 @@ def tts(
     Args:
         text: Input text to synthesize.
         provider: One of "openai", "google", "gemini", "kokoro",
-            "omnivoice", "elevenlabs", or "11labs".
+            "omnivoice", "elevenlabs", "11labs", or "inworld".
         voice: Provider voice name, voice ID, or local reference-voice folder.
             If omitted, the provider default is used.
         output_path: Output WAV file path or directory. If omitted, a timestamped
             WAV is created in the provider-specific default output directory.
             A path without a ".wav" suffix is treated as a directory.
-        speed: Optional speaking speed. Applied to Kokoro, OmniVoice, and
-            ElevenLabs and ignored by OpenAI and Google. Defaults to 1.0 for
-            Kokoro and ElevenLabs and 0.85 for OmniVoice. Must be greater than 0.
-        alignment: For ElevenLabs only, request timing data and write normalized
-            character alignment plus derived word start/end timings to JSON.
-        alignment_output_path: Optional ElevenLabs alignment JSON path. Defaults
-            to the audio path with an ".alignment.json" suffix.
-        previous_text: ElevenLabs only. Tail-truncated prior narration (prior scenes and cues) for continuity.
-        next_text: ElevenLabs only. Head-truncated following narration (later cues and scenes) for continuity.
+        speed: Optional speaking speed. Applied to Kokoro, OmniVoice, ElevenLabs,
+            and Inworld and ignored by OpenAI and Google. Defaults to 1.0 for
+            Kokoro, ElevenLabs, and Inworld and 0.85 for OmniVoice. Must be
+            greater than 0. Inworld speakingRate is clamped to [0.5, 1.5].
+        alignment: For ElevenLabs and Inworld, request timing data and write word
+            start/end timings to JSON.
+        alignment_output_path: Optional alignment JSON path. Defaults to the audio
+            path with an ".alignment.json" suffix.
+        previous_text: ElevenLabs and Inworld. Tail-truncated prior narration for
+            continuity (Inworld maps to synthesisContext.previousRequests).
+        next_text: ElevenLabs only. Head-truncated following narration for continuity.
 
     Returns:
         The generated WAV path as a string.
@@ -1223,7 +1396,15 @@ def tts(
             Will voice. Optional ELEVENLABS_STABILITY (default 0.7) and
             ELEVENLABS_SIMILARITY_BOOST (default 0.75) tune delivery consistency.
             previous_text / next_text improve cadence across cues. Alignment is
-            available only for this provider.
+            available for this provider.
+
+        inworld:
+            Requires INWORLD_API_KEY. Accepts an Inworld voice ID such as
+            happy-oriole-5206__mike (Mike), Reed, Sarah, Ashley, or Olivia.
+            Voice selection order is the explicit voice or INWORLD_TTS_VOICE
+            (default happy-oriole-5206__mike). Model defaults to
+            inworld-tts-2 via INWORLD_TTS_MODEL. previous_text improves cadence
+            across cues. Alignment is available for this provider.
 
         kokoro:
             Uses the configured KOKORO_* model, engine, device, phonemizer, and
@@ -1260,13 +1441,16 @@ def tts(
         "kokoro",
         "omnivoice",
         "elevenlabs",
+        "inworld",
     }:
         raise ValueError(
             "provider must be one of: openai, google, gemini, kokoro, "
-            "omnivoice, elevenlabs, 11labs"
+            "omnivoice, elevenlabs, 11labs, inworld"
         )
-    if alignment and chosen_provider != "elevenlabs":
-        raise ValueError("alignment is supported only for provider='elevenlabs'")
+    if alignment and chosen_provider not in {"elevenlabs", "inworld"}:
+        raise ValueError(
+            "alignment is supported only for provider='elevenlabs' or provider='inworld'"
+        )
     if alignment_output_path and not alignment:
         raise ValueError("alignment_output_path requires alignment=True")
 
@@ -1350,6 +1534,38 @@ def tts(
         )
         return str(out_path)
 
+    if chosen_provider == "inworld":
+        inworld_model, inworld_voice = _inworld_settings()
+        chosen_voice = (voice or inworld_voice).strip()
+        if not chosen_voice:
+            raise ValueError(
+                "Set an Inworld voice ID with voice= or INWORLD_TTS_VOICE."
+            )
+        chosen_speed = float(speed) if speed is not None else 1.0
+        if chosen_speed <= 0:
+            raise ValueError("speed must be greater than 0")
+        delivery_mode = _inworld_delivery_mode(chosen_voice)
+        language = _inworld_language()
+        clamped_speed = _clamp_inworld_speaking_rate(chosen_speed)
+        log.info(
+            f"Inworld config model={inworld_model} "
+            f"voice={chosen_voice} speed={clamped_speed} "
+            f"deliveryMode={delivery_mode} language={language} "
+            f"alignment={alignment} "
+            f"previous_text={'yes' if previous_text else 'no'}"
+        )
+        _run_inworld(
+            clean_text,
+            out_path,
+            chosen_voice,
+            chosen_speed,
+            alignment,
+            alignment_output_path,
+            previous_text,
+            next_text,
+        )
+        return str(out_path)
+
     if chosen_provider == "kokoro":
         k = _kokoro_settings()
         chosen_voice = (voice or k.voice).strip()
@@ -1388,7 +1604,7 @@ def _parse_cli_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         description=(
             "Generate WAV speech with OpenAI, Google, Kokoro, OmniVoice, "
-            "or ElevenLabs."
+            "ElevenLabs, or Inworld."
         )
     )
     parser.add_argument("--text", required=True, help="Text to synthesize.")
@@ -1397,7 +1613,7 @@ def _parse_cli_args(argv: list[str] | None = None) -> argparse.Namespace:
         default="openai",
         help=(
             "Provider: openai, google/gemini, kokoro, omnivoice, "
-            "or elevenlabs/11labs (default: openai)."
+            "elevenlabs/11labs, or inworld (default: openai)."
         ),
     )
     parser.add_argument(
@@ -1410,17 +1626,17 @@ def _parse_cli_args(argv: list[str] | None = None) -> argparse.Namespace:
         "--speed",
         type=float,
         default=None,
-        help="Kokoro, OmniVoice, or ElevenLabs speaking speed.",
+        help="Kokoro, OmniVoice, ElevenLabs, or Inworld speaking speed.",
     )
     parser.add_argument(
         "--alignment",
         action="store_true",
-        help="For ElevenLabs, save word and character timing JSON.",
+        help="For ElevenLabs or Inworld, save word timing JSON.",
     )
     parser.add_argument(
         "--alignment-output",
         default=None,
-        help="ElevenLabs alignment JSON path.",
+        help="Alignment JSON path for ElevenLabs or Inworld.",
     )
     return parser.parse_args(argv)
 

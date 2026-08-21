@@ -12,15 +12,11 @@ agent:
   defaultLengthSeconds: 120
 
 tts:
-  provider: "elevenlabs" # openai, google/gemini, kokoro, omnivoice, elevenlabs/11labs
-  voice: "iP95p4xoKVk53GoZ742B" # Chris
+  provider: "inworld" # openai, google/gemini, kokoro, omnivoice, elevenlabs/11labs, inworld
+  voice: "happy-oriole-5206__mike" # Mike (custom Inworld); Reed; Chris = iP95p4xoKVk53GoZ742B (ElevenLabs)
   speed: 1
 
 render:
   fps: 30
   baseWidth: 1920
   baseHeight: 1080
-  burnSubtitle: false
-  subtitleFont: "Arial"
-  subtitleFontSize: 48
-  subtitleBottomPercent: 8

@@ -72,6 +72,7 @@ const renderTtsVoice = document.getElementById('render-tts-voice');
 const renderTtsSpeed = document.getElementById('render-tts-speed');
 const renderFps = document.getElementById('render-fps');
 const renderResolution = document.getElementById('render-resolution');
+const renderBurnSubtitle = document.getElementById('render-burn-subtitle');
 const frameWrap = document.getElementById('frame-wrap');
 const previewShell = document.getElementById('preview-shell');
 let frame = document.getElementById('preview');

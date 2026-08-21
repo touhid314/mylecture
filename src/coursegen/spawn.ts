@@ -2,7 +2,7 @@ import { existsSync, mkdirSync, readdirSync, renameSync, rmSync, statSync, unlin
 import { spawn } from 'node:child_process';
 import path from 'node:path';
 import { loadAppConfig } from '../config.ts';
-import { isElevenLabsCatalogVoice } from '../voice-allowlist.ts';
+import { isElevenLabsCatalogVoice, isInworldCatalogVoice, normalizeInworldVoiceId } from '../voice-allowlist.ts';
 import {
   generateLectureViaAgentApi,
   renderViaAgentApi,
@@ -145,7 +145,8 @@ export const spawnLectureGen = spawnAgent;
 
 function normalizeTtsVoice(value?: string) {
   const voice = String(value || '').trim();
-  return voice || DEFAULT_COURSEGEN_TTS_VOICE;
+  const resolved = voice || DEFAULT_COURSEGEN_TTS_VOICE;
+  return normalizeInworldVoiceId(resolved) ?? resolved;
 }
 
 function normalizeTtsSpeed(value?: string | number) {
@@ -159,6 +160,9 @@ function resolveTtsProvider(voice: string, explicit?: string) {
   if (explicit) return explicit;
   if (isElevenLabsCatalogVoice(voice)) {
     return 'elevenlabs';
+  }
+  if (isInworldCatalogVoice(voice)) {
+    return 'inworld';
   }
   if (voice === config.tts.voice) return config.tts.provider;
   const v = voice.toLowerCase();

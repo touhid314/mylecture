@@ -4,11 +4,24 @@ export const ELEVENLABS_VOICES = [
   { id: "BtWabtumIemAotTjP5sk", label: "Robert" },
 ] as const;
 
+export const INWORLD_VOICES = [
+  { id: "happy-oriole-5206__mike", label: "Mike" },
+  { id: "Reed", label: "Reed" },
+  { id: "Sarah", label: "Sarah" },
+  { id: "Ashley", label: "Ashley" },
+  { id: "Olivia", label: "Olivia" },
+] as const;
+
 export const ELEVENLABS_VOICE_IDS = new Set<string>(
   ELEVENLABS_VOICES.map((voice) => voice.id),
 );
 
+export const INWORLD_VOICE_IDS = new Set<string>(
+  INWORLD_VOICES.map((voice) => voice.id),
+);
+
 export const DEFAULT_ELEVENLABS_VOICE_ID = ELEVENLABS_VOICES[0].id;
+export const DEFAULT_INWORLD_VOICE_ID = INWORLD_VOICES[0].id;
 
 const LEGACY_ELEVENLABS_VOICE_IDS: Record<string, string> = {
   "21m00Tcm4TlvDq8ikWAM": "iP95p4xoKVk53GoZ742B",
@@ -43,6 +56,18 @@ export function isElevenLabsCatalogVoice(voice: string | null | undefined): bool
   const trimmed = String(voice ?? "").trim();
   if (!trimmed) return false;
   return Boolean(LEGACY_ELEVENLABS_VOICE_IDS[trimmed]) || ELEVENLABS_VOICE_IDS.has(trimmed);
+}
+
+export function normalizeInworldVoiceId(voice: string | null | undefined): string | null {
+  const trimmed = String(voice ?? "").trim();
+  if (!trimmed) return null;
+
+  const match = INWORLD_VOICES.find((entry) => entry.id.toLowerCase() === trimmed.toLowerCase());
+  return match?.id ?? null;
+}
+
+export function isInworldCatalogVoice(voice: string | null | undefined): boolean {
+  return normalizeInworldVoiceId(voice) !== null;
 }
 
 export function isKnownRenderVoice(voice: string): boolean {

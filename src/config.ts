@@ -42,8 +42,8 @@ const defaultConfig: AppConfig = {
     defaultLengthSeconds: 60
   },
   tts: {
-    provider: 'elevenlabs',
-    voice: 'iP95p4xoKVk53GoZ742B',
+    provider: 'inworld',
+    voice: 'happy-oriole-5206__mike',
     speed: 1
   },
   render: {

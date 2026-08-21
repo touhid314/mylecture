@@ -1,7 +1,10 @@
 /**
  * Canonical TTS text normalizer (single source for Live TTS and build-plan).
  * Captions keep the original text; only spoken output is rewritten.
+ *
+ * Pronunciation exceptions live in tts-pronunciation-overrides.ts.
  */
+import { TTS_PRONUNCIATION_OVERRIDES } from './tts-pronunciation-overrides.js';
 const ONES = [
     'zero', 'one', 'two', 'three', 'four', 'five', 'six', 'seven', 'eight', 'nine',
     'ten', 'eleven', 'twelve', 'thirteen', 'fourteen', 'fifteen', 'sixteen', 'seventeen',
@@ -208,8 +211,44 @@ function expandRemainingNumbers(text) {
         return numericTokenToWords(match);
     });
 }
+function escapeRegExp(value) {
+    return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+function isLowercaseWordKey(key) {
+    return /^[a-z]+(?:['-][a-z]+)*$/.test(key);
+}
+/**
+ * Lowercase keys also match sentence case (`cosine` + `Cosine`).
+ * ALL CAPS keys stay exact so `US` never rewrites `us`.
+ */
+function overridePattern(key) {
+    if (isLowercaseWordKey(key)) {
+        const titled = `${key.charAt(0).toUpperCase()}${key.slice(1)}`;
+        return new RegExp(`\\b(?:${escapeRegExp(key)}|${escapeRegExp(titled)})\\b`, 'g');
+    }
+    if (/^\w+$/.test(key)) {
+        return new RegExp(`\\b${escapeRegExp(key)}\\b`, 'g');
+    }
+    return new RegExp(escapeRegExp(key), 'g');
+}
+/** Replace listed tokens with their spoken form. Longer keys win. */
+function applyPronunciationOverrides(text) {
+    const keys = Object.keys(TTS_PRONUNCIATION_OVERRIDES).sort((left, right) => right.length - left.length);
+    let result = text;
+    for (const key of keys) {
+        const spoken = TTS_PRONUNCIATION_OVERRIDES[key];
+        if (!key || spoken == null)
+            continue;
+        result = result.replace(overridePattern(key), spoken);
+    }
+    return result;
+}
 function spaceAcronyms(text) {
-    return text.replace(/\b[A-Z]{2,6}\b/g, (match) => match.split('').join(' '));
+    return text.replace(/\b[A-Z]{2,6}\b/g, (match) => {
+        if (Object.hasOwn(TTS_PRONUNCIATION_OVERRIDES, match))
+            return match;
+        return match.split('').join(' ');
+    });
 }
 function collapseSpaces(text) {
     return text.replace(/ {2,}/g, ' ');
@@ -223,6 +262,7 @@ export function normalizeTtsText(text) {
     result = expandOrdinals(result);
     result = expandNegativeNumbers(result);
     result = expandRemainingNumbers(result);
+    result = applyPronunciationOverrides(result);
     result = spaceAcronyms(result);
     result = collapseSpaces(result);
     return result;

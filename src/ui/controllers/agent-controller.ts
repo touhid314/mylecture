@@ -313,7 +313,7 @@ function fillTtsVoiceSelect(select, tts) {
   select.innerHTML = '';
   let hasSelection = false;
   for (const provider of tts.providers) {
-    if (provider.id !== 'omnivoice' && provider.id !== 'elevenlabs') continue;
+    if (provider.id !== 'omnivoice' && provider.id !== 'elevenlabs' && provider.id !== 'inworld') continue;
     if (!Array.isArray(provider.voices) || provider.voices.length === 0) continue;
     const group = document.createElement('optgroup');
     group.label = provider.label + (provider.configured === false ? ' (not configured)' : '');
@@ -427,6 +427,7 @@ async function sendChat() {
         currentDir: currentBrowserFolder,
         themeId: requestPhase === 'generate' && agentTheme ? agentTheme.value : undefined,
         teachingStyleId: requestPhase === 'generate' && agentTeachingStyle ? agentTeachingStyle.value : undefined,
+        embedCaptions: renderBurnSubtitle ? renderBurnSubtitle.checked : true,
         ...(requestPhase === 'generate' ? (
           agentTtsVoice && agentTtsVoice.value
             ? {
