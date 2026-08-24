@@ -428,17 +428,17 @@ async function sendChat() {
         themeId: requestPhase === 'generate' && agentTheme ? agentTheme.value : undefined,
         teachingStyleId: requestPhase === 'generate' && agentTeachingStyle ? agentTeachingStyle.value : undefined,
         embedCaptions: renderBurnSubtitle ? renderBurnSubtitle.checked : true,
-        ...(requestPhase === 'generate' ? (
-          agentTtsVoice && agentTtsVoice.value
-            ? {
-                ttsVoice: agentTtsVoice.value,
-                ttsProvider: selectedTtsProvider(agentTtsVoice)
-              }
-            : {
-                ttsVoice: configuredDefaults.ttsVoice,
-                ttsProvider: configuredDefaults.ttsProvider
-              }
-        ) : {})
+        ...(agentTtsVoice && agentTtsVoice.value
+          ? {
+              ttsVoice: agentTtsVoice.value,
+              ttsProvider: selectedTtsProvider(agentTtsVoice),
+              ttsSpeed: resolveTtsSpeed.value || configuredDefaults.ttsSpeed,
+            }
+          : {
+              ttsVoice: configuredDefaults.ttsVoice,
+              ttsProvider: configuredDefaults.ttsProvider,
+              ttsSpeed: resolveTtsSpeed.value || configuredDefaults.ttsSpeed,
+            })
       })
     });
     

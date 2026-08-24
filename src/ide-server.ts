@@ -2320,6 +2320,14 @@ const server = createServer(async (request, response) => {
           task += payload.embedCaptions
             ? '\n\n[Embed captions: ON]'
             : '\n\n[Embed captions: OFF]';
+          if (!isGenerationRequest) {
+            const editTtsVoice = normalizeTtsVoice(payload.ttsVoice);
+            const editTtsProvider = resolveTtsProvider(
+              { ttsProvider: payload.ttsProvider },
+              editTtsVoice
+            );
+            task += `\n\n[Current TTS settings for narration tools: provider=${editTtsProvider}; voice=${editTtsVoice}; speed=${normalizeTtsSpeed(payload.ttsSpeed)}. Pass these exact values unless the user explicitly requests a different voice or speed.]`;
+          }
 
           if (isGenerationRequest) {
             if (agentState.activeJob) {
@@ -2464,7 +2472,8 @@ const server = createServer(async (request, response) => {
                 workspaceDir: agentWorkspaceRoot(agentState.id),
                 sessionId: agentState.sessionId || path.basename(agentWorkspaceRoot(agentState.id)),
                 model: payload.model || process.env.AGENT_MODEL || "gemini-3.5-flash",
-                tokenTrackerSessionId: agentState.sessionId || path.basename(agentWorkspaceRoot(agentState.id))
+                tokenTrackerSessionId: agentState.sessionId || path.basename(agentWorkspaceRoot(agentState.id)),
+                enableNarrationTools: true
               }, {
                 signal: abortController.signal,
                 onLog: (text) => {

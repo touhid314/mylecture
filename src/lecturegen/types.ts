@@ -20,7 +20,6 @@ export type LectureGenProgressStage =
   | "scene-generation"
   | "scene-validation"
   | "scene-repair"
-  | "narration-review"
   | "source-ready";
 
 /** Public-safe, monotonically ordered progress for one source version. */

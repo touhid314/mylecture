@@ -82,15 +82,6 @@ export function createProgressInterpreter(): (line: string) => ProgressUpdate | 
       };
     }
 
-    if (/Running narration quality review|Re-running narration quality review/i.test(line)) {
-      return {
-        stage: "narration-review",
-        message: "Reviewing narration",
-        completedScenes: state.completedScenes,
-        totalScenes: state.totalScenes || undefined,
-      };
-    }
-
     return null;
   };
 }

@@ -1,10 +1,8 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { isScriptReviewEnabled } from "../../src/lecturegen/script-gate.ts";
 
-test("activity-only pipeline should skip script gate when video disabled", () => {
+test("activity-only pipeline should skip video HTML load when video disabled", () => {
   const includeVideo = false;
-  const shouldRunGate = includeVideo;
-  assert.equal(shouldRunGate, false);
-  assert.equal(typeof isScriptReviewEnabled(), "boolean");
+  const shouldLoadVideoHtml = includeVideo;
+  assert.equal(shouldLoadVideoHtml, false);
 });

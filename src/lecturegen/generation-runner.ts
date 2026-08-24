@@ -33,7 +33,6 @@ import {
   setProgressCallbackPending,
 } from "./job-store.ts";
 import { createProgressInterpreter, type ProgressUpdate } from "./progress.ts";
-import { runScriptGate } from "./script-gate.ts";
 import { downloadWorkspaceFromStorage } from "./source-bundle.ts";
 import {
   putIntermediateText,
@@ -301,29 +300,9 @@ export async function runCreateJob(
     });
 
     let sourceHtml: string | null = null;
-    let repairTokens: { input: number; output: number } | null = null;
 
     if (includeVideo) {
-      const gate = await runScriptGate({
-        htmlPath: result.entryFile,
-        htmlPaths: result.videoFiles,
-        userPrompt: request.prompt,
-        workspaceDir: result.workspaceDir,
-        model,
-        tokenTrackerSessionId: generationId,
-        targetSeconds: request.targetSeconds,
-        onLog: progress.onLog,
-        signal: controller.signal,
-      });
-
-      if (!gate.scriptReview.passed) {
-        const detail =
-          gate.scriptReview.findings.join("; ") || "Script review failed";
-        throw new Error(detail);
-      }
-
-      sourceHtml = gate.html;
-      repairTokens = gate.extraTokens;
+      sourceHtml = await readFile(result.entryFile, "utf-8");
     }
 
     const sourceVersion = record.sourceVersion;
@@ -345,7 +324,6 @@ export async function runCreateJob(
     const usage = buildJobUsageFromSessions({
       model,
       sessionIds: [generationId],
-      repairTokens,
     });
     setJobUsage(generationId, usage);
 
@@ -467,27 +445,9 @@ export async function runEditJob(
     }
 
     let sourceHtml: string | null = null;
-    let repairTokens: { input: number; output: number } | null = null;
 
     if (includeVideo && existsSync(indexPath)) {
-      const gate = await runScriptGate({
-        htmlPath: indexPath,
-        userPrompt: request.instruction,
-        workspaceDir,
-        model,
-        tokenTrackerSessionId: generationId,
-        onLog: progress.onLog,
-        signal: controller.signal,
-      });
-
-      if (!gate.scriptReview.passed) {
-        const detail =
-          gate.scriptReview.findings.join("; ") || "Script review failed";
-        throw new Error(detail);
-      }
-
-      sourceHtml = gate.html;
-      repairTokens = gate.extraTokens;
+      sourceHtml = await readFile(indexPath, "utf-8");
     }
 
     await persistSource(generationId, sourceVersion, sourceHtml, workspaceDir);
@@ -510,7 +470,6 @@ export async function runEditJob(
     const usage = buildJobUsageFromSessions({
       model,
       sessionIds: [generationId],
-      repairTokens,
     });
     setJobUsage(generationId, usage);
 
