@@ -2,6 +2,7 @@ import { app, BrowserWindow, ipcMain, protocol, net, shell, dialog, Menu, native
 import { lecturegenCatalog } from "./lecturegen/run.js";
 import path from "node:path";
 import fs from "node:fs";
+import { execFileSync } from "node:child_process";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { createEngines, API_PROVIDERS } from "./engines/index.js";
 import { createUsageService } from "./usage.js";
@@ -20,6 +21,24 @@ const DEV = process.argv.includes("--dev");
 
 app.setName("MyLecture");
 if (process.platform === "win32") app.setAppUserModelId("ai.mylecture.app");
+fixPathForGuiLaunch();
+
+// Apps opened from Finder (or the Dock) do not inherit the shell's PATH, so
+// agent CLIs installed with Homebrew, npm or the official installers would
+// not be found. Take PATH from the user's login shell, plus the usual places.
+function fixPathForGuiLaunch() {
+  if (process.platform === "win32") return;
+  const home = process.env.HOME || "";
+  const parts = (process.env.PATH || "").split(":");
+  try {
+    const shell = process.env.SHELL || (process.platform === "darwin" ? "/bin/zsh" : "/bin/bash");
+    const out = execFileSync(shell, ["-ilc", 'printf "__ML_PATH__%s__ML_PATH__" "$PATH"'], { encoding: "utf8", timeout: 5000, stdio: ["ignore", "pipe", "ignore"] });
+    const m = out.match(/__ML_PATH__(.*)__ML_PATH__/s);
+    if (m) parts.unshift(...m[1].split(":"));
+  } catch {}
+  parts.push("/opt/homebrew/bin", "/usr/local/bin", `${home}/.local/bin`, `${home}/.npm-global/bin`, `${home}/.claude/local`, `${home}/.bun/bin`, "/usr/bin", "/bin");
+  process.env.PATH = [...new Set(parts.filter(Boolean))].join(":");
+}
 
 protocol.registerSchemesAsPrivileged([
   { scheme: "mylecture", privileges: { standard: true, secure: true, supportFetchAPI: true, stream: true, corsEnabled: true } },
@@ -41,7 +60,6 @@ function resolveAppUrl(u) {
     ["vendor/katex/", path.join(NM, "katex", "dist")],
     ["vendor/hljs/", path.join(NM, "@highlightjs", "cdn-assets")],
     ["vendor/fonts/", path.join(NM, "@fontsource")],
-    ["vendor/monaco/", path.join(NM, "monaco-editor", "min")],
     ["vendor/markdown-it/", path.join(NM, "markdown-it", "dist")],
     ["tts/", paths.tts],
     ["lib/", paths.library],
@@ -364,16 +382,85 @@ app.whenReady().then(() => {
     if (getSettings().voiceEngine === "omnivoice") tts.omni.start().catch(() => {});
   }
 
-  if (process.argv.includes("--smoke-test")) {
-    console.log("SMOKE_TEST_OK");
-    setTimeout(() => {
-      tts?.stop();
-      app.quit();
-    }, 1500);
-  }
+  if (process.argv.includes("--smoke-test")) runSmokeTest();
 });
 
 app.on("window-all-closed", () => {
   tts?.stop();
   app.quit();
 });
+
+// --smoke-test: the packaged app starts, the UI boots into Create, then quits.
+// CI reads the result from MYLECTURE_SMOKE_OUT (GUI apps have no console on Windows).
+function runSmokeTest() {
+  const report = (ok, detail) => {
+    const line = `${ok ? "SMOKE_TEST_OK" : "SMOKE_TEST_FAILED"} ${detail}`;
+    console.log(line);
+    if (process.env.MYLECTURE_SMOKE_OUT) {
+      try {
+        fs.writeFileSync(process.env.MYLECTURE_SMOKE_OUT, line + "\n", "utf8");
+      } catch {}
+    }
+    tts?.stop();
+    app.exit(ok ? 0 : 1);
+  };
+  const timer = setTimeout(() => report(false, "timed out"), process.env.MYLECTURE_SMOKE_DEEP ? 900000 : 60000);
+  const check = async () => {
+    try {
+      const r = await win.webContents.executeJavaScript(`({ view: document.querySelector(".view.active")?.id || "", tabs: [...document.querySelectorAll(".rail-btn[data-view]")].map(b => b.dataset.view).join(",") })`);
+      if (r.view === "view-create") {
+        const deep = process.env.MYLECTURE_SMOKE_DEEP ? await deepSmoke() : "";
+        clearTimeout(timer);
+        report(true, `${process.platform}-${process.arch} ${app.getVersion()} tabs=${r.tabs}${deep}`);
+      } else setTimeout(check, 500);
+    } catch (e) {
+      if (e?.smoke) return report(false, e.message);
+      setTimeout(check, 500);
+    }
+  };
+  win.webContents.once("did-finish-load", () => setTimeout(check, 500));
+}
+
+// MYLECTURE_SMOKE_DEEP=1: also exercise what packaging can break — the
+// Kokoro voice (transformers + onnxruntime), ffmpeg, and the scene checker.
+async function deepSmoke() {
+  const fail = (what, e) => Object.assign(new Error(`${what}: ${e?.message || e}`), { smoke: true });
+  const parts = [];
+  try {
+    tts.startKokoro();
+    const r = await tts.synth("MyLecture is ready.", { engine: "kokoro" });
+    if (!(r?.dur > 0)) throw new Error("no audio");
+    parts.push(`kokoro=${r.dur.toFixed(2)}s`);
+  } catch (e) {
+    throw fail("kokoro", e);
+  }
+  try {
+    const { ffmpegPath } = await import("./exporter.js");
+    const out = execFileSync(ffmpegPath(), ["-hide_banner", "-version"], { encoding: "utf8", timeout: 20000 });
+    parts.push(`ffmpeg=${out.split(" ")[2] || "ok"}`);
+  } catch (e) {
+    throw fail("ffmpeg", e);
+  }
+  try {
+    const { lecturegen } = await import("./lecturegen/run.js");
+    const lg = await lecturegen();
+    const dir = fs.mkdtempSync(path.join(app.getPath("temp"), "ml-smoke-"));
+    fs.writeFileSync(path.join(dir, "index1.html"), `<!doctype html><html><head><style>body{margin:0;width:1920px;height:1080px;overflow:hidden}</style></head><body><h1 id="t">Hi</h1><script>
+window.__VIDEO_METADATA__={contractVersion:"0.2",title:"Smoke",aspectRatio:"16:9"};
+const VIDEO_PLAN=[{id:"i1",kind:"narration+visual",audio:"audio/i1.wav",text:"Hello."}];window.__VIDEO_PLAN__=VIDEO_PLAN;
+function renderSection(s,l,g){document.getElementById("t").style.opacity=String(Math.min(1,l));}
+window.__RENDER_SECTION__=renderSection;renderSection(VIDEO_PLAN[0],0,0);
+</script></body></html>`);
+    const browser = await lg.chromium.launch();
+    try {
+      const v = await lg.validateHtmlInBrowser("index1.html", dir, browser, { width: 1920, height: 1080 });
+      if (!String(v).includes("validation passed")) throw new Error(v);
+    } finally {
+      await browser.close();
+    }
+    parts.push("validator=ok");
+  } catch (e) {
+    throw fail("validator", e);
+  }
+  return " " + parts.join(" ");
+}

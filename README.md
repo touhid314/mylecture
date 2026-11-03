@@ -1,13 +1,15 @@
 # MyLecture
 
-> **Open-Source AI Study App & Video Creation IDE for Windows**  
+> **Open-source AI video lesson studio for Windows and macOS**  
 > Ask a question, read the streamed answer, then explore it with narrated, animated visuals.
 
 ---
 
 ## Overview
 
-**MyLecture** is a local-first Windows application built with Electron. Study streams a text answer first, then turns that answer into **synchronized voice and interactive visuals**.
+**MyLecture** is a local-first desktop application (Windows and macOS) built with Electron. It is the evolution of the MyLecture local IDE (last state: tag `local-ide-final`, branch `archive/local-ide`). Study streams a text answer first, then turns that answer into **synchronized voice and interactive visuals**.
+
+> On `main`, only **Create** ships. **Study** is under development on the `feature/study` branch (`app/js/features.js` turns it on).
 
 The app is designed with two core modes:
 1. **Study Mode (Tutor)**: Ask any question on algorithms, physics, calculus, machine learning, biology, or economics. The AI starts with a streaming text answer whose length fits the question and conversation, then creates narrated visuals from that answer.
@@ -108,7 +110,7 @@ mylecture-app/
 ## Getting Started
 
 ### Prerequisites
-- Windows 10/11 (64-bit)
+- Windows 10/11 (64-bit) or macOS 12+ (Apple silicon or Intel)
 - Node.js v20+ or v24+
 - (Recommended) Google Antigravity CLI (`agy`) or Codex CLI installed and logged in.
 
@@ -138,12 +140,26 @@ npm run dev
 npm test
 ```
 
-### Building the Windows Installer
+### Building installers
 
 ```powershell
-npm run dist
+npm run dist:win   # Windows: NSIS installer + portable .exe in dist/
+npm run dist:mac   # macOS (run on a Mac): .dmg + .zip in dist/
+npm run smoke      # launch the packaged app and check it boots into Create
 ```
-Outputs an NSIS installer and a portable Windows executable in `dist/`.
+
+### Releasing
+
+Push a version tag; GitHub Actions builds Windows x64, macOS Apple silicon and macOS Intel,
+launches each packaged app (speech, ffmpeg and the scene checker included), and opens a
+draft GitHub Release with the installers:
+
+```powershell
+git tag v0.2.0
+git push origin v0.2.0
+```
+
+See [docs/RELEASING.md](docs/RELEASING.md) for signing and how to test the macOS builds.
 
 ---
 

@@ -2,7 +2,7 @@
   "name": "mylecture",
   "productName": "MyLecture",
   "version": "0.1.0",
-  "description": "MyLecture — an open-source study app that answers every question with a narrated, animated video lesson.",
+  "description": "MyLecture \u2014 an open-source study app that answers every question with a narrated, animated video lesson.",
   "main": "electron/main.js",
   "type": "module",
   "license": "MIT",
@@ -11,7 +11,10 @@
     "start": "electron .",
     "dev": "electron . --dev",
     "test": "node --test \"tests/**/*.test.js\"",
-    "dist": "electron-builder --win"
+    "dist": "electron-builder --publish never",
+    "dist:win": "electron-builder --win --x64 --publish never",
+    "dist:mac": "electron-builder --mac --publish never",
+    "smoke": "node scripts/smoke-packaged.mjs"
   },
   "dependencies": {
     "@fontsource/architects-daughter": "^5.3.0",
@@ -34,20 +37,72 @@
   "build": {
     "appId": "ai.mylecture.app",
     "productName": "MyLecture",
-    "win": {
-      "target": [
-        "nsis",
-        "portable"
-      ],
-      "icon": "build/icon.ico"
+    "artifactName": "MyLecture-${version}-${os}-${arch}.${ext}",
+    "directories": {
+      "output": "dist",
+      "buildResources": "build"
     },
     "files": [
       "app/**/*",
       "electron/**/*",
-      "package.json"
+      "package.json",
+      "!**/*.map",
+      "!**/.cache/**",
+      "!node_modules/@huggingface/transformers/{src,types}/**",
+      "!node_modules/@huggingface/transformers/dist/*.{wasm,jsep.mjs}",
+      "!node_modules/@huggingface/transformers/dist/transformers{,.min,.web,.web.min}.js",
+      "!node_modules/onnxruntime-web/**",
+      "!node_modules/monaco-editor/**",
+      "!node_modules/**/{README,CHANGELOG,HISTORY}*",
+      "!node_modules/**/*.d.ts"
     ],
     "asarUnpack": [
       "node_modules/ffmpeg-static/**/*"
-    ]
+    ],
+    "win": {
+      "target": [
+        {
+          "target": "nsis",
+          "arch": [
+            "x64"
+          ]
+        },
+        {
+          "target": "portable",
+          "arch": [
+            "x64"
+          ]
+        }
+      ],
+      "icon": "build/icon.ico",
+      "files": [
+        "!node_modules/onnxruntime-node/bin/napi-v3/{linux,darwin}/**"
+      ]
+    },
+    "portable": {
+      "artifactName": "MyLecture-${version}-win-${arch}-portable.${ext}"
+    },
+    "nsis": {
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true,
+      "perMachine": false
+    },
+    "mac": {
+      "target": [
+        "dmg",
+        "zip"
+      ],
+      "icon": "build/icon-mac.png",
+      "category": "public.app-category.education",
+      "hardenedRuntime": true,
+      "entitlements": "build/entitlements.mac.plist",
+      "entitlementsInherit": "build/entitlements.mac.plist",
+      "files": [
+        "!node_modules/onnxruntime-node/bin/napi-v3/{linux,win32}/**"
+      ]
+    },
+    "dmg": {
+      "artifactName": "MyLecture-${version}-mac-${arch}.${ext}"
+    }
   }
 }
