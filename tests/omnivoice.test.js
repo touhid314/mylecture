@@ -7,8 +7,9 @@ import { fileURLToPath } from "node:url";
 import { OmniVoice, OMNIVOICE_VOICES, resolveOmniPython } from "../electron/tts/omnivoice.js";
 
 test("every advertised OmniVoice reference includes bundled audio and a transcript", () => {
-  const base = fileURLToPath(new URL("../electron/tts/voices/", import.meta.url));
+  const bases = ["../electron/tts/voices/", "../voices-dev/"].map((u) => fileURLToPath(new URL(u, import.meta.url)));
   for (const [id] of OMNIVOICE_VOICES) {
+    const base = bases.find((b) => fs.existsSync(path.join(b, id, "reference.wav")));
     const wav = fs.readFileSync(path.join(base, id, "reference.wav"));
     assert.equal(wav.toString("ascii", 0, 4), "RIFF", id);
     assert(wav.length > 1000, id);
@@ -64,4 +65,10 @@ test("OmniVoice rejects staging failures and can retry after the directory is re
     voice.stop();
     fs.rmSync(dir, { recursive: true, force: true });
   }
+});
+
+test("release builds leave out the Johnny Harris voice clone", () => {
+  const pkg = JSON.parse(fs.readFileSync(new URL("../package.json", import.meta.url), "utf8"));
+  assert.ok(!pkg.build.files.some((f) => typeof f === "string" && /voices-dev/.test(f) && !f.startsWith("!")));
+  assert.ok(!fs.existsSync(new URL("../electron/tts/voices/johnny-harris", import.meta.url)));
 });

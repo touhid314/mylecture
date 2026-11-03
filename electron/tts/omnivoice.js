@@ -6,11 +6,17 @@ import { fileURLToPath } from "node:url";
 import { killTree } from "../engines/cli-util.js";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
-export const OMNIVOICE_VOICES = [
+const ALL_VOICES = [
   ["maruf", "Maruf"], ["mike", "Mike"],
   ["american-male-1", "American male 1"], ["american-male-2", "American male 2"],
   ["american-male-3", "American male 3"], ["johnny-harris", "Johnny Harris"],
 ];
+// Reference voices ship in electron/tts/voices. Voices that must not ship in
+// releases (e.g. clones of real people) live in voices-dev/ at the repo root,
+// which packaging never includes; they are offered only when present.
+const VOICE_DIRS = [path.join(here, "voices"), path.resolve(here, "../../voices-dev")];
+const voiceDir = (id) => VOICE_DIRS.map((d) => path.join(d, id)).find((d) => fs.existsSync(path.join(d, "reference.wav")));
+export const OMNIVOICE_VOICES = ALL_VOICES.filter(([id]) => voiceDir(id));
 
 export function resolveOmniPython(configured = "") {
   if (configured.trim()) return configured.trim();
@@ -43,7 +49,7 @@ export class OmniVoice extends EventEmitter {
       const runtime = path.join(this.modelDir, "omnivoice-runtime");
       fs.mkdirSync(runtime, { recursive: true });
       fs.copyFileSync(path.join(here, "omnivoice-worker.py"), path.join(runtime, "worker.py"));
-      fs.cpSync(path.join(here, "voices"), path.join(runtime, "voices"), { recursive: true });
+      for (const [id] of OMNIVOICE_VOICES) fs.cpSync(voiceDir(id), path.join(runtime, "voices", id), { recursive: true });
       child = spawn(resolveOmniPython(this.getSettings().omnivoicePython), ["-u", path.join(runtime, "worker.py")], {
         windowsHide: true, stdio: ["pipe", "pipe", "pipe"],
         env: { ...process.env, PYTHONIOENCODING: "utf-8", ML_OMNIVOICE_VOICES: path.join(runtime, "voices") },

@@ -2,7 +2,7 @@
   "name": "mylecture",
   "productName": "MyLecture",
   "version": "0.1.0",
-  "description": "MyLecture \u2014 an open-source study app that answers every question with a narrated, animated video lesson.",
+  "description": "MyLecture — an open-source study app that answers every question with a narrated, animated video lesson.",
   "main": "electron/main.js",
   "type": "module",
   "license": "MIT",
@@ -76,6 +76,9 @@
       ],
       "icon": "build/icon.ico",
       "files": [
+        "app/**/*",
+        "electron/**/*",
+        "package.json",
         "!node_modules/onnxruntime-node/bin/napi-v3/{linux,darwin}/**"
       ]
     },
@@ -98,6 +101,9 @@
       "entitlements": "build/entitlements.mac.plist",
       "entitlementsInherit": "build/entitlements.mac.plist",
       "files": [
+        "app/**/*",
+        "electron/**/*",
+        "package.json",
         "!node_modules/onnxruntime-node/bin/napi-v3/{linux,win32}/**"
       ]
     },
