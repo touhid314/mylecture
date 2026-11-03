@@ -1,5 +1,6 @@
 import { spawn } from "node:child_process";
 import path from "node:path";
+import { loadEnv } from "./coursegen/env.ts";
 
 import {
   ensureAgentApiAvailable,
@@ -7,6 +8,8 @@ import {
 } from "./lecture-agent-api-client.ts";
 
 const rootDir = process.cwd();
+// Provider configuration must reach the managed agent before it is spawned.
+loadEnv(rootDir);
 
 function runCommand(command: string, args: string[], label: string): Promise<void> {
   return new Promise((resolve, reject) => {

@@ -32,6 +32,7 @@ export const TTS_PRONUNCIATION_OVERRIDES: Record<string, string> = {
   RADAR: 'RADAR',
   SCUBA: 'SCUBA',
   SONAR: 'SONAR',
+  Tehranipoor: 'Tehraani poor',
   UEFA: 'UEFA',
   UNESCO: 'UNESCO',
   UNICEF: 'UNICEF',

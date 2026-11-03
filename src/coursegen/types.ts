@@ -160,8 +160,8 @@ function validateLecture(
   if (!slug || !SLUG_RE.test(slug)) throw new Error(`${path}: invalid slug`);
   if (!title) throw new Error(`${path}: title required`);
   if (!objective) throw new Error(`${path}: objective required`);
-  if (!Number.isFinite(durationMinutes) || durationMinutes < 2 || durationMinutes > 10) {
-    throw new Error(`${path}: durationMinutes must be 2-10`);
+  if (!Number.isFinite(durationMinutes) || durationMinutes < 2 || durationMinutes > 15) {
+    throw new Error(`${path}: durationMinutes must be 2-15`);
   }
   if (!formats.includes('video')) {
     throw new Error(`${path}: every lecture must include "video" in formats`);

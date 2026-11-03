@@ -18,7 +18,7 @@ Output a single JSON object (no markdown fences) with a placement decision and *
 - Choose placement intentionally. Use `append_to_module` when the new lecture continues the same skill chain or conceptual unit as an existing module. Use `create_module` only when the extension starts a genuinely new unit, application area, project, or capstone.
 - For a single-lecture extension, prefer `append_to_module` unless the lecture clearly changes the course region.
 - Prefer the smallest useful extension: enough lectures to teach the next idea well, not padding.
-- `durationMinutes` must be an integer between 2 and 10.
+- `durationMinutes` must be an integer between 2 and 15.
 - Keep one primary formal spine per new lecture; match duration to density; respect compute-before-use ordering relative to existing lectures; do not create a kitchen-sink finale that dumps leftover techniques into one lecture.
 - Prefer video-only for purely notational additions; add `interactive` only when manipulation or comparison clearly helps, and avoid blowing past a reasonable interactive count for the whole course.
 - If the existing course is source-grounded (a source section list is provided), every **new** lecture must include a non-empty `sourceSections` array using only the listed ids. Do not invent ids. Do not change or omit `plan.source`.

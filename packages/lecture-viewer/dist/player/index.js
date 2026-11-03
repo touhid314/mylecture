@@ -472,7 +472,7 @@ class LecturePlayer {
                 this.renderAt(0);
             }
             const detectedViewport = (isGameOnly || isInteractiveOnly)
-                ? { width: 1920, height: 1080 }
+                ? { width: 1280, height: 720 }
                 : (detectMetadataViewport(win) || detectDocumentViewport(win));
             const snapshot = { ...this.snapshot(), detectedViewport };
             this.emit('ready', snapshot);

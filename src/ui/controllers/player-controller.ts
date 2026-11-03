@@ -146,7 +146,7 @@ function updateControls(state = playerState()) {
   
   viewportPreset.disabled = isNonTime;
   if (isNonTime) {
-    setPreviewViewport(1920, 1080);
+    setPreviewViewport(1280, 720);
   }
   
   updatePlayheadPosition(state);

@@ -7,7 +7,7 @@ import { assertValidSourceSlug, readSourceManifest } from './source-manifest.ts'
 import { getSourceDir } from './paths.ts';
 
 export function formatGenerationLength(minutes: number) {
-  const whole = Math.max(2, Math.min(10, Math.round(minutes)));
+  const whole = Math.max(2, Math.min(15, Math.round(minutes)));
   return `${whole}:00`;
 }
 

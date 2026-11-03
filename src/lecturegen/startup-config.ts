@@ -106,10 +106,17 @@ export function validateLectureGenStartupConfig(
   }
 
   const models = configuredModels(env);
-  if (models.some((model) => /^gpt-/i.test(model)) && !value(env, "OPENAI_API_KEY")) {
+  const navigatorMode = value(env, "LLM_PROVIDER").toLowerCase() === "navigator"
+    || ((!value(env, "LLM_PROVIDER") || value(env, "LLM_PROVIDER").toLowerCase() === "auto")
+      && Boolean(value(env, "NAVIGATOR_API_KEY") || value(env, "LITELLM_API_KEY")));
+  if (navigatorMode) {
+    if (!(value(env, "NAVIGATOR_API_KEY") || value(env, "LITELLM_API_KEY") || value(env, "MYLECTURE_AGENT_API_TOKEN"))) errors.push("NAVIGATOR_API_KEY is required for Navigator model access");
+    if (!(value(env, "NAVIGATOR_API_ENDPOINT") || value(env, "LITELLM_API_BASE"))) errors.push("NAVIGATOR_API_ENDPOINT is required for Navigator model access");
+  }
+  if (!navigatorMode && models.some((model) => /^gpt-/i.test(model)) && !value(env, "OPENAI_API_KEY")) {
     errors.push("OPENAI_API_KEY is required by the configured GPT model(s)");
   }
-  if (models.some((model) => !/^gpt-/i.test(model)) && !value(env, "GOOGLE_API_KEY")) {
+  if (!navigatorMode && models.some((model) => !/^gpt-/i.test(model)) && !(value(env, "GOOGLE_API_KEY") || value(env, "GEMINI_API_KEY"))) {
     errors.push("GOOGLE_API_KEY is required by the configured Gemini model(s)");
   }
 

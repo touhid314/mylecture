@@ -84,9 +84,9 @@ function summarizeExistingPlan(plan: CoursePlan) {
 
 function sanitizeExtensionLecture(lecture: Record<string, unknown>) {
   const duration = Number(lecture.durationMinutes);
-  if (!Number.isFinite(duration) || duration < 2 || duration > 10) {
+  if (!Number.isFinite(duration) || duration < 2 || duration > 15) {
     const rounded = Number.isFinite(duration) ? Math.round(duration) : 6;
-    lecture.durationMinutes = Math.min(10, Math.max(2, rounded));
+    lecture.durationMinutes = Math.min(15, Math.max(2, rounded));
   }
 }
 

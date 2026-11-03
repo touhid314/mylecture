@@ -33,7 +33,7 @@ Given a topic and any optional audience/intent overrides, output a single JSON o
 - Undergraduate: correct terminology (4-6 min), occasional interactives.
 - Graduate: formal notation and depth (5-8 min), rare games, simulations when useful. Graduate does not mean dry: plan each lecture as a motivated investigation with intellectual context and stakes before the formalism, like the best seminar lecturers teach.
 - Default 6-10 lectures unless the user specifies `--lectures` or `--scope`.
-- `durationMinutes` must be an integer between 2 and 10.
+- `durationMinutes` must be an integer between 2 and 15.
 - `promptNotes` are internal guidance for the lesson generator (not shown to learners).
 - Coursegen chooses only the top-level output formats. Do not design activities, controls, scoring, feedback, interaction mechanics, or game rules; the lecture agent owns those decisions.
 - `summary` is one plain learner-facing line including audience level. State what learners will be able to do; avoid marketing adjectives such as "engaging", "exciting", "fun", "comprehensive", or "interactive".

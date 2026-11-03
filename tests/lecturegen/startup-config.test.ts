@@ -56,3 +56,15 @@ test("production startup requires both provider keys for edit fallback", () => {
   const errors = validateLectureGenStartupConfig(env);
   assert(errors.includes("GOOGLE_API_KEY is required by the configured Gemini model(s)"));
 });
+
+test("Navigator startup accepts one proxy key for both Gemini and OpenAI", () => {
+  const env = validProductionEnv();
+  delete env.GOOGLE_API_KEY;
+  delete env.OPENAI_API_KEY;
+  env.LLM_PROVIDER = "navigator";
+  env.NAVIGATOR_API_KEY = "proxy-key";
+  env.NAVIGATOR_API_ENDPOINT = "https://proxy.example";
+  assert.deepEqual(validateLectureGenStartupConfig(env), []);
+  delete env.NAVIGATOR_API_KEY;
+  assert(validateLectureGenStartupConfig(env).includes("NAVIGATOR_API_KEY is required for Navigator model access"));
+});
