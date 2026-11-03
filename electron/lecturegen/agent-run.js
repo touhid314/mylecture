@@ -1,0 +1,496 @@
+// Agent flow for CLI agents (Codex, Claude, Antigravity).
+//
+// Instead of the staged LectureGen pipeline (answer generator -> script writer
+// -> trimmer -> animator -> JSON repair), the agent gets ONE task and works in
+// the project folder itself:
+//
+//   answer.md -> script.md -> index1.html, index2.html, ... (+ metadata.json)
+//
+// Theme and teaching style are passed along unless they are "auto", in which
+// case the agent decides. The app watches the folder: once index{N+1}.html
+// appears (or the agent finishes), index{N}.html is validated against the
+// HTML contract, narrated, and handed to the player. Files that fail the
+// contract go back to the same agent once, with the validator output.
+import fs from "node:fs";
+import path from "node:path";
+import { Activity } from "../activity.js";
+import { lecturegen, resolveBeats, resolveStyleResource, RESOURCES, GENERATION_LENGTHS } from "./run.js";
+
+export const AUTO = "auto";
+const isAuto = (v) => String(v || "").trim().toLowerCase() === AUTO;
+const INDEX_RE = /^index(\d+)\.html$/i;
+
+export function supportsAgentFlow(engine) {
+  return engine?.kind === "cli" && typeof engine.agent === "function";
+}
+
+function contractText() {
+  try {
+    return fs.readFileSync(path.join(RESOURCES, "contracts", "html-input-contract.md"), "utf8").trim();
+  } catch {
+    return "";
+  }
+}
+
+function stageSize(aspect) {
+  if (aspect === "9:16") return "1080×1920";
+  if (aspect === "1:1") return "1080×1080";
+  return "1920×1080";
+}
+
+function lengthText(length) {
+  const v = GENERATION_LENGTHS[length] || length || "1:00";
+  const [m, s] = String(v).split(":").map(Number);
+  const secs = (m || 0) * 60 + (s || 0);
+  const words = Math.max(30, Math.round((secs / 60) * 150));
+  return `${v} (about ${words} words of narration; ~150 spoken words per minute)`;
+}
+
+// The single task given to the agent. Kept short on purpose: the agent has
+// room to decide structure, pacing, scene count and visual design.
+export function agentTaskPrompt({ question, length, aspect = "16:9", theme, teachingStyle, study = false, history = [] }) {
+  const lines = [
+    "You are making a narrated, animated explainer video for MyLecture.",
+    "Work directly in the current folder (it is this video's project folder) using your file tools. Create the files in this order:",
+    "",
+    "1. answer.md — the explanation itself, written in plain prose.",
+    "2. script.md — the narration script, organised into scenes, with what is said and what is shown.",
+    "3. index1.html, index2.html, … — one self-contained HTML animation per scene, in order. Finish each file completely before starting the next one: the app starts playing a scene as soon as the next file appears.",
+    "4. metadata.json — {\"title\": \"…\", \"description\": \"…\"} for the video.",
+    "",
+    "Everything else — how many scenes, pacing, structure, visual design, analogies — is your call. Make it clear, accurate and visually rich.",
+    "",
+    "# Request",
+    question,
+    "",
+    "# Settings",
+    study
+      ? "- Length: no fixed duration. Answer the question directly like a tutor; let the question decide how long the explanation is. answer.md is shown to the user as the reply, so write it as a direct answer (no talk about videos, scripts or narration)."
+      : `- Target length: ${lengthText(length)}.`,
+    `- Aspect ratio: ${aspect} (stage ${stageSize(aspect)}).`,
+  ];
+  if (isAuto(theme)) lines.push("- Visual theme: your choice.");
+  if (isAuto(teachingStyle)) lines.push("- Teaching style: your choice.");
+  if (history.length) {
+    lines.push("", "# Earlier in this conversation (use only if relevant)");
+    for (const t of history) lines.push(`User: ${t.question}`, `Tutor: ${t.answer}`, "");
+  }
+  if (!isAuto(teachingStyle)) lines.push("", "# Teaching style", resolveStyleResource(teachingStyle, "teaching-styles"));
+  if (!isAuto(theme)) lines.push("", "# Visual theme", resolveStyleResource(theme, "themes"));
+  lines.push(
+    "",
+    "# Scene HTML requirements (the player depends on these)",
+    `- Each index file is a complete HTML document: body fixed at ${stageSize(aspect)}, margin 0, overflow hidden, no scrollbars, no playback controls, no subtitles.`,
+    "- Narration lives inside the HTML as narration+visual plan items; their `text` is spoken exactly as written. The app records the audio itself, so just use audio paths like \"audio/i1.wav\" (ids i1, i2, … per file).",
+    "- All motion is computed inside renderSection(segment, localTime, globalTime): deterministic, no CSS animations/transitions, timers, requestAnimationFrame loops, Date or Math.random.",
+    "- Render one initial frame on load (renderSection(plan[0], 0, 0)). Support the ?export=1 query (it must not break anything).",
+    "- No remote images. Math may use KaTeX markup if helpful.",
+    "",
+    contractText(),
+    "",
+    "When you are done, reply with one short sentence.",
+  );
+  return lines.join("\n");
+}
+
+function fixTaskPrompt(problems) {
+  return [
+    "Some scene files in the current folder fail the MyLecture HTML contract validator. Fix them in place, keeping their content, narration and visual intent. Change only what is needed.",
+    "",
+    ...problems.map((p) => `## ${p.file}\n${p.validation}`),
+    "",
+    "# HTML contract",
+    contractText(),
+    "",
+    "When you are done, reply with one short sentence.",
+  ].join("\n");
+}
+
+export function indexFiles(dir) {
+  let names = [];
+  try {
+    names = fs.readdirSync(dir).filter((f) => INDEX_RE.test(f));
+  } catch {}
+  return names.sort((a, b) => Number(a.match(INDEX_RE)[1]) - Number(b.match(INDEX_RE)[1]));
+}
+
+function readText(file) {
+  try {
+    return fs.readFileSync(file, "utf8");
+  } catch {
+    return null;
+  }
+}
+
+function sceneTitle(html, n) {
+  const m = html && html.match(/title\s*:\s*["'`]([^"'`]{1,120})["'`]/);
+  return m ? m[1] : `Scene ${n}`;
+}
+
+// Run one agent task in the workspace.
+// `activity` collects the agent's words and tool steps; the return value is
+// the agent's last message (its final answer).
+const WORKER_SYSTEM = "You are a skilled educator, script writer and creative coder working on a MyLecture video project. Work autonomously with your file tools; never ask questions.";
+export async function runAgent({ engine, model, effort, signal, workspace, prompt, onStatus, activity, system = WORKER_SYSTEM }) {
+  let text = "";
+  const res = await engine.agent({
+    system,
+    user: prompt,
+    model,
+    effort,
+    signal,
+    workspace,
+    onDelta: (d) => (text += d),
+    onStatus,
+    onActivity: (ev) => activity?.feed(ev),
+  });
+  if (res?.aborted || signal?.aborted) throw Object.assign(new Error("Stopped"), { aborted: true });
+  return (activity?.lastSay() || res?.text || text).trim();
+}
+
+async function validate(lg, browser, workspaceDir, file, viewport) {
+  const html = readText(path.join(workspaceDir, file));
+  if (!html || !/<\/html>\s*$/i.test(html.trim())) return `HTML contract validation failed for ${file}:\n - The file is incomplete (no closing </html>).`;
+  return lg.validateHtmlInBrowser(file, workspaceDir, browser, viewport);
+}
+
+export async function runAgentLecture({ lec, workspaceDir, engine, model, effort, tts, voiceEngine, signal, emit, log, history = [] }) {
+  const lg = await lecturegen();
+  const study = lec.source === "study";
+  fs.mkdirSync(workspaceDir, { recursive: true });
+  const aspect = lec.aspect || "16:9";
+  const viewport = lg.viewportForAspectRatio(aspect);
+  const activity = new Activity((items) => emit("activity", { items }));
+  const say = (m) => {
+    log?.(m);
+    activity.app(m);
+    emit("status", { message: m });
+  };
+  const failures = [];
+  let title = "";
+  let description = "";
+  const seen = { answer: null, script: null, meta: null };
+  const emitted = new Set();
+  const failed = new Map(); // file -> { html, validation }
+  let sceneIndex = 0;
+  let agentDone = false;
+  let busy = false;
+  const browser = await lg.chromium.launch();
+
+  const readMeta = () => {
+    const raw = readText(path.join(workspaceDir, "metadata.json"));
+    if (!raw || raw === seen.meta) return;
+    seen.meta = raw;
+    try {
+      const m = JSON.parse(raw);
+      if (m.title && m.title !== title) {
+        title = String(m.title);
+        emit("title", { title });
+      }
+      description = String(m.description || "");
+    } catch {}
+  };
+
+  // Look at the folder: surface new answer/script, and hand completed scenes
+  // to the player in order.
+  const scan = async ({ final = false } = {}) => {
+    if (busy) return;
+    busy = true;
+    try {
+      const answer = readText(path.join(workspaceDir, "answer.md"));
+      if (answer && answer !== seen.answer) {
+        seen.answer = answer;
+        if (study) emit("answer", { text: answer.trim(), done: true });
+        else emit("progress", { stage: "answer", text: answer.slice(-240) });
+        say("Wrote answer.md");
+      }
+      const script = readText(path.join(workspaceDir, "script.md"));
+      if (script && script !== seen.script) {
+        if (seen.script == null) say("Wrote script.md");
+        seen.script = script;
+      }
+      readMeta();
+      const files = indexFiles(workspaceDir);
+      for (let i = 0; i < files.length; i++) {
+        const file = files[i];
+        if (emitted.has(file)) continue;
+        const complete = agentDone || i < files.length - 1;
+        if (!complete) break;
+        const html = readText(path.join(workspaceDir, file));
+        let validation = failed.get(file)?.html === html ? failed.get(file).validation : null;
+        if (validation == null) {
+          say(`Checking ${file}…`);
+          validation = await validate(lg, browser, workspaceDir, file, viewport);
+        }
+        if (!String(validation).includes("validation passed")) {
+          failed.set(file, { html, validation });
+          log?.(validation);
+          // Keep scene order: later scenes wait until this one is fixed,
+          // except on the final pass, where a broken scene is skipped.
+          if (!final) break;
+          continue;
+        }
+        failed.delete(file);
+        say(`Recording narration for ${file}…`);
+        const beats = await resolveBeats({ lg, browser, workspaceDir, file, viewport, tts, voiceEngine });
+        const n = Number(file.match(INDEX_RE)[1]);
+        const scene = { id: `sc${n}`, kind: "html", file, title: sceneTitle(html, n), beats };
+        emitted.add(file);
+        emit("scene-ready", { index: sceneIndex++, scene });
+      }
+    } finally {
+      busy = false;
+    }
+  };
+
+  let timer = null;
+  let scanning = Promise.resolve();
+  const tick = () => {
+    scanning = scanning.then(scan).catch((e) => log?.(`Scan: ${e.stack || e}`));
+  };
+  try {
+    timer = setInterval(tick, 1200);
+    const reply = await runAgent({
+      engine,
+      model,
+      effort,
+      signal,
+      workspace: workspaceDir,
+      prompt: agentTaskPrompt({ question: lec.question, length: lec.length, aspect, theme: lec.theme, teachingStyle: lec.teachingStyle, study, history }),
+      activity,
+      onStatus: (st) => {
+        log?.(st);
+        if (/^agent: editing /.test(st)) emit("status", { message: st.replace(/^agent: editing/, "Writing") });
+      },
+    });
+    activity.takeFinal();
+    log?.(`Agent: ${reply}`);
+    clearInterval(timer);
+    timer = null;
+    await scanning;
+    agentDone = true;
+    await scan();
+
+    // Check every remaining scene, then give the failures back to the agent once.
+    for (const file of indexFiles(workspaceDir)) {
+      if (emitted.has(file) || failed.has(file)) continue;
+      const html = readText(path.join(workspaceDir, file));
+      const validation = await validate(lg, browser, workspaceDir, file, viewport);
+      if (!String(validation).includes("validation passed")) failed.set(file, { html, validation });
+    }
+    if (failed.size && !signal.aborted) {
+      const problems = [...failed].map(([file, f]) => ({ file, validation: f.validation }));
+      say(`Asking ${engine.name} to fix ${problems.map((p) => p.file).join(", ")}…`);
+      await runAgent({ engine, model, effort, signal, workspace: workspaceDir, prompt: fixTaskPrompt(problems), activity, onStatus: (st) => log?.(st) });
+    }
+    await scan({ final: true });
+    for (const [file, f] of failed) failures.push(`${file}: ${f.validation}`);
+    if (!indexFiles(workspaceDir).length) {
+      throw new Error(`${engine.name} finished without writing any index*.html scene files.${reply ? ` It said: ${reply.slice(0, 300)}` : ""}`);
+    }
+    if (study && !seen.answer) emit("answer", { text: reply, done: true });
+    readMeta();
+    activity.flush();
+    return { title, description, failures, reply, activity: activity.items };
+  } finally {
+    if (timer) clearInterval(timer);
+    await scanning.catch(() => {});
+    await browser.close();
+  }
+}
+
+// ---------- Lecture Agent: one conversation per project ----------
+// Every message goes to the agent with a standing brief (make MyLecture
+// videos with the workflow and the HTML contract), the project's current
+// state and the conversation so far. The agent decides what the message
+// needs: a new video, changes to this one, or just a reply.
+
+export const LECTURE_AGENT_SYSTEM = [
+  "You are the MyLecture Lecture Agent: a world-class educator, script writer and creative coder.",
+  "Your main job is to make narrated, animated explainer videos on the user's request, and to change them when asked, by working on the files of the video project in the current folder.",
+  "You are also a conversation partner: when a message is a question, a discussion or feedback that needs no change, just reply. Do not touch files unless the message calls for it.",
+  "Work autonomously with your file tools. Ask the user only when a request is truly ambiguous.",
+  "Do not mention the project's files or artifacts (answer.md, script.md, index*.html, metadata.json, file paths) in your replies unless the user explicitly asks about them. Talk about the video, its scenes and its content instead (\"scene 2\", not \"index2.html\").",
+].join("\n");
+
+function videoRequirements({ length, aspect = "16:9", theme, teachingStyle }) {
+  const lines = [
+    "# Settings for new videos",
+    `- Target length: ${lengthText(length)}.`,
+    `- Aspect ratio: ${aspect} (stage ${stageSize(aspect)}).`,
+  ];
+  if (isAuto(theme)) lines.push("- Visual theme: your choice.");
+  if (isAuto(teachingStyle)) lines.push("- Teaching style: your choice.");
+  if (!isAuto(teachingStyle)) lines.push("", "# Teaching style", resolveStyleResource(teachingStyle, "teaching-styles"));
+  if (!isAuto(theme)) lines.push("", "# Visual theme", resolveStyleResource(theme, "themes"));
+  return lines;
+}
+
+export function agentTurnPrompt({ message, files = [], sceneFile, history = [], length, aspect = "16:9", theme, teachingStyle }) {
+  const lines = [
+    "# MyLecture workflow",
+    "A video is a project folder (the current folder). To make a new video, create these files in order:",
+    "1. answer.md — the explanation itself, in plain prose.",
+    "2. script.md — the narration script, organised into scenes, with what is said and what is shown.",
+    "3. index1.html, index2.html, … — one self-contained HTML animation per scene, in play order. Finish each file completely before starting the next one: the app starts playing a scene as soon as the next file appears.",
+    "4. metadata.json — {\"title\": \"…\", \"description\": \"…\"}.",
+    "To change a video, edit the files directly. You may add, remove or reorder scenes; keep index files numbered 1..N without gaps, and keep script.md in sync with narration changes.",
+    "Everything else — scene count, pacing, structure, visual design, analogies — is your call. Make it clear, accurate and visually rich.",
+    "The app checks every new or changed scene against the HTML contract, records the narration with its own voice, and plays it.",
+    "",
+    "# This project",
+    files.length ? `Files: ${files.join(", ")}.` : "Empty: no video yet.",
+    sceneFile ? `The user is currently looking at ${sceneFile}.` : "",
+    "",
+    ...videoRequirements({ length, aspect, theme, teachingStyle }),
+    "",
+    "# Scene HTML requirements (the player depends on these)",
+    `- Each index file is a complete HTML document: body fixed at ${stageSize(aspect)}, margin 0, overflow hidden, no scrollbars, no playback controls, no subtitles.`,
+    "- Narration lives inside the HTML as narration+visual plan items; their `text` is spoken exactly as written. The app records the audio itself, so just use audio paths like \"audio/i1.wav\" (ids i1, i2, … per file).",
+    "- All motion is computed inside renderSection(segment, localTime, globalTime): deterministic, no CSS animations/transitions, timers, requestAnimationFrame loops, Date or Math.random.",
+    "- Render one initial frame on load (renderSection(plan[0], 0, 0)). Support the ?export=1 query (it must not break anything).",
+    "- No remote images. Math may use KaTeX markup if helpful.",
+    "",
+    contractText(),
+  ];
+  if (history.length) {
+    lines.push("", "# Conversation so far");
+    for (const m of history) lines.push(`${m.role === "user" ? "User" : "You"}: ${String(m.text || "").slice(0, 1500)}`, "");
+  }
+  lines.push("", "# The user's message", message, "", "End your turn with a short reply to the user (Markdown is fine).");
+  return lines.filter((l, i, a) => !(l === "" && a[i - 1] === "")).join("\n");
+}
+
+// One turn. Streams new/changed scenes to the player as they are finished,
+// then returns the project's full scene list.
+export async function runAgentTurn({ lec, workspaceDir, engine, model, effort, tts, voiceEngine, signal, emit, log, message, sceneFile, settings = {}, history = [] }) {
+  const lg = await lecturegen();
+  fs.mkdirSync(workspaceDir, { recursive: true });
+  const aspect = lec.aspect || "16:9";
+  const viewport = lg.viewportForAspectRatio(aspect);
+  const activity = new Activity((items) => emit("activity", { items }));
+  const say = (m) => {
+    log?.(m);
+    activity.app(m);
+  };
+  const before = new Map(indexFiles(workspaceDir).map((f) => [f, readText(path.join(workspaceDir, f))]));
+  const oldScenes = new Map((lec.scenes || []).map((s) => [s.file, s]));
+  const processed = new Map(); // file -> { html, scene }
+  const failed = new Map(); // file -> { html, validation }
+  const lastSeen = new Map(); // file -> html at the previous scan (stability check)
+  let agentDone = false;
+  let title = "";
+  let metaRaw = null;
+  const browser = await lg.chromium.launch();
+
+  const readMeta = () => {
+    const raw = readText(path.join(workspaceDir, "metadata.json"));
+    if (!raw || raw === metaRaw) return;
+    metaRaw = raw;
+    try {
+      const m = JSON.parse(raw);
+      if (m.title && m.title !== title) emit("title", { title: (title = String(m.title)) });
+    } catch {}
+  };
+
+  const sceneOf = async (file, html) => {
+    const n = Number(file.match(INDEX_RE)[1]);
+    say(`Recording narration for scene ${n}`);
+    const beats = await resolveBeats({ lg, browser, workspaceDir, file, viewport, tts, voiceEngine });
+    return { id: `sc${n}`, kind: "html", file, title: sceneTitle(html, n), beats, version: (oldScenes.get(file)?.version || 0) + 1 };
+  };
+
+  // Hand finished scenes to the player, in order.
+  const scan = async ({ final = false } = {}) => {
+    readMeta();
+    const files = indexFiles(workspaceDir);
+    for (let i = 0; i < files.length; i++) {
+      const file = files[i];
+      const html = readText(path.join(workspaceDir, file));
+      const prevSeen = lastSeen.get(file);
+      lastSeen.set(file, html);
+      if (html == null) break;
+      if (processed.get(file)?.html === html) continue;
+      if (!processed.has(file) && before.get(file) === html) continue; // untouched
+      // Finished = the agent is done, or a later file exists and this one stopped changing.
+      const complete = agentDone || (i < files.length - 1 && prevSeen === html);
+      if (!complete) break;
+      let validation = failed.get(file)?.html === html ? failed.get(file).validation : null;
+      if (validation == null) {
+        say(`Checking scene ${i + 1}`);
+        validation = await validate(lg, browser, workspaceDir, file, viewport);
+      }
+      if (!String(validation).includes("validation passed")) {
+        failed.set(file, { html, validation });
+        log?.(validation);
+        if (!final) break;
+        continue;
+      }
+      failed.delete(file);
+      const scene = await sceneOf(file, html);
+      processed.set(file, { html, scene });
+      emit("scene", { index: i, scene });
+    }
+  };
+
+  let busy = Promise.resolve();
+  const tick = () => (busy = busy.then(() => scan()).catch((e) => log?.(`Scan: ${e.stack || e}`)));
+  const timer = setInterval(tick, 1200);
+  try {
+    const files = fs.readdirSync(workspaceDir).filter((f) => /^(answer\.md|script\.md|metadata\.json|index\d+\.html)$/i.test(f));
+    const reply = await runAgent({
+      engine,
+      model,
+      effort,
+      signal,
+      workspace: workspaceDir,
+      system: LECTURE_AGENT_SYSTEM,
+      prompt: agentTurnPrompt({ message, files, sceneFile, history, aspect, length: settings.length, theme: settings.theme, teachingStyle: settings.teachingStyle }),
+      activity,
+      onStatus: (st) => log?.(st),
+    });
+    activity.takeFinal();
+    clearInterval(timer);
+    await busy;
+    agentDone = true;
+    await scan();
+
+    // Every changed scene that still fails goes back to the agent once.
+    for (const file of indexFiles(workspaceDir)) {
+      const html = readText(path.join(workspaceDir, file));
+      if (processed.get(file)?.html === html || (!processed.has(file) && before.get(file) === html) || failed.has(file)) continue;
+      const validation = await validate(lg, browser, workspaceDir, file, viewport);
+      if (!String(validation).includes("validation passed")) failed.set(file, { html, validation });
+    }
+    if (failed.size && !signal.aborted) {
+      const problems = [...failed].map(([file, f]) => ({ file, validation: f.validation }));
+      say(`Fixing ${problems.length} scene${problems.length > 1 ? "s" : ""} that failed the checks`);
+      await runAgent({ engine, model, effort, signal, workspace: workspaceDir, prompt: fixTaskPrompt(problems), activity });
+      activity.takeFinal();
+    }
+    await scan({ final: true });
+
+    // The project's scenes, from the folder.
+    const scenes = [];
+    const failures = [];
+    for (const file of indexFiles(workspaceDir)) {
+      if (processed.has(file)) scenes.push(processed.get(file).scene);
+      else if (failed.has(file)) failures.push(`${file}: ${failed.get(file).validation}`);
+      else if (oldScenes.has(file)) scenes.push(oldScenes.get(file));
+      else {
+        // Unchanged file without a scene record (e.g. after an earlier failed turn): try it now.
+        const html = readText(path.join(workspaceDir, file));
+        const v = await validate(lg, browser, workspaceDir, file, viewport);
+        if (String(v).includes("validation passed")) scenes.push(await sceneOf(file, html));
+        else failures.push(`${file}: ${v}`);
+      }
+    }
+    readMeta();
+    activity.flush();
+    return { scenes, reply, title, failures, activity: activity.items };
+  } finally {
+    clearInterval(timer);
+    await busy.catch(() => {});
+    await browser.close();
+  }
+}

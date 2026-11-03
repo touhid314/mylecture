@@ -1,0 +1,14 @@
+/* Version 1: embedded into each lecture by installTextLayout. */
+[data-ml-text] {
+  overflow-wrap: break-word;
+  white-space: normal;
+}
+:where([data-ml-text="title"]) { font-size: 72px; }
+:where([data-ml-text="body"]) { font-size: 44px; }
+:where([data-ml-text="label"], [data-ml-text="callout"]) { font-size: 30px; }
+:where([data-ml-card]) { box-sizing: border-box; padding: 24px; }
+:where([data-ml-stack]) { display: flex; flex-direction: column; gap: 24px; }
+:where([data-ml-safe-area]) { box-sizing: border-box; padding: 5vh 5vw; }
+@media (orientation: portrait) {
+  :where([data-ml-safe-area]) { padding: 10vh 5vw 20vh; }
+}

@@ -1,51 +1,53 @@
 {
-  "name": "mylecture-renderer",
-  "version": "1.0.0",
-  "description": "General HTML-to-video renderer with synchronized audio support.",
-  "private": true,
-  "workspaces": [
-    "packages/*"
-  ],
+  "name": "mylecture",
+  "productName": "MyLecture",
+  "version": "0.1.0",
+  "description": "MyLecture — an open-source study app that answers every question with a narrated, animated video lesson.",
+  "main": "electron/main.js",
   "type": "module",
+  "license": "MIT",
+  "author": "MyLecture contributors",
   "scripts": {
-    "agent": "tsx ../mylecture-agent/src/editor-agent/cli.ts",
-    "editor-agent": "tsx ../mylecture-agent/src/editor-agent/cli.ts",
-    "lecturegen": "tsx ../mylecture-agent/src/lecturegen.ts",
-    "prompt-builder": "tsx ../mylecture-agent/src/prompt_builder.ts",
-    "chat": "tsx ../mylecture-agent/src/editor-agent/cli.ts --chat",
-    "token-tracker": "tsx ../mylecture-agent/src/token-tracker/token_tracker_dashboard.ts",
-    "build:viewer": "npm --prefix packages/lecture-viewer run build",
-    "version:sync": "node --import tsx src/sync-versions.ts",
-    "rename:gens": "node --import tsx src/rename-gens.ts",
-    "ide": "node --import tsx src/ide-start.ts",
-    "lecturegen:server": "node --import tsx src/lecturegen-server.ts",
-    "coursegen": "node --import tsx src/coursegen/cli.ts",
-    "coursegen:ui": "node --import tsx src/coursegen/ui/server.ts",
-    "test": "node --import tsx --test \"tests/**/*.test.ts\"",
-    "test:coursegen": "node --import tsx --test \"tests/coursegen/*.test.ts\"",
-    "test:lecturegen": "node --import tsx --test tests/utils/safe-tar-extract.test.ts \"tests/lecturegen/*.test.ts\"",
-    "test:tts-normalize": "node --import tsx --test src/tts-normalize.test.ts",
-    "test:invoke-render": "node --import tsx src/invoke-render-section.test.ts",
-    "test:visual-edit-protect": "node --import tsx src/visual-edit-protect.test.ts",
-    "test:multipart": "node --import tsx --test tests/render-multipart.test.ts"
-  },
-  "devDependencies": {
-    "@types/node": "^20.19.43",
-    "@types/pg": "^8.20.0",
-    "@types/ws": "^8.18.1",
-    "playwright": "^1.57.0",
-    "tsx": "^4.22.4",
-    "typescript": "^5.9.3"
+    "start": "electron .",
+    "dev": "electron . --dev",
+    "test": "node --test \"tests/**/*.test.js\"",
+    "dist": "electron-builder --win"
   },
   "dependencies": {
-    "@aws-sdk/client-s3": "^3.1073.0",
-    "@aws-sdk/lib-storage": "^3.1073.0",
-    "@aws-sdk/s3-request-presigner": "^3.1105.0",
-    "@supabase/supabase-js": "^2.108.2",
+    "@fontsource/architects-daughter": "^5.3.0",
+    "@fontsource/jetbrains-mono": "^5.3.0",
+    "@fontsource/lato": "^5.3.0",
+    "@fontsource/playfair-display": "^5.3.0",
+    "@fontsource/roboto": "^5.3.0",
+    "@highlightjs/cdn-assets": "^11.12.0",
+    "ffmpeg-static": "^5.3.0",
+    "katex": "^0.19.1",
     "kokoro-js": "^1.2.1",
-    "pdfjs-dist": "^6.1.200",
-    "pg": "^8.22.0",
-    "three": "^0.184.0",
-    "ws": "^8.21.0"
+    "markdown-it": "^14.3.3",
+    "monaco-editor": "^0.52.2"
+  },
+  "devDependencies": {
+    "electron": "^45.2.1",
+    "electron-builder": "^26.0.0",
+    "esbuild": "^0.28.2"
+  },
+  "build": {
+    "appId": "ai.mylecture.app",
+    "productName": "MyLecture",
+    "win": {
+      "target": [
+        "nsis",
+        "portable"
+      ],
+      "icon": "build/icon.ico"
+    },
+    "files": [
+      "app/**/*",
+      "electron/**/*",
+      "package.json"
+    ],
+    "asarUnpack": [
+      "node_modules/ffmpeg-static/**/*"
+    ]
   }
 }

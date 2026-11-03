@@ -1,146 +1,152 @@
-# MyLecture IDE
+# MyLecture
 
-MyLecture IDE is an integrated platform for creating, previewing, and rendering animated, synchronized educational lecture videos and interactive game segments using web technologies.
-
-Instead of writing raw video files, lectures are authored as contract-compliant HTML pages. The system integrates multiple components to automate, preview, and build the final output:
-
-1. **AI Coding Agent** ([lecture-agent](file:///c:/Users/touhi/OneDrive/Desktop/mylecture/mylecture-ide/packages/lecture-agent/)): A TypeScript-based agent that parses prompts, writes visual/narration scripts, and automatically constructs or modifies contract-compliant HTML files with rich canvas, SVG, or Three.js animations.
-2. **Timeline Resolver** ([build-plan.ts](file:///c:/Users/touhi/OneDrive/Desktop/mylecture/mylecture-ide/src/build-plan.ts)): Reads the authored video plan, generates synchronized narration audio via local ONNX or cloud TTS APIs, measures audio lengths, and compiles a fully resolved animation timeline injected into the HTML.
-3. **Deterministic Video Renderer** ([render-video.ts](file:///c:/Users/touhi/OneDrive/Desktop/mylecture/mylecture-ide/src/render-video.ts)): Leverages Playwright to capture frame-by-frame screenshots of browser-rendered animations, generates and mixes narration audio tracks, and encodes high-quality MP4 videos.
-4. **Interactive Preview IDE & Server** ([ide-server.ts](file:///c:/Users/touhi/OneDrive/Desktop/mylecture/mylecture-ide/src/ide-server.ts) & [lecture-viewer](file:///c:/Users/touhi/OneDrive/Desktop/mylecture/mylecture-ide/packages/lecture-viewer/)): A local development server and front-end player that allows real-time interactive timeline scrubbing, subtitle preview, and a chat interface to prompt the AI Coding Agent directly from the browser sidebar.
+> **Open-Source AI Study App & Video Creation IDE for Windows**  
+> Ask a question, read the streamed answer, then explore it with narrated, animated visuals.
 
 ---
 
-## Project Layout
+## Overview
 
-This project is configured as an npm workspaces monorepo:
+**MyLecture** is a local-first Windows application built with Electron. Study streams a text answer first, then turns that answer into **synchronized voice and interactive visuals**.
 
-```text
-packages/
-  ├── lecture-agent/    TypeScript-based coding agent for generating lectures
-  └── lecture-viewer/   Playback engine and local preview player
-models/                 Kokoro ONNX models and voices (outside src, resolved from root)
-outputs/                Renderer-ready generated videos and HTML outputs
-src/                    TypeScript CLIs, local IDE server, and social tools
-tests/                  Structured renderer fixtures and smoke tests
-.agents/                Contracts, templates, examples, themes, and agent prompts
-.render/                Temporary render artifacts
+The app is designed with two core modes:
+1. **Study Mode (Tutor)**: Ask any question on algorithms, physics, calculus, machine learning, biology, or economics. The AI starts with a streaming text answer whose length fits the question and conversation, then creates narrated visuals from that answer.
+2. **Create Mode (Video IDE)**: A video creation utility where you can build, edit, and fine-tune videos. Edit HTML structure, write JavaScript animations, adjust spoken narration beats, re-synthesize voices, instruct the AI to rewrite scenes, and export to MP4, interactive HTML, or publish directly to social media.
+
+---
+
+## Key Features
+
+### Rendered video library
+The Library shows completed MP4 exports only, with Play and Show file controls. Generated HTML lessons and editable projects stay in Study/Create. New renders appear after export completes.
+
+### Account usage limits
+- A compact line under the agent/model description shows weekly and five-hour allowance remaining.
+- Click the usage line for all model groups, progress bars, and reset times in your local timezone.
+- Limits refresh every minute, after lessons, and with **Refresh**. These are account-wide allowances, including usage outside MyLecture; checking them consumes no model tokens.
+- Requires an Antigravity CLI version supporting `agy -p /usage --output-format json`. Other engines currently show limits as unavailable.
+
+### 1. Study Mode (AI Tutor)
+- **Answer First**: The text answer streams as it is generated, before visuals are prepared.
+- **Natural Answer Length**: Study has no length control or fixed duration. A simple question can receive a short answer; a complex topic can receive a fuller explanation.
+- **Visuals Afterwards**: The completed answer becomes the basis for narrated, animated visuals; the answer determines the amount of content and runtime.
+- **Session History**: Study conversations and answers are saved locally and can be resumed. The answer remains saved if visual generation fails or is stopped.
+- **One-Click "Edit as Video"**: Open a Study lesson with generated scenes in Create (IDE) Mode.
+
+### 2. Create Mode (Video IDE)
+- The prompt box includes aspect, theme, teaching style, voice, and target length. The slider offers 15, 30, and 45 seconds, then each whole minute from 1 to 10.
+- The provider/model control uses native CLI catalogs and their advertised reasoning levels, with manual refresh and a 60-second refresh while Create is visible. Direct API catalogs use each provider's models endpoint; unadvertised reasoning levels are not guessed.
+- The timeline uses the local IDE's red draggable playhead. Preview subtitles default off. **Render → Embed captions** also defaults off.
+- **Scene Manager**: Add, duplicate, delete, and reorder scenes. Import existing HTML slides via file dialog.
+- **Multi-Tab Code Editor**:
+  - **HTML & CSS**: Scene markup with built-in templates (Title + Subtitle, Two Columns, Card Grid, Highlighted Code, KaTeX math formulas, SVG diagrams, Callouts).
+  - **Animation JS**: Dynamic animation scripts using `ML.show()`, `ML.draw()`, `ML.type()`, `ML.count()`, and `ML.plot()`.
+  - **Narration Beats**: Edit spoken sentences line-by-line with duration metrics and instant audio preview.
+  - **AI Assistant**: Request targeted modifications per scene (e.g., *"Make it simpler"*, *"Add a step-by-step diagram"*, *"Use modern dark cards"*) with real-time token streaming.
+- **Live Preview & Player**: Synchronized stage preview with "Play All", "Play Scene", "Restart", and live error reporting.
+- **Multi-Aspect Ratio**: Switch between **16:9 Landscape** (YouTube / Desktop), **9:16 Vertical** (Shorts / Reels / TikTok), and **1:1 Square** (Instagram / Feed).
+
+### 3. Engine Support
+- **Google Antigravity CLI (`agy`)**: Seamless integration using Antigravity's stream-json protocol with Gemini and Claude models.
+- **OpenAI Codex CLI**: Streaming integration via the Codex app-server JSON-RPC protocol.
+- **Claude Code CLI**: Integration via Claude Code streaming print mode.
+- **Direct API Keys**: Built-in support for Gemini, Anthropic Claude, OpenAI, DeepSeek, Groq, and OpenRouter with DPAPI-encrypted credential storage.
+
+### 4. Local Neural TTS & Fallback
+- **Kokoro-82M Neural Voice**: High-quality local voice synthesis running in an isolated Electron utility process.
+- **OmniVoice**: Local reference-voice synthesis using a persistent Python worker, with CUDA when available and CPU otherwise. Select it under Settings → Voice; the bundled voices include Maruf, Mike, three American male voices, and Johnny Harris. OmniVoice errors are reported directly instead of silently changing the voice engine.
+- Voice choices are **Kokoro** and **OmniVoice**. Synthesis waits for the selected neural engine; Windows voice is not offered or used as an automatic fallback.
+- **Deterministic Audio Mixing**: Audio tracks are synthesized and aligned to millisecond accuracy with the visual timeline.
+
+OmniVoice requires a Python environment with `omnivoice`, PyTorch, and `soundfile` installed, plus the `k2-fsa/OmniVoice` model (downloaded on first use). The development app detects the existing sibling OmniVoice environment. For another installation, set **Settings → Voice → OmniVoice Python** to that environment's Python executable, or set `MYLECTURE_PYTHON`. The Python environment and model weights are external to the Electron installer; reference audio and the worker script are bundled. The worker stays warm across clips and is stopped when the app exits.
+
+### 5. Multi-Format Export Center
+- **MP4 Video Export**: Headless frame capture piped to `ffmpeg` with synchronized audio and optional captions.
+- **Standalone Interactive HTML**: A single, portable HTML bundle with embedded MP3 audio that plays offline in any web browser.
+- **Captions**: Standard `.srt` and `.vtt` subtitle files.
+- **Publish to Socials**: One-click helper modal for YouTube (Shorts/Studio), TikTok, Instagram (Reels), Facebook, LinkedIn, and X with auto-generated hashtags and direct folder opening.
+
+---
+
+## Project Structure
+
+```
+mylecture-app/
+├── app/
+│   ├── assets/              # App icons, lockups, branding
+│   ├── css/                 # Global styles and IDE layout
+│   ├── js/
+│   │   ├── main.js          # App bootstrap & view router
+│   │   ├── study.js         # Study view (streaming chat player)
+│   │   ├── create.js        # Create view (Video IDE & scene editor)
+│   │   ├── library.js       # Saved lessons & videos library
+│   │   ├── settings.js      # Engine, model, and TTS configuration
+│   │   ├── player.js        # Timeline-locked stage player
+│   │   ├── exports.js       # Background export jobs & publishing
+│   │   └── ui.js            # Shared UI components & modals
+│   ├── shared/
+│   │   └── timeline.js      # Timeline math & beat positioning
+│   └── stage/
+│       ├── stage.html       # Isolated sandboxed render stage
+│       ├── stage.css        # Stage styling & theme variables
+│       └── runtime.js       # ML helper library (show, draw, plot, KaTeX, hljs)
+├── electron/
+│   ├── engines/             # CLI & API engine adapters (Antigravity, Codex, etc.)
+│   ├── tts/                 # Kokoro neural worker & Windows SAPI service
+│   ├── exporter.js          # MP4, HTML, and subtitle render pipelines
+│   ├── generator.js         # Streaming generator orchestrator
+│   ├── main.js              # Electron main process & IPC handlers
+│   ├── preload.cjs          # Context bridge & secure API boundary
+│   ├── prompt.js            # MyLecture Stream Format system prompts
+│   ├── store.js             # Encrypted secrets & local persistence
+│   └── stream-parser.js     # Incremental streaming format parser
+└── tests/                   # Unit test suite & smoke test
 ```
 
 ---
 
-## Requirements & Setup
+## Getting Started
 
-1. **Install Node.js Dependencies**: Run `npm install` at the repository root directory.
-2. **Configure API Keys**: Create or update `.env` in the repository root:
-   ```env
-   GOOGLE_API_KEY="your_google_api_key"
-   OPENAI_API_KEY="your_openai_api_key"
-   AGENT_MODEL="gemini-3.5-flash"
-   ```
-3. **Python Dependencies (for local Kokoro TTS)**:
-   ```bash
-   python -m pip install misaki[en] onnxruntime-gpu scipy numpy huggingface_hub
-   ```
-4. **Download ONNX Models**: Download the Kokoro ONNX model files to the root `models/` directory:
-   ```bash
-   python -c "from huggingface_hub import snapshot_download; snapshot_download('onnx-community/Kokoro-82M-v1.0-ONNX', local_dir='models/kokoro-onnx', allow_patterns=['onnx/model.onnx','voices/*','tokenizer.json'])"
-   ```
+### Prerequisites
+- Windows 10/11 (64-bit)
+- Node.js v20+ or v24+
+- (Recommended) Google Antigravity CLI (`agy`) or Codex CLI installed and logged in.
+
+### Installation
+
+```powershell
+# Navigate to the app directory
+cd d:\mylecture\mylecture-app
+
+# Install dependencies
+npm install
+```
+
+### Running the App
+
+```powershell
+# Start the application
+npm start
+
+# Run in development mode (opens DevTools)
+npm run dev
+```
+
+### Running Tests
+
+```powershell
+npm test
+```
+
+### Building the Windows Installer
+
+```powershell
+npm run dist
+```
+Outputs an NSIS installer and a portable Windows executable in `dist/`.
 
 ---
 
-## Main Commands
+## License
 
-* **Start the IDE Server**:
-  ```bash
-  npm run ide
-  ```
-* **Run the Coding Agent**:
-  ```bash
-  # Single task run
-  npm run agent -- "Create a 30s video lecture about red-black trees"
-  # Interactive chat mode
-  npm run chat
-  ```
-* **Render Video**:
-  ```bash
-  npm run render:video -- --html tests/fixtures/input-contract-test/index.html --out output.mp4
-  ```
-* **Build Timeline Plan**:
-  ```bash
-  npm run build:plan -- --input tests/fixtures/input-contract-test/index.html --out .render/tests/resolved.html
-  ```
-* **Run Tests**:
-  ```bash
-  npm test
-  ```
-
----
-
-## HTML Input Contract
-
-Source HTML files must follow the [HTML input contract](file:///c:/Users/touhi/OneDrive/Desktop/mylecture/mylecture-ide/packages/lecture-agent/.agents/mylecture-contracts/html-input-contract.md) (v0.2):
-
-```js
-window.__VIDEO_METADATA__ = {
-  contractVersion: "0.2",
-  title: "Dijkstra's Algorithm Explained",
-  aspectRatio: "16:9"
-};
-
-window.__VIDEO_PLAN__ = [/* visual-only, narration+visual, interactive, or game segments */];
-window.__RENDER_SECTION__ = function renderSection(segment, localTime, globalTime) {};
-```
-
-The plan-builder writes a generated `lastResolved` timestamp into `window.__VIDEO_METADATA__` in the resolved HTML.
-
----
-
-## Preview Viewer (IDE)
-
-The local IDE plays, pauses, and scrubs either source or resolved render HTML:
-```bash
-npm run ide
-```
-It runs a server at `http://127.0.0.1:4307/` that coordinates the player UI, file browsing, live rendering, and agent chat.
-
-**Viewer Features**:
-* **File Picker**: `Load` opens a Windows-native file picker to select files inside the repo.
-* **Auto-Aspect Ratio**: Automatically fits the view to `window.__VIDEO_METADATA__.aspectRatio`.
-* **Subtitle Engine**: Renders captions on the fly derived from the segment narration texts.
-* **Live Agent Integration**: Chat directly with the AI Coding Agent from the side panel to edit, refactor, and update scripts and animations in real-time.
-
----
-
-## Video Rendering & Customization
-
-Render any standalone HTML file to MP4:
-```bash
-npm run render:video -- --html tests/fixtures/input-contract-test/index.html --out output.mp4
-```
-
-**Common Rendering Options**:
-* **Dimensions**: `--width 1080 --height 1920` (default 1080x1920 / 9:16)
-* **Framerate**: `--fps 60` (default 60 fps)
-* **Limit Frames**: `--max-frames 120` (good for quick smoke tests)
-* **Workers**: `--workers 4` (Playwright parallel page count for frame capture)
-* **TTS Customization**: `--tts-voice af_heart --tts-speed 1.0` (forces regeneration if `--force-audio` is passed)
-* **Codecs**: `--video-codec auto` (checks and uses GPU-accelerated encoders like `h264_nvenc`, falling back to `libx264` with `--x264-preset veryfast`)
-
----
-
-## Benchmarks & Testing
-
-Verify renderer speeds and hardware capability with the built-in benchmarks:
-```bash
-npm run benchmark:480p
-npm run benchmark:1080p
-```
-
-For testing visual rendering:
-```bash
-# Render visual-only Three.js stress test
-npm run render:visual-3d
-# Render a 4K 60fps sync test
-npm run render:sync-4k-test
-```
+MIT License. Open-source and free for everyone.
