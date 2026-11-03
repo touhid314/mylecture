@@ -25,6 +25,7 @@ const hooks = registerHooks({
       }
       export const icon = name => name;
       export const toast = () => {};
+      export const modal = () => ({ el: { querySelectorAll: () => [] }, close() {} });
       export const bus = {};`,
     };
     return nextLoad(url, context);

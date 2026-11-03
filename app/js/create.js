@@ -6,6 +6,7 @@
 //   right  Video Agent: generation settings + chat (new videos, changes, questions)
 import { markdownEl, renderInline, onFileLink } from "./markdown.js";
 import { connectPanel, anyConnected } from "./connect.js";
+import { showApiKeyDialog } from "./api-key.js";
 import { h, icon, fmtTime, fmtDate, toast, modal, popMenu, confirmBox, bus } from "./ui.js";
 import { Player } from "./player.js";
 import { UsagePanel } from "./usage.js";
@@ -304,7 +305,7 @@ export class CreateView {
 
   _syncEngineLabel(s = this.state.settings) {
     if (!this.engineLabel) return;
-    const names = { "claude-code": "Claude", codex: "GPT", antigravity: "Gemini", api: "API" };
+    const names = { "claude-code": "Claude", codex: "GPT", antigravity: "Gemini", api: { gemini: "Gemini API", compatible: "LiteLLM" }[s.api?.provider] || "API key" };
     const configured = s.engine === "api" ? s.api?.model : s.models?.[s.engine];
     const key = s.engine === "api" ? `api:${s.api.provider}` : s.engine;
     const models = this._agentModels?.[key]?.models || [];
@@ -327,9 +328,17 @@ export class CreateView {
   async _providerMenu() {
     try {
       this.engineCatalog ||= await window.ml.engines.list();
-      popMenu(this.engineLabel, [{ label: "Provider" }, ...this.engineCatalog.engines.filter(e => e.id !== "api").map(e => ({ text: e.name, run: () => this._saveAgentSettings({ engine: e.id }) })),
-        ...Object.entries(this.engineCatalog.apiProviders).map(([provider, p]) => ({ text: `${p.label} API`, run: () => this._saveAgentSettings({ engine: "api", api: { provider, model: p.defaultModel || "", baseUrl: "" } }) }))]);
+      const s = this.state.settings;
+      const subs = this.engineCatalog.engines.filter(e => e.id !== "api");
+      popMenu(this.engineLabel, [{ label: "Provider" },
+        ...subs.map(e => ({ text: `${e.name}${s.engine === e.id ? "  ✓" : ""}`, run: () => s.connected?.[e.id] ? this._saveAgentSettings({ engine: e.id }) : this._connectFirst(e.name) })),
+        "-",
+        { text: `Use with API key…${s.engine === "api" ? "  ✓" : ""}`, run: () => showApiKeyDialog(this.state, { onDone: () => this._refreshEngineOptions({ force: true }) }) }]);
     } catch (e) { toast(friendly(e), { kind: "bad" }); }
+  }
+
+  _connectFirst(name) {
+    toast(`Connect ${name} first: Settings → Connect.`, { actions: [{ label: "Open Settings", run: () => bus.emit("navigate", { view: "settings" }) }] });
   }
 
   async _modelMenu() {
@@ -621,13 +630,14 @@ export class CreateView {
       welcome.append(box);
       const done = setInterval(async () => {
         if (!welcome.isConnected) return clearInterval(done), panel.stop();
-        if (this.state.settings.engine && (await anyConnected(this.state))) {
+        // Gone once anything is in use: a connected subscription or an API key.
+        if (this.state.settings.engine === "api" || (this.state.settings.engine && (await anyConnected(this.state)))) {
           clearInterval(done);
           panel.stop();
           box.remove();
           this._refreshEngineOptions?.({ force: true });
         }
-      }, 4000);
+      }, 1500);
     });
   }
 

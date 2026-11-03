@@ -1,9 +1,9 @@
 import { antigravity } from "./antigravity.js";
 import { codex } from "./codex.js";
 import { claudeCode } from "./claude-code.js";
-import { makeApiEngine, API_PROVIDERS } from "./api.js";
+import { makeApiEngine, API_PROVIDERS, OFFERED_API_PROVIDERS, verifyApiProvider } from "./api.js";
 
-export { API_PROVIDERS };
+export { API_PROVIDERS, OFFERED_API_PROVIDERS, verifyApiProvider };
 
 export function createEngines(getApiConfig) {
   const api = makeApiEngine(getApiConfig);

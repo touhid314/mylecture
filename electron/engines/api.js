@@ -6,8 +6,68 @@ export const API_PROVIDERS = {
   gemini: { label: "Google Gemini", defaultModel: "gemini-3.8-flash", keyUrl: "https://aistudio.google.com/apikey" },
   openai: { label: "OpenAI", defaultModel: "gpt-6.1-sol", keyUrl: "https://platform.openai.com/api-keys" },
   anthropic: { label: "Anthropic", defaultModel: "claude-sonnet-5-5", keyUrl: "https://console.anthropic.com/settings/keys" },
-  compatible: { label: "OpenAI-compatible (OpenRouter, Ollama, LiteLLM…)", defaultModel: "", keyUrl: "" },
+  compatible: { label: "LiteLLM", defaultModel: "", keyUrl: "" },
 };
+
+// Providers offered in "Use with API key". Only providers verified end to end
+// with a real key are offered (OpenAI and Anthropic are supported in code but
+// not offered until verified).
+export const OFFERED_API_PROVIDERS = {
+  gemini: { label: "Gemini API", hint: "A Google AI Studio API key", keyUrl: "https://aistudio.google.com/apikey" },
+  compatible: { label: "LiteLLM", hint: "Your LiteLLM server and key", needsBaseUrl: true, keyUrl: "" },
+};
+
+// Not chat models: hidden from the model list.
+const NON_CHAT = /(flux|embed|whisper|tts|dall-?e|imagen|image|vision-only|rerank|moderation|audio|transcribe|veo|sora)/i;
+
+// "HTTP 402: {json}" -> "HTTP 402: <the provider's own message>".
+function providerMessage(e) {
+  const text = String(e?.message || e);
+  const m = text.match(/^(.*?HTTP \d+): (\{[\s\S]*)$/);
+  if (!m) return text.slice(0, 300);
+  try {
+    const j = JSON.parse(m[2]);
+    const msg = j.error?.message || j.message || j.detail;
+    if (msg) return `${m[1]}: ${String(msg).replace(/\s+/g, " ").trim().slice(0, 300)}`;
+  } catch {}
+  const loose = m[2].match(/"message"\s*:\s*"([^"]+)/);
+  return loose ? `${m[1]}: ${loose[1].slice(0, 300)}` : text.slice(0, 300);
+}
+
+// Checks a key for real: lists models, then makes one short request.
+// Returns { models, model } or throws with the provider's own error.
+export async function verifyApiProvider(config) {
+  const c = { ...config };
+  if (!OFFERED_API_PROVIDERS[c.provider]) throw new Error("That provider is not available.");
+  if (!c.apiKey) throw new Error("Enter an API key.");
+  if (OFFERED_API_PROVIDERS[c.provider].needsBaseUrl) {
+    if (!/^https?:\/\/\S+$/i.test(c.baseUrl || "")) throw new Error("Enter your LiteLLM server address, e.g. https://litellm.example.com");
+    c.baseUrl = c.baseUrl.replace(/\/+$/, "");
+  }
+  const engine = makeApiEngine(() => c);
+  let models;
+  try {
+    models = (await engine.models()).filter((m) => m.id && !NON_CHAT.test(m.id));
+  } catch (e) {
+    throw new Error(`The key or address was not accepted. ${providerMessage(e)}`);
+  }
+  if (!models.length) throw new Error("The key works, but no chat models are available to it.");
+  const preferred = [API_PROVIDERS[c.provider]?.defaultModel, ...models.map((m) => m.id).filter((id) => /flash|mini|haiku/i.test(id)), ...models.map((m) => m.id)];
+  const candidates = [...new Set(preferred.filter((id) => id && models.some((m) => m.id === id)))].slice(0, 4);
+  let lastError = null;
+  for (const model of candidates) {
+    try {
+      const signal = AbortSignal.timeout(15000);
+      await engine.generate({ system: "Reply with exactly: OK", user: "Say OK.", model, signal, onDelta: () => {} });
+      return { models: models.map((m) => ({ id: m.id, label: m.label || m.id })), model };
+    } catch (e) {
+      lastError = e;
+      // A billing or key problem will not get better with another model.
+      if (/HTTP (401|402|403)\b/.test(String(e.message))) break;
+    }
+  }
+  throw new Error(`The key was accepted, but a test request failed. ${providerMessage(lastError)}`);
+}
 
 async function* sse(res) {
   const reader = res.body.getReader();

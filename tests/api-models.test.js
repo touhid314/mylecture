@@ -107,3 +107,13 @@ test("compatible requests send reasoning_effort only for an explicit selected le
     assert.equal(body.reasoning_effort, "provider-reported-level");
   });
 });
+
+test("Use with API key offers only providers verified end to end", async () => {
+  const { OFFERED_API_PROVIDERS, verifyApiProvider } = await import("../electron/engines/api.js");
+  assert.deepEqual(Object.keys(OFFERED_API_PROVIDERS), ["gemini", "compatible"]);
+  assert.equal(OFFERED_API_PROVIDERS.compatible.label, "LiteLLM");
+  assert.ok(OFFERED_API_PROVIDERS.compatible.needsBaseUrl);
+  await assert.rejects(verifyApiProvider({ provider: "openai", apiKey: "x" }), /not available/);
+  await assert.rejects(verifyApiProvider({ provider: "compatible", apiKey: "x", baseUrl: "" }), /server address/);
+  await assert.rejects(verifyApiProvider({ provider: "gemini", apiKey: "" }), /Enter an API key/);
+});

@@ -4,6 +4,7 @@
 // signed in on the computer are not connected until the user chooses so.
 // Used by the first-run welcome and by Create while nothing is connected.
 import { h, toast, bus } from "./ui.js";
+import { showApiKeyDialog } from "./api-key.js";
 
 export const SERVICE_ORDER = ["codex", "antigravity", "claude-code"];
 let servicesCache = null;
@@ -150,7 +151,7 @@ export function showWelcome(state, { onDone } = {}) {
   const panel = connectPanel(state, { onChange: () => update() });
   const start = h("button", { class: "btn primary welcome-start", disabled: true, onclick: () => finish() }, "Start creating");
   const later = h("button", { class: "btn ghost", onclick: () => finish() }, "Skip for now");
-  const apiLink = h("button", { class: "btn ghost", onclick: () => finish("settings") }, "Use an API key instead");
+  const apiLink = h("button", { class: "btn ghost", onclick: () => showApiKeyDialog(state, { onDone: () => finish() }) }, "Use an API key instead");
   const overlay = h(
     "div",
     { class: "welcome-overlay", role: "dialog", "aria-modal": "true", "aria-label": "Welcome to MyLecture" },

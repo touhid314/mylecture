@@ -19,9 +19,11 @@ const q = process.argv.find((a, i) => i > 1 && !a.startsWith("--") && !a.endsWit
 const theme = process.env.ML_THEME || "default";
 const length = process.env.ML_LENGTH || "quick";
 const s = getSettings();
-const engines = createEngines(() => ({}));
+// API keys: ML_API_PROVIDER, ML_API_KEY, ML_API_BASE, ML_API_MODEL (with ML_ENGINE=api).
+const apiConfig = { provider: process.env.ML_API_PROVIDER, apiKey: process.env.ML_API_KEY, baseUrl: process.env.ML_API_BASE, model: process.env.ML_API_MODEL };
+const engines = createEngines(() => apiConfig);
 const engine = engines.get(process.env.ML_ENGINE || s.engine);
-const model = s.models?.[engine.id] ?? engine.defaultModel;
+const model = engine.id === "api" ? apiConfig.model : s.models?.[engine.id] ?? engine.defaultModel;
 const tts = new TTSService({ cacheDir: paths.tts, modelDir: paths.models, getSettings });
 tts.startKokoro();
 const t0 = Date.now();

@@ -4,7 +4,7 @@ import path from "node:path";
 import fs from "node:fs";
 import { execFileSync } from "node:child_process";
 import { fileURLToPath, pathToFileURL } from "node:url";
-import { createEngines, API_PROVIDERS } from "./engines/index.js";
+import { createEngines, API_PROVIDERS, OFFERED_API_PROVIDERS, verifyApiProvider } from "./engines/index.js";
 import { createUsageService } from "./usage.js";
 import { listRenderedVideos } from "./video-library.js";
 import { TTSService, KOKORO_VOICES, OMNIVOICE_VOICES } from "./tts/index.js";
@@ -179,9 +179,11 @@ function registerIpc() {
   h("engines:list", async () => {
     const out = [];
     for (const e of engines.list) out.push({ id: e.id, name: e.name, kind: e.kind, defaultModel: e.defaultModel || "", installHint: e.installHint || "" });
-    return { engines: out, apiProviders: API_PROVIDERS };
+    return { engines: out, apiProviders: OFFERED_API_PROVIDERS };
   });
   h("connect:services", () => SERVICES);
+  // "Use with API key": check a key for real before it is saved.
+  h("api:verify", ({ provider, apiKey, baseUrl } = {}) => verifyApiProvider({ provider, apiKey: apiKey || getSecret(`api:${provider}`), baseUrl }));
   h("connect:run", (id, action) => connectService(id, action));
   // Cached briefly: the connect cards poll, and the checks start the provider tools.
   const statusCache = new Map();

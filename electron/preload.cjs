@@ -11,6 +11,9 @@ contextBridge.exposeInMainWorld("ml", {
   info: () => invoke("app:info"),
   videos: { list: () => invoke("videos:list") },
   settings: { get: () => invoke("settings:get"), set: (p) => invoke("settings:set", p), setSecret: (n, v) => invoke("secret:set", n, v) },
+  api: {
+    verify: (req) => invoke("api:verify", req),
+  },
   connect: {
     services: () => invoke("connect:services"),
     run: (id, action) => invoke("connect:run", id, action),

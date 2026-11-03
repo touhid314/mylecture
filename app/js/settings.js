@@ -1,11 +1,12 @@
 import { connectPanel } from "./connect.js";
+import { showApiKeyDialog } from "./api-key.js";
 import { h, icon, toast, bus } from "./ui.js";
 
 const ENGINE_INFO = {
   codex: { title: "GPT", sub: "Uses your ChatGPT subscription." },
   antigravity: { title: "Gemini", sub: "Uses your Google account and Gemini plan." },
   "claude-code": { title: "Claude", sub: "Uses your Claude subscription." },
-  api: { title: "MyLecture Agent (API key)", sub: "Bring your own key: Gemini, OpenAI, Anthropic, or any OpenAI-compatible endpoint (OpenRouter, Ollama…)." },
+  api: { title: "Use with API key", sub: "Your own Gemini API or LiteLLM key, with MyLecture's built-in pipeline." },
 };
 
 export function engineLabel(s) {
@@ -69,10 +70,7 @@ export class SettingsView {
     this._connect?.stop();
     this._connect = connectPanel(this.state, { onChange: () => this.render() });
     const s = this.state.settings;
-    const api = h("div", { class: `engine-card ${s.engine === "api" ? "on" : ""}`, style: { marginTop: "10px" }, onclick: async () => {
-      await this.save({ engine: "api" });
-      this.render();
-    } },
+    const api = h("div", { class: `engine-card ${s.engine === "api" ? "on" : ""}`, style: { marginTop: "10px" }, onclick: () => showApiKeyDialog(this.state, { onDone: () => this.render() }) },
       h("div", { class: "ec-head" }, h("span", { class: "grow" }, ENGINE_INFO.api.title), s.engine === "api" ? h("span", { class: "badge good" }, "In use") : null),
       h("div", { class: "ec-sub" }, ENGINE_INFO.api.sub));
     return h("div", {}, this._connect.el, api);
