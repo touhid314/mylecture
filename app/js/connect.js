@@ -51,6 +51,9 @@ export function connectPanel(state, { compact = false, onChange } = {}) {
     const chip = st == null ? ["checking", "Checking…"] : connected ? ["good", "Connected"] : waiting ? ["warn", "Waiting for sign-in…"] : ["muted", "Not connected"];
     c.chip.className = `connect-chip ${chip[0]}`;
     c.chip.textContent = chip[1];
+    const acct = st?.ready && st.account?.email ? [st.account.email, st.account.plan].filter(Boolean).join(" · ") : "";
+    c.account.textContent = acct ? `${connected ? "Signed in as" : "Signed in on this computer as"} ${acct}` : st && st.installed && !st.ready && st.message && st.message !== "Not signed in" ? st.message : "";
+    c.account.hidden = !c.account.textContent;
     c.el.classList.toggle("ready", connected);
     c.el.classList.toggle("selected", selected);
     const buttons = [];
@@ -72,7 +75,8 @@ export function connectPanel(state, { compact = false, onChange } = {}) {
       }));
     } else {
       buttons.push(button(waiting ? "Open sign-in again" : "Connect", async () => {
-        if (st.ready && !waiting) {
+        const live = await window.ml.engines.status(id, { fresh: true }).catch(() => st);
+        if (live.ready && !waiting) {
           // Already signed in on this computer: connect right away.
           await connect(id);
           toast(`${svc.title} connected.`);
@@ -93,7 +97,7 @@ export function connectPanel(state, { compact = false, onChange } = {}) {
     busy = true;
     try {
       const list = await services();
-      const all = await Promise.all(SERVICE_ORDER.map((id) => window.ml.engines.status(id).catch(() => ({ installed: false, ready: false }))));
+      const all = await Promise.all(SERVICE_ORDER.map((id) => window.ml.engines.status(id, { fresh: pending.has(id) }).catch(() => ({ installed: false, ready: false }))));
       const byId = Object.fromEntries(SERVICE_ORDER.map((id, i) => [id, all[i]]));
       // Finish connections the user started once their sign-in is valid.
       for (const id of [...pending]) if (byId[id].ready) await connect(id);
@@ -117,14 +121,16 @@ export function connectPanel(state, { compact = false, onChange } = {}) {
       const svc = list[id];
       const chip = h("span", { class: "connect-chip checking" }, "Checking…");
       const actions = h("div", { class: "connect-actions" });
+      const account = h("div", { class: "connect-account", hidden: true });
       const card = h(
         "div",
         { class: "connect-card" },
         h("div", { class: "connect-head" }, h("b", {}, svc.title), chip),
         compact ? null : h("div", { class: "connect-sub" }, `Uses your ${svc.plan}.`),
+        account,
         actions,
       );
-      cards[id] = { el: card, chip, actions };
+      cards[id] = { el: card, chip, actions, account };
       el.append(card);
     }
     refresh();

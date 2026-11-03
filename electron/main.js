@@ -183,12 +183,21 @@ function registerIpc() {
   });
   h("connect:services", () => SERVICES);
   h("connect:run", (id, action) => connectService(id, action));
-  h("engines:status", async (id) => {
-    try {
-      return await engines.get(id).status();
-    } catch (e) {
-      return { installed: false, ready: false, message: String(e.message || e) };
-    }
+  // Cached briefly: the connect cards poll, and the checks start the provider tools.
+  const statusCache = new Map();
+  h("engines:status", async (id, { fresh = false } = {}) => {
+    const hit = statusCache.get(id);
+    if (!fresh && hit && Date.now() - hit.at < (hit.value?.ready ? 60000 : 8000)) return hit.promise;
+    const promise = engines
+      .get(id)
+      .status()
+      .catch((e) => ({ installed: false, ready: false, message: String(e.message || e) }));
+    statusCache.set(id, { at: Date.now(), promise });
+    promise.then((value) => {
+      const entry = statusCache.get(id);
+      if (entry?.promise === promise) entry.value = value;
+    });
+    return promise;
   });
   const modelRequests = new Map();
   h("engines:models", async (id) => {

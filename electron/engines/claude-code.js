@@ -34,8 +34,17 @@ export const claudeCode = {
     if (!exe) return { installed: false, ready: false, message: "Not set up yet" };
     const r = await runCapture(exe, ["--version"], { timeout: 15000 });
     if (!r.ok) return { installed: true, ready: false, path: exe, message: r.stderr.trim() || "Claude did not start" };
-    const signedIn = claudeSignedIn();
-    return { installed: true, ready: signedIn, version: r.stdout.trim(), path: exe, message: signedIn ? "Signed in" : "Not signed in" };
+    // Live check: signed in with a Claude subscription (not an API key).
+    const a = await runCapture(exe, ["auth", "status", "--json"], { timeout: 20000 });
+    let st = null;
+    try {
+      st = JSON.parse(a.stdout);
+    } catch {}
+    const signedIn = st ? !!st.loggedIn && st.authMethod === "claude.ai" : claudeSignedIn();
+    const plan = st?.subscriptionType ? `Claude ${String(st.subscriptionType).replace(/^\w/, (c) => c.toUpperCase())}` : "";
+    const account = signedIn && st?.email ? { email: st.email, plan } : null;
+    const message = signedIn ? "Signed in" : st?.loggedIn ? "Signed in with an API key, not a Claude subscription" : "Not signed in";
+    return { installed: true, ready: signedIn, version: r.stdout.trim(), path: exe, account, message };
   },
 
   async models() {

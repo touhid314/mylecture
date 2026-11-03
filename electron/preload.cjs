@@ -17,7 +17,7 @@ contextBridge.exposeInMainWorld("ml", {
   },
   engines: {
     list: () => invoke("engines:list"),
-    status: (id) => invoke("engines:status", id),
+    status: (id, opts) => invoke("engines:status", id, opts),
     usage: (id) => invoke("engines:usage", id),
     models: (id) => invoke("engines:models", id),
     test: (id) => invoke("engines:test", id),

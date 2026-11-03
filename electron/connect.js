@@ -32,7 +32,7 @@ export const SERVICES = {
     install: {
       cmd: WIN ? 'powershell -NoProfile -ExecutionPolicy Bypass -Command "irm https://claude.ai/install.ps1 | iex"' : "curl -fsSL https://claude.ai/install.sh | bash",
     },
-    login: "claude",
+    login: "claude auth login --claudeai",
   },
 };
 

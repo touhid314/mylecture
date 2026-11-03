@@ -2,7 +2,22 @@
 // `codex exec --json` only reports whole messages, so we speak the
 // app-server JSON-RPC protocol over stdio, which streams token deltas.
 import { spawn, execFile } from "node:child_process";
+import fs from "node:fs";
+import os from "node:os";
+import path from "node:path";
 import { findExecutable, scratchDir, runCapture, killTree } from "./cli-util.js";
+
+// The signed-in ChatGPT account (email, plan) from the saved sign-in's ID token.
+export function codexAccount(home = process.env.CODEX_HOME || path.join(os.homedir(), ".codex")) {
+  try {
+    const auth = JSON.parse(fs.readFileSync(path.join(home, "auth.json"), "utf8"));
+    const claims = JSON.parse(Buffer.from(String(auth.tokens?.id_token || "").split(".")[1] || "", "base64url").toString("utf8"));
+    const plan = claims["https://api.openai.com/auth"]?.chatgpt_plan_type;
+    return claims.email ? { email: claims.email, plan: plan ? `ChatGPT ${plan.charAt(0).toUpperCase()}${plan.slice(1)}` : "" } : null;
+  } catch {
+    return null;
+  }
+}
 
 export const codex = {
   id: "codex",
@@ -22,7 +37,8 @@ export const codex = {
     const l = await runCapture(exe, ["login", "status"], { timeout: 15000 });
     const text = (l.stdout + l.stderr).trim();
     const loggedIn = l.ok && !/not logged in/i.test(text);
-    return { installed: true, ready: loggedIn, version: v.stdout.trim(), path: exe, message: loggedIn ? "Signed in" : "Not signed in" };
+    const account = loggedIn ? codexAccount() : null;
+    return { installed: true, ready: loggedIn, version: v.stdout.trim(), path: exe, account, message: loggedIn ? "Signed in" : "Not signed in" };
   },
 
   async models() {

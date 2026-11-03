@@ -618,3 +618,6 @@ kbd { font: 11px var(--mono); background: var(--surface-2); border: 1px solid va
 .welcome-box h3 { margin: 8px 0 2px; font-size: 12px; color: var(--muted); text-transform: uppercase; letter-spacing: .06em; }
 .welcome-foot { display: flex; align-items: center; gap: 8px; margin-top: 8px; }
 @media (max-width: 760px) { .connect { grid-template-columns: 1fr; } }
+.connect-account { font-size: 12px; color: var(--fg-2); overflow-wrap: anywhere; }
+.connect-account[hidden] { display: none; }
+.connect.compact .connect-account { flex-basis: 100%; order: 3; }

@@ -7,12 +7,13 @@ import { findExecutable, scratchDir, spawnLines, runCapture } from "./cli-util.j
 import fs from "node:fs";
 import { parseAntigravityModels } from "./model-discovery.js";
 
-// Antigravity keeps the active Google account in ~/.gemini/google_accounts.json.
-export function antigravitySignedIn(home = os.homedir()) {
+// The active Google account, as recorded in ~/.gemini/google_accounts.json.
+export function antigravityEmail(home = os.homedir()) {
   try {
-    return !!JSON.parse(fs.readFileSync(path.join(home, ".gemini", "google_accounts.json"), "utf8")).active;
+    const active = JSON.parse(fs.readFileSync(path.join(home, ".gemini", "google_accounts.json"), "utf8")).active;
+    return typeof active === "string" && active.includes("@") ? active : "";
   } catch {
-    return false;
+    return "";
   }
 }
 
@@ -34,8 +35,15 @@ export const antigravity = {
     if (!exe) return { installed: false, ready: false, message: "Not set up yet" };
     const r = await runCapture(exe, ["--version"], { timeout: 15000 });
     if (!r.ok) return { installed: true, ready: false, path: exe, message: r.stderr.trim() || "Gemini did not start" };
-    const signedIn = antigravitySignedIn();
-    return { installed: true, ready: signedIn, version: r.stdout.trim(), path: exe, message: signedIn ? "Signed in" : "Not signed in" };
+    // Live check: the usage report only answers when the Google sign-in works
+    // (it is stored by the system, e.g. Windows Credential Manager).
+    const u = await runCapture(exe, ["-p", "/usage", "--output-format", "json"], { timeout: 25000 });
+    let signedIn = false;
+    try {
+      signedIn = JSON.parse(u.stdout).status === "SUCCESS";
+    } catch {}
+    const email = signedIn ? antigravityEmail() : "";
+    return { installed: true, ready: signedIn, version: r.stdout.trim(), path: exe, account: email ? { email, plan: "" } : null, message: signedIn ? "Signed in" : "Not signed in" };
   },
 
   async models() {
