@@ -229,6 +229,8 @@ export class IdeService {
     message = String(message || "").trim();
     if (!message) throw new Error("Write a message.");
     if (this.job) throw new Error(`A ${this.job.type} job is already running.`);
+    const chosen = getSettings();
+    if (!chosen.engine || (chosen.engine !== "api" && !chosen.connected?.[chosen.engine])) throw new Error("Connect GPT, Gemini or Claude first: on the welcome screen or in Settings.");
     if (supportsAgentFlow(this.engineConfig().engine)) {
       const lec = projectId ? lectures.get(projectId) : null;
       const r = generator.startAgentTurn({ projectId: lec?.id || null, message, sceneFile: lec?.scenes?.[sceneIndex]?.file || null, length, aspect, theme, teachingStyle });

@@ -1,3 +1,4 @@
+import { connectPanel } from "./connect.js";
 import { h, icon, toast, bus } from "./ui.js";
 
 const ENGINE_INFO = {
@@ -48,7 +49,7 @@ export class SettingsView {
       h("div", { class: "muted" }, "MyLecture is free and open source. It runs on your computer and uses the AI engine you choose."),
 
       h("h3", {}, "AI engine"),
-      this._engineCards(),
+      this._connectCards(),
       this._engineDetails(),
 
       h("h3", {}, "Voice"),
@@ -60,6 +61,21 @@ export class SettingsView {
       h("h3", {}, "App"),
       this._appCard(),
     );
+  }
+
+  // GPT, Gemini and Claude: connect / use, exactly as on the welcome screen;
+  // plus the API-key option.
+  _connectCards() {
+    this._connect?.stop();
+    this._connect = connectPanel(this.state, { onChange: () => this.render() });
+    const s = this.state.settings;
+    const api = h("div", { class: `engine-card ${s.engine === "api" ? "on" : ""}`, style: { marginTop: "10px" }, onclick: async () => {
+      await this.save({ engine: "api" });
+      this.render();
+    } },
+      h("div", { class: "ec-head" }, h("span", { class: "grow" }, ENGINE_INFO.api.title), s.engine === "api" ? h("span", { class: "badge good" }, "In use") : null),
+      h("div", { class: "ec-sub" }, ENGINE_INFO.api.sub));
+    return h("div", {}, this._connect.el, api);
   }
 
   _engineCards() {

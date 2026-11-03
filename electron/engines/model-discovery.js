@@ -9,7 +9,7 @@ export function parseClaudeModels(response) {
   if (!Array.isArray(models) || !models.length) throw new Error("Claude did not list any models. Sign in again from Settings and refresh.");
   return models.filter(m => typeof (m.value || m.id) === "string").map(m => ({
     id: m.value || m.id,
-    label: m.displayName || m.display_name || m.value || m.id,
+    label: String(m.displayName || m.display_name || m.value || m.id).replace(/\s*\(recommended\)/i, ""),
     resolvedModel: m.resolvedModel || m.id,
     description: m.description || "",
     efforts: m.supportsEffort === false ? [] : (Array.isArray(m.supportedEffortLevels) ? m.supportedEffortLevels.filter(x => typeof x === "string") : []),

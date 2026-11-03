@@ -7,7 +7,7 @@ import path from "node:path";
 import crypto from "node:crypto";
 
 export const DEFAULT_SETTINGS = {
-  engine: "antigravity",
+  engine: "", // chosen by the user on first run (GPT, Gemini, Claude or an API key)
   models: { antigravity: "", codex: "", "claude-code": "", api: "" },
   codexEffort: "", // empty uses the selected provider's native default
   engineEfforts: {},
@@ -30,6 +30,8 @@ export const DEFAULT_SETTINGS = {
   autoplay: true,
   uiTheme: "dark",
   onboarded: false,
+  // Services the user connected in MyLecture (codex, antigravity, claude-code).
+  connected: {},
 };
 
 function root() {
@@ -89,7 +91,12 @@ function deepMerge(base, over) {
 // ---------- settings ----------
 let settingsCache = null;
 export function getSettings() {
-  if (!settingsCache) settingsCache = deepMerge(DEFAULT_SETTINGS, readJson(paths.settings, {}));
+  if (!settingsCache) {
+    const saved = readJson(paths.settings, {});
+    // Profiles from before "connected" existed already used their engines.
+    if (saved.connected == null && Object.keys(saved).length) saved.connected = { codex: true, antigravity: true, "claude-code": true };
+    settingsCache = deepMerge(DEFAULT_SETTINGS, saved);
+  }
   return settingsCache;
 }
 export function saveSettings(patch) {

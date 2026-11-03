@@ -310,14 +310,14 @@ export class CreateView {
     const models = this._agentModels?.[key]?.models || [];
     const native = models.find(m => m.id === configured || (configured && m.resolvedModel === configured)) ||
       (!configured && models.find(m => m.isDefault || m.id === "default"));
-    const model = native?.id === "default" ? native.resolvedModel || native.label : native?.label || configured;
-    const provider = names[s.engine] || s.engine || "AI engine";
+    const model = native ? modelLabel(native, models) : configured || (models.length ? modelLabel(defaultModel(models), models) : "");
+    const provider = names[s.engine] || s.engine || "Choose AI";
     this.agentName.textContent = provider;
-    this.modelName.textContent = model || "Provider default";
-    this.modelName.title = configured || native?.resolvedModel || native?.id || "Provider default";
+    this.modelName.textContent = model || (s.engine ? "Loading models…" : "Choose a model");
+    this.modelName.title = configured || native?.resolvedModel || native?.id || model || "";
     const effort = s.engine === "antigravity" ? native?.effort : s.codexEffort || native?.defaultEffort;
-    this.thinkingLabel.textContent = effort ? cap(effort) : "Default";
-    this.thinkingLabel.title = `Reasoning effort: ${effort || "provider default"}`;
+    this.thinkingLabel.textContent = effort ? cap(effort) : "Standard";
+    this.thinkingLabel.title = `Reasoning effort: ${effort || "standard"}`;
   }
 
   _toggleEngineOptions(open = this.enginePanel.hidden) {
@@ -338,8 +338,9 @@ export class CreateView {
     const key = s.engine === "api" ? `api:${s.api.provider}` : s.engine;
     const models = this._agentModels?.[key]?.models || [];
     const choose = model => this._saveAgentSettings(s.engine === "api" ? { api: { model } } : { models: { [s.engine]: model } });
-    popMenu(this.modelName, [{ label: "Model" }, { text: "Provider default", run: () => choose("") },
-      ...models.filter(m => m.id !== "default").map(m => ({ text: m.label || m.id, run: () => choose(m.id) })), "-",
+    const def = defaultModel(models);
+    popMenu(this.modelName, [{ label: "Model" },
+      ...models.filter(m => m.id !== "default" || !models.some(x => x !== m && x.id === m.resolvedModel)).map(m => ({ text: modelLabel(m, models), run: () => choose(m === def ? "" : m.id) })).map((x, i, all) => all.findIndex((y) => y.text === x.text) === i ? x : null).filter(Boolean), "-",
       { text: "Refresh models", run: async () => { await this._refreshEngineOptions({ force: true }); this._modelMenu(); } },
       { label: this.modelStatus.textContent }]);
   }
@@ -435,9 +436,9 @@ export class CreateView {
       const cacheKey = id === "api" ? `${id}:${s.api.provider}` : id;
       if (this._displayedModelKey !== cacheKey) {
         this._displayedModelKey = cacheKey;
-        this.modelSelect.replaceChildren(h("option", { value: current }, current || "Provider default"), h("option", { value: "__custom" }, "Custom model ID…"));
+        this.modelSelect.replaceChildren(h("option", { value: current }, current || "Loading models…"), h("option", { value: "__custom" }, "Custom model ID…"));
         this.modelSuggestions.replaceChildren();
-        this.effortSelect.replaceChildren(h("option", { value: "" }, "Provider default"));
+        this.effortSelect.replaceChildren(h("option", { value: "" }, "Standard"));
         this.effortSelect.disabled = true;
       }
       const cached = this._agentModels[cacheKey];
@@ -456,8 +457,9 @@ export class CreateView {
       this._agentModels[cacheKey] = { models, fetchedAt };
       this._syncEngineLabel();
       this.modelSuggestions.replaceChildren(...models.filter(m => m.id).map(m => h("option", { value: m.id }, m.label || m.id)));
-      this.modelSelect.replaceChildren(...[h("option", { value: "" }, "Provider default"),
-        ...models.filter(m => m.id && m.id !== "default").map(m => h("option", { value: m.id }, m.label || m.id)),
+      const def = defaultModel(models);
+      this.modelSelect.replaceChildren(...[h("option", { value: "" }, def ? modelLabel(def, models) : "Loading models…"),
+        ...models.filter(m => m.id && m.id !== "default" && m !== def && modelLabel(m, models) !== modelLabel(def, models)).map(m => h("option", { value: m.id }, modelLabel(m, models))),
         current && !models.some(m => m.id === current) ? h("option", { value: current }, `${current} (saved)`): null,
         h("option", { value: "__custom" }, "Custom model ID…")].filter(Boolean));
       this.modelSelect.value = current === "default" ? "" : current;
@@ -465,7 +467,7 @@ export class CreateView {
       const model = models.find(m => m.id === current) || models.find(m => current && m.resolvedModel === current) || (!current && models.find(m => m.isDefault || m.id === "default"));
       const values = model?.efforts || [];
       const selected = id === "antigravity" ? model?.effort || "" : s.codexEffort || "";
-      this.effortSelect.replaceChildren(...(id === "antigravity" && model?.effort ? [] : [h("option", { value: "" }, "Provider default")]), ...values.map(v => h("option", { value: v }, cap(v))));
+      this.effortSelect.replaceChildren(...(id === "antigravity" && model?.effort ? [] : [h("option", { value: "" }, model?.defaultEffort ? cap(model.defaultEffort) : "Standard")]), ...values.filter(v => !(v === model?.defaultEffort && !(id === "antigravity" && model?.effort))).map(v => h("option", { value: v }, cap(v))));
       const effective = selected && values.includes(selected) ? selected : "";
       this.effortSelect.value = effective;
       this.effortSelect.disabled = !values.length;
@@ -611,14 +613,15 @@ export class CreateView {
     this._paintAll();
     // Nothing connected yet: offer the accounts right here.
     const welcome = this.welcome;
-    anyConnected().then((ok) => {
-      if (ok || !welcome.isConnected || this.state.settings.engine === "api") return;
+    anyConnected(this.state).then((ok) => {
+      const chosen = this.state.settings.engine;
+      if ((ok && chosen) || !welcome.isConnected || chosen === "api") return;
       const panel = connectPanel(this.state, { compact: true, onChange: () => this._refreshEngineOptions?.({ force: true }) });
       const box = h("div", { class: "agent-connect" }, h("div", { class: "agent-connect-title" }, "Connect your AI to start"), panel.el);
       welcome.append(box);
       const done = setInterval(async () => {
         if (!welcome.isConnected) return clearInterval(done), panel.stop();
-        if (await anyConnected()) {
+        if (this.state.settings.engine && (await anyConnected(this.state))) {
           clearInterval(done);
           panel.stop();
           box.remove();
@@ -1267,4 +1270,20 @@ function workedFor(ms, items) {
     }
   });
   return box;
+}
+
+// The model a provider uses when none is chosen, and how to name it.
+function defaultModel(models) {
+  return models.find((m) => m.isDefault) || models.find((m) => m.id === "default") || models[0] || null;
+}
+// Claude's "default" entry points at a real model (resolvedModel): use that model's name.
+function modelLabel(m, models = []) {
+  if (!m) return "";
+  if (m.id !== "default") return m.label || m.id;
+  const real = models.find((x) => x.id !== "default" && (x.id === m.resolvedModel || x.resolvedModel === m.resolvedModel));
+  return real ? real.label || real.id : prettyModelId(m.resolvedModel) || m.label;
+}
+function prettyModelId(id) {
+  if (!id) return "";
+  return id.replace(/^claude-/, "").split("-").map((p, i, a) => (/^\d+$/.test(p) && /^\d+$/.test(a[i - 1] || "") ? "." + p : (i ? " " : "") + p.charAt(0).toUpperCase() + p.slice(1))).join("");
 }

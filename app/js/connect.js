@@ -1,67 +1,90 @@
-// "Connect your AI": ChatGPT, Google Gemini and Claude subscriptions, each
-// with live status and the one next step (install, sign in, use it).
-// Used by the first-run welcome and by Create when nothing is connected.
+// "Connect your AI": GPT, Gemini and Claude subscriptions.
+// A service counts as connected only once the user connects it in MyLecture
+// (settings.connected) and its sign-in is valid. Tools that happen to be
+// signed in on the computer are not connected until the user chooses so.
+// Used by the first-run welcome and by Create while nothing is connected.
 import { h, toast, bus } from "./ui.js";
 
-const ORDER = ["codex", "antigravity", "claude-code"];
+export const SERVICE_ORDER = ["codex", "antigravity", "claude-code"];
 let servicesCache = null;
 
 async function services() {
   return (servicesCache ||= await window.ml.connect.services());
 }
 
-export async function anyConnected() {
-  const st = await Promise.all(ORDER.map((id) => window.ml.engines.status(id).catch(() => ({}))));
-  return st.some((s) => s.ready);
-}
-
-async function useEngine(state, id) {
-  const s = await window.ml.settings.set({ engine: id });
+async function saveSettings(state, patch) {
+  const s = await window.ml.settings.set(patch);
   state.settings = s;
   bus.emit("settings-changed", s);
   return s;
 }
 
+export const isConnected = (settings, id, status) => !!settings.connected?.[id] && !!status?.ready;
+
+export async function anyConnected(state) {
+  const st = await Promise.all(SERVICE_ORDER.map((id) => window.ml.engines.status(id).catch(() => ({}))));
+  return SERVICE_ORDER.some((id, i) => isConnected(state.settings, id, st[i]));
+}
+
+const friendly = (e) => String(e?.message || e).replace(/^Error invoking remote method '[^']+': (Error: )?/, "");
+
 // Returns { el, refresh, stop }. Polls status while mounted.
 export function connectPanel(state, { compact = false, onChange } = {}) {
   const el = h("div", { class: "connect" + (compact ? " compact" : "") });
   const cards = {};
+  const pending = new Set(); // services the user asked to connect; done once signed in
   let timer = null;
   let busy = false;
   let alive = true;
 
+  const connect = async (id) => {
+    await saveSettings(state, { connected: { ...(state.settings.connected || {}), [id]: true }, engine: id });
+    pending.delete(id);
+    onChange?.(id);
+  };
+
   const paint = (svc, id, st) => {
     const c = cards[id];
-    const selected = state.settings.engine === id;
-    const chip = st == null ? ["checking", "Checking…"] : st.ready ? ["good", "Connected"] : st.installed ? ["warn", "Not signed in"] : ["muted", "Not installed"];
+    const connected = isConnected(state.settings, id, st);
+    const selected = connected && state.settings.engine === id;
+    const waiting = pending.has(id);
+    const chip = st == null ? ["checking", "Checking…"] : connected ? ["good", "Connected"] : waiting ? ["warn", "Waiting for sign-in…"] : ["muted", "Not connected"];
     c.chip.className = `connect-chip ${chip[0]}`;
     c.chip.textContent = chip[1];
-    c.el.classList.toggle("ready", !!st?.ready);
-    c.el.classList.toggle("selected", selected && !!st?.ready);
-    const act = (label, action, primary = true) =>
-      h("button", { class: `btn sm${primary ? " primary" : ""}`, onclick: async () => {
-        try {
-          await window.ml.connect.run(id, action);
-          if (action !== "signup") toast(action === "install" ? `Follow the setup, then come back. MyLecture notices when ${svc.title} is ready.` : `Sign in in the window that opened. MyLecture notices when you're connected.`, { timeout: 7000 });
-        } catch (e) {
-          toast(String(e.message || e).replace(/^Error invoking remote method '[^']+': (Error: )?/, ""), { kind: "bad", timeout: 9000 });
-        }
-      } }, label);
+    c.el.classList.toggle("ready", connected);
+    c.el.classList.toggle("selected", selected);
     const buttons = [];
-    if (!st) buttons.push();
-    else if (st.ready) {
-      buttons.push(
-        selected
-          ? h("span", { class: "connect-using" }, "✓ In use")
-          : h("button", { class: "btn sm primary", onclick: async () => {
-              await useEngine(state, id);
-              refresh();
-              onChange?.(id);
-            } }, `Use ${svc.title}`),
-      );
-    } else if (st.installed) buttons.push(act("Sign in", "login"));
-    else buttons.push(act("Set up", "install"));
-    if (st && !st.ready) buttons.push(h("button", { class: "btn sm ghost", onclick: () => window.ml.connect.run(id, "signup") }, "Get a subscription"));
+    const button = (label, run, primary = true) => h("button", { class: `btn sm${primary ? " primary" : ""}`, onclick: () => run().catch((e) => toast(friendly(e), { kind: "bad", timeout: 9000 })) }, label);
+    if (!st) {
+      // still checking
+    } else if (connected) {
+      buttons.push(selected ? h("span", { class: "connect-using" }, "✓ In use") : button(`Use ${svc.title}`, async () => {
+        await saveSettings(state, { engine: id });
+        refresh();
+        onChange?.(id);
+      }));
+    } else if (!st.installed) {
+      buttons.push(button("Set up", async () => {
+        await window.ml.connect.run(id, "install");
+        pending.add(id);
+        toast(`Follow the setup, then sign in. MyLecture connects ${svc.title} as soon as it's ready.`, { timeout: 8000 });
+        refresh();
+      }));
+    } else {
+      buttons.push(button(waiting ? "Open sign-in again" : "Connect", async () => {
+        if (st.ready && !waiting) {
+          // Already signed in on this computer: connect right away.
+          await connect(id);
+          toast(`${svc.title} connected.`);
+          return refresh();
+        }
+        await window.ml.connect.run(id, "login");
+        pending.add(id);
+        toast(`Sign in to ${svc.title} in the window that opened. MyLecture connects it as soon as you're signed in.`, { timeout: 8000 });
+        refresh();
+      }));
+    }
+    if (st && !connected) buttons.push(h("button", { class: "btn sm ghost", onclick: () => window.ml.connect.run(id, "signup") }, "Get a subscription"));
     c.actions.replaceChildren(...buttons);
   };
 
@@ -70,25 +93,27 @@ export function connectPanel(state, { compact = false, onChange } = {}) {
     busy = true;
     try {
       const list = await services();
-      const all = await Promise.all(ORDER.map((id) => window.ml.engines.status(id).catch(() => ({ installed: false, ready: false }))));
-      const byId = Object.fromEntries(ORDER.map((id, i) => [id, all[i]]));
-      // The selected engine isn't connected but another one is: use that one.
+      const all = await Promise.all(SERVICE_ORDER.map((id) => window.ml.engines.status(id).catch(() => ({ installed: false, ready: false }))));
+      const byId = Object.fromEntries(SERVICE_ORDER.map((id, i) => [id, all[i]]));
+      // Finish connections the user started once their sign-in is valid.
+      for (const id of [...pending]) if (byId[id].ready) await connect(id);
+      // The chosen service stopped working but another connected one works: use that.
       const current = state.settings.engine;
-      if (current !== "api" && !byId[current]?.ready) {
-        const ready = ORDER.find((id) => byId[id].ready);
-        if (ready) {
-          await useEngine(state, ready);
-          onChange?.(ready);
+      if (current && current !== "api" && !isConnected(state.settings, current, byId[current])) {
+        const other = SERVICE_ORDER.find((id) => isConnected(state.settings, id, byId[id]));
+        if (other) {
+          await saveSettings(state, { engine: other });
+          onChange?.(other);
         }
       }
-      if (alive) for (const id of ORDER) paint(list[id], id, byId[id]);
+      if (alive) for (const id of SERVICE_ORDER) paint(list[id], id, byId[id]);
     } finally {
       busy = false;
     }
   };
 
   services().then((list) => {
-    for (const id of ORDER) {
+    for (const id of SERVICE_ORDER) {
       const svc = list[id];
       const chip = h("span", { class: "connect-chip checking" }, "Checking…");
       const actions = h("div", { class: "connect-actions" });
@@ -103,7 +128,7 @@ export function connectPanel(state, { compact = false, onChange } = {}) {
       el.append(card);
     }
     refresh();
-    timer = setInterval(() => document.visibilityState === "visible" && el.isConnected && refresh(), 4000);
+    timer = setInterval(() => document.visibilityState === "visible" && el.isConnected && refresh(), 3000);
   });
   window.addEventListener("focus", refresh);
   const stop = () => {
@@ -138,10 +163,12 @@ export function showWelcome(state, { onDone } = {}) {
   document.body.append(overlay);
 
   async function update() {
-    const st = await window.ml.engines.status(state.settings.engine).catch(() => ({}));
-    start.disabled = !st.ready;
+    const engine = state.settings.engine;
+    const st = engine ? await window.ml.engines.status(engine).catch(() => ({})) : {};
+    start.disabled = !isConnected(state.settings, engine, st);
+    start.title = start.disabled ? "Connect GPT, Gemini or Claude first" : "";
   }
-  const poll = setInterval(update, 4000);
+  const poll = setInterval(update, 3000);
   update();
 
   async function finish(goto) {
