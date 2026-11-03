@@ -4,11 +4,12 @@ import { CreateView } from "./create.js";
 import { LibraryView } from "./library.js";
 import { SettingsView } from "./settings.js";
 import { ExportCenter } from "./exports.js";
+import { FEATURES } from "./features.js";
 
 export const state = {
   settings: null,
   info: null,
-  view: "study",
+  view: FEATURES.study ? "study" : "create",
 };
 
 const views = {};
@@ -19,7 +20,12 @@ async function boot() {
   document.body.classList.toggle("light", state.settings.uiTheme === "light");
 
   const exportsCenter = new ExportCenter();
-  views.study = new StudyView(document.getElementById("view-study"), { state, exportsCenter });
+  if (FEATURES.study) views.study = new StudyView(document.getElementById("view-study"), { state, exportsCenter });
+  else {
+    // Study is under development (feature/study): only Create ships for now.
+    document.querySelector('.rail-btn[data-view="study"]')?.remove();
+    document.getElementById("view-study")?.remove();
+  }
   views.create = new CreateView(document.getElementById("view-create"), { state, exportsCenter });
   views.library = new LibraryView(document.getElementById("view-library"), { state, exportsCenter });
   views.settings = new SettingsView(document.getElementById("view-settings"), { state });
@@ -27,9 +33,8 @@ async function boot() {
   document.querySelectorAll(".rail-btn").forEach((b) => b.addEventListener("click", () => show(b.dataset.view)));
   document.addEventListener("keydown", (e) => {
     if (!e.ctrlKey) return;
-    if (e.key === "1") show("study");
-    else if (e.key === "2") show("create");
-    else if (e.key === "3") show("library");
+    const order = [...document.querySelectorAll(".rail-btn[data-view]")].map((b) => b.dataset.view).filter((v) => v !== "settings");
+    if (/^[1-9]$/.test(e.key) && order[Number(e.key) - 1]) show(order[Number(e.key) - 1]);
     else if (e.key === ",") show("settings");
     else return;
     e.preventDefault();
@@ -44,10 +49,11 @@ async function boot() {
     console.error(e.reason);
     toast(String(e.reason?.message || e.reason).replace(/^Error invoking remote method '[^']+': (Error: )?/, ""), { kind: "bad", timeout: 7000 });
   });
-  show("study");
+  show(state.view);
 }
 
 function show(name, args = {}) {
+  if (!views[name]) name = FEATURES.study ? "study" : "create";
   state.view = name;
   document.querySelectorAll(".rail-btn").forEach((b) => b.classList.toggle("active", b.dataset.view === name));
   document.querySelectorAll(".view").forEach((v) => v.classList.toggle("active", v.id === "view-" + name));
