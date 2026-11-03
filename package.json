@@ -2,7 +2,7 @@
   "name": "mylecture",
   "productName": "MyLecture",
   "version": "0.1.0",
-  "description": "MyLecture — an open-source study app that answers every question with a narrated, animated video lesson.",
+  "description": "MyLecture \u2014 an open-source AI studio for narrated, animated videos: lessons, explainers, product demos, stories and more.",
   "main": "electron/main.js",
   "type": "module",
   "license": "MIT",

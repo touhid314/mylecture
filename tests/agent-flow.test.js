@@ -105,7 +105,8 @@ test("agent writes files; scenes stream in order, broken scene is sent back for 
 });
 
 test("lecture agent brief: makes videos, can just talk, keeps artifacts out of replies", () => {
-  assert.match(LECTURE_AGENT_SYSTEM, /main job is to make narrated, animated explainer videos/);
+  assert.match(LECTURE_AGENT_SYSTEM, /main job is to make narrated, animated videos of any kind/);
+  assert.match(LECTURE_AGENT_SYSTEM, /What video do you want to make next\?/);
   assert.match(LECTURE_AGENT_SYSTEM, /just reply/);
   assert.match(LECTURE_AGENT_SYSTEM, /Do not mention the project's files or artifacts[\s\S]*unless the user explicitly asks/);
   const p = agentTurnPrompt({ message: "hi", files: [], history: [{ role: "user", text: "make a video" }, { role: "agent", text: "Done." }], length: "1:00", theme: "auto", teachingStyle: "auto" });

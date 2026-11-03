@@ -3,7 +3,7 @@
 //   left   recent projects and a collapsible artifacts drawer
 //   center preview (player / document / rendered MP4) + scene timeline,
 //          Edit narration, Edit visual
-//   right  Lecture Agent: generation settings + chat (new lecture or edits)
+//   right  Video Agent: generation settings + chat (new videos, changes, questions)
 import { markdownEl, renderInline, onFileLink } from "./markdown.js";
 import { h, icon, fmtTime, fmtDate, toast, modal, popMenu, confirmBox, bus } from "./ui.js";
 import { Player } from "./player.js";
@@ -163,7 +163,7 @@ export class CreateView {
     const center = h("main", { class: "ide-center" }, this.stage, controls, timelineWrap);
 
     // Right: agent
-    this.chat = h("div", { class: "ide-chat", role: "log", "aria-label": "Lecture Agent conversation" });
+    this.chat = h("div", { class: "ide-chat", role: "log", "aria-label": "Video Agent conversation" });
     this.lenInput = h("input", { class: "input sm", value: "1:00", title: "Length (m:ss)", onchange: () => {
       const v = parseLength(this.lenInput.value);
       this.lenInput.value = v || "1:00";
@@ -179,7 +179,7 @@ export class CreateView {
     this.themeSelect = h("select", { class: "select sm", "aria-label": "Video theme", title: "Visual theme", onchange: e => this._saveAgentSettings({ lgTheme: e.target.value }) }, styles.themes.map((o) => h("option", { value: o.id, title: o.description }, o.name)));
     this.teachSelect = h("select", { class: "select sm", "aria-label": "Teaching style", title: "Teaching style", onchange: e => this._saveAgentSettings({ lgTeachingStyle: e.target.value }) }, styles.teachingStyles.map((o) => h("option", { value: o.id, title: o.description }, o.name)));
     this._syncSettingsSelects();
-    this.input = h("textarea", { class: "ide-input", rows: 2, "aria-label": "Message Lecture Agent", placeholder: "Describe the video you want to make…" });
+    this.input = h("textarea", { class: "ide-input", rows: 2, "aria-label": "Message the Video Agent", placeholder: "What video do you want to make? What do you want to teach?" });
     this.input.addEventListener("input", () => {
       this.input.style.height = "auto";
       this.input.style.height = Math.min(this.input.scrollHeight, 180) + "px";
@@ -248,7 +248,7 @@ export class CreateView {
     const right = h(
       "aside",
       { class: "ide-right" },
-      h("div", { class: "ide-right-head" }, h("span", { class: "agent-mark" }, icon("sparkles")), h("b", { class: "grow" }, "Lecture Agent"), this.agentStatus, h("button", { class: "agent-tool", title: "New lecture", "aria-label": "New lecture", onclick: () => this.newLecture() }, icon("plus"))),
+      h("div", { class: "ide-right-head" }, h("span", { class: "agent-mark" }, icon("sparkles")), h("b", { class: "grow" }, "Video Agent"), this.agentStatus, h("button", { class: "agent-tool", title: "New video", "aria-label": "New video", onclick: () => this.newLecture() }, icon("plus"))),
       h("div", { class: "ide-actions agent-project-actions" }, h("div", { class: "ide-split" }, this.resolveBtn, this.resolveMenu), h("div", { class: "ide-split" }, this.renderBtn, this.renderMenu)),
       this.chat,
       h(
@@ -594,10 +594,15 @@ export class CreateView {
     this.chat.replaceChildren();
     this.welcome = h("div", { class: "agent-welcome" },
       h("div", { class: "agent-welcome-mark" }, icon("sparkles")),
-      h("h2", {}, "What will you teach?"),
-      h("p", {}, "Turn an idea into a polished video. Shape the story, refine each scene, and make it yours."),
-      h("div", { class: "agent-suggestions" }, ["Explain a concept", "Walk through a problem"].map((label) => h("button", { onclick: () => {
-        this.input.value = label === "Explain a concept" ? "Create a video explaining " : "Create a step-by-step video solving ";
+      h("h2", {}, "What video do you want to make next?"),
+      h("p", {}, "Teach a concept, explain how something works, demo a product, or tell a story. Describe it, and the agent writes, animates and narrates it. Then shape every scene together."),
+      h("div", { class: "agent-suggestions" }, [
+        ["Teach a concept", "Make a video teaching "],
+        ["Explain how it works", "Make a video explaining how "],
+        ["Demo a product", "Make a short product demo video for "],
+        ["Tell a story", "Make a short animated story about "],
+      ].map(([label, start]) => h("button", { onclick: () => {
+        this.input.value = start;
         this.input.focus();
       } }, label))),
     );
@@ -620,8 +625,8 @@ export class CreateView {
     this.agentStatus.textContent = busy ? "Working" : "Ready";
     this.agentStatus.className = "agent-status" + (busy ? " working" : "");
     const sc = lec?.scenes?.[this.sceneIndex];
-    this.modeNote.textContent = lec && !this.liveJob && sc ? `Editing ${sc.file}` : "";
-    this.input.placeholder = lec && !this.liveJob ? `Describe a change to ${sc?.file || "this scene"}…` : "Make a video on…";
+    this.modeNote.textContent = lec && !this.liveJob && sc ? `Viewing scene ${this.sceneIndex + 1}` : "";
+    this.input.placeholder = lec && !this.liveJob ? "Ask for a change, ask about this video, or start something new…" : "What video do you want to make? What do you want to teach?";
     if (this.preview === "lecture") this.curFile.textContent = sc ? `${sc.file} · ${sc.title || ""}` : lec ? "No scenes yet" : "No file selected";
   }
 
@@ -853,7 +858,7 @@ export class CreateView {
     if (force || c.scrollHeight - c.scrollTop - c.clientHeight < 160) c.scrollTop = c.scrollHeight;
   }
 
-  // Every message goes to the Lecture Agent, first or not. With a CLI agent it
+  // Every message goes to the Video Agent, first or not. With a CLI agent it
   // decides what the message needs (a new video, changes, or just a reply).
   async send() {
     const text = this.input.value.trim();

@@ -1,7 +1,7 @@
 # MyLecture
 
-> **Open-source AI video lesson studio for Windows and macOS**  
-> Ask a question, read the streamed answer, then explore it with narrated, animated visuals.
+> **Open-source AI video studio for Windows and macOS**  
+> Lessons, explainers, product demos, stories, social shorts: describe a video, and the agent writes, animates and narrates it.
 
 ---
 
