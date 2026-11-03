@@ -5,6 +5,7 @@
 //          Edit narration, Edit visual
 //   right  Video Agent: generation settings + chat (new videos, changes, questions)
 import { markdownEl, renderInline, onFileLink } from "./markdown.js";
+import { connectPanel, anyConnected } from "./connect.js";
 import { h, icon, fmtTime, fmtDate, toast, modal, popMenu, confirmBox, bus } from "./ui.js";
 import { Player } from "./player.js";
 import { UsagePanel } from "./usage.js";
@@ -303,7 +304,7 @@ export class CreateView {
 
   _syncEngineLabel(s = this.state.settings) {
     if (!this.engineLabel) return;
-    const names = { "claude-code": "Claude", codex: "Codex", antigravity: "Antigravity", api: "API" };
+    const names = { "claude-code": "Claude", codex: "GPT", antigravity: "Gemini", api: "API" };
     const configured = s.engine === "api" ? s.api?.model : s.models?.[s.engine];
     const key = s.engine === "api" ? `api:${s.api.provider}` : s.engine;
     const models = this._agentModels?.[key]?.models || [];
@@ -608,6 +609,23 @@ export class CreateView {
     );
     this.chat.append(this.welcome);
     this._paintAll();
+    // Nothing connected yet: offer the accounts right here.
+    const welcome = this.welcome;
+    anyConnected().then((ok) => {
+      if (ok || !welcome.isConnected || this.state.settings.engine === "api") return;
+      const panel = connectPanel(this.state, { compact: true, onChange: () => this._refreshEngineOptions?.({ force: true }) });
+      const box = h("div", { class: "agent-connect" }, h("div", { class: "agent-connect-title" }, "Connect your AI to start"), panel.el);
+      welcome.append(box);
+      const done = setInterval(async () => {
+        if (!welcome.isConnected) return clearInterval(done), panel.stop();
+        if (await anyConnected()) {
+          clearInterval(done);
+          panel.stop();
+          box.remove();
+          this._refreshEngineOptions?.({ force: true });
+        }
+      }, 4000);
+    });
   }
 
   _paintAll() {
@@ -784,7 +802,7 @@ export class CreateView {
   }
 
   // ---------- Super Agent-style work view ----------
-  // While a job runs: "Working for 12s · Codex" over a live timeline of what
+  // While a job runs: "Working for 12s · GPT" over a live timeline of what
   // the agent says (Markdown) and what it does (compact tool steps). When it
   // ends, that collapses into "Worked for 1m 46s ›" and the agent's final
   // message follows as its own reply.

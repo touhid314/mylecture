@@ -592,3 +592,29 @@ kbd { font: 11px var(--mono); background: var(--surface-2); border: 1px solid va
 .caret { font-size: 10px; color: var(--muted); }
 .ide-doc .md h1, .ide-doc .md h2, .ide-doc .md h3 { color: var(--accent); }
 .study-answer.md { font-size: 15px; }
+
+/* ---------- Connect your AI (first-run welcome + Create) ---------- */
+.connect { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px; }
+.connect.compact { grid-template-columns: 1fr; gap: 8px; }
+.connect-card { display: flex; flex-direction: column; gap: 8px; padding: 12px 14px; border: 1px solid var(--line); border-radius: 12px; background: var(--surface-2); text-align: left; }
+.connect-card.selected { border-color: color-mix(in srgb, var(--accent) 60%, var(--line)); }
+.connect.compact .connect-card { flex-direction: row; align-items: center; flex-wrap: wrap; padding: 9px 12px; }
+.connect.compact .connect-head { flex: 1; }
+.connect-head { display: flex; align-items: center; gap: 8px; }
+.connect-head b { color: var(--fg); font-size: 14px; }
+.connect-sub { color: var(--muted); font-size: 12px; line-height: 1.45; flex: 1; }
+.connect-actions { display: flex; gap: 6px; flex-wrap: wrap; align-items: center; }
+.connect-chip { font-size: 11px; padding: 2px 8px; border-radius: 999px; border: 1px solid var(--line); color: var(--muted); white-space: nowrap; }
+.connect-chip.good { color: var(--good); border-color: color-mix(in srgb, var(--good) 45%, transparent); }
+.connect-chip.warn { color: var(--warn); border-color: color-mix(in srgb, var(--warn) 45%, transparent); }
+.connect-using { font-size: 12px; color: var(--good); }
+.agent-connect { margin-top: 18px; width: 100%; max-width: 420px; text-align: left; }
+.agent-connect-title { font-size: 12px; color: var(--muted); margin: 0 0 8px; text-transform: uppercase; letter-spacing: .06em; }
+.welcome-overlay { position: fixed; inset: 0; z-index: 1000; display: grid; place-items: center; background: color-mix(in srgb, var(--bg, #0f0e0d) 88%, transparent); backdrop-filter: blur(6px); padding: 24px; }
+.welcome-box { width: min(860px, 100%); max-height: 100%; overflow: auto; background: var(--surface); border: 1px solid var(--line); border-radius: 18px; padding: 32px 34px 24px; display: flex; flex-direction: column; gap: 12px; box-shadow: 0 30px 80px rgba(0,0,0,.45); }
+.welcome-logo { width: 54px; height: 54px; }
+.welcome-box h1 { margin: 4px 0 0; font-size: 26px; color: var(--fg); }
+.welcome-lead { margin: 0 0 8px; color: var(--fg-2); font-size: 15px; line-height: 1.55; }
+.welcome-box h3 { margin: 8px 0 2px; font-size: 12px; color: var(--muted); text-transform: uppercase; letter-spacing: .06em; }
+.welcome-foot { display: flex; align-items: center; gap: 8px; margin-top: 8px; }
+@media (max-width: 760px) { .connect { grid-template-columns: 1fr; } }

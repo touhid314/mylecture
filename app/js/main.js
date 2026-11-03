@@ -5,6 +5,7 @@ import { LibraryView } from "./library.js";
 import { SettingsView } from "./settings.js";
 import { ExportCenter } from "./exports.js";
 import { FEATURES } from "./features.js";
+import { showWelcome } from "./connect.js";
 
 export const state = {
   settings: null,
@@ -50,6 +51,8 @@ async function boot() {
     toast(String(e.reason?.message || e.reason).replace(/^Error invoking remote method '[^']+': (Error: )?/, ""), { kind: "bad", timeout: 7000 });
   });
   show(state.view);
+  // First run: connect an AI account before anything else.
+  if (!state.settings.onboarded) showWelcome(state, { onDone: (goto) => goto && show(goto) });
 }
 
 function show(name, args = {}) {

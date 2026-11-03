@@ -4,16 +4,26 @@
 import os from "node:os";
 import path from "node:path";
 import { findExecutable, scratchDir, spawnLines, runCapture } from "./cli-util.js";
+import fs from "node:fs";
 import { parseAntigravityModels } from "./model-discovery.js";
+
+// Antigravity keeps the active Google account in ~/.gemini/google_accounts.json.
+export function antigravitySignedIn(home = os.homedir()) {
+  try {
+    return !!JSON.parse(fs.readFileSync(path.join(home, ".gemini", "google_accounts.json"), "utf8")).active;
+  } catch {
+    return false;
+  }
+}
 
 const EXTRA_DIRS = [path.join(os.homedir(), "AppData", "Local", "agy", "bin")];
 
 export const antigravity = {
   id: "antigravity",
-  name: "Antigravity",
+  name: "Gemini",
   kind: "cli",
   defaultModel: "",
-  installHint: "Install Google Antigravity, then run `agy` once in a terminal and sign in.",
+  installHint: "Connect your Gemini subscription from the welcome screen or Settings.",
 
   exe() {
     return findExecutable(["agy"], EXTRA_DIRS);
@@ -21,16 +31,18 @@ export const antigravity = {
 
   async status() {
     const exe = this.exe();
-    if (!exe) return { installed: false, ready: false, message: "agy not found on PATH" };
+    if (!exe) return { installed: false, ready: false, message: "Not set up yet" };
     const r = await runCapture(exe, ["--version"], { timeout: 15000 });
-    return { installed: true, ready: r.ok, version: r.stdout.trim(), path: exe, message: r.ok ? "Ready" : r.stderr.trim() };
+    if (!r.ok) return { installed: true, ready: false, path: exe, message: r.stderr.trim() || "Gemini did not start" };
+    const signedIn = antigravitySignedIn();
+    return { installed: true, ready: signedIn, version: r.stdout.trim(), path: exe, message: signedIn ? "Signed in" : "Not signed in" };
   },
 
   async models() {
     const exe = this.exe();
-    if (!exe) throw new Error("Antigravity CLI (agy) is not installed or not on PATH.");
+    if (!exe) throw new Error("Gemini isn't connected. Connect it from the welcome screen or Settings.");
     const r = await runCapture(exe, ["models"], { timeout: 30000 });
-    if (!r.ok) throw new Error(`Antigravity model discovery failed: ${r.stderr.trim() || r.error?.message || "agy models failed"}`);
+    if (!r.ok) throw new Error(`Gemini model list failed: ${r.stderr.trim() || r.error?.message || "no models"}`);
     return parseAntigravityModels(r.stdout);
   },
 
@@ -42,7 +54,7 @@ export const antigravity = {
 
   async generate({ system, user, model, effort, signal, onDelta, onStatus, onActivity, workspace }) {
     const exe = this.exe();
-    if (!exe) throw new Error("Antigravity CLI (agy) is not installed or not on PATH.");
+    if (!exe) throw new Error("Gemini isn't connected. Connect it from the welcome screen or Settings.");
     const args = ["--input-format", "stream-json", "--output-format", "stream-json", "--disable-slash-commands"];
     if (workspace) args.push("--mode", "accept-edits");
     if (model) args.push("--model", model);
@@ -90,8 +102,8 @@ export const antigravity = {
       },
     });
     if (res.aborted) return { text: full, aborted: true };
-    if (error) throw new Error(`Antigravity: ${error}`);
-    if (res.code !== 0 && !full) throw new Error(`Antigravity exited with code ${res.code}: ${res.stderr.slice(-500)}`);
+    if (error) throw new Error(`Gemini: ${error}`);
+    if (res.code !== 0 && !full) throw new Error(`Gemini stopped unexpectedly (${res.code}): ${res.stderr.slice(-500)}`);
     return { text: full, usage };
   },
 };

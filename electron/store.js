@@ -56,6 +56,8 @@ export const paths = {
     return path.join(root(), "models");
   },
   get exports() {
+    // A separate profile (MYLECTURE_PROFILE) keeps its videos with it.
+    if (process.env.MYLECTURE_PROFILE) return path.join(root(), "videos");
     return path.join(app.getPath("videos"), "MyLecture");
   },
 };

@@ -3,7 +3,18 @@
 import os from "node:os";
 import path from "node:path";
 import { findExecutable, scratchDir, spawnLines, runCapture } from "./cli-util.js";
+import fs from "node:fs";
 import { discoverClaudeModels } from "./model-discovery.js";
+
+// Claude Code records the signed-in account in ~/.claude.json (all platforms)
+// and, outside macOS, the login in ~/.claude/.credentials.json.
+export function claudeSignedIn(home = os.homedir()) {
+  try {
+    const cfg = JSON.parse(fs.readFileSync(path.join(home, ".claude.json"), "utf8"));
+    if (cfg.oauthAccount) return true;
+  } catch {}
+  return fs.existsSync(path.join(home, ".claude", ".credentials.json"));
+}
 
 const EXTRA = [path.join(os.homedir(), ".local", "bin"), path.join(os.homedir(), ".claude", "local")];
 
@@ -12,7 +23,7 @@ export const claudeCode = {
   name: "Claude",
   kind: "cli",
   defaultModel: "",
-  installHint: "Install Claude Code (https://claude.com/claude-code), then run `claude` once and sign in.",
+  installHint: "Connect your Claude subscription from the welcome screen or Settings.",
 
   exe() {
     return findExecutable(["claude"], EXTRA);
@@ -20,14 +31,16 @@ export const claudeCode = {
 
   async status() {
     const exe = this.exe();
-    if (!exe) return { installed: false, ready: false, message: "claude not found on PATH" };
+    if (!exe) return { installed: false, ready: false, message: "Not set up yet" };
     const r = await runCapture(exe, ["--version"], { timeout: 15000 });
-    return { installed: true, ready: r.ok, version: r.stdout.trim(), path: exe, message: r.ok ? "Ready (sign in with `claude` if prompted)" : r.stderr.trim() };
+    if (!r.ok) return { installed: true, ready: false, path: exe, message: r.stderr.trim() || "Claude did not start" };
+    const signedIn = claudeSignedIn();
+    return { installed: true, ready: signedIn, version: r.stdout.trim(), path: exe, message: signedIn ? "Signed in" : "Not signed in" };
   },
 
   async models() {
     const exe = this.exe();
-    if (!exe) throw new Error("Claude Code CLI is not installed or not on PATH.");
+    if (!exe) throw new Error("Claude isn't connected. Connect it from the welcome screen or Settings.");
     return discoverClaudeModels(exe);
   },
 
@@ -38,7 +51,7 @@ export const claudeCode = {
 
   async generate({ system, user, model, effort, signal, onDelta, onStatus, onActivity, workspace }) {
     const exe = this.exe();
-    if (!exe) throw new Error("Claude Code CLI is not installed or not on PATH.");
+    if (!exe) throw new Error("Claude isn't connected. Connect it from the welcome screen or Settings.");
     // The (long) system prompt travels over stdin with the question, which
     // avoids Windows' command-line length limit.
     const args = ["-p", "--output-format", "stream-json", "--include-partial-messages", "--verbose"];
@@ -87,8 +100,8 @@ export const claudeCode = {
       },
     });
     if (res.aborted) return { text: full, aborted: true };
-    if (err && !full) throw new Error("Claude Code: " + err);
-    if (res.code !== 0 && !full) throw new Error(`Claude Code exited ${res.code}: ${res.stderr.slice(-400)}`);
+    if (err && !full) throw new Error("Claude: " + err);
+    if (res.code !== 0 && !full) throw new Error(`Claude stopped unexpectedly (${res.code}): ${res.stderr.slice(-400)}`);
     return { text: full };
   },
 };

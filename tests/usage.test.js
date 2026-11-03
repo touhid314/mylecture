@@ -59,7 +59,7 @@ test("Codex reads the last valid provider event, preserving exhausted limits and
   assert.equal(parsed.groups[0].buckets[0].resetsAt, new Date(1794000000000).toISOString());
   assert.equal(parsed.groups[0].buckets[1].resetsAt, null);
   assert.equal(parsed.measuredAt, "2026-11-03T08:00:00Z");
-  assert.match(parsed.description, /last Codex session/);
+  assert.match(parsed.description, /reported by your GPT subscription/);
   assert.equal(parseCodexUsage('{"payload":{"rate_limits":{"primary":{"used_percent":"20"}}}}').available, false);
   assert.equal(parseCodexUsage("token count: 5000").available, false);
 });

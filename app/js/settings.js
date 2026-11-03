@@ -1,9 +1,9 @@
 import { h, icon, toast, bus } from "./ui.js";
 
 const ENGINE_INFO = {
-  antigravity: { title: "Antigravity", sub: "Use your Google Antigravity login (agy). Fast Gemini Flash models stream lessons in real time.", rec: true },
-  codex: { title: "Codex", sub: "Use your ChatGPT / Codex login. Streams via the Codex app-server." },
-  "claude-code": { title: "Claude", sub: "Use your Claude subscription through the Claude Code CLI." },
+  codex: { title: "GPT", sub: "Uses your ChatGPT subscription." },
+  antigravity: { title: "Gemini", sub: "Uses your Google account and Gemini plan." },
+  "claude-code": { title: "Claude", sub: "Uses your Claude subscription." },
   api: { title: "MyLecture Agent (API key)", sub: "Bring your own key: Gemini, OpenAI, Anthropic, or any OpenAI-compatible endpoint (OpenRouter, Ollama…)." },
 };
 
@@ -79,7 +79,7 @@ export class SettingsView {
             this.render();
             for (const x of this.engines.engines) this._paintStatus(x.id);
           } },
-          h("div", { class: "ec-head" }, h("span", { class: "grow" }, info.title), info.rec ? h("span", { class: "badge good" }, "Recommended") : null),
+          h("div", { class: "ec-head" }, h("span", { class: "grow" }, info.title)),
           h("div", { class: "ec-sub" }, info.sub),
           h("div", { class: "row" }, st),
         );

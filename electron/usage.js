@@ -25,11 +25,11 @@ export function parseCodexUsage(text, measuredAt) {
       return [{ id, name: windowLabel(limit.window_minutes), window: windowLabel(limit.window_minutes),
         remaining: remaining(limit.used_percent), resetsAt: reset && Number.isFinite(reset.getTime()) ? reset.toISOString() : null }];
     });
-    if (buckets.length) return { available: true, groups: [{ name: "Codex", buckets }],
-      description: "Provider-reported limits from the last Codex session; refreshes after a Codex run.",
+    if (buckets.length) return { available: true, groups: [{ name: "GPT", buckets }],
+      description: "Limits reported by your GPT subscription; refreshes after each run.",
       measuredAt: event.timestamp || measuredAt, checkedAt: new Date().toISOString() };
   }
-  return unavailable("No account limits reported in recent Codex sessions. Run Codex while signed in, then refresh.");
+  return unavailable("No limits reported yet. Make a video with GPT, then refresh.");
 }
 
 async function* sessionFiles(dir, depth = 4) {
@@ -60,7 +60,7 @@ async function codexUsage(home) {
     if (parsed.available) return parsed;
     if (++checked >= 30) break;
   }
-  return unavailable("No account limits reported in recent Codex sessions. Run Codex while signed in, then refresh.");
+  return unavailable("No limits reported yet. Make a video with GPT, then refresh.");
 }
 
 export function parseClaudeUsage(data) {
@@ -104,7 +104,7 @@ async function claudeUsage(home, fetchUsage) {
 
 export function parseAntigravityUsage(result) {
   if (result.status !== "SUCCESS" || result.command?.name !== "usage" || !Array.isArray(result.command.data?.groups)) {
-    throw new Error("Antigravity did not return account limits. Update agy and check that you are signed in.");
+    throw new Error("Gemini did not report account limits. Check that you are signed in.");
   }
   const groups = result.command.data.groups.map((g) => ({
     name: String(g.name || "Models"),
@@ -141,14 +141,14 @@ export function createUsageService(engines, capture = runCapture, options = {}) 
           return claudeCached;
         }
         const exe = engines.get(id).exe();
-        if (!exe) throw new Error("Antigravity CLI is not installed. Install agy and sign in to see account limits.");
+        if (!exe) throw new Error("Gemini is not connected. Connect it to see account limits.");
         const r = await capture(exe, ["-p", "/usage", "--output-format", "json"], { timeout: 20000 });
-        if (!r.ok) throw new Error("Could not read Antigravity limits. Check your connection and sign-in, then refresh.");
+        if (!r.ok) throw new Error("Could not read Gemini limits. Check your connection and sign-in, then refresh.");
         return parseAntigravityUsage(JSON.parse(r.stdout));
       } catch (error) {
         return { available: false, groups: [], message: error instanceof SyntaxError
-          ? "Could not read the usage response. Update agy, then refresh."
-          : id === "codex" ? "Could not read Codex session limits. Check the CLI account directory and refresh." : error.message };
+          ? "Could not read the usage response. Refresh to try again."
+          : id === "codex" ? "Could not read GPT limits. Refresh to try again." : error.message };
       }
     })();
     pending.set(id, request);

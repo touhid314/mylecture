@@ -16,7 +16,7 @@ test("Claude discovery preserves each CLI model's own capabilities, including ne
   assert.equal(result[1].defaultEffort, undefined);
   assert.equal(result[1].supportsAdaptiveThinking, undefined);
   assert(!JSON.stringify(result).includes("must-not-leave-protocol"));
-  assert.throws(() => parseClaudeModels({}), /did not advertise/);
+  assert.throws(() => parseClaudeModels({}), /did not list any models/);
 });
 
 test("Claude discovery sends only a native initialize control request, disables hooks, then closes the process", async () => {
@@ -46,5 +46,5 @@ test("Antigravity levels and variants come only from matching CLI-advertised nam
   assert.deepEqual(list[0].effortVariants, [{ level: "quiet", model: "new-model-quiet" }, { level: "turbo-plus", model: "new-model-turbo-plus" }]);
   assert.deepEqual(list[2].efforts, []);
   assert.equal(list[0].defaultEffort, undefined);
-  assert.throws(() => parseAntigravityModels("Fetching available models..."), /no available models/);
+  assert.throws(() => parseAntigravityModels("Fetching available models..."), /returned no models/);
 });

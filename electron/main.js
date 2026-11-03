@@ -10,6 +10,7 @@ import { listRenderedVideos } from "./video-library.js";
 import { TTSService, KOKORO_VOICES, OMNIVOICE_VOICES } from "./tts/index.js";
 import { Generator, audioUrl, sceneUrl } from "./generator.js";
 import { IdeService } from "./ide.js";
+import { SERVICES, connectService } from "./connect.js";
 import { getSettings, saveSettings, getSecret, setSecret, hasSecret, lectures, sessions, paths, newId } from "./store.js";
 import { exportMp4, exportStandaloneHtml, exportContractBundle, captions, safeName } from "./exporter.js";
 
@@ -20,6 +21,9 @@ const NM = path.join(ROOT, "node_modules");
 const DEV = process.argv.includes("--dev");
 
 app.setName("MyLecture");
+// MYLECTURE_PROFILE=<folder>: run with a separate profile (settings, projects,
+// voices, videos), e.g. to see the app exactly as a fresh install does.
+if (process.env.MYLECTURE_PROFILE) app.setPath("userData", path.resolve(process.env.MYLECTURE_PROFILE));
 if (process.platform === "win32") app.setAppUserModelId("ai.mylecture.app");
 fixPathForGuiLaunch();
 
@@ -177,6 +181,8 @@ function registerIpc() {
     for (const e of engines.list) out.push({ id: e.id, name: e.name, kind: e.kind, defaultModel: e.defaultModel || "", installHint: e.installHint || "" });
     return { engines: out, apiProviders: API_PROVIDERS };
   });
+  h("connect:services", () => SERVICES);
+  h("connect:run", (id, action) => connectService(id, action));
   h("engines:status", async (id) => {
     try {
       return await engines.get(id).status();

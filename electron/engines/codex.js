@@ -6,10 +6,10 @@ import { findExecutable, scratchDir, runCapture, killTree } from "./cli-util.js"
 
 export const codex = {
   id: "codex",
-  name: "Codex",
+  name: "GPT",
   kind: "cli",
   defaultModel: "",
-  installHint: "Install with `npm i -g @openai/codex`, then run `codex login`.",
+  installHint: "Connect your GPT subscription from the welcome screen or Settings.",
 
   exe() {
     return findExecutable(["codex"]);
@@ -17,17 +17,17 @@ export const codex = {
 
   async status() {
     const exe = this.exe();
-    if (!exe) return { installed: false, ready: false, message: "codex not found on PATH" };
+    if (!exe) return { installed: false, ready: false, message: "Not set up yet" };
     const v = await runCapture(exe, ["--version"], { timeout: 15000 });
     const l = await runCapture(exe, ["login", "status"], { timeout: 15000 });
     const text = (l.stdout + l.stderr).trim();
     const loggedIn = l.ok && !/not logged in/i.test(text);
-    return { installed: true, ready: loggedIn, version: v.stdout.trim(), path: exe, message: loggedIn ? text || "Logged in" : "Run `codex login` in a terminal" };
+    return { installed: true, ready: loggedIn, version: v.stdout.trim(), path: exe, message: loggedIn ? "Signed in" : "Not signed in" };
   },
 
   async models() {
     const exe = this.exe();
-    if (!exe) throw new Error("Codex CLI is not installed or not on PATH.");
+    if (!exe) throw new Error("GPT isn't connected. Connect it from the welcome screen or Settings.");
     return new Promise((resolve, reject) => {
       const isShim = /\.(cmd|bat)$/i.test(exe);
       const child = isShim
@@ -39,10 +39,10 @@ export const codex = {
         done = true; clearTimeout(timer); killTree(child);
         error ? reject(error) : resolve(models);
       };
-      const timer = setTimeout(() => finish(new Error("Codex model list timed out")), 30000);
+      const timer = setTimeout(() => finish(new Error("GPT model list timed out")), 30000);
       const send = value => child.stdin.write(JSON.stringify(value) + "\n");
       child.on("error", e => finish(e));
-      child.on("close", () => finish(new Error("Codex closed before returning models")));
+      child.on("close", () => finish(new Error("GPT closed before returning models")));
       child.stdin.on("error", e => finish(e));
       child.stderr.resume();
       child.stdout.setEncoding("utf8");
@@ -56,7 +56,7 @@ export const codex = {
           if (m.id === 2) return finish(null, (m.result?.data || []).filter(x => !x.hidden).map(x => ({
             id: x.model || x.id, label: x.displayName || x.model || x.id,
             efforts: (x.supportedReasoningEfforts || []).map(e => e.reasoningEffort),
-            defaultEffort: x.defaultReasoningEffort, isDefault: x.isDefault, source: "Codex app-server model/list",
+            defaultEffort: x.defaultReasoningEffort, isDefault: x.isDefault, source: "GPT",
           })));
         }
       });
@@ -72,7 +72,7 @@ export const codex = {
   generate({ system, user, model, effort = "low", signal, onDelta, onStatus, onActivity, workspace }) {
     const exe = this.exe();
     const cwd = workspace || scratchDir("codex");
-    if (!exe) return Promise.reject(new Error("Codex CLI is not installed or not on PATH."));
+    if (!exe) return Promise.reject(new Error("GPT isn't connected. Connect it from the welcome screen or Settings."));
     return new Promise((resolve, reject) => {
       const isShim = /\.(cmd|bat)$/i.test(exe);
       const child = isShim
@@ -97,7 +97,7 @@ export const codex = {
       child.stderr.on("data", (d) => (stderr += d));
       child.on("error", (e) => finish(e));
       child.on("close", (code) => {
-        if (!done) finish(full ? null : new Error(`Codex app-server exited (${code}): ${stderr.slice(-400)}`), { text: full });
+        if (!done) finish(full ? null : new Error(`GPT stopped unexpectedly (${code}): ${stderr.slice(-400)}`), { text: full });
       });
       child.stdout.setEncoding("utf8");
       child.stdout.on("data", (d) => {
@@ -113,7 +113,7 @@ export const codex = {
             continue;
           }
           if (m.id === 1) {
-            if (m.error) return finish(new Error("Codex: " + (m.error.message || JSON.stringify(m.error))));
+            if (m.error) return finish(new Error("GPT: " + (m.error.message || JSON.stringify(m.error))));
             send({ method: "initialized" });
             const params = {
               cwd,
@@ -124,12 +124,12 @@ export const codex = {
             if (model) params.model = model;
             send({ id: 2, method: "thread/start", params });
           } else if (m.id === 2) {
-            if (m.error) return finish(new Error("Codex: " + (m.error.message || JSON.stringify(m.error))));
+            if (m.error) return finish(new Error("GPT: " + (m.error.message || JSON.stringify(m.error))));
             const tp = { threadId: m.result.thread.id, input: [{ type: "text", text: user }] };
             if (effort) tp.effort = effort;
             send({ id: 3, method: "turn/start", params: tp });
           } else if (m.id === 3 && m.error) {
-            return finish(new Error("Codex: " + (m.error.message || JSON.stringify(m.error))));
+            return finish(new Error("GPT: " + (m.error.message || JSON.stringify(m.error))));
           } else if (m.method === "item/agentMessage/delta") {
             const dlt = m.params?.delta || "";
             full += dlt;
@@ -142,10 +142,10 @@ export const codex = {
             const step = codexStep(item, files);
             if (step) onActivity?.(step);
           } else if (m.method === "error") {
-            return finish(new Error("Codex: " + (m.params?.error?.message || JSON.stringify(m.params))));
+            return finish(new Error("GPT: " + (m.params?.error?.message || JSON.stringify(m.params))));
           } else if (m.method === "turn/completed") {
             const t = m.params?.turn;
-            if (t?.status === "failed" && !full) return finish(new Error("Codex: " + (t.error?.message || "turn failed")));
+            if (t?.status === "failed" && !full) return finish(new Error("GPT: " + (t.error?.message || "turn failed")));
             return finish(null, { text: full });
           }
         }

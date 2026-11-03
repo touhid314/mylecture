@@ -6,7 +6,7 @@ import { scratchDir, killTree } from "./cli-util.js";
 
 export function parseClaudeModels(response) {
   const models = response?.models || response?.supported_models;
-  if (!Array.isArray(models) || !models.length) throw new Error("Claude Code did not advertise any models in its initialize response. Update or sign in to the original CLI and refresh.");
+  if (!Array.isArray(models) || !models.length) throw new Error("Claude did not list any models. Sign in again from Settings and refresh.");
   return models.filter(m => typeof (m.value || m.id) === "string").map(m => ({
     id: m.value || m.id,
     label: m.displayName || m.display_name || m.value || m.id,
@@ -15,7 +15,7 @@ export function parseClaudeModels(response) {
     efforts: m.supportsEffort === false ? [] : (Array.isArray(m.supportedEffortLevels) ? m.supportedEffortLevels.filter(x => typeof x === "string") : []),
     ...(typeof m.defaultEffort === "string" ? { defaultEffort: m.defaultEffort } : {}),
     isDefault: m.value === "default" || m.isDefault === true,
-    source: "Claude Code initialize",
+    source: "Claude",
     ...(typeof m.supportsAdaptiveThinking === "boolean" ? { supportsAdaptiveThinking: m.supportsAdaptiveThinking } : {}),
     ...(typeof m.supportsThinkingOff === "boolean" ? { supportsThinkingOff: m.supportsThinkingOff } : {}),
   }));
@@ -36,10 +36,10 @@ export function discoverClaudeModels(exe, { timeout = 30000, spawnProcess = spaw
       settled = true; clearTimeout(timer); stopProcess(child);
       error ? reject(error) : resolve(models);
     };
-    const timer = setTimeout(() => finish(new Error("Claude Code model discovery timed out. Sign in through the original CLI and refresh.")), timeout);
-    child.on("error", e => finish(new Error(`Claude Code discovery: ${e.message}`)));
-    child.on("close", code => finish(new Error(`Claude Code exited (${code}) before reporting its model capabilities.`)));
-    child.stdin.on("error", e => finish(new Error(`Claude Code discovery connection failed: ${e.message}`)));
+    const timer = setTimeout(() => finish(new Error("Claude model list timed out. Sign in again from Settings and refresh.")), timeout);
+    child.on("error", e => finish(new Error(`Claude model list: ${e.message}`)));
+    child.on("close", code => finish(new Error(`Claude stopped (${code}) before listing its models.`)));
+    child.stdin.on("error", e => finish(new Error(`Claude model list failed: ${e.message}`)));
     // Ignore hook/account/system logs: only model metadata crosses into the UI.
     child.stderr.resume();
     child.stdout.setEncoding("utf8");
@@ -50,7 +50,7 @@ export function discoverClaudeModels(exe, { timeout = 30000, spawnProcess = spaw
         let event; try { event = JSON.parse(line); } catch { continue; }
         if (event.type !== "control_response" || event.response?.request_id !== requestId) continue;
         const result = event.response;
-        if (result.subtype !== "success") return finish(new Error(`Claude Code initialization failed: ${result.error || "unknown error"}`));
+        if (result.subtype !== "success") return finish(new Error(`Claude did not start: ${result.error || "unknown error"}`));
         try { finish(null, parseClaudeModels(result.response)); } catch (e) { finish(e); }
       }
     });
@@ -63,7 +63,7 @@ export function parseAntigravityModels(stdout) {
   const models = stdout.split(/\r?\n/).map(line => line.split("\t"))
     .filter(parts => parts.length >= 2 && parts[0].trim() && !parts[0].startsWith("Fetching"))
     .map(([id, label]) => ({ id: id.trim(), label: label.trim() }));
-  if (!models.length) throw new Error("Antigravity CLI returned no available models. Sign in through agy and refresh.");
+  if (!models.length) throw new Error("Gemini returned no models. Sign in again from Settings and refresh.");
   const groups = new Map();
   const parsed = models.map(model => {
     // The CLI advertises effort in both the display suffix and model ID.
@@ -83,6 +83,6 @@ export function parseAntigravityModels(stdout) {
     ...model,
     efforts: (groups.get(model.baseModel) || []).map(x => x.level),
     effortVariants: groups.get(model.baseModel) || [],
-    source: "Antigravity CLI models",
+    source: "Gemini",
   }));
 }
