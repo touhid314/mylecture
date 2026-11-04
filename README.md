@@ -10,6 +10,29 @@ Turn complex ideas into narrated, animated videos. MyLecture gives teachers, tut
 
 *Preview the lesson, navigate its scenes, and refine it with AI, all in one workspace.*
 
+## How it works: HTML scenes, played like video
+
+MyLecture is built around a [small HTML contract](electron/lecturegen/resources/contracts/html-input-contract.md). The AI works directly with HTML, CSS, JavaScript, SVG, and Canvas to create each scene. The contract supplies just three entry points:
+
+- **Metadata:** the video's title, aspect ratio, and contract version.
+- **A segment plan:** narration text and audio references, or timed visual-only segments.
+- **A render function:** `renderSection(segment, localTime, globalTime)` draws the scene at a specific moment.
+
+Visual state comes from the supplied time, so the player can **play, pause, or seek directly to any point** without replaying earlier animation. MyLecture generates narration and uses its actual audio duration to build the timeline. Export drives the same HTML renderer at fixed timestamps, then combines the captured frames and audio into an MP4 with FFmpeg.
+
+### Why this approach over Remotion?
+
+For AI-generated lessons, MyLecture keeps scene authoring lightweight and gives the AI direct control over the browser's visual tools:
+
+| | MyLecture HTML contract | Remotion |
+| --- | --- | --- |
+| Scene format | An HTML document with CSS and JavaScript | React components and composition metadata |
+| Animation clock | Segment and time in seconds | Frame number through `useCurrentFrame()` |
+| Scene setup | Three contract entry points; no React/JSX compilation or per-scene npm project | React project and Remotion tooling |
+| Playback and export | Shared HTML renderer, MyLecture player, and MP4 export | Remotion Player and rendering APIs |
+
+**Less framework scaffolding for the AI, more room to build the explanation.** Both approaches support playback, seeking, and rendering; MyLecture's advantage here is its minimal scene interface and direct HTML workflow. See Remotion's [core model](https://www.remotion.dev/docs/idea), [Player](https://www.remotion.dev/docs/player/player), and [renderer](https://www.remotion.dev/docs/renderer/render-media).
+
 ## Built for teaching and learning
 
 Make a quick concept explainer, a worked example, a revision video, or a complete lesson. Start with a topic, or attach notes, PDFs, and images to give the AI context.
