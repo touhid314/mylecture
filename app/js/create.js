@@ -128,7 +128,6 @@ export class CreateView {
       { class: "ide-controls" },
       this.renderBar,
       this.renderInfo,
-      this.renderDone,
       this.curFile,
       h("div", { class: "grow" }),
       this.changeVoiceBtn = h("button", { class: "btn sm", title: "Re-record all narration with another voice", onclick: () => this.changeVoice() }, icon("mic"), h("span", {}, "Change voice")),
@@ -171,7 +170,7 @@ export class CreateView {
       const width = this.timelineScroll.clientWidth;
       if (width && width !== this._timelineWidth) { this._timelineWidth = width; this._paintTimeline(); }
     }).observe(this.timelineScroll);
-    const center = h("main", { class: "ide-center" }, this.videoTitle, this.stage, controls, timelineWrap);
+    const center = h("main", { class: "ide-center" }, this.videoTitle, this.stage, this.renderDone, controls, timelineWrap);
 
     // Right: agent
     this.chat = h("div", { class: "ide-chat", role: "log", "aria-label": "Video Agent conversation" });
@@ -1069,7 +1068,7 @@ export class CreateView {
   }
 
   // ---------- render ----------
-  // After a render: "✓ Video ready · Watch · Show in folder" in the controls row.
+  // After a render: a separate status row above the action controls.
   _showRenderDone(file) {
     const name = file.split(/[\\/]/).pop();
     this.renderDone.replaceChildren(
@@ -1079,12 +1078,10 @@ export class CreateView {
       h("button", { class: "btn ghost sm icon", title: "Dismiss", "aria-label": "Dismiss", onclick: () => this._hideRenderDone() }, icon("x")),
     );
     this.renderDone.hidden = false;
-    this.curFile.hidden = true;
   }
   _hideRenderDone() {
     if (this.renderDone.hidden) return;
     this.renderDone.hidden = true;
-    this.curFile.hidden = false;
   }
   // "Rendering 1920×1080 · 30 fps · frame 120/900 (14 fps) · 42% · ETA 0:55"
   _renderLabel(p) {

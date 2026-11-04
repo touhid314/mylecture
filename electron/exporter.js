@@ -111,10 +111,16 @@ export async function exportMp4(lec, { ttsFile, outDir, fps = 30, captionsOn = f
     enableLargerThanScreen: true,
     webPreferences: { offscreen: true, backgroundThrottling: false, sandbox: true, contextIsolation: true },
   });
+  // Windows clamps a new window's initial bounds to the monitor's work area,
+  // even when offscreen. Apply the full scene size again after construction;
+  // resizing a clamped screenshot would stretch the letterboxed scene.
+  win.setContentSize(W, H);
   win.webContents.setFrameRate(60);
   let ff, ffDone;
   try {
     await win.loadURL("mylecture://app/stage/stage.html?export=1");
+    const viewport = await win.webContents.executeJavaScript("({ width: innerWidth, height: innerHeight })");
+    if (viewport.width !== W || viewport.height !== H) throw new Error(`Render viewport is ${viewport.width}×${viewport.height}; expected ${W}×${H}.`);
     await win.webContents.executeJavaScript(`window.__ML.load(${JSON.stringify({ aspect: lec.aspect, theme: lec.theme, scenes: lec.scenes })}, {captions: ${!!captionsOn}}); window.__ML.fonts && window.__ML.fonts()`);
     const frames = Math.ceil(duration * fps);
     ff = spawn(
@@ -124,6 +130,7 @@ export async function exportMp4(lec, { ttsFile, outDir, fps = 30, captionsOn = f
         "-f", "rawvideo", "-pix_fmt", "bgra", "-s", `${OW}x${OH}`, "-r", String(fps), "-i", "-",
         "-i", audioFile,
         "-c:v", "libx264", "-preset", "veryfast", "-crf", "20", "-pix_fmt", "yuv420p",
+        "-vf", "setsar=1",
         "-c:a", "aac", "-b:a", "160k", "-shortest", "-movflags", "+faststart",
         "-f", "mp4", pendingOut,
       ],
@@ -146,8 +153,11 @@ export async function exportMp4(lec, { ttsFile, outDir, fps = 30, captionsOn = f
       await win.webContents.executeJavaScript(`window.__ML.seek(${t}).then(() => new Promise(r => requestAnimationFrame(() => requestAnimationFrame(r))))`);
       let img = await win.webContents.capturePage();
       const sz = img.getSize();
+      if (Math.abs(sz.width / sz.height - W / H) > 0.005) throw new Error(`Captured frame is ${sz.width}×${sz.height}; expected a ${lec.aspect || "16:9"} frame.`);
       if (sz.width !== OW || sz.height !== OH) img = img.resize({ width: OW, height: OH, quality: "good" });
-      await write(img.toBitmap());
+      const bitmap = img.toBitmap();
+      if (bitmap.length !== OW * OH * 4) throw new Error(`Captured frame has an unexpected pixel buffer size (${bitmap.length}).`);
+      await write(bitmap);
       if (i % 10 === 0) {
         const el = (Date.now() - started) / 1000;
         onProgress?.({ phase: "frames", progress: i / frames, eta: i ? (el / i) * (frames - i) : null, frame: i, frames, speed: el ? i / el : 0, fps, width: OW, height: OH });
