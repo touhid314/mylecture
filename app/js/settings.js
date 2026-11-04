@@ -383,7 +383,7 @@ export class SettingsView {
           try { await window.ml.logs.openFolder(); }
           catch { toast("Could not open the logs folder.", { kind: "bad" }); }
         } }, icon("folder"), "Open logs folder"))),
-      h("div", { class: "set-row" }, h("div", { class: "set-label" }, h("b", {}, "About"), h("span", {}, `MyLecture ${this.state.info?.version || ""} · MIT licensed · open source`)), h("div", { class: "set-ctl" })),
+      h("div", { class: "set-row" }, h("div", { class: "set-label" }, h("b", {}, "About"), h("span", {}, `MyLecture ${this.state.info?.version || ""} · CC BY-NC 4.0 · free for non-commercial use`)), h("div", { class: "set-ctl" })),
     );
   }
 }
