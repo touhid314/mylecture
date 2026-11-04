@@ -9,12 +9,17 @@
 ; failed can be installed later from Settings -> AI engines & voices.
 ; Updates (silent or --updated) skip the page and install nothing extra.
 
-; Branded welcome page (the finish page uses the same side image). The side image is build/installerSidebar.bmp
-; (made from app/assets by a small script; 2x size so it stays sharp).
+; Branded welcome page and finish texts (the finish page uses the same side image, build/installerSidebar.bmp;
+; header image build/installerHeader.bmp). Both made by scripts/make-installer-art.py at 2x so they stay sharp.
 !macro customWelcomePage
   !define MUI_WELCOMEPAGE_TITLE "Welcome to MyLecture"
-  !define MUI_WELCOMEPAGE_TEXT "Turn your ideas into narrated, animated videos, right on your PC.$\r$\n$\r$\nThis installs MyLecture ${VERSION} and, if you like, the AI engines and voices it uses.$\r$\n$\r$\nClick Next to continue."
+  !define MUI_WELCOMEPAGE_TEXT "Turn your ideas into narrated, animated videos, right on your PC.$\r$\n$\r$\nSetup installs MyLecture ${VERSION} and, if you want, the AI engines and voices it uses. It takes a few minutes.$\r$\n$\r$\nClick Next to begin."
   !insertmacro MUI_PAGE_WELCOME
+  ; Finish page texts (MUI reads these when electron-builder adds its finish page later on).
+  !define MUI_FINISHPAGE_TITLE "MyLecture is ready"
+  !define MUI_FINISHPAGE_TEXT "MyLecture ${VERSION} is installed.$\r$\n$\r$\nOpen MyLecture and sign in to an AI engine to start making videos. You can add engines and voices any time in Settings."
+  ; Ask before quitting halfway.
+  !define MUI_ABORTWARNING
 !macroend
 
 !macro customPageAfterChangeDir
@@ -44,31 +49,40 @@
       StrCpy $EngKokoro ${BST_CHECKED}
       StrCpy $EngOmni ${BST_UNCHECKED}
     ${EndIf}
-    !insertmacro MUI_HEADER_TEXT "AI engines and voices" "Choose what to install with MyLecture."
+    !insertmacro MUI_HEADER_TEXT "AI engines and voices" "Pick what MyLecture should set up for you."
     nsDialogs::Create 1018
     Pop $0
     ${If} $0 == error
       Abort
     ${EndIf}
-    ${NSD_CreateLabel} 0 0 100% 20u "AI engines use your own account, which you sign in to from MyLecture. Anything you skip can be installed later in Settings."
+    ; Bold section headings (visual only; $1 holds the font handle).
+    CreateFont $1 "$(^Font)" "$(^FontSize)" 700
+    ${NSD_CreateLabel} 0 0 100% 10u "AI engines  -  you sign in with your own account"
     Pop $0
-    ${NSD_CreateCheckbox} 0 24u 100% 11u "Claude (Claude Code) - needs a Claude Pro or Max plan"
+    SendMessage $0 ${WM_SETFONT} $1 0
+    ${NSD_CreateCheckbox} 8u 13u -8u 11u "Claude  (Claude Code)  -  Claude Pro or Max plan"
     Pop $CbClaude
     ${NSD_SetState} $CbClaude $EngClaude
-    ${NSD_CreateCheckbox} 0 38u 100% 11u "GPT (Codex) - needs a ChatGPT Plus, Pro, Business or Enterprise plan"
+    ${NSD_CreateCheckbox} 8u 26u -8u 11u "GPT  (Codex)  -  ChatGPT Plus, Pro, Business or Enterprise"
     Pop $CbCodex
     ${NSD_SetState} $CbCodex $EngCodex
-    ${NSD_CreateCheckbox} 0 52u 100% 11u "Gemini (Antigravity) - needs a Google account"
+    ${NSD_CreateCheckbox} 8u 39u -8u 11u "Gemini  (Antigravity)  -  any Google account"
     Pop $CbAgy
     ${NSD_SetState} $CbAgy $EngAgy
-    ${NSD_CreateCheckbox} 0 72u 100% 11u "Kokoro voice - the default narration voice (about 325 MB)"
+    ${NSD_CreateLabel} 0 58u 100% 10u "Narration voices"
+    Pop $0
+    SendMessage $0 ${WM_SETFONT} $1 0
+    ${NSD_CreateCheckbox} 8u 71u -8u 11u "Kokoro  -  natural default voice  (about 325 MB)"
     Pop $CbKokoro
     ${NSD_SetState} $CbKokoro $EngKokoro
-    ${NSD_CreateCheckbox} 0 86u 100% 11u "OmniVoice - advanced voices, best with an NVIDIA graphics card (about 6 GB)"
+    ${NSD_CreateCheckbox} 8u 84u -8u 11u "OmniVoice  -  advanced voices, best with an NVIDIA GPU  (about 6 GB)"
     Pop $CbOmni
     ${NSD_SetState} $CbOmni $EngOmni
-    ${NSD_CreateLabel} 0 106u 100% 20u "Downloads come from Anthropic, OpenAI, Google, Hugging Face and PyPI, and need an internet connection."
+    ${NSD_CreateHLine} 0 103u 100% 1u ""
     Pop $0
+    ${NSD_CreateLabel} 0 109u 100% 24u "Needs an internet connection. Files come from Anthropic, OpenAI, Google, Hugging Face and PyPI. Anything you skip can be added later in Settings."
+    Pop $0
+    SetCtlColors $0 666666 transparent
     nsDialogs::Show
   FunctionEnd
 

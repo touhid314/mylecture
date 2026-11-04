@@ -1,4 +1,5 @@
-# Draws build/installerSidebar.bmp (installer welcome/finish side image) from app/assets.
+# Draws build/installerSidebar.bmp, uninstallerSidebar.bmp (welcome/finish side image)
+# and installerHeader.bmp (inner-page header) from app/assets.
 #   python scripts/make-installer-art.py .
 import sys
 from PIL import Image, ImageDraw, ImageFilter, ImageFont
@@ -41,4 +42,21 @@ center("made on your PC", H - 27 * S, small, (168, 162, 158))
 bg.save(f"{root}/build/installerSidebar.bmp")
 bg.save(f"{root}/build/uninstallerSidebar.bmp")
 
-print("ok", bg.size)
+# Header image (top-right of the inner pages; the header strip is white).
+HW, HH = 150 * S, 57 * S
+hd = Image.new("RGB", (HW, HH), (255, 255, 255))
+hpx = hd.load()
+# fade from white to a soft sky tint toward the right edge
+for x in range(HW):
+    t = (x / (HW - 1)) ** 2
+    c = tuple(int(255 + (v - 255) * t * 0.18) for v in (56, 189, 248))
+    for y in range(HH):
+        hpx[x, y] = c
+hd_icon = Image.open(f"{root}/app/assets/icon.png").convert("RGBA").resize((40 * S, 40 * S), Image.LANCZOS)
+badge = Image.new("RGBA", (46 * S, 46 * S), (0, 0, 0, 0))
+ImageDraw.Draw(badge).rounded_rectangle((0, 0, 46 * S - 1, 46 * S - 1), radius=10 * S, fill=(17, 16, 16, 255))
+badge.paste(hd_icon, (3 * S, 3 * S), hd_icon)
+hd.paste(badge, (HW - 46 * S - 8 * S, (HH - 46 * S) // 2), badge)
+hd.save(f"{root}/build/installerHeader.bmp")
+
+print("ok", bg.size, hd.size)
