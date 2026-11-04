@@ -167,16 +167,15 @@ npm run smoke      # launch the packaged app and check it boots into Create
 
 ### Releasing
 
-Push a version tag; GitHub Actions builds Windows x64, macOS Apple silicon and macOS Intel,
-launches each packaged app (speech, ffmpeg and the scene checker included), and opens a
-draft GitHub Release with the installers:
+Windows only for now:
 
 ```powershell
-git tag v1.0.0
-git push origin v1.0.0
+npm version patch --no-git-tag-version
+npm run release:build     # tests, build, launch the packaged app
+npm run release:publish   # installed copies are offered the update; the website link serves it
 ```
 
-See [docs/RELEASING.md](docs/RELEASING.md) for signing and how to test the macOS builds.
+See [docs/RELEASING.md](docs/RELEASING.md) for the full steps and signing.
 
 ---
 

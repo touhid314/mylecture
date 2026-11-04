@@ -16,7 +16,8 @@
     "dist:mac": "electron-builder --mac --publish never",
     "smoke": "node scripts/smoke-packaged.mjs",
     "release:publish": "node scripts/publish-update.mjs",
-    "server:configure": "node scripts/configure-server.mjs"
+    "server:configure": "node scripts/configure-server.mjs",
+    "release:build": "npm test && npm run dist:win && node scripts/smoke-packaged.mjs --deep"
   },
   "dependencies": {
     "@fontsource/architects-daughter": "^5.3.0",

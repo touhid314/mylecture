@@ -1,14 +1,18 @@
 // Launches the packaged app (from dist/) with --smoke-test and checks that it
 // boots into the Create tab. Used by the release pipeline on every platform.
-//   node scripts/smoke-packaged.mjs [path-to-app-executable]
+//   node scripts/smoke-packaged.mjs [--deep] [path-to-app-executable]
+// --deep (or MYLECTURE_SMOKE_DEEP=1) also checks speech, ffmpeg and the scene checker.
 import { spawn } from "node:child_process";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 
 const dist = path.resolve("dist");
+const args = process.argv.slice(2);
+if (args.includes("--deep")) process.env.MYLECTURE_SMOKE_DEEP = "1";
+const exeArg = args.find(a => a !== "--deep");
 function findExecutable() {
-  if (process.argv[2]) return process.argv[2];
+  if (exeArg) return exeArg;
   if (process.platform === "win32") return path.join(dist, "win-unpacked", "MyLecture.exe");
   if (process.platform === "darwin") {
     for (const dir of ["mac-arm64", "mac", "mac-universal"]) {

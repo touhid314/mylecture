@@ -8,3 +8,6 @@ tests/scratch/*.log
 tests/scratch/last-gen.*
 tests/scratch/out/
 tests/scratch/themes/
+
+# Local-only test launcher
+MyLecture (fresh install).bat

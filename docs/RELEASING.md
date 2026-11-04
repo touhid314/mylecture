@@ -1,45 +1,45 @@
-# Releasing MyLecture
+# Releasing MyLecture (Windows)
 
-## The pipeline
+Releases are Windows-only for now. Users download the installer from the website, which
+links to `https://mylecture-server.touhid3-1416.workers.dev/download/windows`. That link always
+points to the newest published installer, so the website never needs editing per release.
+Installed copies check for updates once at startup and offer **Update now**.
 
-`.github/workflows/release.yml` runs on every `v*` tag (and manually from the Actions tab):
+## Release a new version
 
-| Job | Runner | Output |
-| --- | --- | --- |
-| Windows x64 | `windows-latest` | NSIS installer + portable `.exe` |
-| macOS Apple silicon | `macos-latest` | `.dmg` + `.zip` (arm64) |
-| macOS Intel | `macos-15-intel` | `.dmg` + `.zip` (x64) |
+```powershell
+cd D:\mylecture\mylecture-app
+npm version patch --no-git-tag-version   # 1.0.0 -> 1.0.1 (or minor / major)
+npm run release:build                    # tests, Windows build, launches the packaged app
+```
 
-Each job runs the unit tests, packages the app, then **launches the packaged app** with
-`--smoke-test` and `MYLECTURE_SMOKE_DEEP=1`. The app must boot into Create, synthesize a
-sentence with Kokoro, run the bundled ffmpeg and validate a scene in the bundled browser.
-A tag build ends with a **draft** GitHub Release; check it, then publish it.
+`release:build` leaves `dist\MyLecture-<version>-win-x64.exe` (installer),
+`dist\MyLecture-<version>-win-x64-portable.exe` and `dist\latest.yml`. Install it once and try it.
+Then:
 
-The version comes from the tag (`v1.0.0` → `1.0.0`).
+```powershell
+npm run release:publish                  # uploads to R2; users are offered it from now on
+git commit -am "Release <version>"
+git tag v<version>
+git push origin main v<version>
+```
 
-## In-app updates
+`release:publish` uploads the installers first and `latest.yml` last, so nobody is offered a
+half-uploaded release. Credentials come from `../mylecture-website/.env` (`R2_*`); they never go
+into the app. Users are only offered a **higher** version than they have; to roll back, publish
+a new higher version.
 
-Installed copies check `<server>/updates` (the server in `../mylecture-app-admin/server`,
-backed by the `mylecture-releases` R2 bucket; address in `electron/server-config.json`) once when the app starts
-(no polling while it runs). Nothing reaches users until you publish:
+Pushing the tag also runs `.github/workflows/release.yml`, which rebuilds on a clean Windows
+machine, launches the packaged app, and keeps a draft GitHub Release as an archive.
 
-1. Bump `"version"` in `package.json` (users are only prompted for a **higher** version).
-2. Build: `npm run dist:win` (and/or put the macOS `.dmg`/`.zip`/`latest-mac.yml` from the
-   GitHub Actions artifacts into `dist/`).
-3. Try the installer yourself.
-4. `npm run release:publish` uploads that version's installers, then `latest.yml` /
-   `latest-mac.yml` last. Credentials come from `../mylecture-website/.env` (`R2_*`).
+## What users see
 
-What users see:
-
-- **Windows (installer)**: the update downloads in the background; then a prompt
-  "Update available" → **Update now** restarts into the new version. **Later** installs it
-  when they close the app. If a video is generating/rendering, they are asked first.
-- **Windows portable `.exe` and macOS**: the prompt's **Update now** downloads the new
-  installer in the browser. (Unsigned macOS apps cannot replace themselves; once the Mac
-  build is signed and notarized this can become automatic.)
-
-To roll back, publish a new higher version; updates never downgrade.
+- **Installer build**: the update downloads in the background, then "Update available" →
+  **Update now** restarts into the new version. **Later** installs it when they close the app.
+  If a video is generating or rendering, they are asked first.
+- **Portable `.exe`**: **Update now** downloads the new portable `.exe` in the browser.
+- Windows SmartScreen warns about unsigned installers ("More info" → "Run anyway") until a
+  code-signing certificate is added (below).
 
 ## Signing (optional, add when ready)
 

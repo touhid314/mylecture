@@ -1,8 +1,10 @@
-# Builds MyLecture for Windows and macOS, checks every packaged app actually
-# starts (and can speak, run ffmpeg and check scenes), then publishes a draft
-# GitHub Release when a version tag is pushed.
+# Builds MyLecture for Windows, checks the packaged app actually starts (and can
+# speak, run ffmpeg and check scenes), then keeps a draft GitHub Release when a
+# version tag is pushed. Users get releases from `npm run release:publish`
+# (see docs/RELEASING.md), not from GitHub. macOS jobs were removed while
+# releases are Windows-only; restore them from git history when needed.
 #
-#   git tag v0.2.0 && git push origin v0.2.0   -> draft release with all installers
+#   git tag v1.0.0 && git push origin v1.0.0   -> draft release with the installers
 #   Actions -> Release -> Run workflow          -> builds + smoke tests only (artifacts)
 name: Release
 
@@ -34,20 +36,6 @@ jobs:
               dist/*.exe
               dist/*.exe.blockmap
               dist/latest.yml
-          - name: macOS Apple silicon
-            os: macos-latest
-            target: --mac --arm64
-            artifacts: |
-              dist/*.dmg
-              dist/*.zip
-              dist/latest-mac.yml
-          - name: macOS Intel
-            os: macos-15-intel
-            target: --mac --x64
-            artifacts: |
-              dist/*.dmg
-              dist/*.zip
-              dist/latest-mac.yml
     steps:
       - uses: actions/checkout@v4
 
