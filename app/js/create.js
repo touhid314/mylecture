@@ -11,6 +11,7 @@ import { h, icon, fmtTime, fmtDate, toast, modal, popMenu, confirmBox, bus } fro
 import { Player } from "./player.js";
 import { UsagePanel } from "./usage.js";
 import { AttachmentPicker, attachmentNames } from "./attachments.js";
+import { omniVoiceInstalled, showOmniVoiceDownloader } from "./omnivoice-download.js";
 
 const TL = window.MLTimeline;
 const LENGTH_PRESETS = ["0:15", "0:30", "0:45", ...Array.from({ length: 10 }, (_, i) => `${i + 1}:00`)];
@@ -391,8 +392,14 @@ export class CreateView {
     const menu = popMenu(this.voiceButton, []);
     menu.classList.add("voice-menu");
     menu.setAttribute("role", "menu");
+    const omniReady = await omniVoiceInstalled();
     for (const [engine, label, quality] of [["kokoro", "Kokoro", "Fast"], ["omnivoice", "OmniVoice", "Higher quality"]]) {
-      menu.append(h("div", { class: "menu-label voice-group-label" }, label, h("span", { class: "voice-quality" }, quality), h("span", { class: "badge" }, "Local")));
+      // OmniVoice not installed yet: offer the download instead of its voices.
+      const missing = engine === "omnivoice" && !omniReady;
+      menu.append(h("div", { class: "menu-label voice-group-label" }, label, h("span", { class: "voice-quality" }, quality),
+        missing ? h("button", { class: "btn sm primary voice-download", onclick: () => { menu.remove(); showOmniVoiceDownloader(); } }, "Download")
+          : h("span", { class: "badge" }, "Local")));
+      if (missing) continue;
       for (const [id, name] of this._voiceCatalog[engine] || []) {
         const key = `${engine}:${id}`;
         const pick = h("button", { class: "voice-pick", role: "menuitem", onclick: () => {

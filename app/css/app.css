@@ -705,3 +705,11 @@ kbd { font: 11px var(--mono); background: var(--surface-2); border: 1px solid va
    the dark versions (made from the same artwork; the blue "my" is unchanged). */
 body.light img[src$="assets/icon.png"] { content: url("../assets/icon-dark.png"); }
 body.light img[src$="assets/lockup.png"] { content: url("../assets/lockup-dark.png"); }
+
+/* OmniVoice download popup (app/js/omnivoice-download.js) */
+.omni-dl-bar { height: 6px; margin: 4px 0 8px; border-radius: 4px; background: rgba(127, 127, 127, .25); overflow: hidden; }
+.omni-dl-fill { height: 100%; width: 0; background: var(--accent); transition: width .3s; }
+.omni-dl-bar.busy .omni-dl-fill { width: 30%; animation: omni-dl-slide 1.2s infinite ease-in-out; }
+@keyframes omni-dl-slide { from { margin-left: -30%; } to { margin-left: 100%; } }
+.voice-group-label .voice-download { flex: none; width: auto; margin-left: auto; font-size: 11px; padding: 3px 10px; min-height: 0; text-transform: none; letter-spacing: 0; white-space: nowrap; }
+.voice-group-label .voice-quality { white-space: nowrap; }

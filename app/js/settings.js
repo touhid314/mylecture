@@ -2,6 +2,7 @@ import { connectPanel } from "./connect.js";
 import { showApiKeyDialog } from "./api-key.js";
 import { h, icon, toast, bus } from "./ui.js";
 import { showLiveLog } from "./logs.js";
+import { showOmniVoiceDownloader } from "./omnivoice-download.js";
 
 const ENGINE_INFO = {
   codex: { title: "GPT", sub: "Uses your ChatGPT subscription." },
@@ -62,8 +63,6 @@ export class SettingsView {
       h("h3", {}, "AI engines & voices"),
       this._componentsCard(),
 
-      h("h3", {}, "Lessons"),
-      this._lessonCard(),
 
       h("h3", {}, "App"),
       this._appCard(),
@@ -230,7 +229,9 @@ export class SettingsView {
       return h("div", { class: "set-row" },
         h("div", { class: "set-label" }, h("b", {}, c.title), h("span", {}, `${c.detail} Download: ${c.size}.`),
           h("span", { class: "small", style: { display: "block", marginTop: "2px", color: c.installed ? "var(--good, #4ade80)" : failed ? "var(--bad)" : "var(--muted)" }, "data-comp-status": c.id }, status)),
-        h("div", { class: "set-ctl" }, c.installed ? null : h("button", { class: "btn sm", disabled: busy, onclick: async () => {
+        h("div", { class: "set-ctl" }, c.installed ? null : h("button", { class: "btn sm", disabled: busy && c.id !== "omnivoice", onclick: async () => {
+          // OmniVoice is a large, multi-step download: show its own progress popup.
+          if (c.id === "omnivoice") return showOmniVoiceDownloader({ onDone: () => load() });
           const install = window.ml.components.install(c.id);
           load();
           try {
@@ -241,7 +242,7 @@ export class SettingsView {
           } finally {
             load();
           }
-        } }, busy ? "Installing…" : failed ? "Try again" : "Install")));
+        } }, busy ? (c.id === "omnivoice" ? "Show progress" : "Installing…") : failed ? "Try again" : "Install")));
     }))).catch(() => {});
     this._componentsLoad = load;
     if (!this._componentsSub) {
@@ -328,41 +329,6 @@ export class SettingsView {
     }[k.state] || k.message;
     this.ttsMsg.textContent = label || "Not loaded";
     this.ttsBar.style.width = Math.round((k.state === "ready" ? 1 : k.progress || 0) * 100) + "%";
-  }
-
-  _lessonCard() {
-    const s = this.state.settings;
-    const seg = (key, opts) =>
-      h("div", { class: "seg" }, opts.map(([v, l]) => h("button", { class: s[key] === v ? "on" : "", onclick: async (e) => {
-        await this.save({ [key]: v });
-        e.target.parentElement.querySelectorAll("button").forEach((b) => b.classList.toggle("on", b === e.target));
-      } }, l)));
-    const pick = (key, listName) => {
-      const list = this.state.info?.styles?.[listName] || [];
-      const hint = h("div", { class: "small muted", style: { marginTop: "4px" } });
-      const sel = h("select", { class: "select", onchange: async () => {
-        await this.save({ [key]: sel.value });
-        hint.textContent = list.find((o) => o.id === sel.value)?.description || "";
-      } }, list.map((o) => h("option", { value: o.id }, o.name)));
-      sel.value = s[key] || list[0]?.id || "";
-      hint.textContent = list.find((o) => o.id === sel.value)?.description || "";
-      return h("div", {}, sel, hint);
-    };
-    const sw = (key) => {
-      const i = h("input", { type: "checkbox", checked: s[key] !== false, onchange: (e) => this.save({ [key]: e.target.checked }) });
-      return h("label", { class: "switch" }, i, h("span"));
-    };
-    const lang = h("input", { class: "input", value: s.language || "", placeholder: "Auto (same as your question)", onchange: (e) => this.save({ language: e.target.value.trim() }) });
-    return h(
-      "div",
-      { class: "card" },
-      h("div", { class: "set-row" }, h("div", { class: "set-label" }, h("b", {}, "Default length")), h("div", { class: "set-ctl" }, seg("length", [["quick", "1 min"], ["standard", "2 min"], ["deep", "5 min"]]))),
-      h("div", { class: "set-row" }, h("div", { class: "set-label" }, h("b", {}, "Visual theme"), h("span", {}, "Colors, fonts, type scale and motion style of the lesson.")), h("div", { class: "set-ctl" }, pick("lgTheme", "themes"))),
-      h("div", { class: "set-row" }, h("div", { class: "set-label" }, h("b", {}, "Teaching style"), h("span", {}, "How the tutor structures and narrates the lesson.")), h("div", { class: "set-ctl" }, pick("lgTeachingStyle", "teachingStyles"))),
-      h("div", { class: "set-row" }, h("div", { class: "set-label" }, h("b", {}, "Language"), h("span", {}, "Narration and on-screen labels.")), h("div", { class: "set-ctl" }, lang)),
-      h("div", { class: "set-row" }, h("div", { class: "set-label" }, h("b", {}, "Captions"), h("span", {}, "Show narration subtitles on lessons.")), h("div", { class: "set-ctl" }, sw("captions"))),
-      h("div", { class: "set-row" }, h("div", { class: "set-label" }, h("b", {}, "Autoplay"), h("span", {}, "Start playing as soon as the first scene is ready.")), h("div", { class: "set-ctl" }, sw("autoplay"))),
-    );
   }
 
   _appCard() {

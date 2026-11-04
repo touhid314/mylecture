@@ -121,3 +121,21 @@ test("runHidden reports lines and fails with the output tail", async () => {
   assert.deepEqual(lines.sort(), ["one", "two"]);
   await assert.rejects(runHidden(process.execPath, ["-e", "console.log('bad thing'); process.exit(3)"]), /exited with code 3: bad thing/);
 });
+
+test("OmniVoice reuses an installed uv and Python 3.10-3.12 instead of downloading them", async () => {
+  const t = harness({ have: ["uv"] });
+  const run = t.manager.run;
+  t.manager.run = async (file, args, opts) => {
+    if (args[0] === "python" && args[1] === "find") {
+      t.runs.push([file, ...args].join(" "));
+      return ["warning: something", "C:\\Python310\\python.exe"];
+    }
+    return run(file, args, opts);
+  };
+  await t.manager.install("omnivoice");
+  const steps = t.runs.join("\n");
+  assert.doesNotMatch(steps, /astral\.sh/);
+  assert.match(steps, /^C:\\bin\\uv\.exe python find >=3\.10,<3\.13$/m);
+  assert.match(steps, /uv\.exe venv --python C:\\Python310\\python\.exe --seed/);
+});
+

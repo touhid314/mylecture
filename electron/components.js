@@ -181,17 +181,24 @@ export class ComponentManager extends EventEmitter {
       PYTHONIOENCODING: "utf-8",
     };
     fs.mkdirSync(this.toolsDir, { recursive: true });
-    const uvExe = path.join(env.UV_INSTALL_DIR, win ? "uv.exe" : "uv");
-    if (!fs.existsSync(uvExe)) {
+    // Use uv if it is already installed; otherwise get a private copy.
+    const privateUv = path.join(env.UV_INSTALL_DIR, win ? "uv.exe" : "uv");
+    let uvExe = fs.existsSync(privateUv) ? privateUv : this.find(["uv"]);
+    if (!uvExe) {
       step("Getting the Python installer (uv)…", 2);
       const [f, a] = win ? PS("irm https://astral.sh/uv/install.ps1 | iex") : SH("curl -LsSf https://astral.sh/uv/install.sh | sh");
       await this.run(f, a, { env, onLine, signal });
+      uvExe = privateUv;
     }
     const uv = (args, more = {}) => this.run(uvExe, args, { env: { ...env, ...more }, onLine, signal });
     const envDir = path.join(this.omniDir, "env");
     if (!fs.existsSync(this.omniPython)) {
-      step("Installing Python 3.11…", 5);
-      await uv(["venv", "--python", "3.11", "--seed", envDir]);
+      // Reuse a Python 3.10-3.12 already on the computer (PyTorch 2.5.1 and
+      // OmniVoice support these); download Python 3.11 only if there is none.
+      let python = null;
+      try { python = (await uv(["python", "find", ">=3.10,<3.13"])).findLast((l) => /python(3(\.\d+)?)?(\.exe)?$/i.test(l)) || null; } catch {}
+      step(python ? "Using the Python already on this computer…" : "Installing Python 3.11…", 5);
+      await uv(["venv", "--python", python || "3.11", "--seed", envDir]);
     }
     const gpu = this.hasNvidiaGpu();
     step(gpu ? "Installing PyTorch for your NVIDIA graphics card (about 2.5 GB)…" : "Installing PyTorch (CPU)…", 10);
