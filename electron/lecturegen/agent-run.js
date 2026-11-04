@@ -15,6 +15,7 @@ import fs from "node:fs";
 import { attachmentContext } from "../attachments.js";
 import path from "node:path";
 import { Activity } from "../activity.js";
+import { IDLE_STATUS } from "../engines/cli-util.js";
 import { lecturegen, resolveBeats, isResolvedScene, resolveStyleResource, RESOURCES, GENERATION_LENGTHS } from "./run.js";
 import { writePlaybackSnapshot } from "../scene-readiness.js";
 
@@ -135,6 +136,7 @@ function sceneTitle(html, n) {
 const WORKER_SYSTEM = "You are a skilled educator, script writer and creative coder working on a MyLecture video project. Work autonomously with your file tools; never ask questions.";
 export async function runAgent({ engine, model, effort, signal, workspace, prompt, onStatus, activity, inbox, system = WORKER_SYSTEM }) {
   let text = "";
+  let phase = "Working…";
   if (inbox) inbox.onDelivered = (t) => activity?.user(t);
   const res = await engine.agent({
     inbox,
@@ -144,12 +146,22 @@ export async function runAgent({ engine, model, effort, signal, workspace, promp
     effort,
     signal,
     workspace,
-    onDelta: (d) => (text += d),
+    onDelta: (d) => { text += d; phase = "Generating…"; },
     onStatus: status => {
-      onStatus?.(status);
-      if (/^Waiting for a response \(no events/.test(status)) activity?.app(status);
+      if (!IDLE_STATUS.test(status)) {
+        phase = /think|reason/i.test(status) ? "Thinking…"
+          : /writ|edit|fileChange|agent_response/i.test(status) ? "Generating…" : "Working…";
+        return onStatus?.(status);
+      }
+      onStatus?.(phase);
+      activity?.step("💭", phase);
     },
-    onActivity: (ev) => activity?.feed(ev),
+    onActivity: (ev) => {
+      if (ev?.type === "say") phase = "Generating…";
+      else if (ev?.type === "step") phase = ev.icon === "💭" ? "Thinking…"
+        : ev.icon === "✏️" ? "Generating…" : "Working…";
+      activity?.feed(ev);
+    },
   });
   if (res?.aborted || signal?.aborted) throw Object.assign(new Error("Stopped"), { aborted: true });
   return (activity?.lastSay() || res?.text || text).trim();

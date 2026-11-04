@@ -5,7 +5,7 @@ import { spawn, execFile } from "node:child_process";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { findExecutable, scratchDir, runCapture, killTree } from "./cli-util.js";
+import { findExecutable, scratchDir, runCapture, killTree, idleStatus } from "./cli-util.js";
 import { log } from "../logger.js";
 
 // The signed-in ChatGPT account (email, plan) from the saved sign-in's ID token.
@@ -113,7 +113,7 @@ export const codex = {
       const heartbeat = setInterval(() => {
         const idleMs = Date.now() - lastOutputAt;
         log("info", "provider.heartbeat", { provider: "codex", pid: child.pid, elapsedMs: Date.now() - startedAt, idleMs, stdoutBytes, stderrBytes });
-        if (idleMs >= 45000) onStatus?.(`Waiting for a response (no events for ${Math.floor(idleMs / 1000)}s)`);
+        if (idleMs >= 45000) onStatus?.(idleStatus(idleMs));
       }, 15000);
       heartbeat.unref?.();
       const send = (o) => child.stdin.write(JSON.stringify(o) + "\n");

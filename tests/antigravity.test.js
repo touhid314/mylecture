@@ -12,6 +12,7 @@ const hooks = registerHooks({
         export const scratchDir = () => "scratch";
         export const runCapture = async () => ({ok:true,stdout:""});
         export const killTree = () => {};
+        export const idleStatus = () => "Working…";
         export const spawnLines = async (exe,args,opts) => {
           const f = globalThis.__agyFixture;
           f.call = {exe,args,opts};

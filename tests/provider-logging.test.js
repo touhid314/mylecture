@@ -49,6 +49,7 @@ const hooks = registerHooks({
       export const findExecutable=()=>"claude";
       export const scratchDir=()=>"scratch";
       export const runCapture=async()=>({ok:true,stdout:""});
+      export { idleStatus } from ${JSON.stringify(new URL("../electron/engines/cli-util.js", import.meta.url).href)};
       export const spawnLines=async(_exe,_args,opts)=>{
         for(const ev of globalThis.__providerLoggingFixture.events)opts.onLine(JSON.stringify(ev));
         opts.onIdle?.({idleMs:45000,elapsedMs:60000});
@@ -71,7 +72,8 @@ test("Claude diagnostics identify thought activity and tools without recording p
   const status = [];
   const result = await claudeCode.generate({ system: "PRIVATE_SYSTEM", user: "PRIVATE_USER", model: "test-model", workspace: "project", onDelta() {}, onStatus: line => status.push(line) });
   assert.equal(result.text, "PRIVATE_RESPONSE_TEXT");
-  assert(status.some(line => /no events for 45s/.test(line)));
+  assert(status.includes("Working…"));
+  assert(status.every(line => !/no events|waiting for a response/i.test(line)));
   const logged = entries().filter(entry => entry.event.startsWith("provider."));
   for (const event of ["provider.start", "provider.thinking", "provider.tool", "provider.result", "provider.waiting", "provider.finish"]) assert(logged.some(entry => entry.event === event), event);
   const serialized = JSON.stringify(logged);

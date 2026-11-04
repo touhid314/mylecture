@@ -1429,7 +1429,7 @@ function step(text, live, since) {
   const tool = /^(\S+(?: files| file| command)?)\s*(.*)$/s.exec(rest);
   const arg = (t) => h("span", { class: "g-arg" }, t);
   const body =
-    ic === "💭" ? [h("i", {}, "Thinking…")]
+    ic === "💭" ? [h("i", {}, ["Working…", "Generating…"].includes(rest) ? rest : "Thinking…")]
     : ic === "✏️" ? [h("b", {}, "Edited"), " ", arg(rest ? rest.split(/,\s*/).map(shortPath).join(", ") : "files")]
     : ic === "▶" ? [h("b", {}, "Ran"), " ", h("code", {}, rest)]
     : ic === "🔎" ? [h("b", {}, "Searched"), " ", rest]

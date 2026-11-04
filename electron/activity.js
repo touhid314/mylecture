@@ -22,6 +22,10 @@ export class Activity {
 
   say(id, delta) {
     if (!delta) return;
+    if (this.items.at(-1)?.startsWith("💭")) {
+      this.items.pop();
+      this.sayIds.pop();
+    }
     const last = this.items.length - 1;
     if (last >= 0 && this.sayIds[last] === id && this.items[last].startsWith("💬")) this.items[last] += delta;
     else this._push(`💬 ${delta.replace(/^\s+/, "")}`, id);

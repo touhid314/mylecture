@@ -4,6 +4,8 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { registerHooks } from "node:module";
+import { Activity } from "../electron/activity.js";
+import { idleStatus } from "../electron/engines/cli-util.js";
 
 const pause = (ms = 30) => new Promise((r) => setTimeout(r, ms));
 const html = (n, ok = true) => `<!doctype html><html><head></head><body>${ok ? "" : "BROKEN"}<script>window.__VIDEO_METADATA__={contractVersion:"0.2",title:"Part ${n}",aspectRatio:"16:9"};</script></body></html>`;
@@ -39,18 +41,44 @@ test.after(() => {
   delete globalThis[key];
 });
 
-test("provider silence is surfaced as waiting instead of leaving a stale thinking label", async () => {
-  const events = [], status = [];
-  const waiting = "Waiting for a response (no events for 45s)";
+test("silent heartbeats retain the observed phase without repeated warning lines", async () => {
+  const status = [];
+  const activity = new Activity(() => {});
   const result = await runAgent({
-    engine: { agent: async ({ onStatus }) => { onStatus("agent: Read"); onStatus(waiting); return { text: "Done" }; } },
+    engine: { agent: async ({ onStatus, onActivity, onDelta }) => {
+      const idle = () => { for (const ms of [45000, 60000, 300000, 600000]) onStatus(idleStatus(ms)); };
+      idle();
+      assert.deepEqual(activity.items, ["💭 Working…"]);
+      onActivity({ type: "step", icon: "💭", text: "thinking" });
+      idle();
+      assert.deepEqual(activity.items, ["💭 Thinking…"]);
+      onStatus("agent: Write");
+      idle();
+      assert.deepEqual(activity.items, ["💭 Generating…"]);
+      onActivity({ type: "step", icon: "✏️", text: "index1.html" });
+      idle();
+      assert.deepEqual(activity.items, ["✏️ index1.html", "💭 Generating…"]);
+      onStatus("agent: Bash");
+      onActivity({ type: "step", icon: "▶", text: "validate scene" });
+      idle();
+      assert.equal(activity.items.at(-1), "💭 Working…");
+      onDelta("Done");
+      onActivity({ type: "say", id: "m", delta: "Done" });
+      idle();
+      assert.equal(activity.items.at(-1), "💭 Generating…");
+      onActivity({ type: "say", id: "m", delta: "." });
+      assert.equal(activity.items.at(-1), "💬 Done.");
+      return { text: "Done." };
+    } },
     signal: new AbortController().signal,
-    activity: { app: value => events.push(value), lastSay: () => "" },
+    activity,
     onStatus: value => status.push(value),
   });
-  assert.equal(result, "Done");
-  assert.deepEqual(events, [waiting]);
-  assert.deepEqual(status, ["agent: Read", waiting]);
+  activity.flush();
+  assert.equal(result, "Done.");
+  for (const label of ["Thinking…", "Generating…", "Working…"]) assert.ok(status.includes(label));
+  assert.doesNotMatch([...status, ...activity.items].join("\n"), /waiting|no (events|output|response)|seems stuck/i);
+  assert.equal(activity.items.filter(item => item.startsWith("💭")).length, 0);
 });
 
 test("task prompt: one straightforward task; auto omits theme and teaching style", () => {

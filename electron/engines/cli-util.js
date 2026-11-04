@@ -35,6 +35,11 @@ export function wingetCodex(env = process.env, home = os.homedir()) {
   return null;
 }
 
+// Silence alone cannot distinguish reasoning, file generation or a running tool.
+// The agent runner retains the latest observed phase without adding log lines.
+export const idleStatus = () => "Working…";
+export const IDLE_STATUS = /^Working…$/;
+
 export function findExecutable(names, extraDirs = []) {
   const win = process.platform === "win32";
   const exts = win ? [".exe", ".cmd", ".bat", ""] : [""];

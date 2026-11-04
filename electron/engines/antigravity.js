@@ -3,7 +3,7 @@
 // command-line length limit) and text deltas stream back line by line.
 import os from "node:os";
 import path from "node:path";
-import { findExecutable, scratchDir, spawnLines, runCapture } from "./cli-util.js";
+import { findExecutable, scratchDir, spawnLines, runCapture, idleStatus } from "./cli-util.js";
 import fs from "node:fs";
 import { parseAntigravityModels } from "./model-discovery.js";
 import { log } from "../logger.js";
@@ -106,7 +106,7 @@ export const antigravity = {
           signal: interrupt.signal,
           onIdle: ({ idleMs, elapsedMs }) => {
             log("warn", "provider.waiting", { provider: "antigravity", idleMs, elapsedMs });
-            onStatus?.(`Waiting for a response (no events for ${Math.floor(idleMs / 1000)}s)`);
+            onStatus?.(idleStatus(idleMs));
           },
           onLine: (line) => {
             if (!conversation) conversation = /"conversation_id"\s*:\s*"([^"]+)"/.exec(line)?.[1] || null;

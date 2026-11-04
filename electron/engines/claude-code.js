@@ -2,7 +2,7 @@
 // Print mode with stream-json output and partial messages gives token deltas.
 import os from "node:os";
 import path from "node:path";
-import { findExecutable, scratchDir, spawnLines, runCapture } from "./cli-util.js";
+import { findExecutable, scratchDir, spawnLines, runCapture, idleStatus } from "./cli-util.js";
 import fs from "node:fs";
 import { discoverClaudeModels } from "./model-discovery.js";
 import { log } from "../logger.js";
@@ -112,7 +112,7 @@ export const claudeCode = {
       signal,
       onIdle: ({ idleMs, elapsedMs }) => {
         log("warn", "provider.waiting", { provider: "claude-code", idleMs, elapsedMs });
-        onStatus?.(`Waiting for a response (no events for ${Math.floor(idleMs / 1000)}s)`);
+        onStatus?.(idleStatus(idleMs));
       },
       onLine(line) {
         let ev;
