@@ -72,10 +72,10 @@
     ${NSD_CreateLabel} 0 58u 100% 10u "Narration voices"
     Pop $0
     SendMessage $0 ${WM_SETFONT} $1 0
-    ${NSD_CreateCheckbox} 8u 71u -8u 11u "Kokoro  -  natural default voice  (about 325 MB)"
+    ${NSD_CreateCheckbox} 8u 71u -8u 11u "Kokoro  -  fast, natural voice  (about 325 MB)"
     Pop $CbKokoro
     ${NSD_SetState} $CbKokoro $EngKokoro
-    ${NSD_CreateCheckbox} 8u 84u -8u 11u "OmniVoice  -  advanced voices, best with an NVIDIA GPU  (about 6 GB)"
+    ${NSD_CreateCheckbox} 8u 84u -8u 11u "OmniVoice  -  high-quality, expressive voice  (about 6 GB)"
     Pop $CbOmni
     ${NSD_SetState} $CbOmni $EngOmni
     ${NSD_CreateHLine} 0 103u 100% 1u ""

@@ -17,8 +17,8 @@ export const COMPONENTS = [
   { id: "claude-code", kind: "engine", title: "Claude", detail: "Claude Code. Needs a Claude Pro or Max plan.", size: "about 250 MB", byDefault: true },
   { id: "codex", kind: "engine", title: "GPT", detail: "Codex. Needs a ChatGPT Plus, Pro, Business or Enterprise plan.", size: "about 450 MB", byDefault: true },
   { id: "antigravity", kind: "engine", title: "Gemini", detail: "Antigravity CLI. Needs a Google account.", size: "about 250 MB", byDefault: true },
-  { id: "kokoro", kind: "voice", title: "Kokoro voice", detail: "The default narration voice.", size: "about 325 MB", byDefault: true },
-  { id: "omnivoice", kind: "voice", title: "OmniVoice", detail: "Advanced voices. Uses an NVIDIA graphics card when there is one.", size: "about 6 GB", byDefault: false },
+  { id: "kokoro", kind: "voice", title: "Kokoro voice", detail: "Fast, natural voice. The default.", size: "about 325 MB", byDefault: true },
+  { id: "omnivoice", kind: "voice", title: "OmniVoice", detail: "High-quality, expressive voice. Best with an NVIDIA graphics card.", size: "about 6 GB", byDefault: false },
 ];
 export const COMPONENT_IDS = COMPONENTS.map(c => c.id);
 
