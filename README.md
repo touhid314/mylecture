@@ -36,9 +36,21 @@ Follow lessons, ideas, and updates: [YouTube](https://www.youtube.com/@mylecture
 
 For mathematics: [MyLectureMath on Facebook](https://www.facebook.com/mylecturemath) | [MyLecture Math on Instagram](https://www.instagram.com/mylectureai.math/)
 
-## Development
+## Use your AI subscription
 
-With Node.js 22 installed:
+Connect the provider in the welcome screen or Settings, then sign in through its browser/terminal flow:
+
+| Provider | Uses your account through |
+| --- | --- |
+| **GPT** | Codex CLI and your eligible ChatGPT plan |
+| **Gemini** | Antigravity CLI and your Google account; Google AI Pro/Ultra offer higher limits |
+| **Claude** | Claude Code and an eligible Claude subscription, such as Pro or Max |
+
+Subscription sign-in does not require an API key. Your provider's allowances and account policies still apply. **Use with API key** is a separate option with API/provider billing.
+
+## Run without the installer
+
+Install Git and Node.js 22.15+ (22.x or 24.x), then run:
 
 ```sh
 git clone https://github.com/touhid314/mylecture.git
@@ -47,6 +59,8 @@ npm ci
 npm start
 ```
 
-Run `npm test` to validate changes. See the [release guide](docs/RELEASING.md) for Windows builds and publishing.
+In the app, install your chosen AI engine and voice from Settings, then connect your account. No MyLecture installer or repository `.env` file is required.
+
+See [source setup and account sign-in](docs/GETTING_STARTED.md) for details. Developers can run `npm test` to validate changes; the [release guide](docs/RELEASING.md) covers Windows builds and publishing.
 
 **License:** [CC BY-NC 4.0](LICENSE): free to use, share, and adapt with attribution for non-commercial purposes. For commercial use, contact [support@mylecture.ai](mailto:support@mylecture.ai).

@@ -1,79 +1,74 @@
-# Releasing MyLecture (Windows)
+# Releasing MyLecture for Windows
 
-Releases are Windows-only for now. Users download the installer from the website, which
-links to `https://mylecture-server.touhid3-1416.workers.dev/download/windows`. That link always
-redirects to the installer in the latest published GitHub release, so the website never needs editing per release.
-Installed copies check for updates once at startup and offer **Update now**.
+Official releases target Windows 10/11, 64-bit. The release workflow builds and tests Windows x64 installers and portable executables.
 
-## Release a new version
+To run the app without packaging it, see [Getting started from source](GETTING_STARTED.md).
 
-```powershell
-cd D:\mylecture\mylecture-app
-npm version patch --no-git-tag-version   # 1.0.0 -> 1.0.1 (or minor / major)
-npm run release:build                    # tests, Windows build, launches the packaged app
-```
+## Publish a GitHub release
 
-`release:build` leaves `dist\MyLecture-<version>-win-x64.exe` (installer),
-`dist\MyLecture-<version>-win-x64-portable.exe` and `dist\latest.yml`. Install it once and try it.
-Then:
+Start from the repository root with the intended app changes committed:
 
 ```powershell
-npm run release:publish                  # uploads to R2; users are offered it from now on
-git commit -am "Release <version>"
-git tag v<version>
-git push origin main v<version>
+npm ci
+npm test
+npm version patch --no-git-tag-version
+$releaseVersion = node -p "require('./package.json').version"
+
+git add package.json package-lock.json
+git commit -m "Release $releaseVersion"
+git tag "v$releaseVersion"
+git push origin main "v$releaseVersion"
 ```
 
-`release:publish` uploads the installers first and `latest.yml` last, so nobody is offered a
-half-uploaded release. Credentials come from `../mylecture-website/.env` (`R2_*`); they never go
-into the app. Users are only offered a **higher** version than they have; to roll back, publish
-a new higher version.
+In GitHub Actions, wait for **Release** to finish successfully. The workflow:
 
-Pushing the tag also runs `.github/workflows/release.yml`, which rebuilds on a clean Windows
-machine, launches the packaged app, and publishes a GitHub Release with the installers.
-A GitHub Release updates the website download link; GitHub serves those files and records
-their download counts. `release:publish` separately updates the R2 feed used by installed copies.
+1. Installs dependencies and runs tests, including real MP4 aspect-ratio checks.
+2. Builds the Windows installer and portable app.
+3. Starts the packaged app and checks speech synthesis, bundled ffmpeg, and scene validation.
+4. Publishes the files to a GitHub Release.
 
-Never run two builds at once (for example an old `dist:win` still running in another terminal): they write into the same `dist` folder and produce a corrupted app that exits on startup. `release:build` launches the packaged app, which catches this.
+Assets include `MyLecture-<version>-win-x64.exe`, the `-portable.exe`, the installer's `.blockmap`, and `latest.yml`. Try the installer and a representative video generation/render before announcing the release.
 
-## What users see
+Running **Release > Run workflow** on `main` builds and checks downloadable artifacts without publishing a release.
 
-- **Installer build**: the update downloads in the background, then "Update available" →
-  **Update now** restarts into the new version. **Later** installs it when they close the app.
-  If a video is generating or rendering, they are asked first.
-- **Portable `.exe`**: **Update now** downloads the new portable `.exe` in the browser.
-- Windows SmartScreen warns about unsigned installers ("More info" → "Run anyway") until a
-  code-signing certificate is added (below).
+## Website downloads
 
-## Signing (optional, add when ready)
+The homepage uses this permanent URL:
 
-Without certificates the pipeline still produces working builds:
+https://mylecture-server.touhid3-1416.workers.dev/download/windows
 
-- **Windows** — unsigned. SmartScreen shows "Windows protected your PC" → *More info* → *Run anyway*.
-- **macOS** — ad-hoc signed, not notarized. First launch: right-click the app → *Open* → *Open*
-  (or `xattr -dr com.apple.quarantine /Applications/MyLecture.app`).
+The Worker redirects to the Windows installer in the latest published GitHub release, with a 60-second lookup cache. GitHub serves the file and records its asset download count. No website edit or R2 upload is needed to update this link.
 
-To remove those warnings, add these repository secrets:
+Download counts belong to individual assets. Save historical counts before deleting old releases.
 
-| Secret | What |
-| --- | --- |
-| `MAC_CERT_P12_BASE64`, `MAC_CERT_PASSWORD` | "Developer ID Application" certificate (.p12, base64) — needs the Apple Developer Program ($99/yr) |
-| `APPLE_ID`, `APPLE_APP_SPECIFIC_PASSWORD`, `APPLE_TEAM_ID` | Notarization (with the certificate above) |
-| `WIN_CERT_P12_BASE64`, `WIN_CERT_PASSWORD` | Windows code-signing certificate |
+## Publish the in-app update feed
 
-## Testing the macOS builds without a Mac
+Installed apps use a separate Cloudflare R2 update feed. Publishing a GitHub Release alone does not update that feed.
 
-- **Every build is already tested on a real Mac.** The GitHub macOS runners launch the packaged
-  app and exercise speech, ffmpeg and the scene checker. A green job means the app starts and
-  works on that architecture.
-- **Interactive testing (clicking around):** a VM on this Windows PC is not a real option —
-  Apple's license only allows macOS VMs on Apple hardware, and unofficial "Hackintosh" VMs
-  are unreliable for GPU/Electron apps. Practical options:
-  - Rent a cloud Mac by the hour: **AWS EC2 Mac** (24-hour minimum), **Scaleway Apple silicon**
-    (hourly), or **MacinCloud** (monthly). Connect over VNC/Remote Desktop and install the `.dmg`.
-  - Remote into the Actions runner for a debugging session with an action such as
-    `mxschmitt/action-tmate` (terminal only).
-  - Borrow any Mac (an Apple-silicon Mac can also run the Intel build via Rosetta).
-- **What can differ on a Mac**, worth checking by hand once: the agent CLIs must be found
-  (the app reads the login shell's `PATH`, plus Homebrew and `~/.local/bin`), OmniVoice needs
-  `python3`, and the Windows-only system voice is not available (Kokoro is the default).
+After the GitHub workflow succeeds, download the same verified assets into `dist/` and publish them:
+
+```powershell
+$releaseVersion = node -p "require('./package.json').version"
+gh release download "v$releaseVersion" --dir dist --clobber
+npm run release:publish
+```
+
+The version in `package.json` must match the downloaded release. The publisher uploads binaries first and `latest.yml` last.
+
+Maintainers need `R2_ACCESS_KEY_ID`, `R2_SECRET_ACCESS_KEY`, and `R2_ENDPOINT` in their environment or the sibling website's local `.env`. These are not required to run MyLecture and must never be committed or bundled.
+
+Installed apps check at startup and offer only higher versions. Installer builds can download updates in the background; portable builds open the matching download in a browser.
+
+## Local packaging
+
+```powershell
+npm run release:build
+```
+
+This runs tests, builds Windows packages, and performs the deep packaged-app checks. Keep only one build running per checkout because builds share `dist/`.
+
+## Windows signing
+
+Current installers are unsigned. A trusted signing service can verify the publisher, but signing alone does not guarantee immediate SmartScreen reputation. See [Microsoft's signing guidance](https://learn.microsoft.com/en-us/windows/apps/package-and-deploy/smartscreen-reputation).
+
+The workflow accepts `WIN_CERT_P12_BASE64` and `WIN_CERT_PASSWORD` as GitHub Actions secrets for compatible file-based certificates. Cloud or hardware-backed signing requires its provider's integration. Keep signing credentials in secrets, never in the repository.
