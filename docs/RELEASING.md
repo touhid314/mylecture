@@ -2,7 +2,7 @@
 
 Releases are Windows-only for now. Users download the installer from the website, which
 links to `https://mylecture-server.touhid3-1416.workers.dev/download/windows`. That link always
-points to the newest published installer, so the website never needs editing per release.
+redirects to the installer in the latest published GitHub release, so the website never needs editing per release.
 Installed copies check for updates once at startup and offer **Update now**.
 
 ## Release a new version
@@ -31,8 +31,8 @@ a new higher version.
 
 Pushing the tag also runs `.github/workflows/release.yml`, which rebuilds on a clean Windows
 machine, launches the packaged app, and publishes a GitHub Release with the installers.
-A GitHub Release alone does not reach users: only `release:publish` updates installed copies
-and the website download link.
+A GitHub Release updates the website download link; GitHub serves those files and records
+their download counts. `release:publish` separately updates the R2 feed used by installed copies.
 
 Never run two builds at once (for example an old `dist:win` still running in another terminal): they write into the same `dist` folder and produce a corrupted app that exits on startup. `release:build` launches the packaged app, which catches this.
 

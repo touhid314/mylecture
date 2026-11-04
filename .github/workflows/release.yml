@@ -1,7 +1,7 @@
 # Builds MyLecture for Windows, checks the packaged app actually starts (and can
 # speak, run ffmpeg and check scenes), then publishes a GitHub Release with the
-# installers when a version tag is pushed. The in-app updater and website link
-# use `npm run release:publish` instead (docs/RELEASING.md). macOS jobs were removed while
+# installers when a version tag is pushed. The website redirects to the latest GitHub
+# release; the in-app updater uses `npm run release:publish` (docs/RELEASING.md). macOS jobs were removed while
 # releases are Windows-only; restore them from git history when needed.
 #
 #   git tag v1.0.0 && git push origin v1.0.0   -> GitHub Release with the installers
