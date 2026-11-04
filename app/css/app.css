@@ -700,3 +700,8 @@ kbd { font: 11px var(--mono); background: var(--surface-2); border: 1px solid va
 .tl-user { margin: 6px 0 6px auto; width: fit-content; }
 .drop-active { position: relative; }
 .drop-active::after { content: attr(data-drop-label); position: absolute; inset: 8px; z-index: 50; display: flex; align-items: center; justify-content: center; border: 2px dashed #66bdf4; border-radius: 14px; background: rgba(102,189,244,.12); color: #87cdf9; font-weight: 700; font-size: 14px; pointer-events: none; }
+
+/* Light theme: the cream logo artwork would vanish on light backgrounds; use
+   the dark versions (made from the same artwork; the blue "my" is unchanged). */
+body.light img[src$="assets/icon.png"] { content: url("../assets/icon-dark.png"); }
+body.light img[src$="assets/lockup.png"] { content: url("../assets/lockup-dark.png"); }
