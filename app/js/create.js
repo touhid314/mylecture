@@ -193,6 +193,7 @@ export class CreateView {
     this.input = h("textarea", { class: "ide-input", rows: 2, "aria-label": "Message the Video Agent", placeholder: "What video do you want to make? What do you want to teach?" });
     this.attachments = new AttachmentPicker(this.input);
     this.input.addEventListener("input", () => {
+      this._syncSendStop();
       this.input.style.height = "auto";
       this.input.style.height = Math.min(this.input.scrollHeight, 180) + "px";
     });
@@ -658,6 +659,15 @@ export class CreateView {
     });
   }
 
+  // One button: Stop while the agent works and nothing is typed; typing turns
+  // it back into Send (a message for the running agent).
+  _syncSendStop() {
+    const busy = !!this.job;
+    const stop = busy && !this.input.value.trim();
+    this.stopBtn.style.display = stop ? "" : "none";
+    this.sendBtn.style.display = stop ? "none" : "";
+  }
+
   _paintAll() {
     this._paintProjects();
     this._paintFiles();
@@ -681,7 +691,7 @@ export class CreateView {
     this.renderBtn.title = rendering ? "Stop rendering" : "Render an MP4";
     this.renderBtn.classList.toggle("render-stop", rendering);
     this.sendBtn.title = busy ? "Send to the agent while it works (Enter)" : "Send message (Enter)";
-    this.stopBtn.style.display = busy ? "" : "none";
+    this._syncSendStop();
     this.agentStatus.textContent = busy ? "Working" : "Ready";
     this.agentStatus.className = "agent-status" + (busy ? " working" : "");
     const sc = lec?.scenes?.[this.sceneIndex];
@@ -944,6 +954,7 @@ export class CreateView {
     try {
       await window.ml.ide.chat({ projectId: this.project?.lecture?.id || null, message: text, live: true });
       this.input.value = "";
+      this._syncSendStop?.();
       this.input.style.height = "";
     } catch (e) {
       toast(friendly(e), { kind: "bad" });
@@ -965,6 +976,7 @@ export class CreateView {
       const r = await window.ml.ide.chat({ projectId, message: text, attachments, sceneIndex: this.sceneIndex, length, aspect, theme: this.themeSelect.value, teachingStyle: this.teachSelect.value });
       this._msg("user", text, attachmentNames(attachments));
       this.input.value = "";
+      this._syncSendStop?.();
       this.input.style.height = "";
       this.attachments.clear();
       if (r.kind === "project") return void this._applyProject(r.project);
