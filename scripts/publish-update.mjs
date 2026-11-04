@@ -36,7 +36,7 @@ function credentials() {
 const files = fs.existsSync(dist) ? fs.readdirSync(dist) : [];
 const installers = files.filter(f => f.startsWith(`MyLecture-${version}-`) && /\.(exe|dmg|zip|blockmap|AppImage)$/.test(f));
 const manifests = files.filter(f => /^latest(-mac|-linux)?\.yml$/.test(f))
-  .filter(f => new RegExp(`^version:\s*['"]?${version.replace(/\./g, "\.")}['"]?\s*$`, "m").test(fs.readFileSync(path.join(dist, f), "utf8")));
+  .filter(f => (/^version:\s*['"]?([^'"\s]+)/m.exec(fs.readFileSync(path.join(dist, f), "utf8")) || [])[1] === version);
 if (!installers.length || !manifests.length) {
   console.error(`No release files for version ${version} in dist/. Build first (npm run dist:win), and bump "version" in package.json for each release.`);
   process.exit(1);
