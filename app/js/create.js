@@ -130,7 +130,7 @@ export class CreateView {
       this.renderDone,
       this.curFile,
       h("div", { class: "grow" }),
-      h("button", { class: "btn sm", title: "Re-record all narration with another voice", onclick: () => this.changeVoice() }, "Change voice"),
+      this.changeVoiceBtn = h("button", { class: "btn sm", title: "Re-record all narration with another voice", onclick: () => this.changeVoice() }, icon("mic"), h("span", {}, "Change voice")),
       h("button", { class: "btn sm", title: "View and edit narration for every beat", onclick: () => this.editNarration() }, icon("mic"), "Edit narration"),
       h("button", { class: "btn sm", title: "Video info", onclick: () => this.info() }, "Info"),
       h("div", { class: "ide-split" }, this.renderBtn, this.renderMenu),
@@ -663,6 +663,10 @@ export class CreateView {
     const busy = !!this.job;
     this.voiceSelect.disabled = busy;
     this.voiceButton.disabled = busy;
+    const revoicing = this._revoicing || (this.job?.type === "resolve" && this.job.projectId === lec?.id);
+    this.changeVoiceBtn.disabled = revoicing || busy || !!this.liveJob || !lec?.scenes?.length;
+    this.changeVoiceBtn.lastChild.textContent = revoicing ? "Changing voice…" : "Change voice";
+    this.changeVoiceBtn.title = revoicing ? "Re-recording narration with the new voice" : busy ? "Wait for the current job to finish" : "Re-record all narration with another voice";
     const rendering = this.job?.type === "render";
     this.renderBtn.disabled = rendering ? false : !lec?.scenes?.length || busy;
     this.renderMenu.disabled = !lec?.scenes?.length || busy;
@@ -1169,12 +1173,18 @@ export class CreateView {
         { label: "Change voice", primary: true, run: async () => {
           const voiceEngine = engineSel.value, voice = voiceSel.value, voiceSpeed = Number(speed.value);
           // New narration (and later per-beat edits) use this voice from now on.
-          this.state.settings = await window.ml.settings.set(voiceEngine === "omnivoice" ? { voiceEngine, omnivoiceVoice: voice, voiceSpeed } : { voiceEngine, voice, voiceSpeed });
-          bus.emit("settings-changed", this.state.settings);
+          if (this.job || this._revoicing) return void toast("Wait for the current job to finish.");
+          try {
+            this.state.settings = await window.ml.settings.set(voiceEngine === "omnivoice" ? { voiceEngine, omnivoiceVoice: voice, voiceSpeed } : { voiceEngine, voice, voiceSpeed });
+            bus.emit("settings-changed", this.state.settings);
+          } catch (e) { return void toast(friendly(e), { kind: "bad" }); }
+          this._revoicing = true;
+          this._paintAll();
           toast("Re-recording narration with the new voice…", { timeout: 4000 });
           window.ml.ide.resolve(lec.id, { voiceEngine, voice, speed: voiceSpeed })
-            .then((p) => { if (this.project?.lecture.id === lec.id) this._applyProject(p); toast("Voice changed."); })
-            .catch((e) => toast(friendly(e), { kind: "bad", timeout: 9000 }));
+            .then((p) => { if (this.project?.lecture.id === lec.id) this._applyProject(p); toast("Voice changed.", { kind: "good" }); })
+            .catch((e) => toast(friendly(e), { kind: "bad", timeout: 9000 }))
+            .finally(() => { this._revoicing = false; this._paintAll(); });
         } },
       ],
     });
