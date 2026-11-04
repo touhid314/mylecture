@@ -18,7 +18,7 @@ test("MP4 export preserves aspect, resolution and geometry beyond the monitor bo
   catch (error) { failure = error; }
   assert.ok(fs.existsSync(report), `Electron render test did not report: ${failure?.message || ""}`);
   const result = JSON.parse(fs.readFileSync(report, "utf8"));
-  if (path.dirname(result.temp) === os.tmpdir() && path.basename(result.temp).startsWith("ml-export-aspect-")) fs.rmSync(result.temp, { recursive: true, force: true });
+  if (path.dirname(result.temp) === os.tmpdir() && path.basename(result.temp).startsWith("ml-export-aspect-")) fs.rmSync(result.temp, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
   if (path.dirname(dir) === os.tmpdir() && path.basename(dir).startsWith("ml-export-report-")) fs.rmSync(dir, { recursive: true, force: true });
   assert.equal(result.ok, true, result.error);
   assert.equal(failure, undefined);
