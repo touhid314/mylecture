@@ -34,6 +34,8 @@ machine, launches the packaged app, and publishes a GitHub Release with the inst
 A GitHub Release alone does not reach users: only `release:publish` updates installed copies
 and the website download link.
 
+Never run two builds at once (for example an old `dist:win` still running in another terminal): they write into the same `dist` folder and produce a corrupted app that exits on startup. `release:build` launches the packaged app, which catches this.
+
 ## What users see
 
 - **Installer build**: the update downloads in the background, then "Update available" →

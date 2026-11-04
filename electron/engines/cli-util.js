@@ -5,19 +5,55 @@ import path from "node:path";
 import { log } from "../logger.js";
 
 // Locate a CLI on PATH (plus common Windows install locations).
+// Where the official installers put the engine CLIs on Windows. Checked even
+// when they are not yet on this process's PATH, e.g. right after the
+// MyLecture installer or the app's Set up button installed them.
+export function windowsInstallDirs(env = process.env, home = os.homedir()) {
+  const local = env.LOCALAPPDATA || path.join(home, "AppData", "Local");
+  const roaming = env.APPDATA || path.join(home, "AppData", "Roaming");
+  return [
+    path.join(home, ".local", "bin"),                      // Claude Code
+    path.join(local, "agy", "bin"),                         // Antigravity CLI
+    path.join(local, "Microsoft", "WinGet", "Links"),       // winget (Codex)
+    path.join(roaming, "npm"),                              // npm -g (Codex)
+  ];
+}
+
+// winget's Codex package (OpenAI.Codex) is a portable zip. Without Windows
+// Developer Mode winget cannot create its `codex` link, so the binary is only
+// reachable under its own name inside the package folder.
+export function wingetCodex(env = process.env, home = os.homedir()) {
+  const root = path.join(env.LOCALAPPDATA || path.join(home, "AppData", "Local"), "Microsoft", "WinGet", "Packages");
+  let dirs = [];
+  try { dirs = fs.readdirSync(root).filter(d => d.startsWith("OpenAI.Codex_")); } catch { return null; }
+  for (const dir of dirs) {
+    for (const exe of ["codex-x86_64-pc-windows-msvc.exe", "codex-aarch64-pc-windows-msvc.exe", "codex.exe"]) {
+      const p = path.join(root, dir, exe);
+      try { if (fs.statSync(p).isFile()) return p; } catch {}
+    }
+  }
+  return null;
+}
+
 export function findExecutable(names, extraDirs = []) {
-  const exts = process.platform === "win32" ? [".exe", ".cmd", ".bat", ""] : [""];
-  const dirs = [...(process.env.PATH || "").split(path.delimiter), ...extraDirs].filter(Boolean);
+  const win = process.platform === "win32";
+  const exts = win ? [".exe", ".cmd", ".bat", ""] : [""];
+  const dirs = [...(process.env.PATH || "").split(path.delimiter), ...extraDirs, ...(win ? windowsInstallDirs() : [])].filter(Boolean);
   for (const name of names) {
     for (const dir of dirs) {
       for (const ext of exts) {
         const p = path.join(dir, name + ext);
         try {
           if (fs.statSync(p).isFile()) return p;
-        } catch {}
+        } catch (error) {
+          // Windows app execution aliases (e.g. WindowsApps\winget.exe) are
+          // links that cannot be stat'ed, but they run fine.
+          try { if (win && error.code === "EACCES" && fs.lstatSync(p).isSymbolicLink()) return p; } catch {}
+        }
       }
     }
   }
+  if (process.platform === "win32" && names.includes("codex")) return wingetCodex();
   return null;
 }
 

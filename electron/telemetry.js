@@ -28,7 +28,6 @@ export async function sendLaunchPing({
   if (!url || !enabled) return false;
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), timeoutMs);
-  timeout?.unref?.();
   try {
     const response = await fetchImpl(url, {
       method: "POST", headers: { "content-type": "application/json" },

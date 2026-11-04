@@ -130,6 +130,7 @@ export class CreateView {
       this.renderDone,
       this.curFile,
       h("div", { class: "grow" }),
+      h("button", { class: "btn sm", title: "Re-record all narration with another voice", onclick: () => this.changeVoice() }, "Change voice"),
       h("button", { class: "btn sm", title: "View and edit narration for every beat", onclick: () => this.editNarration() }, icon("mic"), "Edit narration"),
       h("button", { class: "btn sm", title: "Video info", onclick: () => this.info() }, "Info"),
       h("div", { class: "ide-split" }, this.renderBtn, this.renderMenu),
@@ -1132,6 +1133,53 @@ export class CreateView {
   }
 
   // ---------- dialogs ----------
+  // Re-record every beat of the open project with another voice (engine,
+  // voice and speed). Visuals and narration text stay as they are.
+  async changeVoice() {
+    const lec = this.project?.lecture;
+    if (!lec?.scenes?.length || this.liveJob || this.job) return toast("Open a finished project first.");
+    let voices, comps;
+    try { [voices, comps] = await Promise.all([window.ml.tts.voices(), window.ml.components.status().catch(() => [])]); }
+    catch (e) { return toast(friendly(e), { kind: "bad" }); }
+    const s = this.state.settings;
+    const omniReady = comps.find((c) => c.id === "omnivoice")?.installed !== false;
+    const engineSel = h("select", { class: "select" },
+      h("option", { value: "kokoro", selected: s.voiceEngine !== "omnivoice" }, "Kokoro"),
+      h("option", { value: "omnivoice", selected: s.voiceEngine === "omnivoice", disabled: !omniReady }, omniReady ? "OmniVoice" : "OmniVoice (install it in Settings)"));
+    const voiceSel = h("select", { class: "select" });
+    const fillVoices = () => {
+      const engine = engineSel.value;
+      const current = engine === "omnivoice" ? s.omnivoiceVoice || "maruf" : s.voice;
+      voiceSel.replaceChildren(...(voices[engine] || []).map(([id, label]) => h("option", { value: id, selected: id === current }, label)));
+    };
+    engineSel.onchange = fillVoices;
+    fillVoices();
+    const speed = h("input", { type: "range", min: "0.7", max: "1.4", step: "0.05", value: String(s.voiceSpeed || 1) });
+    const speedLbl = h("span", { class: "small muted" }, `${Number(speed.value).toFixed(2)}×`);
+    speed.oninput = () => { speedLbl.textContent = `${Number(speed.value).toFixed(2)}×`; };
+    const row = (label, ...ctl) => h("label", { style: { display: "grid", gridTemplateColumns: "90px 1fr auto", gap: "10px", alignItems: "center", margin: "8px 0" } }, h("span", {}, label), ...ctl);
+    modal({
+      title: "Change voice",
+      width: "440px",
+      body: h("div", {},
+        h("p", { class: "muted small", style: { marginTop: 0 } }, "Re-records all narration in this video with the voice you pick. Visuals and narration text don't change."),
+        row("Engine", engineSel), row("Voice", voiceSel), row("Speed", speed, speedLbl)),
+      actions: [
+        { label: "Cancel" },
+        { label: "Change voice", primary: true, run: async () => {
+          const voiceEngine = engineSel.value, voice = voiceSel.value, voiceSpeed = Number(speed.value);
+          // New narration (and later per-beat edits) use this voice from now on.
+          this.state.settings = await window.ml.settings.set(voiceEngine === "omnivoice" ? { voiceEngine, omnivoiceVoice: voice, voiceSpeed } : { voiceEngine, voice, voiceSpeed });
+          bus.emit("settings-changed", this.state.settings);
+          toast("Re-recording narration with the new voice…", { timeout: 4000 });
+          window.ml.ide.resolve(lec.id, { voiceEngine, voice, speed: voiceSpeed })
+            .then((p) => { if (this.project?.lecture.id === lec.id) this._applyProject(p); toast("Voice changed."); })
+            .catch((e) => toast(friendly(e), { kind: "bad", timeout: 9000 }));
+        } },
+      ],
+    });
+  }
+
   async editNarration() {
     const lec = this.project?.lecture;
     if (!lec?.scenes?.length || this.liveJob || this.job) return toast("Open a finished project first.");

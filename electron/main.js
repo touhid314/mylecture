@@ -16,6 +16,7 @@ import { getSettings, saveSettings, getSecret, setSecret, hasSecret, lectures, s
 import { exportMp4, exportStandaloneHtml, exportContractBundle, captions, safeName } from "./exporter.js";
 import { sendLaunchPing, launchPingSuppressed } from "./telemetry.js";
 import { createUpdater } from "./updater.js";
+import { ComponentManager, COMPONENT_IDS } from "./components.js";
 import { configureLogger, log, getLogInfo, readLogTail, onLogEntry, registerLogSecret } from "./logger.js";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
@@ -69,6 +70,13 @@ let win = null;
 let engines, tts, generator, ide;
 const exportJobs = new Map();
 let updater;
+let components;
+// --setup-components=claude-code,codex,...: run by the Windows installer for the
+// engines and voices ticked on its "AI engines" page. Shows a progress window,
+// installs them, then exits. No main window, update check or launch ping.
+const SETUP_IDS = (process.argv.find(a => a.startsWith("--setup-components="))?.split("=")[1] || "")
+  .split(",").filter(id => COMPONENT_IDS.includes(id));
+const SETUP_MODE = process.argv.some(a => a.startsWith("--setup-components="));
 let lastTtsLogState = "", lastTtsLogAt = 0;
 
 function send(channel, payload) {
@@ -260,6 +268,7 @@ function registerIpc() {
   h("api:verify", ({ provider, apiKey, baseUrl } = {}) => verifyApiProvider({ provider, apiKey: apiKey || getSecret(`api:${provider}`), baseUrl }));
   h("connect:run", async (id, action, options = {}) => {
     log("info", "account.action", { provider: id, action });
+    if (action === "install") return components.install(id).then(() => true);
     if (!["remove-account", "switch-account", "complete-account", "connect-account"].includes(action)) {
       if (action === "login") invalidateAccount(id);
       return connectService(id, action);
@@ -470,6 +479,11 @@ function registerIpc() {
   // shell helpers
   h("shell:showItem", (p) => shell.showItemInFolder(p));
   h("shell:openPath", (p) => shell.openPath(p));
+  h("components:status", () => components.status().map(({ progress, ...c }) => ({ ...c, progress: progress && { state: progress.state, message: progress.message, percent: progress.percent } })));
+  h("components:install", async (id) => {
+    await components.install(id);
+    return true;
+  });
   h("update:state", () => updater?.state || { status: "idle", mode: "off" });
   h("update:install", (options) => updater?.install({ force: !!options?.force }) || { ok: false });
   h("shell:openExternal", (url) => (/^https?:\/\//.test(url) ? shell.openExternal(url) : null));
@@ -508,7 +522,15 @@ app.whenReady().then(() => {
     },
   });
   ide = new IdeService({ engines, tts, send });
+  components = new ComponentManager({
+    userData: app.getPath("userData"), modelDir: paths.models, tts, getSettings, saveSettings, log,
+  });
+  components.on("progress", ({ promise, ...p }) => {
+    send("components:progress", p);
+    if (p.id === "omnivoice" && p.state === "done") tts.omni.stop();
+  });
   registerIpc();
+  if (SETUP_MODE) return runSetupMode();
   createWindow();
   updater = createUpdater({
     app, shell, send, log, feedUrl: updateFeed,
@@ -537,6 +559,27 @@ app.on("window-all-closed", () => {
   app.quit();
 });
 app.on("before-quit", () => log("info", "app.quit"));
+
+async function runSetupMode() {
+  log("info", "setup.start", { components: SETUP_IDS });
+  win = new BrowserWindow({
+    width: 560, height: 520, title: "Setting up MyLecture", backgroundColor: "#111010", autoHideMenuBar: true,
+    icon: path.join(APP_DIR, "assets", "icon.png"),
+    webPreferences: { preload: path.join(here, "preload.cjs"), contextIsolation: true, nodeIntegration: false, sandbox: true },
+  });
+  Menu.setApplicationMenu(null);
+  await win.loadURL(`mylecture://app/setup.html?ids=${encodeURIComponent(SETUP_IDS.join(","))}`);
+  let failed = 0;
+  for (const id of SETUP_IDS) {
+    if (win.isDestroyed()) break;
+    try { await components.install(id); } catch { failed++; }
+  }
+  log("info", "setup.done", { failed });
+  if (win.isDestroyed()) return app.quit();
+  send("components:setup-done", { failed });
+  // Close by itself when everything worked; otherwise leave the errors visible.
+  if (!failed) setTimeout(() => app.quit(), 2500);
+}
 
 // --smoke-test: the packaged app starts, the UI boots into Create, then quits.
 // CI reads the result from MYLECTURE_SMOKE_OUT (GUI apps have no console on Windows).

@@ -50,7 +50,7 @@ export class SettingsView {
     const s = this.state.settings;
     this.wrap.replaceChildren(
       h("h2", {}, "Settings"),
-      h("div", { class: "muted" }, "MyLecture is free and open source. It runs on your computer and uses the AI engine you choose."),
+      h("div", { class: "muted" }, "MyLecture is free for non-commercial use. It runs on your computer and uses the AI engine you choose."),
 
       h("h3", {}, "AI engine"),
       this._connectCards(),
@@ -58,6 +58,9 @@ export class SettingsView {
 
       h("h3", {}, "Voice"),
       this._voiceCard(),
+
+      h("h3", {}, "AI engines & voices"),
+      this._componentsCard(),
 
       h("h3", {}, "Lessons"),
       this._lessonCard(),
@@ -212,6 +215,43 @@ export class SettingsView {
       );
       this._paintStatus(id);
     }
+    return card;
+  }
+
+  // Install any engine or voice that was unticked in the installer (or never
+  // installed). Same installer code as the Windows setup and the welcome screen.
+  _componentsCard() {
+    const card = h("div", { class: "card" });
+    const load = () => window.ml.components.status().then((list) => card.replaceChildren(...list.map((c) => {
+      const p = c.progress;
+      const busy = p?.state === "installing";
+      const failed = p?.state === "error" && !c.installed;
+      const status = c.installed ? "Installed" : busy ? (p.message || "Installing…") : failed ? p.message : "Not installed";
+      return h("div", { class: "set-row" },
+        h("div", { class: "set-label" }, h("b", {}, c.title), h("span", {}, `${c.detail} Download: ${c.size}.`),
+          h("span", { class: "small", style: { display: "block", marginTop: "2px", color: c.installed ? "var(--good, #4ade80)" : failed ? "var(--bad)" : "var(--muted)" }, "data-comp-status": c.id }, status)),
+        h("div", { class: "set-ctl" }, c.installed ? null : h("button", { class: "btn sm", disabled: busy, onclick: async () => {
+          const install = window.ml.components.install(c.id);
+          load();
+          try {
+            await install;
+            toast(`${c.title} installed.`);
+          } catch (e) {
+            toast(String(e?.message || e).replace(/^Error invoking remote method '[^']+': (Error: )?/, ""), { kind: "bad", timeout: 9000 });
+          } finally {
+            load();
+          }
+        } }, busy ? "Installing…" : failed ? "Try again" : "Install")));
+    }))).catch(() => {});
+    this._componentsLoad = load;
+    if (!this._componentsSub) {
+      this._componentsSub = window.ml.components.onProgress((p) => {
+        const el = this.wrap.querySelector(`[data-comp-status="${p.id}"]`);
+        if (el && p.state === "installing") el.textContent = p.message || "Installing…";
+        else this._componentsLoad?.();
+      });
+    }
+    load();
     return card;
   }
 

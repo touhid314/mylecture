@@ -28,6 +28,15 @@ export async function anyConnected(state) {
   return SERVICE_ORDER.some((id, i) => isConnected(state.settings, id, st[i]));
 }
 
+// Engine installs in progress (id -> latest message), shared by every panel.
+// Progress text updates in place without re-checking every engine.
+const installs = new Map();
+globalThis.window?.ml?.components?.onProgress((p) => {
+  if (!installs.has(p.id)) return;
+  installs.set(p.id, p.message || "Installing…");
+  for (const el of document.querySelectorAll(`[data-install-progress="${p.id}"]`)) el.textContent = installs.get(p.id);
+});
+
 const friendly = (e) => String(e?.message || e).replace(/^Error invoking remote method '[^']+': (Error: )?/, "");
 
 // Returns { el, refresh, stop }. Polls status while mounted.
@@ -98,13 +107,17 @@ export function connectPanel(state, { compact = false, manageAccounts = false, o
         onChange?.(id);
       }));
     } else if (!st.installed) {
-      buttons.push(button("Set up", async () => {
-        await window.ml.connect.run(id, "install");
-        if (!alive) return;
-        pending.add(id);
-        revisions.set(id, state.settings.accountRevision?.[id] ?? 0);
-        toast(`Follow the setup, then sign in. MyLecture connects ${svc.title} as soon as it's ready.`, { timeout: 8000 });
-        refresh();
+      if (installs.has(id)) buttons.push(h("span", { class: "connect-account", "data-install-progress": id }, installs.get(id)));
+      else buttons.push(button("Set up", async () => {
+        installs.set(id, "Starting…");
+        paint(svc, id, st);
+        try {
+          await window.ml.components.install(id);
+        } finally {
+          installs.delete(id);
+          if (alive) refresh();
+        }
+        toast(`${svc.title} is installed. Click Connect to sign in.`, { timeout: 8000 });
       }));
     } else {
       buttons.push(button(waiting ? "Open sign-in again" : "Connect", async () => {

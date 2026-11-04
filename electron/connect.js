@@ -26,7 +26,10 @@ export const SERVICES = {
     title: "GPT",
     plan: "ChatGPT Plus, Pro, Business or Enterprise subscription",
     signup: "https://chatgpt.com/pricing",
-    install: { cmd: "npm install -g @openai/codex", needsNpm: true },
+    // Windows: OpenAI's winget package (no Node.js needed); elsewhere npm.
+    install: WIN && findExecutable(["winget"])
+      ? { cmd: "winget install --id OpenAI.Codex --exact --source winget --accept-package-agreements --accept-source-agreements" }
+      : { cmd: "npm install -g @openai/codex", needsNpm: true },
     login: "codex login",
     logout: "codex logout",
   },
@@ -34,7 +37,9 @@ export const SERVICES = {
     title: "Gemini",
     plan: "Google account (a Google AI plan gives higher limits)",
     signup: "https://one.google.com/about/google-ai-plans/",
-    install: { url: "https://antigravity.google/download" },
+    install: WIN
+      ? { cmd: 'powershell -NoProfile -ExecutionPolicy Bypass -Command "irm https://antigravity.google/cli/install.ps1 | iex"' }
+      : { url: "https://antigravity.google/download" },
     login: "agy",
   },
   "claude-code": {

@@ -341,7 +341,7 @@ kbd { font: 11px var(--mono); background: var(--surface-2); border: 1px solid va
 .ide-preview-close { position: absolute; top: 20px; right: 20px; z-index: 3; width: 30px; height: 30px; display: grid; place-items: center; border-radius: 8px; border: 1px solid var(--line); background: var(--surface-2, var(--surface)); color: var(--muted); cursor: pointer; }
 .ide-preview-close:hover { color: var(--fg); background: var(--hover, var(--surface)); }
 .ide-preview-close[hidden] { display: none; }
-.ide-curfile { font: 12px var(--mono); color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
+.ide-curfile { display: none !important; font: 12px var(--mono); color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
 .btn.on-toggle.on { color: var(--accent); border-color: var(--accent); }
 /* Same ruler, scene strips and red playhead as local IDE timeline-styles.ts. */
 .ide-timeline-wrap { flex: none; height: 150px; border-top: 1px solid var(--line); background: var(--bg); display: flex; flex-direction: column; min-width: 0; }

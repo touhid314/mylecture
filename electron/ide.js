@@ -262,7 +262,7 @@ export class IdeService {
   }
 
   // ---------- resolve: re-record narration from the current HTML ----------
-  async resolve(id, { sceneIndex = null, voice, speed } = {}) {
+  async resolve(id, { sceneIndex = null, voiceEngine, voice, speed } = {}) {
     const abort = this._begin("resolve", id);
     let browser;
     try {
@@ -276,7 +276,7 @@ export class IdeService {
         abort.signal.throwIfAborted();
         const sc = lec.scenes[i];
         this.log(id, `Resolving ${sc.file}…`);
-        sc.beats = await resolveBeats({ lg, browser, workspaceDir: ws, file: sc.file, viewport, tts: this.tts, voice, speed });
+        sc.beats = await resolveBeats({ lg, browser, workspaceDir: ws, file: sc.file, viewport, tts: this.tts, voiceEngine, voice, speed });
         sc.version = (sc.version || 0) + 1;
       }
       lec.duration = TL.build(lec.scenes).total;

@@ -1,0 +1,31 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Setting up MyLecture</title>
+<meta http-equiv="Content-Security-Policy" content="default-src mylecture:; script-src mylecture:; style-src mylecture: 'unsafe-inline'; img-src mylecture: data:">
+<link rel="stylesheet" href="css/app.css">
+<style>
+  body { margin: 0; padding: 22px 26px; background: var(--bg); color: var(--text, #eee); font-size: 13px; overflow: auto; }
+  h1 { font-size: 17px; margin: 0 0 4px; }
+  .lead { margin: 0 0 16px; color: var(--muted); }
+  .comp { padding: 10px 0; border-bottom: 1px solid var(--border, #333); }
+  .comp-top { display: flex; justify-content: space-between; gap: 12px; }
+  .comp-state { color: var(--muted); white-space: nowrap; }
+  .comp-state.done { color: #4ade80; } .comp-state.error { color: #f87171; }
+  .comp-msg { margin-top: 4px; color: var(--muted); font-size: 12px; overflow-wrap: anywhere; }
+  .bar { height: 4px; margin-top: 6px; border-radius: 3px; background: rgba(127,127,127,.25); overflow: hidden; }
+  .bar > div { height: 100%; width: 0; background: var(--accent, #38bdf8); transition: width .3s; }
+  .bar.busy > div { width: 30%; animation: slide 1.2s infinite ease-in-out; }
+  @keyframes slide { from { margin-left: -30%; } to { margin-left: 100%; } }
+  .foot { margin-top: 16px; display: flex; justify-content: space-between; align-items: center; gap: 12px; }
+</style>
+</head>
+<body>
+  <h1>Setting up MyLecture</h1>
+  <p class="lead">Installing the AI engines and voices you chose. Keep this window open.</p>
+  <div id="list"></div>
+  <div class="foot"><span id="summary" class="comp-state"></span><button id="close" class="btn" hidden>Close</button></div>
+  <script type="module" src="js/setup.js"></script>
+</body>
+</html>

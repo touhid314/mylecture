@@ -1,6 +1,6 @@
 # MyLecture
 
-> **Open-source AI video studio for Windows and macOS**  
+> **AI video studio for Windows and macOS. Free for non-commercial use.**  
 > Lessons, explainers, product demos, stories, social shorts: describe a video, and the agent writes, animates and narrates it.
 
 ---
@@ -26,6 +26,10 @@ The Library shows completed MP4 exports only, with Play and Show file controls. 
 **Settings → App → Diagnostics → View live log** shows app activity and errors as they happen. Pause, refresh, copy the visible log, or open its folder. Local JSONL logs live in `<app-data>/logs/app.log`, rotate at 2 MB, and retain up to five files. They record startup, IPC operation names/timings, account status, provider process lifecycle and idle heartbeats, generation stages, TTS, exports, renderer errors and crashes. Credentials and email addresses are redacted; request bodies, prompts, generated content and private thinking text are not intentionally logged. Review logs before sharing them.
 
 Project `generation.log` files also update during generation. Provider diagnostics distinguish receiving thinking events from no new provider output; a long silence is reported as waiting, rather than claiming the model is actively thinking. Diagnostics stay local and are separate from remote aggregate usage telemetry.
+
+### AI engines and voices
+
+The Windows installer has an **AI engines and voices** page: Claude (Claude Code), GPT (Codex), Gemini (Antigravity CLI) and the Kokoro voice are ticked by default; OmniVoice (about 6 GB) is not. Ticked items are installed after MyLecture with each provider's official installer (`claude.ai/install.ps1`, OpenAI's `OpenAI.Codex` winget package, `antigravity.google/cli/install.ps1`), the Kokoro model from Hugging Face, and OmniVoice into a private Python 3.11 environment made with `uv` (PyTorch 2.5.1, CUDA when an NVIDIA GPU is present). Anything skipped can be installed later from **Settings → AI engines & voices** or the welcome screen's **Set up** button, which use the same code (`electron/components.js`). Installs run hidden and are logged in the diagnostics log.
 
 ### Usage statistics and updates
 Release builds talk to one server, whose address is in `electron/server-config.json` (set it with `npm run server:configure <url>`). The server's code lives in `../mylecture-app-admin/server`; it is not part of the app.
@@ -61,6 +65,7 @@ Settings lets you **Remove account** from MyLecture or **Add new account** for G
   - **Animation JS**: Dynamic animation scripts using `ML.show()`, `ML.draw()`, `ML.type()`, `ML.count()`, and `ML.plot()`.
   - **Narration Beats**: Edit spoken sentences line-by-line with duration metrics and instant audio preview.
 - **Edit narration** lists every narrated beat across all scenes, using the exact normalized text submitted to TTS, with its caption shown underneath. Each changed beat can be regenerated separately.
+- **Change voice** re-records all narration of the open video with another engine, voice and speed (Kokoro or OmniVoice). Visuals and narration text stay the same; the choice also becomes the default for new narration.
   - **AI Assistant**: Request targeted modifications per scene (e.g., *"Make it simpler"*, *"Add a step-by-step diagram"*, *"Use modern dark cards"*) with real-time token streaming.
 - **Live Preview & Player**: Synchronized stage preview with "Play All", "Play Scene", "Restart", and live error reporting.
 - **Multi-Aspect Ratio**: Switch between **16:9 Landscape** (YouTube / Desktop), **9:16 Vertical** (Shorts / Reels / TikTok), and **1:1 Square** (Instagram / Feed).
@@ -181,4 +186,4 @@ See [docs/RELEASING.md](docs/RELEASING.md) for the full steps and signing.
 
 ## License
 
-MIT License. Open-source and free for everyone.
+[CC BY-NC 4.0](LICENSE): free to use, share and adapt with credit, for non-commercial purposes. Commercial use or distribution needs written permission.

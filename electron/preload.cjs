@@ -18,6 +18,12 @@ contextBridge.exposeInMainWorld("ml", {
     reportError: entry => ipcRenderer.send("logs:renderer", entry),
   },
   info: () => invoke("app:info"),
+  components: {
+    status: () => invoke("components:status"),
+    install: (id) => invoke("components:install", id),
+    onProgress: (fn) => on("components:progress", fn),
+    onSetupDone: (fn) => on("components:setup-done", fn),
+  },
   updates: {
     state: () => invoke("update:state"),
     install: (options) => invoke("update:install", options),
