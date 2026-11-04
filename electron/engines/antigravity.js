@@ -6,6 +6,7 @@ import path from "node:path";
 import { findExecutable, scratchDir, spawnLines, runCapture } from "./cli-util.js";
 import fs from "node:fs";
 import { parseAntigravityModels } from "./model-discovery.js";
+import { log } from "../logger.js";
 
 // The active Google account, as recorded in ~/.gemini/google_accounts.json.
 export function antigravityEmail(home = os.homedir()) {
@@ -18,6 +19,11 @@ export function antigravityEmail(home = os.homedir()) {
 }
 
 const EXTRA_DIRS = [path.join(os.homedir(), "AppData", "Local", "agy", "bin")];
+
+// Headless accept-edits permits native file tools, but cannot ask the user to
+// approve a terminal command. Do not grant unrestricted command permissions:
+// --sandbox currently does not confine terminal writes on Windows.
+export const ANTIGRAVITY_FILE_TOOLS = `You are running non-interactively in MyLecture. Use the native list_dir, find_by_name, view_file, write_to_file, replace_file_content and multi_replace_file_content tools to inspect and edit project files. Terminal commands cannot be approved here: do not use run_command, shell, scripts or terminal tools. Write the requested Markdown, JSON and HTML files directly with the native file tools. Browser JavaScript and Web Audio belong in the generated HTML; they do not require terminal commands. Finish with a short response describing the result.`;
 
 export const antigravity = {
   id: "antigravity",
@@ -60,24 +66,68 @@ export const antigravity = {
     return this.generate(opts);
   },
 
-  async generate({ system, user, model, effort, signal, onDelta, onStatus, onActivity, workspace }) {
+  async generate({ system, user, model, effort, signal, onDelta, onStatus, onActivity, workspace, inbox }) {
     const exe = this.exe();
     if (!exe) throw new Error("Gemini isn't connected. Connect it from the welcome screen or Settings.");
-    const args = ["--input-format", "stream-json", "--output-format", "stream-json", "--disable-slash-commands"];
-    if (workspace) args.push("--mode", "accept-edits");
-    if (model) args.push("--model", model);
-    if (workspace && effort) args.push("--effort", effort);
-    args.push("-p", "");
-    const content = `${system}\n\n---\n\n${user}`;
-    const stdin = JSON.stringify({ event: "user", message: { role: "user", content } }) + "\n";
+    const baseArgs = ["--input-format", "stream-json", "--output-format", "stream-json", "--disable-slash-commands"];
+    if (workspace) baseArgs.push("--mode", "accept-edits");
+    if (model) baseArgs.push("--model", model);
+    if (workspace && effort) baseArgs.push("--effort", effort);
+    let content = `${system}${workspace ? `\n\n${ANTIGRAVITY_FILE_TOOLS}` : ""}\n\n---\n\n${user}`;
     let full = "";
     let error = null;
     let usage = null;
-    const res = await spawnLines(exe, args, {
-      cwd: workspace || scratchDir("antigravity"),
-      stdin,
-      signal,
-      onLine(line) {
+    const startedAt = Date.now();
+    let lastProgressAt = 0;
+    log("info", "provider.start", { provider: "antigravity", model, effort, agent: !!workspace });
+    // Mid-run messages (as Super Agent does for Antigravity): stop the run and
+    // resume the same conversation at once with the new message.
+    let conversation = null, interrupt = null;
+    const pending = [];
+    const detach = inbox?.attach((text) => {
+      if (!conversation || !interrupt) return false;
+      pending.push(text);
+      log("info", "provider.inject", { provider: "antigravity", chars: text.length });
+      interrupt.abort();
+      return true;
+    });
+    let res;
+    try {
+      for (;;) {
+        interrupt = new AbortController();
+        const onOuterAbort = () => interrupt?.abort();
+        signal?.addEventListener("abort", onOuterAbort, { once: true });
+        if (signal?.aborted) interrupt.abort();
+        const args = [...baseArgs, ...(conversation ? ["--conversation", conversation] : []), "-p", ""];
+        const stdin = JSON.stringify({ event: "user", message: { role: "user", content } }) + "\n";
+        res = await spawnLines(exe, args, {
+          cwd: workspace || scratchDir("antigravity"),
+          stdin,
+          signal: interrupt.signal,
+          onIdle: ({ idleMs, elapsedMs }) => {
+            log("warn", "provider.waiting", { provider: "antigravity", idleMs, elapsedMs });
+            onStatus?.(`Waiting for a response (no events for ${Math.floor(idleMs / 1000)}s)`);
+          },
+          onLine: (line) => {
+            if (!conversation) conversation = /"conversation_id"\s*:\s*"([^"]+)"/.exec(line)?.[1] || null;
+            handle(line);
+          },
+        });
+        signal?.removeEventListener("abort", onOuterAbort);
+        interrupt = null;
+        // Interrupted for a new message (not stopped by the user): resume with it.
+        if (res.aborted && !signal?.aborted && pending.length && conversation) {
+          content = `You were interrupted by a new message from the user. Take it into account, then continue the task:\n\n${pending.splice(0).join("\n\n")}`;
+          error = null;
+          log("info", "provider.resume", { provider: "antigravity", conversation });
+          continue;
+        }
+        break;
+      }
+    } finally {
+      detach?.();
+    }
+    function handle(line) {
         let ev;
         try {
           ev = JSON.parse(line);
@@ -86,6 +136,10 @@ export const antigravity = {
         }
         if (ev.event === "step_update") {
           const su = ev.step_update || {};
+          if (su.step_type === "tool" || Date.now() - lastProgressAt >= 5000) {
+            lastProgressAt = Date.now();
+            log("info", "provider.event", { provider: "antigravity", type: su.step_type, state: su.state, tool: su.tool_name, outputBytes: Buffer.byteLength(full), elapsedMs: Date.now() - startedAt });
+          }
           if (su.step_type === "agent_response" && su.text_delta) {
             full += su.text_delta;
             onDelta(su.text_delta);
@@ -99,7 +153,11 @@ export const antigravity = {
           if (su.usage) usage = su.usage;
         } else if (ev.event === "result") {
           const r = ev.result || {};
+          log(r.status === "SUCCESS" ? "info" : "error", "provider.result", { provider: "antigravity", status: r.status, deniedActions: r.denied_actions?.length || 0, outputBytes: Buffer.byteLength(full) });
           if (r.status && r.status !== "SUCCESS") error = r.error || r.status;
+          if (r.denied_actions?.length) {
+            error = "A tool needed permission that Gemini cannot request inside MyLecture. Send the request again; Gemini must use its built-in file tools instead of terminal commands.";
+          }
           if (r.usage) usage = r.usage;
           // If deltas were missed, fall back to the full response.
           if (!full && r.response) {
@@ -107,11 +165,12 @@ export const antigravity = {
             onDelta(r.response);
           }
         }
-      },
-    });
+    }
+    log("info", "provider.finish", { provider: "antigravity", code: res.code, aborted: !!res.aborted, elapsedMs: Date.now() - startedAt, outputBytes: Buffer.byteLength(full) });
     if (res.aborted) return { text: full, aborted: true };
     if (error) throw new Error(`Gemini: ${error}`);
     if (res.code !== 0 && !full) throw new Error(`Gemini stopped unexpectedly (${res.code}): ${res.stderr.slice(-500)}`);
+    if (!full.trim()) throw new Error("Gemini stopped without a reply. Send the request again; no completed response was received.");
     return { text: full, usage };
   },
 };

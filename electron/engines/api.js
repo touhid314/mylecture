@@ -1,6 +1,15 @@
 // "MyLecture Agent" — the built-in engine that talks to model APIs directly
 // with the user's own key. Supports Gemini, OpenAI, Anthropic, and any
 // OpenAI-compatible endpoint (OpenRouter, LiteLLM/Navigator, Ollama, LM Studio).
+import fs from "node:fs";
+import { log, registerLogSecret } from "../logger.js";
+
+export function imageAttachments(attachments = []) {
+  return attachments.filter(a => /^image\/(png|jpeg|webp|gif)$/.test(a.mime || "")).map(a => ({
+    mime: a.mime,
+    data: fs.readFileSync(a.path).toString("base64"),
+  }));
+}
 
 export const API_PROVIDERS = {
   gemini: { label: "Google Gemini", defaultModel: "gemini-3.8-flash", keyUrl: "https://aistudio.google.com/apikey" },
@@ -192,12 +201,18 @@ export function makeApiEngine(getConfig) {
       return discoverApiModels(getConfig());
     },
 
-    async generate({ system, user, model, effort = "low", signal, onDelta }) {
+    async generate({ system, user, model, effort = "low", signal, onDelta, attachments = [] }) {
       const c = getConfig();
+      registerLogSecret(c.apiKey);
       const m = model || c.model || API_PROVIDERS[c.provider]?.defaultModel;
+      const started = Date.now();
+      log("info", "api.request", { provider: c.provider, model: m, effort, attachmentCount: attachments.length });
+      try {
+      const images = imageAttachments(attachments);
       let full = "";
       const push = (t) => {
         if (!t) return;
+        if (!full) log("info", "api.firstResponse", { provider: c.provider, model: m, durationMs: Date.now() - started });
         full += t;
         onDelta(t);
       };
@@ -209,7 +224,7 @@ export function makeApiEngine(getConfig) {
           headers: { "content-type": "application/json", "x-goog-api-key": c.apiKey },
           body: JSON.stringify({
             systemInstruction: { parts: [{ text: system }] },
-            contents: [{ role: "user", parts: [{ text: user }] }],
+            contents: [{ role: "user", parts: [{ text: user }, ...images.map(i => ({ inlineData: { mimeType: i.mime, data: i.data } }))] }],
             // https://ai.google.dev/gemini-api/docs/generate-content/thinking
             generationConfig: { temperature: 0.7, maxOutputTokens: 32768,
               ...(effort && /^gemini-[34]/.test(m) ? { thinkingConfig: { thinkingLevel: effort } }
@@ -229,7 +244,7 @@ export function makeApiEngine(getConfig) {
           method: "POST",
           signal,
           headers: { "content-type": "application/json", authorization: `Bearer ${c.apiKey}` },
-          body: JSON.stringify({ model: m, instructions: system, input: user, stream: true, ...(effort ? { reasoning: { effort } } : {}) }),
+          body: JSON.stringify({ model: m, instructions: system, input: images.length ? [{ role: "user", content: [{ type: "input_text", text: user }, ...images.map(i => ({ type: "input_image", image_url: `data:${i.mime};base64,${i.data}` }))] }] : user, stream: true, ...(effort ? { reasoning: { effort } } : {}) }),
         });
         await check(res, "OpenAI");
         for await (const ev of sse(res)) {
@@ -248,7 +263,7 @@ export function makeApiEngine(getConfig) {
           signal,
           headers: { "content-type": "application/json", "x-api-key": c.apiKey, "anthropic-version": "2023-06-01" },
           // https://platform.claude.com/docs/en/build-with-claude/effort
-          body: JSON.stringify({ model: m, max_tokens: 32000, system, messages: [{ role: "user", content: user }], stream: true,
+          body: JSON.stringify({ model: m, max_tokens: 32000, system, messages: [{ role: "user", content: images.length ? [{ type: "text", text: user }, ...images.map(i => ({ type: "image", source: { type: "base64", media_type: i.mime, data: i.data } }))] : user }], stream: true,
             ...(!effort || /claude-(?:haiku|sonnet)-4-5/.test(m) ? {} : { output_config: { effort } }),
           }),
         });
@@ -276,7 +291,7 @@ export function makeApiEngine(getConfig) {
             ...(effort ? { reasoning_effort: effort } : {}),
             messages: [
               { role: "system", content: system },
-              { role: "user", content: user },
+              { role: "user", content: images.length ? [{ type: "text", text: user }, ...images.map(i => ({ type: "image_url", image_url: { url: `data:${i.mime};base64,${i.data}` } }))] : user },
             ],
           }),
         });
@@ -289,7 +304,12 @@ export function makeApiEngine(getConfig) {
           } catch {}
         }
       }
+      log("info", "api.done", { provider: c.provider, model: m, durationMs: Date.now() - started, characters: full.length });
       return { text: full };
+      } catch (error) {
+        log(signal?.aborted ? "info" : "error", signal?.aborted ? "api.aborted" : "api.failed", { provider: c.provider, model: m, durationMs: Date.now() - started, error });
+        throw error;
+      }
     },
   };
 }

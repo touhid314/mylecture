@@ -2,7 +2,7 @@
 // real-time streaming. Layout and workflow follow mylecture-local-ide:
 //   left   recent projects and a collapsible artifacts drawer
 //   center preview (player / document / rendered MP4) + scene timeline,
-//          Edit narration, Edit visual
+//          Edit narration
 //   right  Video Agent: generation settings + chat (new videos, changes, questions)
 import { markdownEl, renderInline, onFileLink } from "./markdown.js";
 import { connectPanel, anyConnected } from "./connect.js";
@@ -10,6 +10,7 @@ import { showApiKeyDialog } from "./api-key.js";
 import { h, icon, fmtTime, fmtDate, toast, modal, popMenu, confirmBox, bus } from "./ui.js";
 import { Player } from "./player.js";
 import { UsagePanel } from "./usage.js";
+import { AttachmentPicker, attachmentNames } from "./attachments.js";
 
 const TL = window.MLTimeline;
 const LENGTH_PRESETS = ["0:15", "0:30", "0:45", ...Array.from({ length: 10 }, (_, i) => `${i + 1}:00`)];
@@ -66,10 +67,8 @@ export class CreateView {
     this.projList = h("div", { class: "ide-projects" });
     this.fileList = h("div", { class: "ide-files" });
     this.folderTitle = h("div", { class: "ide-folder-title" }, "No project open");
-    this.resolveBtn = h("button", { class: "btn sm grow", title: "Re-record narration from the scene HTML", onclick: () => this.resolve() }, "Resolve");
-    this.resolveMenu = h("button", { class: "btn sm icon", title: "Resolve options", onclick: (e) => this._resolveOptions(e.currentTarget) }, icon("down"));
-    this.renderBtn = h("button", { class: "btn sm grow", title: "Render an MP4", onclick: () => this.render() }, "Render");
-    this.renderMenu = h("button", { class: "btn sm icon", title: "Render options", onclick: (e) => this._renderOptions(e.currentTarget) }, icon("down"));
+    this.renderBtn = h("button", { class: "btn sm grow render-highlight", title: "Render an MP4", onclick: () => (this.job?.type === "render" ? this.stopRender() : this.render()) }, "Render");
+    this.renderMenu = h("button", { class: "btn sm icon render-options-highlight", title: "Render options", onclick: (e) => this._renderOptions(e.currentTarget) }, icon("down"));
     this.artifactCount = h("span", { class: "artifact-count" }, "0");
     this.artifactToggle = h("button", { class: "artifact-toggle", "aria-expanded": "false", "aria-controls": "create-artifacts", onclick: () => this._setArtifactsOpen(!this.artifactsOpen) },
       icon("up"), h("span", { class: "grow" }, "Artifacts"), this.artifactCount);
@@ -118,14 +117,22 @@ export class CreateView {
     this.stage = h("div", { class: "ide-stage" }, this.player.el, this.docView, this.video, this.closePreviewBtn);
     new ResizeObserver(() => this._fit()).observe(this.stage);
     this.curFile = h("div", { class: "ide-curfile" }, "No file selected");
+    this.videoTitle = h("h2", { class: "ide-video-title", hidden: true });
+    this.renderBarFill = h("div", { class: "render-bar-fill" });
+    this.renderInfo = h("div", { class: "render-info", hidden: true });
+    this.renderDone = h("div", { class: "render-done", hidden: true });
+    this.renderBar = h("div", { class: "render-bar", hidden: true, role: "progressbar", "aria-label": "Render progress", "aria-valuemin": "0", "aria-valuemax": "100" }, this.renderBarFill);
     const controls = h(
       "div",
       { class: "ide-controls" },
+      this.renderBar,
+      this.renderInfo,
+      this.renderDone,
       this.curFile,
       h("div", { class: "grow" }),
-      h("button", { class: "btn sm", title: "Edit and regenerate one narration clip", onclick: () => this.editNarration() }, icon("mic"), "Edit narration"),
-      h("button", { class: "btn sm", title: "Edit this scene's visual or on-screen text", onclick: () => this.editVisual() }, icon("wand"), "Edit visual"),
+      h("button", { class: "btn sm", title: "View and edit narration for every beat", onclick: () => this.editNarration() }, icon("mic"), "Edit narration"),
       h("button", { class: "btn sm", title: "Video info", onclick: () => this.info() }, "Info"),
+      h("div", { class: "ide-split" }, this.renderBtn, this.renderMenu),
     );
     this.timeline = h("div", { class: "ide-timeline" });
     this.playheadEl = h("div", { class: "ide-playhead" }, h("div", { class: "ide-playhead-handle" }));
@@ -162,7 +169,7 @@ export class CreateView {
       const width = this.timelineScroll.clientWidth;
       if (width && width !== this._timelineWidth) { this._timelineWidth = width; this._paintTimeline(); }
     }).observe(this.timelineScroll);
-    const center = h("main", { class: "ide-center" }, this.stage, controls, timelineWrap);
+    const center = h("main", { class: "ide-center" }, this.videoTitle, this.stage, controls, timelineWrap);
 
     // Right: agent
     this.chat = h("div", { class: "ide-chat", role: "log", "aria-label": "Video Agent conversation" });
@@ -182,6 +189,7 @@ export class CreateView {
     this.teachSelect = h("select", { class: "select sm", "aria-label": "Teaching style", title: "Teaching style", onchange: e => this._saveAgentSettings({ lgTeachingStyle: e.target.value }) }, styles.teachingStyles.map((o) => h("option", { value: o.id, title: o.description }, o.name)));
     this._syncSettingsSelects();
     this.input = h("textarea", { class: "ide-input", rows: 2, "aria-label": "Message the Video Agent", placeholder: "What video do you want to make? What do you want to teach?" });
+    this.attachments = new AttachmentPicker(this.input);
     this.input.addEventListener("input", () => {
       this.input.style.height = "auto";
       this.input.style.height = Math.min(this.input.scrollHeight, 180) + "px";
@@ -249,9 +257,8 @@ export class CreateView {
     this._syncEngineLabel();
     const right = h(
       "aside",
-      { class: "ide-right" },
+      { class: "ide-right", "data-drop-label": "Drop files to attach" },
       h("div", { class: "ide-right-head" }, h("span", { class: "agent-mark" }, icon("sparkles")), h("b", { class: "grow" }, "Video Agent"), this.agentStatus, h("button", { class: "agent-tool", title: "New video", "aria-label": "New video", onclick: () => this.newLecture() }, icon("plus"))),
-      h("div", { class: "ide-actions agent-project-actions" }, h("div", { class: "ide-split" }, this.resolveBtn, this.resolveMenu), h("div", { class: "ide-split" }, this.renderBtn, this.renderMenu)),
       this.chat,
       h(
         "div",
@@ -259,13 +266,14 @@ export class CreateView {
         this.enginePanel,
         this.modeNote,
         h("div", { class: "agent-box" },
-          h("div", { class: "agent-prompt-row" }, this.input, this.stopBtn, this.sendBtn),
+          this.attachments.list,
+          h("div", { class: "agent-prompt-row" }, this.attachments.controls, this.input, this.stopBtn, this.sendBtn),
           this.videoControls,
           h("div", { class: "agent-toolbar" }, this.engineLabel, this.modelName, this.thinkingLabel, this.usage.root)),
-        h("div", { class: "agent-key-hint" }, "Enter to send", h("span", {}, "Shift + Enter for a new line")),
       ),
     );
 
+    this.attachments.dropTarget(right);
     this.root.append(left, center, right);
     document.addEventListener("pointerdown", (e) => {
       if (!this.enginePanel.hidden && !this.enginePanel.contains(e.target) && !this.engineLabel.contains(e.target) && !this.thinkingLabel.contains(e.target)) this._toggleEngineOptions(false);
@@ -367,8 +375,8 @@ export class CreateView {
       const s = this.state.settings;
       const group = (engine, label, voices) => h("optgroup", { label }, voices.map(([id, name]) => h("option", { value: `${engine}:${id}` }, name)));
       this.voiceSelect.replaceChildren(
-        group("kokoro", "Kokoro", this._voiceCatalog.kokoro || []),
-        group("omnivoice", "OmniVoice", this._voiceCatalog.omnivoice || []));
+        group("kokoro", "Kokoro · Fast · Local", this._voiceCatalog.kokoro || []),
+        group("omnivoice", "OmniVoice · Higher quality · Local", this._voiceCatalog.omnivoice || []));
       const voice = s.voiceEngine === "omnivoice" ? s.omnivoiceVoice || "maruf" : s.voice || "af_heart";
       this.voiceSelect.value = `${s.voiceEngine === "omnivoice" ? "omnivoice" : "kokoro"}:${voice}`;
       this.voiceSelect.title = `${s.voiceEngine === "omnivoice" ? "OmniVoice" : "Kokoro"} · ${this.voiceSelect.selectedOptions[0]?.textContent || voice}`;
@@ -382,8 +390,8 @@ export class CreateView {
     const menu = popMenu(this.voiceButton, []);
     menu.classList.add("voice-menu");
     menu.setAttribute("role", "menu");
-    for (const [engine, label] of [["kokoro", "Kokoro"], ["omnivoice", "OmniVoice"]]) {
-      menu.append(h("div", { class: "menu-label" }, label));
+    for (const [engine, label, quality] of [["kokoro", "Kokoro", "Fast"], ["omnivoice", "OmniVoice", "Higher quality"]]) {
+      menu.append(h("div", { class: "menu-label voice-group-label" }, label, h("span", { class: "voice-quality" }, quality), h("span", { class: "badge" }, "Local")));
       for (const [id, name] of this._voiceCatalog[engine] || []) {
         const key = `${engine}:${id}`;
         const pick = h("button", { class: "voice-pick", role: "menuitem", onclick: () => {
@@ -554,6 +562,7 @@ export class CreateView {
 
   async open(id, { keepScene = false } = {}) {
     if (this.job && id !== this.job.projectId) return toast("Stop the current job before opening another project.");
+    if (!keepScene) this._hideRenderDone();
     try {
       this.project = await window.ml.ide.get(id);
     } catch (e) {
@@ -647,16 +656,24 @@ export class CreateView {
     this._paintTimeline();
     const lec = this.project?.lecture;
     this.folderTitle.textContent = lec ? lec.title || lec.question : "No project open";
+    this.videoTitle.textContent = lec?.title || "";
+    this.videoTitle.title = this.videoTitle.textContent;
+    this.videoTitle.hidden = !this.videoTitle.textContent;
     const busy = !!this.job;
     this.voiceSelect.disabled = busy;
     this.voiceButton.disabled = busy;
-    for (const b of [this.resolveBtn, this.resolveMenu, this.renderBtn, this.renderMenu]) b.disabled = !lec?.scenes?.length || busy;
-    this.sendBtn.style.display = busy ? "none" : "";
+    const rendering = this.job?.type === "render";
+    this.renderBtn.disabled = rendering ? false : !lec?.scenes?.length || busy;
+    this.renderMenu.disabled = !lec?.scenes?.length || busy;
+    this.renderBtn.textContent = rendering ? "■ Stop render" : "Render";
+    this.renderBtn.title = rendering ? "Stop rendering" : "Render an MP4";
+    this.renderBtn.classList.toggle("render-stop", rendering);
+    this.sendBtn.title = busy ? "Send to the agent while it works (Enter)" : "Send message (Enter)";
     this.stopBtn.style.display = busy ? "" : "none";
     this.agentStatus.textContent = busy ? "Working" : "Ready";
     this.agentStatus.className = "agent-status" + (busy ? " working" : "");
     const sc = lec?.scenes?.[this.sceneIndex];
-    this.modeNote.textContent = lec && !this.liveJob && sc ? `Viewing scene ${this.sceneIndex + 1}` : "";
+    this.modeNote.textContent = lec?.narrationPending ? "Narration is incomplete. Ask the AI to finish this video." : lec && !this.liveJob && sc ? `Viewing scene ${this.sceneIndex + 1}` : "";
     this.input.placeholder = lec && !this.liveJob ? "Ask for a change, ask about this video, or start something new…" : "What video do you want to make? What do you want to teach?";
     if (this.preview === "lecture") this.curFile.textContent = sc ? `${sc.file} · ${sc.title || ""}` : lec ? "No scenes yet" : "No file selected";
   }
@@ -790,7 +807,10 @@ export class CreateView {
   _msg(cls, ...children) {
     this.welcome?.remove();
     const el = h("div", { class: "ide-msg " + cls }, ...children);
-    this.chat.appendChild(el);
+    // Job events can arrive before the send request returns. Keep the user's
+    // prompt before the work view even when progress has already started.
+    if (cls === "user" && this.work?.el.parentNode === this.chat) this.chat.insertBefore(el, this.work.el);
+    else this.chat.appendChild(el);
     this.chat.scrollTop = this.chat.scrollHeight;
     return el;
   }
@@ -800,6 +820,11 @@ export class CreateView {
   _onLog(m) {
     if (this.project && m.projectId && m.projectId !== this.project.lecture.id) return;
     if (m.kind === "error") return void this._msg("err", m.text);
+    // Render steps stay out of the agent chat (a toast reports the result).
+    if (this.job?.type === "render") {
+      if (m.kind !== "reply" && m.kind !== "done" && m.kind !== "stopped") this.agentStatus.textContent = m.text;
+      return;
+    }
     if (m.kind === "stopped") {
       this._workFinish("");
       return void this._msg("log", m.text);
@@ -819,8 +844,10 @@ export class CreateView {
   // the agent says (Markdown) and what it does (compact tool steps). When it
   // ends, that collapses into "Worked for 1m 46s ›" and the agent's final
   // message follows as its own reply.
+  // Replies and live work are always labeled as the product, never the
+  // underlying provider or model.
   _who() {
-    return [this.agentName?.textContent, this.modelName?.textContent].map((t) => (t || "").trim()).filter(Boolean).join(" · ");
+    return "MyLecture Engine";
   }
   _workStart() {
     if (this.work) return this.work;
@@ -832,8 +859,7 @@ export class CreateView {
     const w = (this.work = { el, head, tl, started: Date.now(), items: [], agentItems: null, pinned: true, stepAt: Date.now(), stepN: 0 });
     tl.addEventListener("scroll", () => (w.pinned = tl.scrollHeight - tl.scrollTop - tl.clientHeight < 24));
     const tick = () => {
-      const who = this._who();
-      head.textContent = `Working for ${duration(Date.now() - w.started)}${who ? ` · ${who}` : ""}`;
+      head.textContent = `MyLecture Engine · Working for ${duration(Date.now() - w.started)}`;
     };
     tick();
     w.timer = setInterval(() => {
@@ -891,23 +917,49 @@ export class CreateView {
 
   // Every message goes to the Video Agent, first or not. With a CLI agent it
   // decides what the message needs (a new video, changes, or just a reply).
+  // While the agent works, a message goes straight into its running session
+  // (like Claude Code): it reads it at its next step and adapts.
   async send() {
-    const text = this.input.value.trim();
-    if (!text || this.job || this.liveJob) return;
-    this.input.value = "";
-    this.input.style.height = "";
+    const text = this.input.value.trim() || (this.attachments.count ? "Make a video based on the attached material." : "");
+    if (!text || this.sending) return;
+    if (this.liveJob) return this._sendLive(text);
+    return this._dispatch(text);
+  }
+
+  async _sendLive(text) {
+    if (this.attachments.count) return void toast("Files can't be added while the agent is working. Send them after it finishes.");
+    this.sending = true;
+    try {
+      await window.ml.ide.chat({ projectId: this.project?.lecture?.id || null, message: text, live: true });
+      this.input.value = "";
+      this.input.style.height = "";
+    } catch (e) {
+      toast(friendly(e), { kind: "bad" });
+    } finally {
+      this.sending = false;
+    }
+  }
+
+  async _dispatch(text) {
+    this.sending = true;
+    this.input.readOnly = true;
+    this.attachments.setLocked(true);
     this._toggleEngineOptions(false);
-    this._msg("user", text);
     const length = parseLength(this.lenInput.value) || "1:00";
     const aspect = this.arSelect.value;
     const projectId = this.project?.lecture?.id || null;
     try {
-      const r = await window.ml.ide.chat({ projectId, message: text, sceneIndex: this.sceneIndex, length, aspect, theme: this.themeSelect.value, teachingStyle: this.teachSelect.value });
+      const attachments = await this.attachments.serialize();
+      const r = await window.ml.ide.chat({ projectId, message: text, attachments, sceneIndex: this.sceneIndex, length, aspect, theme: this.themeSelect.value, teachingStyle: this.teachSelect.value });
+      this._msg("user", text, attachmentNames(attachments));
+      this.input.value = "";
+      this.input.style.height = "";
+      this.attachments.clear();
       if (r.kind === "project") return void this._applyProject(r.project);
       this.liveJob = r.jobId;
       if (r.lectureId !== projectId) {
         // A new project: the player fills in as scenes are finished.
-        this.project = { lecture: { id: r.lectureId, question: text, title: text, aspect, length, scenes: [], chat: [] }, files: [] };
+        this.project = { lecture: { id: r.lectureId, question: text, title: "", aspect, length, scenes: [], chat: [] }, files: [] };
         this._chatFor = r.lectureId;
         this.sceneIndex = 0;
         this.player.setLecture({ scenes: [], aspect });
@@ -919,6 +971,10 @@ export class CreateView {
       this.refreshProjects();
     } catch (e) {
       this._msg("err", friendly(e));
+    } finally {
+      this.sending = false;
+      this.input.readOnly = false;
+      this.attachments.setLocked(false);
     }
   }
 
@@ -928,7 +984,8 @@ export class CreateView {
     this.work = null;
     this.chat.replaceChildren();
     for (const m of lec.chat || []) {
-      if (m.role === "user") this._msg("user", m.text);
+      if (m.role === "user") this._msg("user", m.text, attachmentNames(m.attachments));
+      else if (m.role === "error") this._msg("err", m.text);
       else this._agentMsg(m.text, m.at);
     }
     this._scrollChat(true);
@@ -968,40 +1025,71 @@ export class CreateView {
   }
 
   _onJob(j) {
-    if (j.state === "running") this._workStart();
-    else if (this.work && !this.liveJob) this._workFinish("");
-    this.job = j.state === "running" ? { type: j.type, projectId: j.projectId } : null;
+    // Render is local (no AI): its progress lives in the header status, not
+    // in the agent's "Working · Claude" chat block.
+    if (j.type === "render") this._renderBar(j.state === "running" ? 0 : null);
+    if (j.state === "running" && j.type !== "render") this._workStart();
+    else if (j.state !== "running" && this.work && !this.liveJob) this._workFinish("");    this.job = j.state === "running" ? { type: j.type, projectId: j.projectId } : null;
     this._paintAll();
   }
 
   _onProgress(p) {
     if (!this.job) return;
+    if (this.job.type === "render") {
+      if (p.progress != null) this._renderBar(p.progress);
+      this._renderLabel(p);
+    }
     const pct = p.progress != null ? ` ${Math.round(p.progress * 100)}%` : "";
     // Progress (e.g. rendering) shows in the header status next to the title.
     this.agentStatus.textContent = `${cap(p.phase || this.job.type)}${pct}`;
   }
 
-  // ---------- resolve / render ----------
-  _resolveOpts() {
-    return (this._ro ||= { currentOnly: false, speed: this.state.settings.voiceSpeed || 1 });
+  // ---------- render ----------
+  // After a render: "✓ Video ready · Watch · Show in folder" in the controls row.
+  _showRenderDone(file) {
+    const name = file.split(/[\\/]/).pop();
+    this.renderDone.replaceChildren(
+      h("span", { class: "render-done-label", title: file }, "✓ Video ready", h("span", { class: "render-done-name" }, name)),
+      h("button", { class: "btn sm render-done-btn", title: "Play the video", onclick: () => window.ml.shell.openPath(file) }, "▶ Watch"),
+      h("button", { class: "btn sm", title: "Show the file in its folder", onclick: () => window.ml.shell.showItem(file) }, "Show in folder"),
+      h("button", { class: "btn ghost sm icon", title: "Dismiss", "aria-label": "Dismiss", onclick: () => this._hideRenderDone() }, icon("x")),
+    );
+    this.renderDone.hidden = false;
+    this.curFile.hidden = true;
   }
-  _resolveOptions(anchor) {
-    const o = this._resolveOpts();
-    popMenu(anchor, [
-      { label: "Voice speed" },
-      ...[1, 1.2, 1.3, 1.5].map((v) => ({ text: `${v.toFixed(1)}×${o.speed === v ? "  ✓" : ""}`, run: () => (o.speed = v) })),
-      "-",
-      { text: `${o.currentOnly ? "✓ " : ""}Resolve current scene only`, run: () => (o.currentOnly = !o.currentOnly) },
-    ]);
+  _hideRenderDone() {
+    if (this.renderDone.hidden) return;
+    this.renderDone.hidden = true;
+    this.curFile.hidden = false;
   }
-  async resolve() {
-    const o = this._resolveOpts();
-    try {
-      const p = await window.ml.ide.resolve(this.project.lecture.id, { sceneIndex: o.currentOnly ? this.sceneIndex : null, speed: o.speed });
-      this._applyProject(p);
-    } catch (e) {
-      this._msg("err", friendly(e));
+  // "Rendering 1920×1080 · 30 fps · frame 120/900 (14 fps) · 42% · ETA 0:55"
+  _renderLabel(p) {
+    const o = this._renderOpts();
+    const res = p.width && p.height ? `${p.width}×${p.height}` : `${o.height}p`;
+    const parts = [p.phase === "audio" ? "Preparing narration" : "Rendering", res, `${p.fps || o.fps} fps`];
+    if (p.frames) parts.push(`frame ${p.frame}/${p.frames}` + (p.speed ? ` (${p.speed.toFixed(1)} fps)` : ""));
+    if (p.progress != null && p.phase !== "audio") parts.push(`${Math.round(p.progress * 100)}%`);
+    if (p.phase === "done") parts.push("finishing…");
+    else parts.push(p.eta != null ? `ETA ${duration(p.eta * 1000)}` : "ETA calculating…");
+    this.renderInfo.textContent = parts.join(" · ");
+    this.renderInfo.hidden = false;
+    this.curFile.hidden = true;
+  }
+  // Thin bar on the top edge of the controls row; null hides it.
+  _renderBar(frac) {
+    this.renderBar.hidden = frac == null;
+    if (frac == null) {
+      this.renderInfo.hidden = true;
+      this.curFile.hidden = false;
+      return;
     }
+    if (frac === 0) {
+      this._hideRenderDone();
+      this._renderLabel({});
+    }
+    const pct = Math.max(0, Math.min(100, Math.round(frac * 100)));
+    this.renderBarFill.style.width = pct + "%";
+    this.renderBar.setAttribute("aria-valuenow", String(pct));
   }
   _renderOpts() {
     return (this._rdo ||= { fps: 30, height: 1080, captions: false });
@@ -1021,67 +1109,81 @@ export class CreateView {
       { text: `${o.captions ? "✓ " : ""}Embed captions`, run: () => (o.captions = !o.captions) },
     ]);
   }
+  stopRender() {
+    this._renderStopped = true;
+    this.renderBtn.disabled = true;
+    this.renderBtn.textContent = "Stopping…";
+    window.ml.ide.stop();
+  }
   async render() {
     const o = this._renderOpts();
+    this._renderStopped = false;
     try {
       const r = await window.ml.ide.render(this.project.lecture.id, { fps: o.fps, height: o.height, captions: o.captions });
       this.project.files = r.files;
       this._paintFiles();
-      toast("Video rendered", { kind: "good", actions: [{ label: "Show file", run: () => window.ml.shell.showItem(r.file) }] });
+      if (this._renderStopped) return;
+      this._showRenderDone(r.file);
       bus.emit("library-changed");
     } catch (e) {
+      if (this._renderStopped || /cancel|abort/i.test(String(e?.message || e))) return void toast("Render stopped");
       this._msg("err", friendly(e));
     }
   }
 
   // ---------- dialogs ----------
-  editNarration() {
+  async editNarration() {
     const lec = this.project?.lecture;
-    const sc = lec?.scenes?.[this.sceneIndex];
-    if (!sc || this.liveJob) return toast("Open a finished project and select a scene first.");
-    const cues = sc.beats.map((b, bi) => ({ b, bi })).filter(({ b }) => !b.visualOnly && b.segment);
-    if (!cues.length) return toast("This scene has no narration.");
-    const loc = TL.locate(TL.build(lec.scenes), this.player.t);
-    const start = cues.find((c) => loc && loc.scene === this.sceneIndex && c.bi === loc.beat) || cues[0];
-    const sel = h("select", { class: "select" }, cues.map(({ b, bi }) => h("option", { value: String(bi) }, `${b.segment.id} · ${b.text.slice(0, 70)}`)));
-    sel.value = String(start.bi);
-    const caption = h("textarea", { class: "textarea", rows: 3, spellcheck: true });
-    const spoken = h("textarea", { class: "textarea", rows: 3, spellcheck: true });
-    const fill = () => {
-      const b = sc.beats[+sel.value];
-      caption.value = b.text;
-      spoken.value = b.ttsText || b.text;
-    };
-    sel.onchange = fill;
-    fill();
-    modal({
-      title: "Edit narration",
-      body: h(
-        "div",
-        {},
-        h("p", { class: "small muted", style: { marginTop: 0 } }, "Edit the caption and spoken text, then regenerate only that clip."),
-        h("div", { class: "field" }, h("label", {}, "Narration cue"), sel),
-        h("div", { class: "field" }, h("label", {}, "Caption text"), caption),
-        h("div", { class: "field" }, h("label", {}, "Spoken text"), spoken, h("button", { class: "btn ghost sm", style: { alignSelf: "flex-start" }, onclick: () => (spoken.value = caption.value) }, "Use caption text")),
-      ),
-      actions: [
-        { label: "Cancel" },
-        {
-          label: "Regenerate this clip",
-          primary: true,
-          run: async () => {
-            const b = sc.beats[+sel.value];
-            try {
-              const p = await window.ml.ide.editNarration(lec.id, { sceneIndex: this.sceneIndex, sectionId: b.segment.id, text: caption.value, ttsText: spoken.value });
-              this._applyProject(p);
-            } catch (e) {
-              toast(friendly(e), { kind: "bad" });
-              return false;
-            }
-          },
-        },
-      ],
-    });
+    if (!lec?.scenes?.length || this.liveJob || this.job) return toast("Open a finished project first.");
+    let entries;
+    try { entries = await window.ml.ide.narration(lec.id); }
+    catch (e) { return toast(friendly(e), { kind: "bad" }); }
+    if (!entries.length) return toast("This project has no narration.");
+    const body = h("div", { class: "narration-list" });
+    const buttons = [];
+    let sceneIndex = -1, saving = false;
+    for (const entry of entries) {
+      if (entry.sceneIndex !== sceneIndex) {
+        sceneIndex = entry.sceneIndex;
+        body.append(h("h3", { class: "narration-scene" }, `Scene ${sceneIndex + 1}`));
+      }
+      let original = entry.spokenText;
+      const spoken = h("textarea", { class: "textarea narration-spoken", rows: 1, spellcheck: true,
+        readOnly: !entry.sectionId, "aria-label": `Scene ${entry.sceneIndex + 1}, beat ${entry.beatIndex + 1} narration` });
+      // A textarea's text must be set as a property; a value attribute is ignored.
+      spoken.value = original || "";
+      const fit = () => { if (!spoken.style) return; spoken.style.height = "auto"; spoken.style.height = spoken.scrollHeight + 2 + "px"; };
+      spoken.addEventListener("input", fit);
+      setTimeout(fit, 0);
+      // Only show the on-screen caption when it differs from what is spoken.
+      const caption = entry.caption && entry.caption.trim() !== (original || "").trim() ? h("div", { class: "narration-caption" }, entry.caption) : null;
+      const regenerate = h("button", { class: "btn sm", disabled: true, onclick: async () => {
+        if (saving) return;
+        saving = true;
+        for (const { button } of buttons) button.disabled = true;
+        regenerate.textContent = "Regenerating…";
+        spoken.readOnly = true;
+        try {
+          const p = await window.ml.ide.editNarration(lec.id, { sceneIndex: entry.sceneIndex, sectionId: entry.sectionId, text: entry.caption, ttsText: spoken.value });
+          const beat = p.lecture.scenes[entry.sceneIndex].beats[entry.beatIndex];
+          original = beat.spokenText ?? spoken.value;
+          spoken.value = original;
+          this._applyProject(p);
+        } catch (e) { toast(friendly(e), { kind: "bad" }); }
+        finally {
+          saving = false;
+          spoken.readOnly = !entry.sectionId;
+          regenerate.textContent = "Regenerate";
+          for (const { button, changed } of buttons) { button.disabled = !changed(); button.hidden = !changed(); }
+        }
+      } }, "Regenerate");
+      const changed = () => !!entry.sectionId && !!spoken.value.trim() && spoken.value !== original;
+      buttons.push({ button: regenerate, changed });
+      regenerate.hidden = true;
+      spoken.addEventListener("input", () => { regenerate.disabled = saving || !changed(); regenerate.hidden = !changed() && !saving; });
+      body.append(h("div", { class: "narration-beat" }, h("div", { class: "narration-row" }, spoken, entry.sectionId ? regenerate : null), caption));
+    }
+    modal({ title: "Edit narration", width: "min(820px, 92vw)", body, actions: [{ label: "Done" }] });
   }
 
   async editVisual() {
@@ -1221,10 +1323,11 @@ const shortPath = (s) => (/^([a-zA-Z]:)?[\\/]/.test(s) ? s.split(/[\\/]/).slice(
 function groups(items) {
   const out = [];
   items.forEach((s, i) => {
-    const say = /^(💬|🏁)/u.test(s);
+    const user = s.startsWith("👤");
+    const say = user || /^(💬|🏁)/u.test(s);
     const last = out.at(-1);
     if (!say && last && !last.say) last.items.push(s);
-    else out.push({ say, at: i, items: [s] });
+    else out.push({ say, user, at: i, items: [s] });
   });
   return out;
 }
@@ -1234,7 +1337,9 @@ function timelineNodes(items, { live = false, since = 0 } = {}) {
   items = items.filter((s, i) => !s.startsWith("💭") || i === items.length - 1);
   if (!items.length) return [h("div", { class: "g-step now" }, h("i", {}, "Thinking…"))];
   return groups(items).map((g) =>
-    g.say
+    g.user
+      ? h("div", { class: "ide-msg user tl-user" }, g.items[0].replace(/^👤s*/u, ""))
+      : g.say
       ? h("div", { class: "tl-say" }, markdownEl(g.items[0].slice(2).trim()))
       : h("div", { class: "tl-tools" }, ...g.items.map((s, j) => step(s, live && g.at + j === items.length - 1, since))),
   );

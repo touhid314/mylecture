@@ -4,6 +4,7 @@ import { h, icon, fmtTime, fmtDate, toast, popMenu, confirmBox, promptBox, bus }
 import { Player } from "./player.js";
 import { engineLabel } from "./settings.js";
 import { UsagePanel } from "./usage.js";
+import { AttachmentPicker, attachmentNames } from "./attachments.js";
 
 const SUGGESTIONS = [
   ["How does binary search work?", "Algorithms"],
@@ -49,6 +50,7 @@ export class StudyView {
     this.inner = h("div", { class: "chat-inner" });
     this.scroller = h("div", { class: "chat-scroll" }, this.inner);
     this.input = h("textarea", { rows: 1, placeholder: "Ask anything…" });
+    this.attachments = new AttachmentPicker(this.input);
     this.input.addEventListener("input", () => this._autosize());
     this.input.addEventListener("keydown", (e) => {
       if (e.key === "Enter" && !e.shiftKey) {
@@ -75,10 +77,12 @@ export class StudyView {
     const composer = h(
       "div",
       { class: "composer" },
-      this.input,
+      this.attachments.list,
+      h("div", { class: "composer-input-row" }, this.attachments.controls, this.input),
       h("div", { class: "composer-bar" }, this.themeSelect, this.teachSelect, h("div", { class: "grow" }), h("span", { class: "small faint" }, h("kbd", {}, "Enter"), " send · ", h("kbd", {}, "Shift+Enter"), " new line"), this.sendBtn),
     );
-    const chat = h("div", { class: "chat" }, this.scroller, h("div", { class: "composer-wrap" }, composer, h("div", { class: "composer-note" }, "Lessons are AI-generated and can contain mistakes. Check important facts.")));
+    const chat = h("div", { class: "chat", "data-drop-label": "Drop files to attach" }, this.scroller, h("div", { class: "composer-wrap" }, composer, h("div", { class: "composer-note" }, "Lessons are AI-generated and can contain mistakes. Check important facts.")));
+    this.attachments.dropTarget(chat);
     this.root.append(side, chat);
     this._welcome();
   }
@@ -96,7 +100,7 @@ export class StudyView {
     const s = this.state.settings;
     this.enginePill.replaceChildren(h("span", { class: "dot warn" }), h("div", { class: "grow" }, h("b", {}, engineLabel(s)), h("span", { class: "muted" }, "Checking…")));
     this.enginePill.querySelector(".grow").appendChild(this.usage.root);
-    const st = await window.ml.engines.status(s.engine);
+    const st = !s.engine || (s.engine !== "api" && !s.connected?.[s.engine]) ? { ready: false, message: "Connect an account in Settings." } : await window.ml.engines.status(s.engine);
     this.enginePill.replaceChildren(
       h("span", { class: `dot ${st.ready ? "good" : "bad"}` }),
       h("div", { class: "grow" }, h("b", {}, engineLabel(s)), h("span", { class: "muted" }, st.ready ? "Connected · click to change" : st.message || "Not ready")),
@@ -173,7 +177,7 @@ export class StudyView {
     this.sessionId = id;
     this._clearChat();
     for (const m of s.messages || []) {
-      if (m.role === "user") this._userBubble(m.text, m.mode);
+      if (m.role === "user") this._userBubble(m.text, m.mode, m.attachments);
       else if (m.role === "lecture") {
         const lec = await window.ml.lectures.get(m.lectureId);
         if (lec) this._lectureCard(lec, { autoplay: false });
@@ -230,28 +234,33 @@ export class StudyView {
     requestAnimationFrame(() => (this.scroller.scrollTop = this.scroller.scrollHeight));
   }
 
-  _userBubble(text, mode) {
+  _userBubble(text, mode, attachments = []) {
     this.inner.querySelector(".welcome")?.remove();
-    const b = h("div", { class: "msg-user" }, mode && MODE_LABEL[mode] ? h("span", { class: "mode-tag" }, MODE_LABEL[mode]) : null, text);
+    const b = h("div", { class: "msg-user" }, mode && MODE_LABEL[mode] ? h("span", { class: "mode-tag" }, MODE_LABEL[mode]) : null, text, attachmentNames(attachments));
     this.inner.appendChild(b);
     return b;
   }
 
   // ---------- asking ----------
   async send(mode = "answer", override) {
-    const q = (override ?? this.input.value).trim();
-    if (!q || this.activeJob) return;
-    if (!override) {
-      this.input.value = "";
-      this._autosize();
-    }
-    if (!this.sessionId) this.sessionId = (await window.ml.sessions.create()).id;
-    this._userBubble(q, mode);
+    const q = (override ?? this.input.value).trim() || (this.attachments.count ? "Explain the attached material." : "");
+    if (!q || this.activeJob || this.sending) return;
+    this.sending = true;
+    this.input.readOnly = true;
+    this.attachments.setLocked(true);
+    const bubble = this._userBubble(q, mode, this.attachments.names());
     const card = this._lectureCard(null, { live: true, question: q });
     this._scrollBottom();
     this._setBusy(true);
     try {
-      const { jobId, lectureId } = await window.ml.gen.start({ question: q, mode, sessionId: this.sessionId, source: "study" });
+      if (!this.sessionId) this.sessionId = (await window.ml.sessions.create()).id;
+      const attachments = await this.attachments.serialize();
+      const { jobId, lectureId } = await window.ml.gen.start({ question: q, mode, sessionId: this.sessionId, source: "study", attachments });
+      if (!override) {
+        this.input.value = "";
+        this._autosize();
+      }
+      this.attachments.clear();
       card.jobId = jobId;
       card.lectureId = lectureId;
       this.jobs.set(jobId, card);
@@ -260,8 +269,13 @@ export class StudyView {
       // Replay buffered events that may have raced the IPC reply.
       for (const ev of this._early.splice(0)) this._onGen(ev);
     } catch (e) {
+      bubble.remove();
       card.fail(String(e.message || e));
       this._setBusy(false);
+    } finally {
+      this.sending = false;
+      this.input.readOnly = false;
+      this.attachments.setLocked(false);
     }
     setTimeout(() => this.refreshSessions(), 300);
   }
@@ -287,7 +301,7 @@ export class StudyView {
     const p = card.player;
     switch (ev.type) {
       case "started":
-        card.meta(`${ev.engine}${ev.model ? " · " + ev.model : ""} · voice: ${{ kokoro: "Kokoro", omnivoice: "OmniVoice", system: "system" }[ev.voiceEngine] || ev.voiceEngine}`);
+        card.meta(`MyLecture Engine · voice: ${{ kokoro: "Kokoro", omnivoice: "OmniVoice", system: "system" }[ev.voiceEngine] || ev.voiceEngine}`);
         p.liveStatus("Thinking…", `${ev.engine} is answering`);
         card.meta("Answering…");
         break;

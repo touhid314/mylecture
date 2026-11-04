@@ -10,8 +10,12 @@ import { fileURLToPath, pathToFileURL } from "node:url";
 import { lectures, getSettings, paths } from "./store.js";
 import { lecturegen, withEngine, resolveBeats, readOverrides, resolveStyleResource } from "./lecturegen/run.js";
 import { supportsAgentFlow } from "./lecturegen/agent-run.js";
+import { prepareAttachments } from "./attachments.js";
 import { audioUrl, sceneUrl } from "./generator.js";
+import { withAvailableNarration, writePlaybackSnapshot } from "./scene-readiness.js";
 import { exportMp4 } from "./exporter.js";
+import { normalizeForSpeech } from "./tts/index.js";
+import { log as appLog } from "./logger.js";
 import "../app/shared/timeline.js";
 
 const TL = globalThis.MLTimeline;
@@ -19,11 +23,12 @@ const PROJECT_FILES = /^(answer\.md|script\.md|metadata\.json|narration-edits\.j
 
 export function hydrateProject(lec) {
   if (!lec) return lec;
+  lec = withAvailableNarration(lec, paths.tts);
   return {
     ...lec,
     scenes: (lec.scenes || []).map((sc) => ({
       ...sc,
-      src: sc.kind === "html" && sc.file ? sceneUrl(lec.id, sc.file) : sc.src,
+      src: sc.kind === "html" && sc.file ? sceneUrl(lec.id, sc.playbackFile || sc.file) : sc.src,
       version: sc.version || 0,
       beats: (sc.beats || []).map((b) => ({ ...b, url: audioUrl(b.audio) })),
     })),
@@ -147,6 +152,7 @@ export class IdeService {
   }
 
   log(projectId, text, kind = "log") {
+    appLog(kind === "error" ? "error" : "info", "project.activity", { projectId, kind, message: text });
     this.send("ide:log", { projectId, text, kind, at: Date.now() });
   }
 
@@ -212,11 +218,11 @@ export class IdeService {
   }
 
   // ---------- generation (full original pipeline) ----------
-  generate({ question, length = "1:00", aspect = "16:9", theme = "default", teachingStyle = "default" }, generator) {
+  async generate({ question, length = "1:00", aspect = "16:9", theme = "default", teachingStyle = "default", attachments = [] }, generator) {
     if (this.job) throw new Error(`A ${this.job.type} job is already running.`);
     question = String(question || "").trim();
     if (!question) throw new Error("Describe the video to make.");
-    const r = generator.startLectureGen({ question, length, aspect, theme, teachingStyle, source: "ide" });
+    const r = await generator.startLectureGen({ question, length, aspect, theme, teachingStyle, attachments, source: "ide" });
     this.job = { type: "generation", projectId: r.lectureId, jobId: r.jobId, abort: { abort: () => generator.cancel(r.jobId) } };
     this.send("ide:job", { projectId: r.lectureId, type: "generation", state: "running" });
     return r;
@@ -225,20 +231,29 @@ export class IdeService {
   // CLI agents: one conversational turn (new video, changes or just a reply).
   // API models keep the staged pipeline: the first message generates, later
   // ones are scene edits.
-  async chat({ projectId = null, message, sceneIndex = 0, length, aspect, theme, teachingStyle } = {}, generator) {
+  async chat({ projectId = null, message, sceneIndex = 0, length, aspect, theme, teachingStyle, attachments = [], live = false } = {}, generator) {
     message = String(message || "").trim();
     if (!message) throw new Error("Write a message.");
+    if (this.job?.jobId && (this.job.type === "agent" || this.job.type === "generation")) {
+      if (generator.inject(this.job.jobId, message)) return { kind: "injected", lectureId: this.job.projectId };
+      throw new Error(live ? "This agent can't take messages while it works. Stop it first, or wait for it to finish." : `A ${this.job.type} job is already running.`);
+    }
     if (this.job) throw new Error(`A ${this.job.type} job is already running.`);
     const chosen = getSettings();
     if (!chosen.engine || (chosen.engine !== "api" && !chosen.connected?.[chosen.engine])) throw new Error("Connect GPT, Gemini or Claude first: on the welcome screen or in Settings.");
     if (supportsAgentFlow(this.engineConfig().engine)) {
       const lec = projectId ? lectures.get(projectId) : null;
-      const r = generator.startAgentTurn({ projectId: lec?.id || null, message, sceneFile: lec?.scenes?.[sceneIndex]?.file || null, length, aspect, theme, teachingStyle });
+      const r = await generator.startAgentTurn({ projectId: lec?.id || null, message, sceneFile: lec?.scenes?.[sceneIndex]?.file || null, length, aspect, theme, teachingStyle, attachments });
       this.job = { type: "agent", projectId: r.lectureId, jobId: r.jobId, abort: { abort: () => generator.cancel(r.jobId) } };
       this.send("ide:job", { projectId: r.lectureId, type: "agent", state: "running" });
       return { ...r, kind: "job" };
     }
-    if (!projectId) return { ...this.generate({ question: message, length, aspect, theme, teachingStyle }, generator), kind: "job" };
+    if (!projectId) return { ...await this.generate({ question: message, length, aspect, theme, teachingStyle, attachments }, generator), kind: "job" };
+    const lec = lectures.get(projectId);
+    if (!lec) throw new Error("Project not found");
+    const attached = await prepareAttachments(attachments, lectures.dir(projectId));
+    lec.attachments = [...(lec.attachments || []), ...attached];
+    lectures.save(lec);
     return { kind: "project", project: await this.editScene(projectId, { sceneIndex, instruction: message, scope: "chat" }) };
   }
 
@@ -275,10 +290,30 @@ export class IdeService {
   }
 
   // ---------- narration: edit caption/spoken text, regenerate one clip ----------
+  async narration(id) {
+    const lec = lectures.get(id);
+    if (!lec) throw new Error("Project not found");
+    const lg = await lecturegen();
+    const entries = [];
+    for (const [sceneIndex, scene] of (lec.scenes || []).entries()) {
+      for (const [beatIndex, beat] of (scene.beats || []).entries()) {
+        const sectionId = beat.segment?.id || null;
+        if (beat.visualOnly || beat.segment?.kind === "visual-only") continue;
+        const source = String(beat.ttsText ?? beat.segment?.ttsText ?? beat.text ?? beat.segment?.text ?? "");
+        entries.push({
+          sceneIndex, beatIndex, sectionId,
+          spokenText: beat.spokenText ?? normalizeForSpeech(lg.normalizeTtsText(source)),
+          caption: String(beat.text ?? beat.segment?.text ?? ""),
+        });
+      }
+    }
+    return entries;
+  }
+
   async editNarration(id, { sceneIndex, sectionId, text, ttsText, voice, speed }) {
-    text = String(text || "").trim();
+    text = String(text ?? "");
     ttsText = String(ttsText || "").trim() || text;
-    if (!text) throw new Error("Caption text cannot be empty.");
+    if (!text.trim() && !ttsText.trim()) throw new Error("Narration text cannot be empty.");
     const abort = this._begin("narration", id);
     try {
     const lec = lectures.get(id);
@@ -294,7 +329,7 @@ export class IdeService {
     const r = await this.tts.synth(lg.normalizeTtsText(ttsText), { voice, speed });
     abort.signal.throwIfAborted();
     fs.writeFileSync(path.join(ws, "narration-edits.json"), JSON.stringify(overrides, null, 2) + "\n", "utf8");
-    Object.assign(beat, { text, ttsText, audio: r.key, dur: r.dur, segment: { ...beat.segment, text, ttsText } });
+    Object.assign(beat, { text, ttsText, spokenText: r.spokenText, audio: r.key, dur: r.dur, segment: { ...beat.segment, text, ttsText } });
     lec.duration = TL.build(lec.scenes).total;
     lectures.save(lec);
     this.log(id, `Regenerated narration ${sc.file} · ${sectionId}.`, "done");
@@ -328,6 +363,7 @@ export class IdeService {
       if (script.includes(oldText)) fs.writeFileSync(scriptPath, script.split(oldText).join(newText), "utf8");
     }
     sc.version = (sc.version || 0) + 1;
+    sc.playbackFile = writePlaybackSnapshot(ws, sc.file, updated.source);
     lectures.save(lec);
     this.log(id, `Replaced ${updated.replacements} text occurrence(s) in ${sc.file}.`, "done");
     return this.get(id);
@@ -349,7 +385,7 @@ export class IdeService {
     filePath = path.join(ws, sc.file);
     original = fs.readFileSync(filePath, "utf8");
     browser = await lg.chromium.launch();
-      return await withEngine({ engine, model, effort: s.codexEffort, signal: abort.signal }, async () => {
+      return await withEngine({ engine, model, effort: s.codexEffort, signal: abort.signal, attachments: lec.attachments }, async () => {
         const viewport = lg.viewportForAspectRatio(lec.aspect || "16:9");
         const protectedContract = scope === "visual" ? await sceneContract(browser, filePath, viewport) : null;
         const prompts = path.join(path.dirname(fileURLToPath(import.meta.url)), "lecturegen", "src", "prompts");
@@ -367,7 +403,7 @@ export class IdeService {
           `# Current ${sc.file} With Line Numbers`,
           lineNumbered(original),
         ].join("\n");
-        this.log(id, `${scope === "visual" ? "Visual edit" : "Agent"} on ${sc.file}: ${instruction}`);
+        this.log(id, `${scope === "visual" ? "Visual edit" : "Agent"} on ${sc.file}`);
         const response = await globalThis.__ML_LLM__.generate({ system, user, purpose: `ide_${scope}_edit` });
         const edits = lg.parseAnimatorEdits(response, sc.file);
         lg.tool_edits(sc.file, edits, ws);
@@ -410,6 +446,7 @@ export class IdeService {
           sc.beats = await resolveBeats({ lg, browser, workspaceDir: ws, file: sc.file, viewport, tts: this.tts });
           lec.duration = TL.build(lec.scenes).total;
         }
+        sc.playbackFile = writePlaybackSnapshot(ws, sc.file, modified);
         lectures.save(lec);
         this.log(id, `Saved ${sc.file}.`, "done");
         return this.get(id);
@@ -434,6 +471,7 @@ export class IdeService {
     const abort = this._begin("render", id);
     try {
       const lec = hydrateProject(lectures.get(id));
+      if (lec?.narrationPending) throw new Error("This video still needs narration. Ask the agent to finish its narration before rendering.");
       const outDir = paths.exports;
       fs.mkdirSync(outDir, { recursive: true });
       const out = await exportMp4(lec, {

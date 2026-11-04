@@ -15,6 +15,8 @@ import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { AsyncLocalStorage } from "node:async_hooks";
+import { writePlaybackSnapshot } from "../scene-readiness.js";
+import { attachmentContext } from "../attachments.js";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 export const RESOURCES = path.join(here, "resources");
@@ -42,12 +44,15 @@ globalThis.__ML_LLM__ = {
     ctx.signal.throwIfAborted();
     const combined = signal ? AbortSignal.any([ctx.signal, signal]) : ctx.signal;
     if (ctx.study) ({ system, user } = studyPrompts({ system, user, purpose, history: ctx.history }));
+    const reference = attachmentContext(ctx.attachments);
+    if (reference) user += "\n\n" + reference;
     let text = "";
     const res = await ctx.engine.generate({
       system,
       user,
       model: ctx.model,
       effort: ctx.effort,
+      attachments: ctx.attachments || [],
       signal: combined,
       onDelta: (d) => {
         text += d;
@@ -79,16 +84,22 @@ export function studyPrompts({ system, user, purpose, history = [] }) {
 }
 
 // Run fn with LLM calls routed to the given engine.
-export function withEngine({ engine, model, effort, signal, onDelta, onStatus }, fn) {
-  return jobContext.run({ engine, model, effort, signal, onDelta, onStatus }, fn);
+export function withEngine({ engine, model, effort, signal, onDelta, onStatus, attachments = [] }, fn) {
+  return jobContext.run({ engine, model, effort, signal, onDelta, onStatus, attachments }, fn);
 }
 
 // ---------- catalogs (original resources) ----------
+// Keep these resources available for existing projects, but omit them from
+// the choices offered for new requests.
+const HIDDEN_PRESETS = {
+  themes: new Set(["fonts-colors", "none", "sat-tutor"]),
+  "teaching-styles": new Set(["middle-school-math", "none", "sat-tutor", "stickman-compare"]),
+};
 function listCatalog(folder) {
   const dir = path.join(RESOURCES, folder);
   return fs
     .readdirSync(dir)
-    .filter((f) => f.endsWith(".md"))
+    .filter((f) => f.endsWith(".md") && !HIDDEN_PRESETS[folder]?.has(f.slice(0, -3)))
     .map((f) => {
       const id = f.slice(0, -3);
       const body = fs.readFileSync(path.join(dir, f), "utf8");
@@ -217,22 +228,36 @@ export function readOverrides(workspaceDir) {
     return { version: 1, files: {} };
   }
 }
-export async function resolveBeats({ lg, browser, workspaceDir, file, viewport, tts, voiceEngine, voice, speed }) {
+
+export function isResolvedScene(scene) {
+  return Array.isArray(scene?.beats) && scene.beats.length > 0 && scene.beats.every(beat =>
+    Number.isFinite(beat?.dur) && beat.dur > 0 &&
+    (beat.visualOnly === true || beat.segment?.kind === "visual-only" ||
+      (typeof beat.audio === "string" && beat.audio.trim().length > 0)));
+}
+
+export async function resolveBeats({ lg, browser, workspaceDir, file, sourceFile = file, viewport, tts, voiceEngine, voice, speed }) {
   const plan = await readPlan(browser, path.join(workspaceDir, file), viewport);
-  const overrides = readOverrides(workspaceDir).files?.[file] || {};
+  const overrides = readOverrides(workspaceDir).files?.[sourceFile] || {};
   const beats = [];
   for (const raw of plan) {
     if (!raw || !raw.id) continue;
     const o = overrides[raw.id];
-    const item = o ? { ...raw, text: o.text || raw.text, ttsText: o.ttsText || raw.ttsText } : raw;
+    const item = o ? { ...raw, text: o.text ?? raw.text, ttsText: o.ttsText ?? raw.ttsText } : raw;
     if (item.kind === "visual-only") {
-      beats.push({ text: "", dur: Number(item.duration) || 1, visualOnly: true, segment: item });
+      const duration = item.duration == null ? 1 : Number(item.duration);
+      if (!Number.isFinite(duration) || duration <= 0) throw new Error(`${file}: Visual cue ${item.id} has an invalid duration.`);
+      beats.push({ text: "", dur: duration, visualOnly: true, segment: item });
     } else {
       const spoken = lg.normalizeTtsText(String(item.ttsText ?? item.text ?? ""));
       const r = await tts.synth(spoken, { engine: voiceEngine, voice, speed });
-      beats.push({ text: String(item.text || ""), ttsText: item.ttsText, audio: r.key, dur: r.dur, segment: item });
+      if (typeof r?.key !== "string" || !r.key.trim() || !Number.isFinite(r.dur) || r.dur <= 0) {
+        throw new Error(`${file}: Narration for ${item.id} did not produce playable audio. Try generating the scene again.`);
+      }
+      beats.push({ text: String(item.text || ""), ttsText: item.ttsText, spokenText: r.spokenText, audio: r.key, dur: r.dur, segment: item });
     }
   }
+  if (!beats.length) throw new Error(`${file}: The scene has no narration or visual-only cues to play.`);
   return beats;
 }
 
@@ -240,7 +265,7 @@ export async function resolveBeats({ lg, browser, workspaceDir, file, viewport, 
 export async function runLectureGen({ lec, workspaceDir, engine, model, effort, tts, voiceEngine, signal, emit, log, history = [] }) {
   const lg = await lecturegen();
   const study = lec.source === "study";
-  const ctx = { engine, model, effort, signal, study, history, onDelta: null, onStatus: (purpose, st) => log?.(`${purpose}: ${st}`) };
+  const ctx = { engine, model, effort, signal, study, history, attachments: lec.attachments || [], onDelta: null, onStatus: (purpose, st) => log?.(`${purpose}: ${st}`) };
   return jobContext.run(ctx, async () => {
     fs.mkdirSync(workspaceDir, { recursive: true });
     const theme = resolveStyleResource(lec.theme, "themes");
@@ -393,8 +418,9 @@ export async function runLectureGen({ lec, workspaceDir, engine, model, effort, 
 
           // Resolve: narration audio + durations for each plan item.
           say(`Recording narration for scene ${block.index}…`);
-          const beats = await resolveBeats({ lg, browser, workspaceDir, file: outputPath, viewport, tts, voiceEngine });
-          const scene = { id: `sc${block.index}`, kind: "html", file: outputPath, title: firstVisualTitle(block.content) || `Part ${block.index}`, beats };
+          const playbackFile = writePlaybackSnapshot(workspaceDir, outputPath, finalHtml);
+          const beats = await resolveBeats({ lg, browser, workspaceDir, file: playbackFile, sourceFile: outputPath, viewport, tts, voiceEngine });
+          const scene = { id: `sc${block.index}`, kind: "html", file: outputPath, playbackFile, title: firstVisualTitle(block.content) || `Part ${block.index}`, beats };
           emit("scene-ready", { index: sceneIndex++, scene });
         } catch (e) {
           if (e?.aborted || signal.aborted) throw e;

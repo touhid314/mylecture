@@ -10,6 +10,17 @@ import { findExecutable } from "./engines/cli-util.js";
 
 const WIN = process.platform === "win32";
 
+function cliCommand(command) {
+  const [name, ...args] = command.split(" ");
+  const extraDirs = name === "claude"
+    ? [path.join(os.homedir(), ".local", "bin"), path.join(os.homedir(), ".claude", "local")]
+    : name === "agy" ? [path.join(os.homedir(), "AppData", "Local", "agy", "bin")] : [];
+  const executable = findExecutable([name], extraDirs);
+  if (!executable) return command;
+  const quoted = WIN ? `"${executable}"` : `'${executable.replaceAll("'", "'\\''")}'`;
+  return [quoted, ...args].join(" ");
+}
+
 export const SERVICES = {
   codex: {
     title: "GPT",
@@ -17,6 +28,7 @@ export const SERVICES = {
     signup: "https://chatgpt.com/pricing",
     install: { cmd: "npm install -g @openai/codex", needsNpm: true },
     login: "codex login",
+    logout: "codex logout",
   },
   antigravity: {
     title: "Gemini",
@@ -33,8 +45,24 @@ export const SERVICES = {
       cmd: WIN ? 'powershell -NoProfile -ExecutionPolicy Bypass -Command "irm https://claude.ai/install.ps1 | iex"' : "curl -fsSL https://claude.ai/install.sh | bash",
     },
     login: "claude auth login --claudeai",
+    logout: "claude auth logout",
   },
 };
+
+// CLI credentials are shared with the provider's own applications. The caller
+// must explain this and obtain the user's explicit choice before switching.
+// Normal Connect/login never signs an existing account out.
+export function accountSwitchCommand(id) {
+  const svc = SERVICES[id];
+  if (!svc) throw new Error("Unknown service");
+  if (id === "antigravity") {
+    // Installed agy exposes /logout only in its interactive prompt, not an
+    // `auth` command. Leave that step visible and deliberate in the official UI.
+    const instructions = "echo To use another Google account, enter /logout in the Gemini prompt. Then sign in with the other account. If Gemini exits after logout, run agy again.";
+    return `${instructions}${WIN ? "\r\ncall " : "; "}${cliCommand(svc.login)}`;
+  }
+  return WIN ? `call ${cliCommand(svc.logout)} && call ${cliCommand(svc.login)}` : `${cliCommand(svc.logout)} && ${cliCommand(svc.login)}`;
+}
 
 // Opens a visible terminal running `command`, left open so the user can follow it.
 export function openTerminal(title, command) {
@@ -58,7 +86,7 @@ export function openTerminal(title, command) {
   throw new Error(`Open a terminal and run: ${command}`);
 }
 
-// action: "install" | "login" | "signup"
+// action: "install" | "login" | "signup" | "switch-account"
 export function connectService(id, action) {
   const svc = SERVICES[id];
   if (!svc) throw new Error("Unknown service");
@@ -71,6 +99,7 @@ export function connectService(id, action) {
     }
     return void openTerminal(`Setting up ${svc.title} for MyLecture`, svc.install.cmd);
   }
-  if (action === "login") return void openTerminal(`Sign in to ${svc.title} for MyLecture`, svc.login);
+  if (action === "login") return void openTerminal(`Sign in to ${svc.title} for MyLecture`, `${WIN ? "call " : ""}${cliCommand(svc.login)}`);
+  if (action === "switch-account") return void openTerminal(`Use another ${svc.title} account for MyLecture`, accountSwitchCommand(id));
   throw new Error("Unknown action");
 }

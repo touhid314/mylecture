@@ -1,6 +1,7 @@
 // Local persistence: settings, study sessions, and the lecture library.
-// Everything lives in the user's app-data folder; nothing leaves the machine
-// except prompts sent to the AI engine the user chose.
+// Projects and credentials live in the user's app-data folder. Anonymous launch
+// telemetry (electron/telemetry.js) sends one ping per launch with only the app version and OS; the
+// collector derives the connection's country without retaining IP addresses.
 import { app, safeStorage } from "electron";
 import fs from "node:fs";
 import path from "node:path";
@@ -32,6 +33,10 @@ export const DEFAULT_SETTINGS = {
   onboarded: false,
   // Services the user connected in MyLecture (codex, antigravity, claude-code).
   connected: {},
+  accountRevision: {},
+  accountSwitch: {},
+  accountSwitchFrom: {},
+  accountChangedAt: {},
 };
 
 function root() {
@@ -96,6 +101,8 @@ export function getSettings() {
     // Profiles from before "connected" existed already used their engines.
     if (saved.connected == null && Object.keys(saved).length) saved.connected = { codex: true, antigravity: true, "claude-code": true };
     settingsCache = deepMerge(DEFAULT_SETTINGS, saved);
+    if (["fonts-colors", "none", "sat-tutor"].includes(settingsCache.lgTheme)) settingsCache.lgTheme = "auto";
+    if (["middle-school-math", "none", "sat-tutor", "stickman-compare"].includes(settingsCache.lgTeachingStyle)) settingsCache.lgTeachingStyle = "auto";
   }
   return settingsCache;
 }

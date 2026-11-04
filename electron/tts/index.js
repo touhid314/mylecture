@@ -8,6 +8,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { SapiVoice } from "./sapi.js";
 import { OmniVoice, OMNIVOICE_VOICES } from "./omnivoice.js";
+import { log } from "../logger.js";
 export { OMNIVOICE_VOICES };
 
 const here = path.dirname(fileURLToPath(import.meta.url));
@@ -183,7 +184,8 @@ export class TTSService extends EventEmitter {
     return path.join(this.cacheDir, key + ".wav");
   }
 
-  // -> {key, file, dur}
+  // spokenText is the exact normalized string submitted to the voice engine.
+  // -> {key, file, dur, engine, spokenText}
   async synth(rawText, opts = {}) {
     const s = this.getSettings();
     const text = normalizeForSpeech(rawText);
@@ -193,10 +195,15 @@ export class TTSService extends EventEmitter {
     const voice = engine === "kokoro" ? opts.voice || s.voice || "af_heart"
       : engine === "omnivoice" ? opts.voice || s.omnivoiceVoice || "maruf" : opts.systemVoice || s.systemVoice || "";
     const key = this.keyFor(text, engine, voice, speed);
+    const started = Date.now();
+    log("info", "tts.request", { engine, voice, speed, key, characters: text.length });
     const file = this.fileFor(key);
     if (fs.existsSync(file)) {
       const dur = wavDuration(file);
-      if (dur > 0) return { key, file, dur, engine };
+      if (dur > 0) {
+        log("info", "tts.cacheHit", { engine, key, durationSeconds: dur });
+        return { key, file, dur, engine, spokenText: text };
+      }
     }
     if (this.inflight.has(key)) return this.inflight.get(key);
     const job = (async () => {
@@ -219,11 +226,16 @@ export class TTSService extends EventEmitter {
         await this.sapi.synthToFile(text, tmp, { speed, voice });
         fs.renameSync(tmp, file);
       }
-      return { key, file, dur: wavDuration(file), engine };
+      return { key, file, dur: wavDuration(file), engine, spokenText: text };
     })();
     this.inflight.set(key, job);
     try {
-      return await job;
+      const result = await job;
+      log("info", "tts.done", { engine, key, durationMs: Date.now() - started, audioSeconds: result.dur });
+      return result;
+    } catch (error) {
+      log("error", "tts.failed", { engine, key, durationMs: Date.now() - started, error });
+      throw error;
     } finally {
       this.inflight.delete(key);
     }

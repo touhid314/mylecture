@@ -40,6 +40,12 @@ export class Activity {
     this._changed();
   }
 
+  // A message the user sent into the running agent.
+  user(text) {
+    this._push(`👤 ${String(text).trim()}`, null);
+    this._changed();
+  }
+
   // The app's own steps (checking a scene, recording narration, …).
   app(text) {
     this.step("🔧", String(text).replace(/…$/, ""));
@@ -82,5 +88,26 @@ export class Activity {
     clearTimeout(this._timer);
     this._timer = null;
     this.onChange?.(this.items.slice());
+  }
+}
+
+// Messages typed while an agent is running. The engine attaches a writer that
+// injects them into its live session; without one, send() returns false.
+export class Inbox {
+  constructor() {
+    this.writer = null;
+    this.onDelivered = null;
+  }
+  attach(writer) {
+    this.writer = writer;
+    return () => { if (this.writer === writer) this.writer = null; };
+  }
+  get open() {
+    return !!this.writer;
+  }
+  send(text) {
+    if (!this.writer || !this.writer(text)) return false;
+    this.onDelivered?.(text);
+    return true;
   }
 }

@@ -1,8 +1,8 @@
 {
   "name": "mylecture",
   "productName": "MyLecture",
-  "version": "0.1.0",
-  "description": "MyLecture \u2014 an open-source AI studio for narrated, animated videos: lessons, explainers, product demos, stories and more.",
+  "version": "1.0.0",
+  "description": "MyLecture — an open-source AI studio for narrated, animated videos: lessons, explainers, product demos, stories and more.",
   "main": "electron/main.js",
   "type": "module",
   "license": "MIT",
@@ -14,7 +14,9 @@
     "dist": "electron-builder --publish never",
     "dist:win": "electron-builder --win --x64 --publish never",
     "dist:mac": "electron-builder --mac --publish never",
-    "smoke": "node scripts/smoke-packaged.mjs"
+    "smoke": "node scripts/smoke-packaged.mjs",
+    "release:publish": "node scripts/publish-update.mjs",
+    "server:configure": "node scripts/configure-server.mjs"
   },
   "dependencies": {
     "@fontsource/architects-daughter": "^5.3.0",
@@ -23,13 +25,20 @@
     "@fontsource/playfair-display": "^5.3.0",
     "@fontsource/roboto": "^5.3.0",
     "@highlightjs/cdn-assets": "^11.12.0",
+    "electron-updater": "^6.8.11",
     "ffmpeg-static": "^5.3.0",
+    "jszip": "^3.10.2",
     "katex": "^0.19.1",
     "kokoro-js": "^1.2.1",
     "markdown-it": "^14.3.3",
-    "monaco-editor": "^0.52.2"
+    "monaco-editor": "^0.52.2",
+    "unpdf": "^2.1.0",
+    "word-extractor": "^1.0.4",
+    "xlsx": "https://cdn.sheetjs.com/xlsx-0.20.3/xlsx-0.20.3.tgz"
   },
   "devDependencies": {
+    "@aws-sdk/client-s3": "^3.1161.0",
+    "@aws-sdk/lib-storage": "^3.1161.0",
     "electron": "^45.2.1",
     "electron-builder": "^26.0.0",
     "esbuild": "^0.28.2"
@@ -109,6 +118,12 @@
     },
     "dmg": {
       "artifactName": "MyLecture-${version}-mac-${arch}.${ext}"
-    }
+    },
+    "publish": [
+      {
+        "provider": "generic",
+        "url": "https://mylecture-server.touhid3-1416.workers.dev/updates"
+      }
+    ]
   }
 }

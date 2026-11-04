@@ -6,6 +6,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { findExecutable, scratchDir, runCapture, killTree } from "./cli-util.js";
+import { log } from "../logger.js";
 
 // The signed-in ChatGPT account (email, plan) from the saved sign-in's ID token.
 export function codexAccount(home = process.env.CODEX_HOME || path.join(os.homedir(), ".codex")) {
@@ -85,11 +86,12 @@ export const codex = {
     return this.generate(opts);
   },
 
-  generate({ system, user, model, effort = "low", signal, onDelta, onStatus, onActivity, workspace }) {
+  generate({ system, user, model, effort = "low", signal, onDelta, onStatus, onActivity, workspace, inbox }) {
     const exe = this.exe();
     const cwd = workspace || scratchDir("codex");
     if (!exe) return Promise.reject(new Error("GPT isn't connected. Connect it from the welcome screen or Settings."));
     return new Promise((resolve, reject) => {
+      const startedAt = Date.now();
       const isShim = /\.(cmd|bat)$/i.test(exe);
       const child = isShim
         ? spawn(`"${exe}" app-server`, { shell: true, windowsHide: true, cwd })
@@ -97,11 +99,31 @@ export const codex = {
       let buf = "";
       let full = "";
       let done = false;
+      // Mid-run messages: added to the running turn with turn/steer (as Super Agent does).
+      let threadId = null, turnId = null, nextId = 100, detach = null;
+      if (inbox) detach = inbox.attach((text) => {
+        if (done || !threadId || !turnId) return false;
+        send({ id: nextId++, method: "turn/steer", params: { threadId, expectedTurnId: turnId, input: [{ type: "text", text, text_elements: [] }] } });
+        log("info", "provider.inject", { provider: "codex", chars: text.length });
+        return true;
+      });
       let stderr = "";
+      let lastOutputAt = startedAt, stdoutBytes = 0, stderrBytes = 0, lastProgressAt = 0;
+      log("info", "provider.start", { provider: "codex", model, effort, agent: !!workspace, pid: child.pid });
+      const heartbeat = setInterval(() => {
+        const idleMs = Date.now() - lastOutputAt;
+        log("info", "provider.heartbeat", { provider: "codex", pid: child.pid, elapsedMs: Date.now() - startedAt, idleMs, stdoutBytes, stderrBytes });
+        if (idleMs >= 45000) onStatus?.(`Waiting for a response (no events for ${Math.floor(idleMs / 1000)}s)`);
+      }, 15000);
+      heartbeat.unref?.();
       const send = (o) => child.stdin.write(JSON.stringify(o) + "\n");
       const finish = (err, val) => {
         if (done) return;
         done = true;
+        detach?.();
+        clearInterval(heartbeat);
+        signal?.removeEventListener("abort", aborted);
+        log(err ? "error" : "info", "provider.finish", { provider: "codex", pid: child.pid, elapsedMs: Date.now() - startedAt, aborted: !!val?.aborted, outputBytes: Buffer.byteLength(full), error: err });
         kill();
         err ? reject(err) : resolve(val);
       };
@@ -109,14 +131,21 @@ export const codex = {
         if (process.platform === "win32" && child.pid) execFile("taskkill", ["/pid", String(child.pid), "/T", "/F"], () => {});
         else child.kill();
       };
-      signal?.addEventListener("abort", () => finish(null, { text: full, aborted: true }), { once: true });
-      child.stderr.on("data", (d) => (stderr += d));
+      const aborted = () => finish(null, { text: full, aborted: true });
+      signal?.addEventListener("abort", aborted, { once: true });
+      child.stderr.on("data", (d) => {
+        lastOutputAt = Date.now(); stderrBytes += Buffer.byteLength(d);
+        stderr = (stderr + d).slice(-65536);
+        log("warn", "provider.stderr", { provider: "codex", pid: child.pid, totalBytes: stderrBytes });
+      });
       child.on("error", (e) => finish(e));
       child.on("close", (code) => {
+        log("info", "provider.exit", { provider: "codex", pid: child.pid, code, elapsedMs: Date.now() - startedAt });
         if (!done) finish(full ? null : new Error(`GPT stopped unexpectedly (${code}): ${stderr.slice(-400)}`), { text: full });
       });
       child.stdout.setEncoding("utf8");
       child.stdout.on("data", (d) => {
+        lastOutputAt = Date.now(); stdoutBytes += Buffer.byteLength(d);
         buf += d;
         let i;
         while ((i = buf.indexOf("\n")) !== -1) {
@@ -127,6 +156,10 @@ export const codex = {
             m = JSON.parse(line);
           } catch {
             continue;
+          }
+          if (m.method && (!/delta$/.test(m.method) || Date.now() - lastProgressAt >= 5000)) {
+            lastProgressAt = Date.now();
+            log("info", "provider.event", { provider: "codex", type: m.method, itemType: m.params?.item?.type, elapsedMs: Date.now() - startedAt, outputBytes: Buffer.byteLength(full) });
           }
           if (m.id === 1) {
             if (m.error) return finish(new Error("GPT: " + (m.error.message || JSON.stringify(m.error))));
@@ -141,11 +174,16 @@ export const codex = {
             send({ id: 2, method: "thread/start", params });
           } else if (m.id === 2) {
             if (m.error) return finish(new Error("GPT: " + (m.error.message || JSON.stringify(m.error))));
-            const tp = { threadId: m.result.thread.id, input: [{ type: "text", text: user }] };
+            threadId = m.result.thread.id;
+            const tp = { threadId, input: [{ type: "text", text: user }] };
             if (effort) tp.effort = effort;
             send({ id: 3, method: "turn/start", params: tp });
           } else if (m.id === 3 && m.error) {
             return finish(new Error("GPT: " + (m.error.message || JSON.stringify(m.error))));
+          } else if (m.id === 3) {
+            turnId = m.result?.turn?.id || null;
+          } else if (m.id >= 100 && m.error) {
+            log("warn", "provider.injectFailed", { provider: "codex", message: m.error.message || JSON.stringify(m.error) });
           } else if (m.method === "item/agentMessage/delta") {
             const dlt = m.params?.delta || "";
             full += dlt;

@@ -33,18 +33,21 @@ jobs:
             artifacts: |
               dist/*.exe
               dist/*.exe.blockmap
+              dist/latest.yml
           - name: macOS Apple silicon
             os: macos-latest
             target: --mac --arm64
             artifacts: |
               dist/*.dmg
               dist/*.zip
+              dist/latest-mac.yml
           - name: macOS Intel
             os: macos-15-intel
             target: --mac --x64
             artifacts: |
               dist/*.dmg
               dist/*.zip
+              dist/latest-mac.yml
     steps:
       - uses: actions/checkout@v4
 

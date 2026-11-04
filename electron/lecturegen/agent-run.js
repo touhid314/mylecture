@@ -12,9 +12,11 @@
 // HTML contract, narrated, and handed to the player. Files that fail the
 // contract go back to the same agent once, with the validator output.
 import fs from "node:fs";
+import { attachmentContext } from "../attachments.js";
 import path from "node:path";
 import { Activity } from "../activity.js";
-import { lecturegen, resolveBeats, resolveStyleResource, RESOURCES, GENERATION_LENGTHS } from "./run.js";
+import { lecturegen, resolveBeats, isResolvedScene, resolveStyleResource, RESOURCES, GENERATION_LENGTHS } from "./run.js";
+import { writePlaybackSnapshot } from "../scene-readiness.js";
 
 export const AUTO = "auto";
 const isAuto = (v) => String(v || "").trim().toLowerCase() === AUTO;
@@ -131,9 +133,11 @@ function sceneTitle(html, n) {
 // `activity` collects the agent's words and tool steps; the return value is
 // the agent's last message (its final answer).
 const WORKER_SYSTEM = "You are a skilled educator, script writer and creative coder working on a MyLecture video project. Work autonomously with your file tools; never ask questions.";
-export async function runAgent({ engine, model, effort, signal, workspace, prompt, onStatus, activity, system = WORKER_SYSTEM }) {
+export async function runAgent({ engine, model, effort, signal, workspace, prompt, onStatus, activity, inbox, system = WORKER_SYSTEM }) {
   let text = "";
+  if (inbox) inbox.onDelivered = (t) => activity?.user(t);
   const res = await engine.agent({
+    inbox,
     system,
     user: prompt,
     model,
@@ -141,20 +145,23 @@ export async function runAgent({ engine, model, effort, signal, workspace, promp
     signal,
     workspace,
     onDelta: (d) => (text += d),
-    onStatus,
+    onStatus: status => {
+      onStatus?.(status);
+      if (/^Waiting for a response \(no events/.test(status)) activity?.app(status);
+    },
     onActivity: (ev) => activity?.feed(ev),
   });
   if (res?.aborted || signal?.aborted) throw Object.assign(new Error("Stopped"), { aborted: true });
   return (activity?.lastSay() || res?.text || text).trim();
 }
 
-async function validate(lg, browser, workspaceDir, file, viewport) {
-  const html = readText(path.join(workspaceDir, file));
+async function validate(lg, browser, workspaceDir, file, viewport, html = readText(path.join(workspaceDir, file))) {
   if (!html || !/<\/html>\s*$/i.test(html.trim())) return `HTML contract validation failed for ${file}:\n - The file is incomplete (no closing </html>).`;
-  return lg.validateHtmlInBrowser(file, workspaceDir, browser, viewport);
+  const snapshot = writePlaybackSnapshot(workspaceDir, file, html);
+  return String(await lg.validateHtmlInBrowser(snapshot, workspaceDir, browser, viewport)).replaceAll(snapshot, file);
 }
 
-export async function runAgentLecture({ lec, workspaceDir, engine, model, effort, tts, voiceEngine, signal, emit, log, history = [] }) {
+export async function runAgentLecture({ lec, workspaceDir, engine, model, effort, tts, voiceEngine, signal, emit, log, history = [], inbox }) {
   const lg = await lecturegen();
   const study = lec.source === "study";
   fs.mkdirSync(workspaceDir, { recursive: true });
@@ -220,10 +227,10 @@ export async function runAgentLecture({ lec, workspaceDir, engine, model, effort
         let validation = failed.get(file)?.html === html ? failed.get(file).validation : null;
         if (validation == null) {
           say(`Checking ${file}…`);
-          validation = await validate(lg, browser, workspaceDir, file, viewport);
+          validation = await validate(lg, browser, workspaceDir, file, viewport, html);
         }
         if (!String(validation).includes("validation passed")) {
-          failed.set(file, { html, validation });
+          failed.set(file, { html, validation, phase: failed.get(file)?.html === html ? failed.get(file).phase : undefined });
           log?.(validation);
           // Keep scene order: later scenes wait until this one is fixed,
           // except on the final pass, where a broken scene is skipped.
@@ -232,9 +239,19 @@ export async function runAgentLecture({ lec, workspaceDir, engine, model, effort
         }
         failed.delete(file);
         say(`Recording narration for ${file}…`);
-        const beats = await resolveBeats({ lg, browser, workspaceDir, file, viewport, tts, voiceEngine });
+        let beats;
+        const playbackFile = writePlaybackSnapshot(workspaceDir, file, html);
+        try {
+          beats = await resolveBeats({ lg, browser, workspaceDir, file: playbackFile, sourceFile: file, viewport, tts, voiceEngine });
+        } catch (e) {
+          if (e?.aborted || signal.aborted) throw e;
+          failed.set(file, { html, validation: `Narration failed: ${e.message || e}`, phase: "narration" });
+          log?.(`${file}: Narration failed: ${e.message || e}`);
+          if (!final) break;
+          continue;
+        }
         const n = Number(file.match(INDEX_RE)[1]);
-        const scene = { id: `sc${n}`, kind: "html", file, title: sceneTitle(html, n), beats };
+        const scene = { id: `sc${n}`, kind: "html", file, playbackFile, title: sceneTitle(html, n), beats };
         emitted.add(file);
         emit("scene-ready", { index: sceneIndex++, scene });
       }
@@ -250,13 +267,13 @@ export async function runAgentLecture({ lec, workspaceDir, engine, model, effort
   };
   try {
     timer = setInterval(tick, 1200);
-    const reply = await runAgent({
+    const reply = await runAgent({ inbox,
       engine,
       model,
       effort,
       signal,
       workspace: workspaceDir,
-      prompt: agentTaskPrompt({ question: lec.question, length: lec.length, aspect, theme: lec.theme, teachingStyle: lec.teachingStyle, study, history }),
+      prompt: agentTaskPrompt({ question: lec.question, length: lec.length, aspect, theme: lec.theme, teachingStyle: lec.teachingStyle, study, history }) + "\n\n" + attachmentContext(lec.attachments),
       activity,
       onStatus: (st) => {
         log?.(st);
@@ -275,13 +292,13 @@ export async function runAgentLecture({ lec, workspaceDir, engine, model, effort
     for (const file of indexFiles(workspaceDir)) {
       if (emitted.has(file) || failed.has(file)) continue;
       const html = readText(path.join(workspaceDir, file));
-      const validation = await validate(lg, browser, workspaceDir, file, viewport);
+      const validation = await validate(lg, browser, workspaceDir, file, viewport, html);
       if (!String(validation).includes("validation passed")) failed.set(file, { html, validation });
     }
-    if (failed.size && !signal.aborted) {
-      const problems = [...failed].map(([file, f]) => ({ file, validation: f.validation }));
+    const problems = [...failed].filter(([, f]) => f.phase !== "narration").map(([file, f]) => ({ file, validation: f.validation }));
+    if (problems.length && !signal.aborted) {
       say(`Asking ${engine.name} to fix ${problems.map((p) => p.file).join(", ")}…`);
-      await runAgent({ engine, model, effort, signal, workspace: workspaceDir, prompt: fixTaskPrompt(problems), activity, onStatus: (st) => log?.(st) });
+      await runAgent({ inbox, engine, model, effort, signal, workspace: workspaceDir, prompt: fixTaskPrompt(problems), activity, onStatus: (st) => log?.(st) });
     }
     await scan({ final: true });
     for (const [file, f] of failed) failures.push(`${file}: ${f.validation}`);
@@ -364,7 +381,7 @@ export function agentTurnPrompt({ message, files = [], sceneFile, history = [], 
 
 // One turn. Streams new/changed scenes to the player as they are finished,
 // then returns the project's full scene list.
-export async function runAgentTurn({ lec, workspaceDir, engine, model, effort, tts, voiceEngine, signal, emit, log, message, sceneFile, settings = {}, history = [] }) {
+export async function runAgentTurn({ lec, workspaceDir, engine, model, effort, tts, voiceEngine, signal, emit, log, message, sceneFile, settings = {}, history = [], inbox }) {
   const lg = await lecturegen();
   fs.mkdirSync(workspaceDir, { recursive: true });
   const aspect = lec.aspect || "16:9";
@@ -376,6 +393,13 @@ export async function runAgentTurn({ lec, workspaceDir, engine, model, effort, t
   };
   const before = new Map(indexFiles(workspaceDir).map((f) => [f, readText(path.join(workspaceDir, f))]));
   const oldScenes = new Map((lec.scenes || []).map((s) => [s.file, s]));
+  const resolved = scene => isResolvedScene(scene) && scene.beats.every(beat => {
+    if (beat.visualOnly === true || beat.segment?.kind === "visual-only" || typeof tts.fileFor !== "function") return true;
+    try {
+      const file = fs.statSync(tts.fileFor(beat.audio));
+      return file.isFile() && file.size > 44;
+    } catch { return false; }
+  });
   const processed = new Map(); // file -> { html, scene }
   const failed = new Map(); // file -> { html, validation }
   const lastSeen = new Map(); // file -> html at the previous scan (stability check)
@@ -397,8 +421,9 @@ export async function runAgentTurn({ lec, workspaceDir, engine, model, effort, t
   const sceneOf = async (file, html) => {
     const n = Number(file.match(INDEX_RE)[1]);
     say(`Recording narration for scene ${n}`);
-    const beats = await resolveBeats({ lg, browser, workspaceDir, file, viewport, tts, voiceEngine });
-    return { id: `sc${n}`, kind: "html", file, title: sceneTitle(html, n), beats, version: (oldScenes.get(file)?.version || 0) + 1 };
+    const playbackFile = writePlaybackSnapshot(workspaceDir, file, html);
+    const beats = await resolveBeats({ lg, browser, workspaceDir, file: playbackFile, sourceFile: file, viewport, tts, voiceEngine });
+    return { id: `sc${n}`, kind: "html", file, playbackFile, title: sceneTitle(html, n), beats, version: (oldScenes.get(file)?.version || 0) + 1 };
   };
 
   // Hand finished scenes to the player, in order.
@@ -412,23 +437,34 @@ export async function runAgentTurn({ lec, workspaceDir, engine, model, effort, t
       lastSeen.set(file, html);
       if (html == null) break;
       if (processed.get(file)?.html === html) continue;
-      if (!processed.has(file) && before.get(file) === html) continue; // untouched
+      if (!processed.has(file) && before.get(file) === html && resolved(oldScenes.get(file))) continue; // already playable and untouched
       // Finished = the agent is done, or a later file exists and this one stopped changing.
       const complete = agentDone || (i < files.length - 1 && prevSeen === html);
       if (!complete) break;
       let validation = failed.get(file)?.html === html ? failed.get(file).validation : null;
       if (validation == null) {
         say(`Checking scene ${i + 1}`);
-        validation = await validate(lg, browser, workspaceDir, file, viewport);
+        validation = await validate(lg, browser, workspaceDir, file, viewport, html);
       }
       if (!String(validation).includes("validation passed")) {
-        failed.set(file, { html, validation });
+        processed.delete(file);
+        failed.set(file, { html, validation, phase: failed.get(file)?.html === html ? failed.get(file).phase : undefined });
         log?.(validation);
         if (!final) break;
         continue;
       }
       failed.delete(file);
-      const scene = await sceneOf(file, html);
+      let scene;
+      try {
+        scene = await sceneOf(file, html);
+      } catch (e) {
+        if (e?.aborted || signal.aborted) throw e;
+        processed.delete(file);
+        failed.set(file, { html, validation: `Narration failed: ${e.message || e}`, phase: "narration" });
+        log?.(`${file}: Narration failed: ${e.message || e}`);
+        if (!final) break;
+        continue;
+      }
       processed.set(file, { html, scene });
       emit("scene", { index: i, scene });
     }
@@ -439,14 +475,14 @@ export async function runAgentTurn({ lec, workspaceDir, engine, model, effort, t
   const timer = setInterval(tick, 1200);
   try {
     const files = fs.readdirSync(workspaceDir).filter((f) => /^(answer\.md|script\.md|metadata\.json|index\d+\.html)$/i.test(f));
-    const reply = await runAgent({
+    const reply = await runAgent({ inbox,
       engine,
       model,
       effort,
       signal,
       workspace: workspaceDir,
       system: LECTURE_AGENT_SYSTEM,
-      prompt: agentTurnPrompt({ message, files, sceneFile, history, aspect, length: settings.length, theme: settings.theme, teachingStyle: settings.teachingStyle }),
+      prompt: agentTurnPrompt({ message, files, sceneFile, history, aspect, length: settings.length, theme: settings.theme, teachingStyle: settings.teachingStyle }) + "\n\n" + attachmentContext(lec.attachments),
       activity,
       onStatus: (st) => log?.(st),
     });
@@ -459,14 +495,14 @@ export async function runAgentTurn({ lec, workspaceDir, engine, model, effort, t
     // Every changed scene that still fails goes back to the agent once.
     for (const file of indexFiles(workspaceDir)) {
       const html = readText(path.join(workspaceDir, file));
-      if (processed.get(file)?.html === html || (!processed.has(file) && before.get(file) === html) || failed.has(file)) continue;
-      const validation = await validate(lg, browser, workspaceDir, file, viewport);
+      if (processed.get(file)?.html === html || (!processed.has(file) && before.get(file) === html && resolved(oldScenes.get(file))) || failed.has(file)) continue;
+      const validation = await validate(lg, browser, workspaceDir, file, viewport, html);
       if (!String(validation).includes("validation passed")) failed.set(file, { html, validation });
     }
-    if (failed.size && !signal.aborted) {
-      const problems = [...failed].map(([file, f]) => ({ file, validation: f.validation }));
+    const problems = [...failed].filter(([, f]) => f.phase !== "narration").map(([file, f]) => ({ file, validation: f.validation }));
+    if (problems.length && !signal.aborted) {
       say(`Fixing ${problems.length} scene${problems.length > 1 ? "s" : ""} that failed the checks`);
-      await runAgent({ engine, model, effort, signal, workspace: workspaceDir, prompt: fixTaskPrompt(problems), activity });
+      await runAgent({ inbox, engine, model, effort, signal, workspace: workspaceDir, prompt: fixTaskPrompt(problems), activity });
       activity.takeFinal();
     }
     await scan({ final: true });
@@ -475,20 +511,34 @@ export async function runAgentTurn({ lec, workspaceDir, engine, model, effort, t
     const scenes = [];
     const failures = [];
     for (const file of indexFiles(workspaceDir)) {
-      if (processed.has(file)) scenes.push(processed.get(file).scene);
-      else if (failed.has(file)) failures.push(`${file}: ${failed.get(file).validation}`);
-      else if (oldScenes.has(file)) scenes.push(oldScenes.get(file));
+      const html = readText(path.join(workspaceDir, file));
+      if (failed.has(file)) failures.push(`${file}: ${failed.get(file).validation}`);
+      else if (processed.get(file)?.html === html && isResolvedScene(processed.get(file).scene)) scenes.push(processed.get(file).scene);
+      else if (before.get(file) === html && resolved(oldScenes.get(file))) scenes.push(oldScenes.get(file));
       else {
         // Unchanged file without a scene record (e.g. after an earlier failed turn): try it now.
-        const html = readText(path.join(workspaceDir, file));
-        const v = await validate(lg, browser, workspaceDir, file, viewport);
-        if (String(v).includes("validation passed")) scenes.push(await sceneOf(file, html));
-        else failures.push(`${file}: ${v}`);
+        const v = await validate(lg, browser, workspaceDir, file, viewport, html);
+        if (String(v).includes("validation passed")) {
+          try { scenes.push(await sceneOf(file, html)); }
+          catch (e) {
+            if (e?.aborted || signal.aborted) throw e;
+            failures.push(`${file}: Narration failed: ${e.message || e}`);
+          }
+        } else failures.push(`${file}: ${v}`);
       }
     }
     readMeta();
     activity.flush();
     return { scenes, reply, title, failures, activity: activity.items };
+  } catch (error) {
+    // A failed agent turn may have edited scene files in place. The caller
+    // retains the previous project on fatal failure, so restore its HTML too.
+    clearInterval(timer);
+    await busy.catch(() => {});
+    for (const [file, html] of before) {
+      if (html != null) fs.writeFileSync(path.join(workspaceDir, file), html, "utf8");
+    }
+    throw error;
   } finally {
     clearInterval(timer);
     await busy.catch(() => {});

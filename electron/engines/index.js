@@ -12,7 +12,8 @@ export function createEngines(getApiConfig) {
   return {
     list,
     get(id) {
-      return byId[id] || antigravity;
+      if (!byId[id]) throw new Error("Connect an AI account in Settings first.");
+      return byId[id];
     },
   };
 }

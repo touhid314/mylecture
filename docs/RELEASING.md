@@ -15,7 +15,31 @@ Each job runs the unit tests, packages the app, then **launches the packaged app
 sentence with Kokoro, run the bundled ffmpeg and validate a scene in the bundled browser.
 A tag build ends with a **draft** GitHub Release; check it, then publish it.
 
-The version comes from the tag (`v0.2.0` → `0.2.0`).
+The version comes from the tag (`v1.0.0` → `1.0.0`).
+
+## In-app updates
+
+Installed copies check `<server>/updates` (the server in `../mylecture-app-admin/server`,
+backed by the `mylecture-releases` R2 bucket; address in `electron/server-config.json`) once when the app starts
+(no polling while it runs). Nothing reaches users until you publish:
+
+1. Bump `"version"` in `package.json` (users are only prompted for a **higher** version).
+2. Build: `npm run dist:win` (and/or put the macOS `.dmg`/`.zip`/`latest-mac.yml` from the
+   GitHub Actions artifacts into `dist/`).
+3. Try the installer yourself.
+4. `npm run release:publish` uploads that version's installers, then `latest.yml` /
+   `latest-mac.yml` last. Credentials come from `../mylecture-website/.env` (`R2_*`).
+
+What users see:
+
+- **Windows (installer)**: the update downloads in the background; then a prompt
+  "Update available" → **Update now** restarts into the new version. **Later** installs it
+  when they close the app. If a video is generating/rendering, they are asked first.
+- **Windows portable `.exe` and macOS**: the prompt's **Update now** downloads the new
+  installer in the browser. (Unsigned macOS apps cannot replace themselves; once the Mac
+  build is signed and notarized this can become automatic.)
+
+To roll back, publish a new higher version; updates never downgrade.
 
 ## Signing (optional, add when ready)
 

@@ -5,6 +5,7 @@ import path from "node:path";
 import { findExecutable, scratchDir, spawnLines, runCapture } from "./cli-util.js";
 import fs from "node:fs";
 import { discoverClaudeModels } from "./model-discovery.js";
+import { log } from "../logger.js";
 
 // Claude Code records the signed-in account in ~/.claude.json (all platforms)
 // and, outside macOS, the login in ~/.claude/.credentials.json.
@@ -58,12 +59,19 @@ export const claudeCode = {
     return this.generate(opts);
   },
 
-  async generate({ system, user, model, effort, signal, onDelta, onStatus, onActivity, workspace }) {
+  async generate({ system, user, model, effort, signal, onDelta, onStatus, onActivity, workspace, inbox }) {
     const exe = this.exe();
     if (!exe) throw new Error("Claude isn't connected. Connect it from the welcome screen or Settings.");
     // The (long) system prompt travels over stdin with the question, which
     // avoids Windows' command-line length limit.
-    const args = ["-p", "--output-format", "stream-json", "--include-partial-messages", "--verbose"];
+    // --safe-mode: ignore the user's personal Claude Code setup (CLAUDE.md,
+    // hooks, MCP servers, plugins). Those leak into MyLecture runs, slow them
+    // down and can contradict the lesson prompt (e.g. "never create .md files").
+    const args = ["-p", "--safe-mode", "--no-session-persistence", "--output-format", "stream-json", "--include-partial-messages", "--verbose"];
+    // Agent mode streams its input too, so messages typed mid-run (inbox) are
+    // injected into the live session; Claude reads them at its next step.
+    const live = !!workspace;
+    if (live) args.push("--input-format", "stream-json", "--replay-user-messages");
     if (workspace) {
       args.push("--permission-mode", "acceptEdits", "--allowedTools", "Read,Write,Edit,MultiEdit,Glob,Grep");
       args.push("--disallowedTools", "Bash,WebFetch,WebSearch,Task,NotebookEdit");
@@ -74,11 +82,38 @@ export const claudeCode = {
     if (effort) args.push("--effort", effort);
     let full = "";
     let err = null;
+    // Live input: stdin closes at a result once every message we sent has been
+    // consumed (echoed back); otherwise Claude takes another turn for it.
+    let input = null, sent = 0, echoed = 0, detach = null;
+    const userLine = (text) => JSON.stringify({ type: "user", message: { role: "user", content: [{ type: "text", text }] } }) + "\n";
+    const closeInput = () => { detach?.(); detach = null; input?.end(); input = null; };
     let msgId = "m";
+    const startedAt = Date.now();
+    let thinkingChunks = 0, thinkingBytes = 0, lastProgressAt = 0;
+    log("info", "provider.start", { provider: "claude-code", model, effort, agent: !!workspace });
     const res = await spawnLines(exe, args, {
       cwd: workspace || scratchDir("claude-code"),
-      stdin: `${system}\n\n---\n\n${user}`,
+      // Uncapped hidden thinking made Claude plan for minutes before writing
+      // anything; a small budget gets it writing files in seconds.
+      env: { ...process.env, MAX_THINKING_TOKENS: process.env.MAX_THINKING_TOKENS || "1024" },
+      stdin: live ? null : `${system}\n\n---\n\n${user}`,
+      keepStdin: live,
+      onStdin: (io) => {
+        input = io;
+        sent++;
+        io.write(userLine(`${system}\n\n---\n\n${user}`));
+        if (inbox) detach = inbox.attach((text) => {
+          if (!input || !input.write(userLine(text))) return false;
+          sent++;
+          log("info", "provider.inject", { provider: "claude-code", chars: text.length });
+          return true;
+        });
+      },
       signal,
+      onIdle: ({ idleMs, elapsedMs }) => {
+        log("warn", "provider.waiting", { provider: "claude-code", idleMs, elapsedMs });
+        onStatus?.(`Waiting for a response (no events for ${Math.floor(idleMs / 1000)}s)`);
+      },
       onLine(line) {
         let ev;
         try {
@@ -86,8 +121,21 @@ export const claudeCode = {
         } catch {
           return;
         }
+        if (ev.type === "user" && ev.isReplay) {
+          echoed++;
+          return;
+        }
         if (ev.type === "stream_event") {
           const e = ev.event || {};
+          if (e.type !== "content_block_delta") log("debug", "provider.event", { provider: "claude-code", type: e.type, blockType: e.content_block?.type, tool: e.content_block?.name });
+          if (e.type === "content_block_delta" && e.delta?.type === "thinking_delta") {
+            thinkingChunks++;
+            thinkingBytes += Buffer.byteLength(e.delta.thinking || "");
+            if (Date.now() - lastProgressAt >= 5000) {
+              lastProgressAt = Date.now();
+              log("info", "provider.thinking", { provider: "claude-code", elapsedMs: Date.now() - startedAt, chunks: thinkingChunks, bytes: thinkingBytes });
+            }
+          }
           if (e.type === "message_start") msgId = e.message?.id || msgId + "'";
           if (e.type === "content_block_start" && e.content_block?.type === "tool_use") onStatus?.(`agent: ${e.content_block.name}`);
           if (e.type === "content_block_start" && e.content_block?.type === "thinking") onActivity?.({ type: "step", icon: "💭", text: "thinking" });
@@ -98,8 +146,13 @@ export const claudeCode = {
           }
         } else if (ev.type === "assistant") {
           // Complete tool calls (with their inputs) arrive on the assistant message.
-          for (const b of ev.message?.content || []) if (b.type === "tool_use") onActivity?.(claudeStep(b));
+          for (const b of ev.message?.content || []) if (b.type === "tool_use") {
+            log("info", "provider.tool", { provider: "claude-code", tool: b.name });
+            onActivity?.(claudeStep(b));
+          }
         } else if (ev.type === "result") {
+          if (live && echoed >= sent) closeInput();
+          log(ev.is_error ? "error" : "info", "provider.result", { provider: "claude-code", isError: !!ev.is_error, subtype: ev.subtype, durationMs: ev.duration_ms, turns: ev.num_turns, outputBytes: Buffer.byteLength(full) });
           if (ev.is_error) err = ev.result || ev.subtype || "error";
           if (!full && typeof ev.result === "string" && !ev.is_error) {
             full = ev.result;
@@ -108,6 +161,8 @@ export const claudeCode = {
         }
       },
     });
+    closeInput();
+    log("info", "provider.finish", { provider: "claude-code", code: res.code, aborted: !!res.aborted, elapsedMs: Date.now() - startedAt, outputBytes: Buffer.byteLength(full), thinkingChunks, thinkingBytes });
     if (res.aborted) return { text: full, aborted: true };
     if (err && !full) throw new Error("Claude: " + err);
     if (res.code !== 0 && !full) throw new Error(`Claude stopped unexpectedly (${res.code}): ${res.stderr.slice(-400)}`);

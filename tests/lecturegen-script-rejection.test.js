@@ -33,7 +33,7 @@ const fake = {
       close: async () => { state.closed++; },
       newPage: async () => ({
         addInitScript: async () => {}, goto: async () => {},
-        evaluate: async () => [], close: async () => {},
+        evaluate: async () => [{ id: "i1", kind: "narration+visual", text: "Narrated fixture scene." }], close: async () => {},
       }),
     };
   } },

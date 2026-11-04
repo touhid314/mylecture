@@ -1,6 +1,7 @@
 import { connectPanel } from "./connect.js";
 import { showApiKeyDialog } from "./api-key.js";
 import { h, icon, toast, bus } from "./ui.js";
+import { showLiveLog } from "./logs.js";
 
 const ENGINE_INFO = {
   codex: { title: "GPT", sub: "Uses your ChatGPT subscription." },
@@ -21,6 +22,7 @@ export class SettingsView {
     this.state = state;
     this.statusCache = {};
     this.modelsCache = {};
+    this.accountRevisions = { ...state.settings?.accountRevision };
     this.wrap = h("div", { class: "settings" });
     root.appendChild(this.wrap);
     window.ml.tts.onStatus((st) => this._ttsStatus(st));
@@ -44,6 +46,7 @@ export class SettingsView {
   }
 
   render() {
+    this._syncAccountCaches();
     const s = this.state.settings;
     this.wrap.replaceChildren(
       h("h2", {}, "Settings"),
@@ -68,7 +71,7 @@ export class SettingsView {
   // plus the API-key option.
   _connectCards() {
     this._connect?.stop();
-    this._connect = connectPanel(this.state, { onChange: () => this.render() });
+    this._connect = connectPanel(this.state, { manageAccounts: true, onChange: () => this.render() });
     const s = this.state.settings;
     const api = h("div", { class: `engine-card ${s.engine === "api" ? "on" : ""}`, style: { marginTop: "10px" }, onclick: () => showApiKeyDialog(this.state, { onDone: () => this.render() }) },
       h("div", { class: "ec-head" }, h("span", { class: "grow" }, ENGINE_INFO.api.title), s.engine === "api" ? h("span", { class: "badge good" }, "In use") : null),
@@ -101,8 +104,22 @@ export class SettingsView {
     );
   }
 
+  _syncAccountCaches() {
+    const revisions = this.state.settings.accountRevision || {};
+    for (const id of new Set([...Object.keys(this.accountRevisions || {}), ...Object.keys(revisions)])) {
+      if ((this.accountRevisions?.[id] ?? 0) !== (revisions[id] ?? 0)) {
+        delete this.statusCache[id];
+        delete this.modelsCache[id];
+      }
+    }
+    this.accountRevisions = { ...revisions };
+  }
+
   async _checkEngine(id) {
-    this.statusCache[id] = await window.ml.engines.status(id);
+    const revision = this.state.settings.accountRevision?.[id] ?? 0;
+    const status = await window.ml.engines.status(id);
+    if (revision !== (this.state.settings.accountRevision?.[id] ?? 0)) return;
+    this.statusCache[id] = status;
     this._paintStatus(id);
   }
 
@@ -121,6 +138,12 @@ export class SettingsView {
     const id = s.engine;
     const e = this.engines.engines.find((x) => x.id === id);
     const card = h("div", { class: "card", style: { marginTop: "12px" } });
+    this.engineMsg = null;
+    if (!id || !e || (id !== "api" && !s.connected?.[id])) {
+      const prompt = id && e && ENGINE_INFO[id] ? `Connect ${ENGINE_INFO[id].title} above to choose its model.` : "Connect GPT, Gemini or Claude, or use an API key, to choose a model.";
+      card.append(h("p", { class: "small muted" }, prompt));
+      return card;
+    }
     this.engineMsg = h("span", { class: "small muted" }, "");
     const testOut = h("span", { class: "small muted" });
     const testBtn = h("button", { class: "btn sm", onclick: async () => {
@@ -168,12 +191,15 @@ export class SettingsView {
     } else {
       const sel = h("select", { class: "select", onchange: (ev) => this.save({ models: { [id]: ev.target.value } }) }, h("option", { value: s.models?.[id] || "" }, s.models?.[id] || "Default model"));
       const loadModels = async () => {
-        const list = this.modelsCache[id] || (this.modelsCache[id] = await window.ml.engines.models(id));
+        const revision = this.state.settings.accountRevision?.[id] ?? 0;
+        const list = this.modelsCache[id] || await window.ml.engines.models(id);
+        if (revision !== (this.state.settings.accountRevision?.[id] ?? 0)) return;
+        this.modelsCache[id] = list;
         const cur = s.models?.[id] ?? "";
         sel.replaceChildren(h("option", { value: "" }, "Default model"), ...list.filter((m) => m.id).map((m) => h("option", { value: m.id, selected: m.id === cur }, m.label || m.id)));
         if (cur && !list.find((m) => m.id === cur)) sel.appendChild(h("option", { value: cur, selected: true }, cur));
       };
-      loadModels();
+      loadModels().catch(error => { testOut.textContent = String(error.message || error); });
       card.append(
         h("div", { class: "set-row" }, h("div", { class: "set-label" }, h("b", {}, "Status"), this.engineMsg), h("div", { class: "set-ctl" }, h("button", { class: "btn sm ghost", onclick: () => this._checkEngine(id) }, icon("refresh"), "Re-check"))),
         h("div", { class: "set-row" }, h("div", { class: "set-label" }, h("b", {}, "Model"), h("span", {}, id === "antigravity" ? "Flash (Low) is the fastest and keeps lessons real-time. Bigger models look better but start slower." : "Smaller/faster models start playing sooner.")), h("div", { class: "set-ctl" }, sel)),
@@ -220,12 +246,12 @@ export class SettingsView {
       "div",
       { class: "card" },
       h("div", { class: "set-row" }, h("div", { class: "set-label" }, h("b", {}, "Voice engine"), h("span", {}, "Kokoro and OmniVoice run locally. OmniVoice uses reference voices and supports GPU acceleration.")),
-        h("div", { class: "set-ctl" }, h("div", { class: "seg" }, [["kokoro", "Kokoro"], ["omnivoice", "OmniVoice"]].map(([v, l]) =>
+        h("div", { class: "set-ctl" }, h("div", { class: "seg" }, [["kokoro", "Kokoro", "Fast"], ["omnivoice", "OmniVoice", "Higher quality"]].map(([v, l, quality]) =>
           h("button", { class: voiceEngine === v ? "on" : "", onclick: async () => {
             await this.save({ voiceEngine: v });
             this.render();
             this._ttsStatus(await window.ml.tts.status());
-          } }, l))))),
+          } }, l, " ", h("span", { class: "badge" }, quality), " ", h("span", { class: "badge" }, "Local")))))),
       voiceEngine === "kokoro"
         ? h("div", { class: "set-row" }, h("div", { class: "set-label" }, h("b", {}, "Neural voice"), this.ttsMsg, h("div", { class: "progress", style: { marginTop: "6px", width: "260px" } }, this.ttsBar)), h("div", { class: "set-ctl" }, voiceSel))
         : h("div", {},
@@ -311,6 +337,12 @@ export class SettingsView {
         } }, l))))),
       h("div", { class: "set-row" }, h("div", { class: "set-label" }, h("b", {}, "Exported videos"), h("span", {}, this.state.info?.exportsDir || "")), h("div", { class: "set-ctl" }, h("button", { class: "btn sm", onclick: () => window.ml.shell.openExports() }, icon("folder"), "Open folder"))),
       h("div", { class: "set-row" }, h("div", { class: "set-label" }, h("b", {}, "App data"), h("span", {}, this.state.info?.userData || "")), h("div", { class: "set-ctl" }, h("button", { class: "btn sm", onclick: () => window.ml.shell.openPath(this.state.info.userData) }, icon("folder"), "Open"))),
+      h("div", { class: "set-row" }, h("div", { class: "set-label" }, h("b", {}, "Diagnostics"), h("span", {}, "Live local logs for app activity and errors. Credentials and private content are redacted.")), h("div", { class: "set-ctl" },
+        h("button", { class: "btn sm", onclick: () => showLiveLog() }, "View live log"),
+        h("button", { class: "btn sm", onclick: async () => {
+          try { await window.ml.logs.openFolder(); }
+          catch { toast("Could not open the logs folder.", { kind: "bad" }); }
+        } }, icon("folder"), "Open logs folder"))),
       h("div", { class: "set-row" }, h("div", { class: "set-label" }, h("b", {}, "About"), h("span", {}, `MyLecture ${this.state.info?.version || ""} · MIT licensed · open source`)), h("div", { class: "set-ctl" })),
     );
   }

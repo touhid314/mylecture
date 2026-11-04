@@ -6,6 +6,12 @@ import { SettingsView } from "./settings.js";
 import { ExportCenter } from "./exports.js";
 import { FEATURES } from "./features.js";
 import { showWelcome } from "./connect.js";
+import { initUpdates } from "./updates.js";
+
+// Page errors occur in the renderer's main world; the isolated preload's
+// global error events do not see them.
+window.addEventListener("error", event => window.ml.logs?.reportError?.({ kind: "error", message: String(event.message || "Renderer error"), stack: String(event.error?.stack || ""), line: event.lineno }));
+window.addEventListener("unhandledrejection", event => window.ml.logs?.reportError?.({ kind: "unhandledrejection", message: String(event.reason?.message || event.reason || "Unhandled rejection"), stack: String(event.reason?.stack || "") }));
 
 export const state = {
   settings: null,
@@ -51,6 +57,7 @@ async function boot() {
     toast(String(e.reason?.message || e.reason).replace(/^Error invoking remote method '[^']+': (Error: )?/, ""), { kind: "bad", timeout: 7000 });
   });
   show(state.view);
+  initUpdates().catch(() => {});
   // First run: connect an AI account before anything else.
   if (!state.settings.onboarded) showWelcome(state, { onDone: (goto) => goto && show(goto) });
 }

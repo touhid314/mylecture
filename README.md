@@ -22,7 +22,22 @@ The app is designed with two core modes:
 ### Rendered video library
 The Library shows completed MP4 exports only, with Play and Show file controls. Generated HTML lessons and editable projects stay in Study/Create. New renders appear after export completes.
 
+### Local diagnostics
+**Settings → App → Diagnostics → View live log** shows app activity and errors as they happen. Pause, refresh, copy the visible log, or open its folder. Local JSONL logs live in `<app-data>/logs/app.log`, rotate at 2 MB, and retain up to five files. They record startup, IPC operation names/timings, account status, provider process lifecycle and idle heartbeats, generation stages, TTS, exports, renderer errors and crashes. Credentials and email addresses are redacted; request bodies, prompts, generated content and private thinking text are not intentionally logged. Review logs before sharing them.
+
+Project `generation.log` files also update during generation. Provider diagnostics distinguish receiving thinking events from no new provider output; a long silence is reported as waiting, rather than claiming the model is actively thinking. Diagnostics stay local and are separate from remote aggregate usage telemetry.
+
+### Usage statistics and updates
+Release builds talk to one server, whose address is in `electron/server-config.json` (set it with `npm run server:configure <url>`). The server's code lives in `../mylecture-app-admin/server`; it is not part of the app.
+
+- **Launch count:** one anonymous ping per launch (app version and OS; the server adds the approximate country). No identifier, no user setting, nothing sent after startup.
+- **Updates:** one check per launch; see [docs/RELEASING.md](docs/RELEASING.md).
+
+Source runs, `--dev`, smoke tests and CI (`CI` set) do neither; `MYLECTURE_PROFILE` runs send no launch ping. With an empty server address, the app sends nothing. IP addresses pass through Cloudflare to serve the request, but the server does not read, store or log them.
+
 ### Account usage limits
+Settings lets you **Remove account** from MyLecture or **Add new account** for GPT, Gemini and Claude. Removal preserves the provider's sign-in on your computer. Adding another account replaces the shared CLI sign-in after confirmation; one account per provider can be active at a time. Signing in with a different email connects automatically. If you sign in with the same account, select **Use this account** once. Gemini's interactive window uses `/logout` before signing in with a different Google account. Account changes clear cached usage limits.
+
 - A compact line under the agent/model description shows weekly and five-hour allowance remaining.
 - Click the usage line for all model groups, progress bars, and reset times in your local timezone.
 - Limits refresh every minute, after lessons, and with **Refresh**. These are account-wide allowances, including usage outside MyLecture; checking them consumes no model tokens.
@@ -36,6 +51,7 @@ The Library shows completed MP4 exports only, with Play and Show file controls. 
 - **One-Click "Edit as Video"**: Open a Study lesson with generated scenes in Create (IDE) Mode.
 
 ### 2. Create Mode (Video IDE)
+- The generated title appears above the player. Render and its export options sit below the player. Scenes appear only after validation and narration audio are ready; no manual Resolve step is needed.
 - The prompt box includes aspect, theme, teaching style, voice, and target length. The slider offers 15, 30, and 45 seconds, then each whole minute from 1 to 10.
 - The provider/model control uses native CLI catalogs and their advertised reasoning levels, with manual refresh and a 60-second refresh while Create is visible. Direct API catalogs use each provider's models endpoint; unadvertised reasoning levels are not guessed.
 - The timeline uses the local IDE's red draggable playhead. Preview subtitles default off. **Render → Embed captions** also defaults off.
@@ -44,6 +60,7 @@ The Library shows completed MP4 exports only, with Play and Show file controls. 
   - **HTML & CSS**: Scene markup with built-in templates (Title + Subtitle, Two Columns, Card Grid, Highlighted Code, KaTeX math formulas, SVG diagrams, Callouts).
   - **Animation JS**: Dynamic animation scripts using `ML.show()`, `ML.draw()`, `ML.type()`, `ML.count()`, and `ML.plot()`.
   - **Narration Beats**: Edit spoken sentences line-by-line with duration metrics and instant audio preview.
+- **Edit narration** lists every narrated beat across all scenes, using the exact normalized text submitted to TTS, with its caption shown underneath. Each changed beat can be regenerated separately.
   - **AI Assistant**: Request targeted modifications per scene (e.g., *"Make it simpler"*, *"Add a step-by-step diagram"*, *"Use modern dark cards"*) with real-time token streaming.
 - **Live Preview & Player**: Synchronized stage preview with "Play All", "Play Scene", "Restart", and live error reporting.
 - **Multi-Aspect Ratio**: Switch between **16:9 Landscape** (YouTube / Desktop), **9:16 Vertical** (Shorts / Reels / TikTok), and **1:1 Square** (Instagram / Feed).
@@ -155,8 +172,8 @@ launches each packaged app (speech, ffmpeg and the scene checker included), and 
 draft GitHub Release with the installers:
 
 ```powershell
-git tag v0.2.0
-git push origin v0.2.0
+git tag v1.0.0
+git push origin v1.0.0
 ```
 
 See [docs/RELEASING.md](docs/RELEASING.md) for signing and how to test the macOS builds.

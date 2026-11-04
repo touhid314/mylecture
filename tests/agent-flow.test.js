@@ -18,7 +18,7 @@ const fake = {
   chromium: {
     launch: async () => ({
       close: async () => {},
-      newPage: async () => ({ addInitScript: async () => {}, goto: async () => {}, close: async () => {}, evaluate: async () => [{ id: "i1", kind: "narration+visual", text: "Hello." }] }),
+      newPage: async () => ({ addInitScript: async () => {}, goto: async () => {}, close: async () => {}, evaluate: async () => fake.plan ?? [{ id: "i1", kind: "narration+visual", text: "Hello." }] }),
     }),
   },
 };
@@ -32,11 +32,25 @@ const hooks = registerHooks({
     return nextLoad(url, context);
   },
 });
-const { runAgentLecture, runAgentTurn, agentTaskPrompt, agentTurnPrompt, LECTURE_AGENT_SYSTEM, supportsAgentFlow } = await import("../electron/lecturegen/agent-run.js");
+const { runAgent, runAgentLecture, runAgentTurn, agentTaskPrompt, agentTurnPrompt, LECTURE_AGENT_SYSTEM, supportsAgentFlow } = await import("../electron/lecturegen/agent-run.js");
 const { lecturegenCatalog, resolveStyleResource } = await import("../electron/lecturegen/run.js");
 test.after(() => {
   hooks.deregister();
   delete globalThis[key];
+});
+
+test("provider silence is surfaced as waiting instead of leaving a stale thinking label", async () => {
+  const events = [], status = [];
+  const waiting = "Waiting for a response (no events for 45s)";
+  const result = await runAgent({
+    engine: { agent: async ({ onStatus }) => { onStatus("agent: Read"); onStatus(waiting); return { text: "Done" }; } },
+    signal: new AbortController().signal,
+    activity: { app: value => events.push(value), lastSay: () => "" },
+    onStatus: value => status.push(value),
+  });
+  assert.equal(result, "Done");
+  assert.deepEqual(events, [waiting]);
+  assert.deepEqual(status, ["agent: Read", waiting]);
 });
 
 test("task prompt: one straightforward task; auto omits theme and teaching style", () => {
@@ -50,6 +64,11 @@ test("task prompt: one straightforward task; auto omits theme and teaching style
   assert.match(auto, /Visual theme: your choice/);
   assert.equal(lecturegenCatalog().themes[0].id, "auto");
   assert.equal(lecturegenCatalog().teachingStyles[0].id, "auto");
+  const catalog = lecturegenCatalog();
+  for (const id of ["fonts-colors", "none", "sat-tutor"]) assert.ok(!catalog.themes.some(item => item.id === id));
+  for (const id of ["middle-school-math", "none", "sat-tutor", "stickman-compare"]) assert.ok(!catalog.teachingStyles.some(item => item.id === id));
+  assert.ok(catalog.themes.some(item => item.id === "stickman-compare"));
+  assert.ok(catalog.teachingStyles.some(item => item.id === "research-paper"));
   assert.match(resolveStyleResource("auto", "themes"), /No specific visual theme/);
   assert.equal(supportsAgentFlow({ kind: "cli", agent() {} }), true);
   assert.equal(supportsAgentFlow({ kind: "api", generate() {} }), false);
@@ -126,7 +145,7 @@ const turn = (lec, ws, engine, message, extra = {}) => {
 test("agent turn: a plain question gets a reply and touches nothing", async () => {
   const ws = fs.mkdtempSync(path.join(os.tmpdir(), "agent-turn-"));
   fs.writeFileSync(path.join(ws, "index1.html"), html(1));
-  const keep = { id: "sc1", kind: "html", file: "index1.html", beats: [] };
+  const keep = { id: "sc1", kind: "html", file: "index1.html", beats: [{ text: "Hello.", audio: "existing", dur: 1 }] };
   const engine = {
     name: "Fake",
     kind: "cli",
@@ -147,7 +166,7 @@ test("agent turn: changes stream to the player; only changed scenes are re-narra
   const ws = fs.mkdtempSync(path.join(os.tmpdir(), "agent-turn-"));
   fs.writeFileSync(path.join(ws, "index1.html"), html(1));
   fs.writeFileSync(path.join(ws, "index2.html"), html(2));
-  const keep = { id: "sc1", kind: "html", file: "index1.html", beats: [] };
+  const keep = { id: "sc1", kind: "html", file: "index1.html", beats: [{ text: "Hello.", audio: "existing", dur: 1 }] };
   const lec = { aspect: "16:9", scenes: [keep, { id: "sc2", kind: "html", file: "index2.html", beats: [] }] };
   const engine = {
     name: "Fake",
@@ -170,4 +189,144 @@ test("agent turn: changes stream to the player; only changed scenes are re-narra
   assert.deepEqual(r.events.filter((e) => e.type === "scene").map((e) => e.index), [1, 2]);
   // The final reply is not left inside the work timeline.
   assert.ok(!r.activity.some((i) => i.includes("Added a recap scene")));
+});
+
+test("agent scenes stay unavailable until narration finishes", async t => {
+  const ws = fs.mkdtempSync(path.join(os.tmpdir(), "agent-resolve-pending-"));
+  t.after(() => fs.rmSync(ws, { recursive: true, force: true }));
+  let signalStarted, finish;
+  const started = new Promise(resolve => { signalStarted = resolve; });
+  const voice = new Promise(resolve => { finish = resolve; });
+  const events = [];
+  const result = runAgentTurn({
+    lec: {}, workspaceDir: ws, signal: new AbortController().signal, message: "make it",
+    engine: { async agent() { fs.writeFileSync(path.join(ws, "index1.html"), html(1)); return { text: "Done" }; } },
+    tts: { async synth() { signalStarted(); return voice; } },
+    emit: (type, payload) => events.push({ type, ...payload }),
+  });
+  await started;
+  assert.equal(events.filter(event => event.type === "scene").length, 0);
+  finish({ key: "recorded", dur: 2 });
+  const complete = await result;
+  assert.equal(complete.scenes.length, 1);
+  assert.equal(complete.scenes[0].beats[0].audio, "recorded");
+  assert.equal(events.filter(event => event.type === "scene").length, 1);
+});
+
+test("rejected or invalid narration never publishes scenes or reuses changed scene audio", async t => {
+  for (const output of [undefined, {}, { key: "", dur: 1 }, { key: "k", dur: 0 }, { key: "k", dur: NaN }, new Error("Voice download failed")]) {
+    const ws = fs.mkdtempSync(path.join(os.tmpdir(), "agent-resolve-failed-"));
+    t.after(() => fs.rmSync(ws, { recursive: true, force: true }));
+    fs.writeFileSync(path.join(ws, "index1.html"), html(1));
+    let calls = 0;
+    const engine = { async agent() {
+      calls++;
+      fs.writeFileSync(path.join(ws, "index1.html"), html(1).replace("Part 1", "Changed"));
+      return { text: "Changed" };
+    } };
+    const lec = { scenes: [{ id: "sc1", kind: "html", file: "index1.html", beats: [{ audio: "old-audio", dur: 1 }] }] };
+    const result = await turn(lec, ws, engine, "change it", { tts: { async synth() { if (output instanceof Error) throw output; return output; } } });
+    assert.deepEqual(result.scenes, []);
+    assert.equal(result.events.filter(event => event.type === "scene").length, 0);
+    assert.equal(result.failures.length, 1);
+    assert.match(result.failures[0], /Narration failed/);
+    assert.equal(calls, 1, "A voice failure must not ask the HTML agent to repair the scene");
+    assert.equal(fs.existsSync(path.join(ws, "index1.html")), true, "Keep failed scenes available for retry");
+  }
+});
+
+test("unresolved historical scene records are narrated before they are returned", async t => {
+  const ws = fs.mkdtempSync(path.join(os.tmpdir(), "agent-resolve-old-"));
+  t.after(() => fs.rmSync(ws, { recursive: true, force: true }));
+  fs.writeFileSync(path.join(ws, "index1.html"), html(1));
+  const lec = { scenes: [{ file: "index1.html", beats: [] }] };
+  let calls = 0;
+  const result = await turn(lec, ws, { async agent() { return { text: "Just a reply" }; } }, "hi", {
+    tts: { async synth() { calls++; return { key: "new-audio", dur: 1 }; } },
+  });
+  assert.equal(calls, 1);
+  assert.equal(result.scenes[0].beats[0].audio, "new-audio");
+});
+
+test("intentional visual-only scenes play without requesting speech and empty plans cannot play", async t => {
+  const ws = fs.mkdtempSync(path.join(os.tmpdir(), "agent-resolve-visual-"));
+  t.after(() => { fake.plan = undefined; fs.rmSync(ws, { recursive: true, force: true }); });
+  fake.plan = [{ id: "visual", kind: "visual-only", duration: 2 }];
+  const engine = { async agent() { fs.writeFileSync(path.join(ws, "index1.html"), html(1)); return { text: "Done" }; } };
+  const result = await turn({}, ws, engine, "make it", { tts: { async synth() { throw new Error("Must not narrate visual-only cue"); } } });
+  assert.equal(result.scenes.length, 1);
+  assert.equal(result.scenes[0].beats[0].visualOnly, true);
+  assert.equal(result.scenes[0].beats[0].dur, 2);
+  fake.plan = [];
+  const empty = await turn({}, ws, engine, "make it");
+  assert.deepEqual(empty.scenes, []);
+  assert.match(empty.failures[0], /no narration or visual-only cues/);
+});
+
+test("fatal agent failure restores original HTML paired with existing narration", async t => {
+  const ws = fs.mkdtempSync(path.join(os.tmpdir(), "agent-resolve-rollback-"));
+  t.after(() => fs.rmSync(ws, { recursive: true, force: true }));
+  fs.writeFileSync(path.join(ws, "index1.html"), html(1));
+  const engine = { async agent() { fs.writeFileSync(path.join(ws, "index1.html"), html(2)); throw new Error("Provider disconnected"); } };
+  await assert.rejects(turn({ scenes: [{ file: "index1.html", beats: [{ audio: "old-audio", dur: 1 }] }] }, ws, engine, "change it"), /Provider disconnected/);
+  assert.equal(fs.readFileSync(path.join(ws, "index1.html"), "utf8"), html(1));
+});
+
+test("initial lecture generation reports voice failure without publishing a silent scene", async t => {
+  const ws = fs.mkdtempSync(path.join(os.tmpdir(), "agent-lecture-voice-failure-"));
+  t.after(() => fs.rmSync(ws, { recursive: true, force: true }));
+  const events = [];
+  let calls = 0;
+  const result = await runAgentLecture({
+    lec: { question: "make it", theme: "auto", teachingStyle: "auto" }, workspaceDir: ws,
+    engine: { async agent() { calls++; fs.writeFileSync(path.join(ws, "index1.html"), html(1)); return { text: "Done" }; } },
+    tts: { async synth() { throw new Error("Voice is unavailable"); } },
+    signal: new AbortController().signal,
+    emit: (type, payload) => events.push({ type, ...payload }),
+  });
+  assert.equal(events.filter(event => event.type === "scene-ready").length, 0);
+  assert.match(result.failures[0], /Narration failed: Voice is unavailable/);
+  assert.equal(calls, 1);
+});
+
+test("published playback HTML stays paired with its narration when the agent rewrites the source", async t => {
+  const ws = fs.mkdtempSync(path.join(os.tmpdir(), "agent-playback-snapshot-"));
+  t.after(() => fs.rmSync(ws, { recursive: true, force: true }));
+  const events = [];
+  let rewritten = false;
+  const result = await runAgentTurn({
+    lec: {}, workspaceDir: ws, message: "make it", signal: new AbortController().signal,
+    engine: { async agent() { fs.writeFileSync(path.join(ws, "index1.html"), html(1)); return { text: "Done" }; } },
+    tts: fakeTts,
+    emit(type, payload) {
+      if (type !== "scene") return;
+      events.push(payload.scene);
+      if (!rewritten) { rewritten = true; fs.writeFileSync(path.join(ws, "index1.html"), html(2)); }
+    },
+  });
+  assert.equal(events.length, 2);
+  assert.match(events[0].playbackFile, /^\.playback-index1-[a-f0-9]+\.html$/);
+  assert.notEqual(events[0].playbackFile, events[1].playbackFile);
+  assert.equal(fs.readFileSync(path.join(ws, events[0].playbackFile), "utf8"), html(1));
+  assert.equal(fs.readFileSync(path.join(ws, result.scenes[0].playbackFile), "utf8"), html(2));
+});
+
+test("untouched saved scenes regenerate missing or empty cached audio before being returned", async t => {
+  for (const corruptCache of [false, true]) {
+    const ws = fs.mkdtempSync(path.join(os.tmpdir(), "agent-audio-cache-recovery-"));
+    t.after(() => fs.rmSync(ws, { recursive: true, force: true }));
+    fs.writeFileSync(path.join(ws, "index1.html"), html(1));
+    if (corruptCache) fs.writeFileSync(path.join(ws, "old-audio.wav"), Buffer.alloc(44));
+    const oldScene = { file: "index1.html", beats: [{ audio: "old-audio", dur: 1, text: "Hello." }] };
+    let calls = 0;
+    const tts = {
+      fileFor: key => path.join(ws, `${key}.wav`),
+      async synth() { calls++; fs.writeFileSync(path.join(ws, "regenerated.wav"), Buffer.alloc(100)); return { key: "regenerated", dur: 1 }; },
+    };
+    const result = await turn({ scenes: [oldScene] }, ws, { async agent() { return { text: "Just a reply" }; } }, "hi", { tts });
+    assert.equal(calls, 1);
+    assert.equal(result.scenes[0].beats[0].audio, "regenerated");
+    assert.equal(result.events.filter(event => event.type === "scene").length, 1);
+    assert.equal(fs.readFileSync(path.join(ws, "index1.html"), "utf8"), html(1));
+  }
 });

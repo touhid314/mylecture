@@ -6,10 +6,14 @@ import path from "node:path";
 // behind playback.
 import { systemPrompt, userPrompt, sceneEditPrompt } from "./prompt.js";
 import { StreamParser, parseAll } from "./stream-parser.js";
-import { lectures, sessions, newId, getSettings } from "./store.js";
+import { lectures, sessions, newId, getSettings, paths } from "./store.js";
 import "../app/shared/timeline.js";
 import { runLectureGen } from "./lecturegen/run.js";
 import { runAgentLecture, runAgentTurn, supportsAgentFlow } from "./lecturegen/agent-run.js";
+import { Inbox } from "./activity.js";
+import { prepareAttachments } from "./attachments.js";
+import { withAvailableNarration } from "./scene-readiness.js";
+import { log as appLog, sanitizeLogValue } from "./logger.js";
 
 const TL = globalThis.MLTimeline;
 
@@ -34,13 +38,25 @@ export class Generator {
     this.jobs = new Map();
   }
 
+  // A message typed while the agent works goes straight into its live session.
+  inject(jobId, text) {
+    const j = this.jobs.get(jobId);
+    if (!j?.inbox?.send(text)) return false;
+    (j.lec.chat ||= []).push({ role: "user", text, attachments: [], at: Date.now() });
+    try { lectures.save(j.lec); } catch {}
+    appLog("info", "generation.inject", { jobId, lectureId: j.lectureId, chars: text.length });
+    return true;
+  }
+
   cancel(jobId) {
     const j = this.jobs.get(jobId);
+    appLog("info", "generation.cancelRequested", { jobId, active: !!j });
     if (j) j.abort.abort();
   }
 
   engineConfig() {
     const s = getSettings();
+    if (!s.engine || (s.engine !== "api" && !s.connected?.[s.engine])) throw new Error("Connect an AI account in Settings first.");
     const base = this.engines.get(s.engine);
     const engine = base.snapshot?.() || base;
     const model = s.engine === "api" ? s.api.model : s.models?.[s.engine] ?? engine.defaultModel;
@@ -48,7 +64,7 @@ export class Generator {
   }
 
   // Study: the original MyLecture LectureGen pipeline, streamed scene by scene.
-  startLectureGen(req) {
+  async startLectureGen(req) {
     const { engine, model, settings: s } = this.engineConfig();
     const jobId = newId("job-");
     const lec = {
@@ -70,13 +86,17 @@ export class Generator {
       scenes: [],
     };
     const voiceEngine = this.tts.activeEngine();
+    lec.attachments = await prepareAttachments(req.attachments || [], lectures.dir(lec.id));
     const abort = new AbortController();
-    this.jobs.set(jobId, { id: jobId, lectureId: lec.id, abort });
+    const inbox = new Inbox();
+    this.jobs.set(jobId, { id: jobId, lectureId: lec.id, abort, inbox, lec });
     const emit = (type, payload = {}) => this.send("gen:event", { jobId, lectureId: lec.id, type, ...payload });
     const t0 = Date.now();
-    const logLines = [];
-    const log = (m) => logLines.push(`[${((Date.now() - t0) / 1000).toFixed(1)}s] ${m}`);
     const workspaceDir = lectures.dir(lec.id);
+    const log = (m) => {
+      appLog("info", "generation.step", { jobId, lectureId: lec.id, message: String(m).split("\n")[0] });
+      try { fs.appendFileSync(path.join(workspaceDir, "generation.log"), `[${((Date.now() - t0) / 1000).toFixed(1)}s] ${sanitizeLogValue(String(m))}\n`, "utf8"); } catch {}
+    };
     let reply = "";
     const history = [];
     if (lec.source === "study" && req.sessionId) {
@@ -87,7 +107,7 @@ export class Generator {
       }
     }
     emit("started", { lecture: { ...lec }, engine: engine.name, model, voiceEngine });
-    if (req.sessionId) attachToSession(req.sessionId, req.question, lec.id, req.mode);
+    if (req.sessionId) attachToSession(req.sessionId, req.question, lec.id, req.mode, lec.attachments);
     try {
       lectures.save(lec);
     } catch {}
@@ -107,6 +127,7 @@ export class Generator {
           tts: this.tts,
           voiceEngine,
           history: history.slice(-6),
+          inbox,
           signal: abort.signal,
           log,
           emit: (type, payload) => {
@@ -121,7 +142,7 @@ export class Generator {
               const sc = payload.scene;
               const index = lec.scenes.length;
               lec.scenes.push(sc);
-              const playable = { ...sc, src: sceneUrl(lec.id, sc.file), beats: sc.beats.map((b) => ({ ...b, url: audioUrl(b.audio) })) };
+              const playable = { ...sc, src: sceneUrl(lec.id, sc.playbackFile || sc.file), beats: sc.beats.map((b) => ({ ...b, url: audioUrl(b.audio) })) };
               sc.beats.forEach((b, bi) => b.text && emit("beat", { scene: index, index: bi, text: b.text }));
               emit("scene", { index, scene: playable, elapsed: Date.now() - t0 });
               try {
@@ -137,14 +158,12 @@ export class Generator {
         emit("generated", { elapsed: Date.now() - t0 });
       } catch (e) {
         const aborted = e?.aborted || abort.signal.aborted;
+        log(aborted ? "Stopped" : `Generation failed: ${e?.message || e}`);
         lec.status = lec.scenes.length ? "partial" : "failed";
         if (!lec.title) lec.title = req.question.slice(0, 60);
         emit("error", { message: aborted ? "Stopped" : String(e?.message || e), aborted });
       } finally {
         lec.duration = TL.build(lec.scenes).total;
-        try {
-          fs.writeFileSync(path.join(workspaceDir, "generation.log"), logLines.join("\n"), "utf8");
-        } catch {}
         if (lec.scenes.length) lectures.save(lec);
         else {
           try {
@@ -152,7 +171,8 @@ export class Generator {
           } catch {}
         }
         this.jobs.delete(jobId);
-        const playable = { ...lec, scenes: lec.scenes.map((sc) => ({ ...sc, src: sceneUrl(lec.id, sc.file), beats: sc.beats.map((b) => ({ ...b, url: audioUrl(b.audio) })) })) };
+        const ready = withAvailableNarration(lec, paths.tts);
+        const playable = { ...ready, scenes: ready.scenes.map((sc) => ({ ...sc, src: sceneUrl(lec.id, sc.playbackFile || sc.file), beats: sc.beats.map((b) => ({ ...b, url: audioUrl(b.audio) })) })) };
         emit("done", { lecture: playable, elapsed: Date.now() - t0, reply });
       }
     })();
@@ -162,7 +182,7 @@ export class Generator {
   // Create (CLI agents): one conversational turn with the Lecture Agent in a
   // project. The agent decides whether the message needs a new video, changes
   // to this one, or just a reply. New projects are created on the first message.
-  startAgentTurn(req) {
+  async startAgentTurn(req) {
     const { engine, model, settings: s } = this.engineConfig();
     const jobId = newId("job-");
     const message = String(req.message || "").trim();
@@ -185,24 +205,30 @@ export class Generator {
         scenes: [],
       };
     }
+    const attached = await prepareAttachments(req.attachments || [], lectures.dir(lec.id));
+    lec.attachments = [...(lec.attachments || []), ...attached];
     lec.chat ||= [];
     const history = lec.chat.slice(-12);
-    lec.chat.push({ role: "user", text: message, at: Date.now() });
+    lec.chat.push({ role: "user", text: message, attachments: attached.map(({ name, path, mime }) => ({ name, path, mime })), at: Date.now() });
     lec.status = "generating";
     lectures.save(lec);
     const abort = new AbortController();
-    this.jobs.set(jobId, { id: jobId, lectureId: lec.id, abort });
+    const inbox = new Inbox();
+    this.jobs.set(jobId, { id: jobId, lectureId: lec.id, abort, inbox, lec });
     const emit = (type, payload = {}) => this.send("gen:event", { jobId, lectureId: lec.id, type, ...payload });
     const t0 = Date.now();
-    const logLines = [];
-    const log = (m) => logLines.push(`[${((Date.now() - t0) / 1000).toFixed(1)}s] ${m}`);
     const workspaceDir = lectures.dir(lec.id);
+    const log = (m) => {
+      appLog("info", "generation.step", { jobId, lectureId: lec.id, message: String(m).split("\n")[0] });
+      try { fs.appendFileSync(path.join(workspaceDir, "generation.log"), `[${((Date.now() - t0) / 1000).toFixed(1)}s] ${sanitizeLogValue(String(m))}\n`, "utf8"); } catch {}
+    };
     const voiceEngine = this.tts.activeEngine();
     emit("started", { lecture: { ...lec }, engine: engine.name, model, voiceEngine });
 
     (async () => {
       let reply = "";
       try {
+        log(`Flow: agent · ${engine.name}${model ? ` · ${model}` : ""}`);
         const r = await runAgentTurn({
           lec,
           workspaceDir,
@@ -211,6 +237,7 @@ export class Generator {
           effort: s.codexEffort,
           tts: this.tts,
           voiceEngine,
+          inbox,
           signal: abort.signal,
           log,
           message,
@@ -220,7 +247,7 @@ export class Generator {
           emit: (type, payload) => {
             if (type === "scene") {
               const sc = payload.scene;
-              emit("scene", { index: payload.index, scene: { ...sc, src: sceneUrl(lec.id, sc.file), beats: sc.beats.map((b) => ({ ...b, url: audioUrl(b.audio) })) } });
+              emit("scene", { index: payload.index, scene: { ...sc, src: sceneUrl(lec.id, sc.playbackFile || sc.file), beats: sc.beats.map((b) => ({ ...b, url: audioUrl(b.audio) })) } });
             } else if (type === "title") {
               lec.title = payload.title;
               emit("title", payload);
@@ -234,18 +261,19 @@ export class Generator {
         lec.status = r.failures.length ? "partial" : "ready";
       } catch (e) {
         const aborted = e?.aborted || abort.signal.aborted;
+        log(aborted ? "Stopped" : `Generation failed: ${e?.message || e}`);
         lec.status = lec.scenes.length ? "ready" : "failed";
-        emit("error", { message: aborted ? "Stopped" : String(e?.message || e), aborted });
+        const message = aborted ? "Stopped" : String(e?.message || e);
+        lec.chat.push({ role: "error", text: message, at: Date.now() });
+        emit("error", { message, aborted });
       } finally {
         if (!lec.title) lec.title = (lec.question || message).slice(0, 60);
         if (reply) lec.chat.push({ role: "agent", text: reply, at: Date.now() });
         lec.duration = TL.build(lec.scenes).total;
-        try {
-          fs.appendFileSync(path.join(workspaceDir, "generation.log"), logLines.join("\n") + "\n", "utf8");
-        } catch {}
         lectures.save(lec);
         this.jobs.delete(jobId);
-        const playable = { ...lec, scenes: lec.scenes.map((sc) => ({ ...sc, src: sceneUrl(lec.id, sc.file), beats: sc.beats.map((b) => ({ ...b, url: audioUrl(b.audio) })) })) };
+        const ready = withAvailableNarration(lec, paths.tts);
+        const playable = { ...ready, scenes: ready.scenes.map((sc) => ({ ...sc, src: sceneUrl(lec.id, sc.playbackFile || sc.file), beats: sc.beats.map((b) => ({ ...b, url: audioUrl(b.audio) })) })) };
         emit("done", { lecture: playable, elapsed: Date.now() - t0, reply });
       }
     })();
@@ -443,10 +471,10 @@ export class Generator {
   }
 }
 
-function attachToSession(sessionId, question, lectureId, mode) {
+function attachToSession(sessionId, question, lectureId, mode, attachments = []) {
   let s = sessions.get(sessionId);
   if (!s) s = { id: sessionId, title: question.slice(0, 70), createdAt: new Date().toISOString(), messages: [] };
-  s.messages.push({ role: "user", text: question, mode, at: new Date().toISOString() });
+  s.messages.push({ role: "user", text: question, mode, attachments: attachments.map(({ name, path, mime }) => ({ name, path, mime })), at: new Date().toISOString() });
   s.messages.push({ role: "lecture", lectureId, at: new Date().toISOString() });
   sessions.save(s);
 }

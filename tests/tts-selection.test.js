@@ -25,6 +25,7 @@ const hooks = registerHooks({
       }
       export const icon = name => name;
       export const toast = () => {};
+      export const confirmBox = async () => false;
       export const modal = () => ({ el: { querySelectorAll: () => [] }, close() {} });
       export const bus = {};`,
     };
@@ -110,4 +111,26 @@ test("Settings displays Kokoro for legacy system selections and retains honest l
   assert.equal(view.ttsMsg.textContent, "Loading...");
   view._ttsStatus({ kokoro: { state: "error", message: "Missing model" } });
   assert.match(JSON.stringify(view.ttsMsg.children), /Error: Missing model/);
+});
+
+test("synthesis returns the exact engine input on fresh, concurrent and cached requests", async t => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "mylecture-tts-spoken-"));
+  t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
+  const tts = service({ voiceEngine: "kokoro" }, dir);
+  tts.kokoro.state = "ready";
+  const submitted = [];
+  let finish;
+  tts._kokoroSynth = async text => {
+    submitted.push(text);
+    await new Promise(resolve => { finish = resolve; });
+    return { pcm: new Int16Array(2400).fill(500), sampleRate: 24000 };
+  };
+  const first = tts.synth("**Area** → π × r^2");
+  const concurrent = tts.synth("**Area** → π × r^2");
+  finish();
+  const results = await Promise.all([first, concurrent]);
+  const cached = await tts.synth("**Area** → π × r^2");
+  assert.deepEqual(submitted, ["Area to pi times r squared"]);
+  for (const result of [...results, cached]) assert.equal(result.spokenText, submitted[0]);
+  assert.equal(cached.key, results[0].key);
 });

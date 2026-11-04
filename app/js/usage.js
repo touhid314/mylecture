@@ -1,5 +1,12 @@
 import { h, icon, bus } from "./ui.js";
 
+const subscriptionProviders = new Set(["antigravity", "codex", "claude-code"]);
+const usageKey = settings => {
+  const id = settings.engine;
+  return JSON.stringify([id, settings.models?.[id] || "", settings.accountRevision?.[id] || 0,
+    settings.connected?.[id]]);
+};
+
 export class UsagePanel {
   constructor({ state, compact = false }) {
     this.state = state;
@@ -26,16 +33,32 @@ export class UsagePanel {
   async refresh() {
     const id = this.state.settings.engine;
     const model = this.state.settings.models?.[id] || "";
-    const key = id + ":" + model;
+    const key = usageKey(this.state.settings);
+    const unavailable = !id || (subscriptionProviders.has(id) && this.state.settings.connected?.[id] === false);
+    if (unavailable) {
+      this.request = (this.request || 0) + 1;
+      this.pendingKey = null;
+      this.loadedKey = null;
+      this.refreshButton.disabled = false;
+      const message = id ? "Connect this account to see its limits." : "Select a provider to see account limits.";
+      this.summary.textContent = this.compact ? "Limits —" : "Usage unavailable";
+      this.summary.title = message;
+      this.summary.removeAttribute("aria-label");
+      this.body.replaceChildren(h("p", { class: "muted" }, message));
+      return;
+    }
     if (this.pendingKey === key) return;
     const request = this.request = (this.request || 0) + 1;
     this.pendingKey = key;
     this.refreshButton.disabled = true;
-    if (this.loadedKey !== key) this.summary.textContent = this.compact ? "Limits …" : "Usage: checking...";
+    this.loadedKey = null;
+    this.summary.textContent = this.compact ? "Limits …" : "Usage: checking...";
+    this.summary.title = "Checking account limits...";
+    this.summary.removeAttribute("aria-label");
     this.body.replaceChildren(h("p", { class: "muted" }, "Checking account limits..."));
     try {
       const result = await window.ml.engines.usage(id);
-      if (request !== this.request) return;
+      if (request !== this.request || key !== usageKey(this.state.settings)) return;
       if (!result.available || !result.groups.length) {
         this.summary.textContent = this.compact ? "Limits —" : "Usage unavailable";
         this.summary.title = result.message || "Account limits unavailable";
@@ -63,7 +86,7 @@ export class UsagePanel {
         h("div", { class: "small muted" }, `Updated ${new Date(result.checkedAt).toLocaleTimeString()} · Refreshes every minute`),
       );
     } catch {
-      if (request !== this.request) return;
+      if (request !== this.request || key !== usageKey(this.state.settings)) return;
       this.summary.textContent = this.compact ? "Limits —" : "Usage unavailable";
       this.body.replaceChildren(h("p", { class: "muted" }, "Could not load usage limits. Try Refresh."));
     } finally {

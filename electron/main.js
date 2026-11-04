@@ -6,24 +6,41 @@ import { execFileSync } from "node:child_process";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { createEngines, API_PROVIDERS, OFFERED_API_PROVIDERS, verifyApiProvider } from "./engines/index.js";
 import { createUsageService } from "./usage.js";
+import { accountRemovalPatch, accountRevisionPatch } from "./account-connections.js";
 import { listRenderedVideos } from "./video-library.js";
 import { TTSService, KOKORO_VOICES, OMNIVOICE_VOICES } from "./tts/index.js";
 import { Generator, audioUrl, sceneUrl } from "./generator.js";
-import { IdeService } from "./ide.js";
+import { IdeService, hydrateProject } from "./ide.js";
 import { SERVICES, connectService } from "./connect.js";
 import { getSettings, saveSettings, getSecret, setSecret, hasSecret, lectures, sessions, paths, newId } from "./store.js";
 import { exportMp4, exportStandaloneHtml, exportContractBundle, captions, safeName } from "./exporter.js";
+import { sendLaunchPing, launchPingSuppressed } from "./telemetry.js";
+import { createUpdater } from "./updater.js";
+import { configureLogger, log, getLogInfo, readLogTail, onLogEntry, registerLogSecret } from "./logger.js";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const ROOT = path.join(here, "..");
 const APP_DIR = path.join(ROOT, "app");
 const NM = path.join(ROOT, "node_modules");
 const DEV = process.argv.includes("--dev");
+// MyLecture's server (launch counts + updates): ../mylecture-app-admin/server.
+let serverUrl = "";
+try {
+  serverUrl = JSON.parse(fs.readFileSync(path.join(here, "server-config.json"), "utf8")).url || "";
+} catch {}
+const telemetryEndpoint = process.env.MYLECTURE_TELEMETRY_URL ?? serverUrl;
+const updateFeed = process.env.MYLECTURE_UPDATE_URL || (serverUrl && `${serverUrl}/updates`);
+const telemetrySuppressed = launchPingSuppressed({ isPackaged: app.isPackaged, argv: process.argv, env: process.env });
 
 app.setName("MyLecture");
 // MYLECTURE_PROFILE=<folder>: run with a separate profile (settings, projects,
 // voices, videos), e.g. to see the app exactly as a fresh install does.
 if (process.env.MYLECTURE_PROFILE) app.setPath("userData", path.resolve(process.env.MYLECTURE_PROFILE));
+configureLogger({ directory: path.join(app.getPath("userData"), "logs") });
+log("info", "app.start", { version: app.getVersion(), platform: process.platform, arch: process.arch, packaged: app.isPackaged, dev: DEV, testProfile: !!process.env.MYLECTURE_PROFILE });
+process.on("uncaughtExceptionMonitor", error => log("error", "process.uncaughtException", { error }));
+process.on("unhandledRejection", reason => log("error", "process.unhandledRejection", { error: reason instanceof Error ? reason : String(reason) }));
+app.on("child-process-gone", (_event, details) => log("error", "process.childGone", details));
 if (process.platform === "win32") app.setAppUserModelId("ai.mylecture.app");
 fixPathForGuiLaunch();
 
@@ -51,10 +68,32 @@ protocol.registerSchemesAsPrivileged([
 let win = null;
 let engines, tts, generator, ide;
 const exportJobs = new Map();
+let updater;
+let lastTtsLogState = "", lastTtsLogAt = 0;
 
 function send(channel, payload) {
+  if (channel === "gen:event" && !["activity", "answer", "progress", "script", "beat", "delta"].includes(payload?.type)) {
+    log(payload?.type === "error" ? "error" : "info", `generation.${payload?.type || "event"}`, {
+      jobId: payload?.jobId, lectureId: payload?.lectureId, index: payload?.index,
+      message: payload?.message, aborted: payload?.aborted,
+      engine: payload?.engine, model: payload?.model, elapsed: payload?.elapsed,
+      sceneCount: payload?.lecture?.scenes?.length, status: payload?.lecture?.status,
+    });
+  }
+  if (channel === "ide:job") log("info", "job.state", payload);
+  if (channel === "tts:status") {
+    const engine = getSettings().voiceEngine;
+    const state = `${engine}:${payload?.kokoro?.state}:${payload?.omnivoice?.state}`;
+    if (state !== lastTtsLogState || Date.now() - lastTtsLogAt >= 5000) {
+      lastTtsLogState = state;
+      lastTtsLogAt = Date.now();
+      log(/error/.test(state) ? "error" : "info", "tts.status", { engine, kokoro: payload?.kokoro?.state, kokoroMessage: payload?.kokoro?.message, omnivoice: payload?.omnivoice?.state, omnivoiceMessage: payload?.omnivoice?.message });
+    }
+  }
+  if (channel === "export:progress" && ["done", "error"].includes(payload?.phase)) log(payload.phase === "error" ? "error" : "info", "export." + payload.phase, { jobId: payload.jobId, lectureId: payload.lectureId, kind: payload.kind, message: payload.message });
   if (win && !win.isDestroyed()) win.webContents.send(channel, payload);
 }
+onLogEntry(entry => send("logs:entry", entry));
 
 // mylecture://app/... -> local files (app UI, vendor libs, cached audio).
 function resolveAppUrl(u) {
@@ -103,6 +142,14 @@ function createWindow() {
     },
   });
   Menu.setApplicationMenu(null);
+  win.webContents.on("did-finish-load", () => log("info", "renderer.loaded"));
+  win.webContents.on("did-fail-load", (_event, errorCode, errorDescription, _url, isMainFrame) => log("error", "renderer.loadFailed", { errorCode, errorDescription, isMainFrame }));
+  win.webContents.on("render-process-gone", (_event, details) => log("error", "renderer.gone", details));
+  win.webContents.on("console-message", details => {
+    if (details.level === "error") log("error", "renderer.consoleError", { message: details.message, line: details.lineNumber, source: details.sourceId });
+  });
+  win.on("unresponsive", () => log("warn", "renderer.unresponsive"));
+  win.on("responsive", () => log("info", "renderer.responsive"));
   win.loadURL("mylecture://app/index.html");
   win.webContents.setWindowOpenHandler(({ url }) => {
     if (/^https?:/.test(url)) shell.openExternal(url);
@@ -129,26 +176,52 @@ function apiConfig() {
 }
 
 function hydrate(lec) {
-  // Attach playable URLs for the renderer.
-  if (!lec) return lec;
-  for (const sc of lec.scenes || []) {
-    if (sc.kind === "html" && sc.file) sc.src = sceneUrl(lec.id, sc.file);
-    for (const b of sc.beats || []) b.url = audioUrl(b.audio);
-  }
-  return lec;
+  return hydrateProject(lec);
 }
 
 function registerIpc() {
   const readUsage = createUsageService(engines);
-  ipcMain.handle("engines:usage", (_event, id) => readUsage(id || getSettings().engine));
-  const h = (name, fn) => ipcMain.handle(name, async (_e, ...args) => fn(...args));
+  const statusCache = new Map();
+  const modelRequests = new Map();
+  const invalidateAccount = id => { statusCache.delete(id); modelRequests.delete(id); readUsage.invalidate(id); };
+  ipcMain.handle("engines:usage", async (_event, id) => {
+    const s = getSettings();
+    id ||= s.engine;
+    if (!id || (id !== "api" && !s.connected?.[id])) return { available: false, groups: [], message: "Connect an account to see its limits." };
+    const revision = s.accountRevision?.[id] ?? 0;
+    const result = await readUsage(id);
+    if (revision !== (getSettings().accountRevision?.[id] ?? 0) || (id !== "api" && !getSettings().connected?.[id])) return { available: false, groups: [], message: "Account changed. Refresh to see its limits." };
+    if (id === "codex" && s.accountChangedAt?.[id] && (!result.measuredAt || Date.parse(result.measuredAt) < s.accountChangedAt[id])) return { available: false, groups: [], message: "Make a video with this GPT account, then refresh its limits." };
+    return result;
+  });
+  const h = (name, fn) => ipcMain.handle(name, async (_e, ...args) => {
+    if (name.startsWith("logs:")) return fn(...args);
+    const started = Date.now();
+    log("info", "ipc.start", { operation: name });
+    try {
+      const result = await fn(...args);
+      log("info", "ipc.done", { operation: name, durationMs: Date.now() - started });
+      return result;
+    } catch (error) {
+      log("error", "ipc.failed", { operation: name, durationMs: Date.now() - started, error });
+      throw error;
+    }
+  });
+  h("logs:info", () => getLogInfo());
+  h("logs:read", () => readLogTail());
+  h("logs:openFolder", () => shell.openPath(getLogInfo().directory));
+  ipcMain.on("logs:renderer", (_event, entry) => {
+    if (!entry || !["error", "unhandledrejection"].includes(entry.kind)) return;
+    log("error", "renderer." + entry.kind, { message: String(entry.message || "").slice(0, 2000), stack: String(entry.stack || "").slice(0, 4000), line: entry.line });
+  });
 
-  h("app:info", () => ({ version: app.getVersion(), platform: process.platform, userData: app.getPath("userData"), exportsDir: paths.exports, dev: DEV, styles: lecturegenCatalog() }));
+  h("app:info", () => ({ version: app.getVersion(), platform: process.platform, userData: app.getPath("userData"), exportsDir: paths.exports, dev: DEV, styles: lecturegenCatalog()}));
 
   // create tab (local IDE)
   h("ide:list", () => ide.list());
   h("ide:get", (id) => ide.get(id));
   h("ide:readFile", (id, name) => ide.readFile(id, name));
+  h("ide:narration", (id) => ide.narration(id));
   h("ide:remove", (id) => ide.remove(id));
   h("ide:generate", (req) => ide.generate(req, generator));
   h("ide:chat", (req) => ide.chat(req, generator));
@@ -171,6 +244,7 @@ function registerIpc() {
     return s;
   });
   h("secret:set", (name, value) => {
+    registerLogSecret(value);
     setSecret(name, value);
     return true;
   });
@@ -184,12 +258,50 @@ function registerIpc() {
   h("connect:services", () => SERVICES);
   // "Use with API key": check a key for real before it is saved.
   h("api:verify", ({ provider, apiKey, baseUrl } = {}) => verifyApiProvider({ provider, apiKey: apiKey || getSecret(`api:${provider}`), baseUrl }));
-  h("connect:run", (id, action) => connectService(id, action));
+  h("connect:run", async (id, action, options = {}) => {
+    log("info", "account.action", { provider: id, action });
+    if (!["remove-account", "switch-account", "complete-account", "connect-account"].includes(action)) {
+      if (action === "login") invalidateAccount(id);
+      return connectService(id, action);
+    }
+    if (!Object.hasOwn(SERVICES, id)) throw new Error("Unknown account provider");
+    if (generator.jobs.size || ide.job || exportJobs.size) throw new Error("Stop the current job before changing accounts.");
+    if (action === "complete-account" || action === "connect-account") {
+      const s = getSettings();
+      const switching = action === "complete-account";
+      if ((switching ? !s.accountSwitch?.[id] : !!s.accountSwitch?.[id]) || options.revision !== (s.accountRevision?.[id] ?? 0)) throw new Error("This sign-in was cancelled. Try again.");
+      const revision = s.accountRevision?.[id] ?? 0;
+      const st = await engines.get(id).status();
+      if ((getSettings().accountRevision?.[id] ?? 0) !== revision || (switching ? !getSettings().accountSwitch?.[id] : !!getSettings().accountSwitch?.[id])) throw new Error("This sign-in was cancelled.");
+      if (!st.ready || (switching && (options.email || "") !== (st.account?.email || ""))) throw new Error("The signed-in account changed. Check the account shown and try again.");
+      if (options.automatic && (!s.accountSwitchFrom?.[id] || s.accountSwitchFrom[id].toLowerCase() === (st.account?.email || "").toLowerCase())) throw new Error("Finish signing in with the new account, or select Use this account.");
+      invalidateAccount(id);
+      return saveSettings({ connected: { [id]: true }, accountSwitch: { [id]: false }, accountSwitchFrom: { [id]: "" }, accountChangedAt: { [id]: Date.now() }, engine: id, ...accountRevisionPatch(getSettings(), id) });
+    }
+    let previousEmail = "";
+    if (action === "switch-account") {
+      const revision = getSettings().accountRevision?.[id] ?? 0;
+      const previous = await engines.get(id).status();
+      if (revision !== (getSettings().accountRevision?.[id] ?? 0)) throw new Error("The account changed. Try again.");
+      previousEmail = previous.account?.email || "";
+    }
+    invalidateAccount(id);
+    const s = saveSettings({ ...accountRemovalPatch(getSettings(), id), accountSwitchFrom: { [id]: previousEmail }, accountChangedAt: { [id]: Date.now() }, accountSwitch: { [id]: action === "switch-account" } });
+    if (action === "switch-account") {
+      try { connectService(id, action); }
+      catch (error) { saveSettings({ accountSwitch: { [id]: false } }); throw error; }
+    }
+    return s;
+  });
   // Cached briefly: the connect cards poll, and the checks start the provider tools.
-  const statusCache = new Map();
   h("engines:status", async (id, { fresh = false } = {}) => {
+    if (!id || !engines.list.some(e => e.id === id)) return { installed: false, ready: false, message: "Connect an account in Settings." };
+    const revision = getSettings().accountRevision?.[id] ?? 0;
     const hit = statusCache.get(id);
-    if (!fresh && hit && Date.now() - hit.at < (hit.value?.ready ? 60000 : 8000)) return hit.promise;
+    if (!fresh && hit && Date.now() - hit.at < (hit.value?.ready ? 60000 : 8000)) {
+      const result = await hit.promise;
+      return revision === (getSettings().accountRevision?.[id] ?? 0) ? result : { installed: true, ready: false, message: "Account changed. Refresh to check sign-in." };
+    }
     const promise = engines
       .get(id)
       .status()
@@ -199,16 +311,21 @@ function registerIpc() {
       const entry = statusCache.get(id);
       if (entry?.promise === promise) entry.value = value;
     });
-    return promise;
+    const result = await promise;
+    log("info", "account.status", { provider: id, ready: result.ready, installed: result.installed, hasEmail: !!result.account?.email, message: result.ready ? undefined : result.message });
+    return revision === (getSettings().accountRevision?.[id] ?? 0) ? result : { installed: true, ready: false, message: "Account changed. Refresh to check sign-in." };
   });
-  const modelRequests = new Map();
   h("engines:models", async (id) => {
     const s = getSettings();
     const key = id === "api" ? JSON.stringify([id, s.api.provider, s.api.baseUrl]) : id;
     if (modelRequests.has(key)) return modelRequests.get(key);
     const selected = engines.get(id);
     const engine = selected.snapshot?.() || selected;
-    const request = engine.models().finally(() => modelRequests.delete(key));
+    const revision = s.accountRevision?.[id] ?? 0;
+    const request = engine.models().then(models => {
+      if (revision !== (getSettings().accountRevision?.[id] ?? 0)) throw new Error("Account changed. Refresh the model list.");
+      return models;
+    }).finally(() => { if (modelRequests.get(key) === request) modelRequests.delete(key); });
     modelRequests.set(key, request);
     return request;
   });
@@ -353,6 +470,8 @@ function registerIpc() {
   // shell helpers
   h("shell:showItem", (p) => shell.showItemInFolder(p));
   h("shell:openPath", (p) => shell.openPath(p));
+  h("update:state", () => updater?.state || { status: "idle", mode: "off" });
+  h("update:install", (options) => updater?.install({ force: !!options?.force }) || { ok: false });
   h("shell:openExternal", (url) => (/^https?:\/\//.test(url) ? shell.openExternal(url) : null));
   h("shell:openExports", () => {
     fs.mkdirSync(paths.exports, { recursive: true });
@@ -391,6 +510,17 @@ app.whenReady().then(() => {
   ide = new IdeService({ engines, tts, send });
   registerIpc();
   createWindow();
+  updater = createUpdater({
+    app, shell, send, log, feedUrl: updateFeed,
+    isBusy: () => !!(generator.jobs.size || ide.job || exportJobs.size),
+  });
+  updater.start();
+  void sendLaunchPing({
+    endpoint: telemetryEndpoint,
+    version: app.getVersion(),
+    platform: process.platform,
+    enabled: !telemetrySuppressed,
+  });
 
   // Warm up voices in the background so the first answer speaks immediately.
   tts.sapi.start().catch(() => {});
@@ -406,6 +536,7 @@ app.on("window-all-closed", () => {
   tts?.stop();
   app.quit();
 });
+app.on("before-quit", () => log("info", "app.quit"));
 
 // --smoke-test: the packaged app starts, the UI boots into Create, then quits.
 // CI reads the result from MYLECTURE_SMOKE_OUT (GUI apps have no console on Windows).

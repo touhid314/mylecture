@@ -1,4 +1,6 @@
 const { contextBridge, ipcRenderer } = require("electron");
+window.addEventListener("error", event => ipcRenderer.send("logs:renderer", { kind: "error", message: String(event.message || "Renderer error"), stack: String(event.error?.stack || ""), line: event.lineno }));
+window.addEventListener("unhandledrejection", event => ipcRenderer.send("logs:renderer", { kind: "unhandledrejection", message: String(event.reason?.message || event.reason || "Unhandled rejection"), stack: String(event.reason?.stack || "") }));
 
 const invoke = (ch, ...a) => ipcRenderer.invoke(ch, ...a);
 const on = (ch, fn) => {
@@ -8,7 +10,19 @@ const on = (ch, fn) => {
 };
 
 contextBridge.exposeInMainWorld("ml", {
+  logs: {
+    info: () => invoke("logs:info"),
+    read: () => invoke("logs:read"),
+    openFolder: () => invoke("logs:openFolder"),
+    onEntry: fn => on("logs:entry", fn),
+    reportError: entry => ipcRenderer.send("logs:renderer", entry),
+  },
   info: () => invoke("app:info"),
+  updates: {
+    state: () => invoke("update:state"),
+    install: (options) => invoke("update:install", options),
+    onState: (fn) => on("update:state", fn),
+  },
   videos: { list: () => invoke("videos:list") },
   settings: { get: () => invoke("settings:get"), set: (p) => invoke("settings:set", p), setSecret: (n, v) => invoke("secret:set", n, v) },
   api: {
@@ -16,7 +30,7 @@ contextBridge.exposeInMainWorld("ml", {
   },
   connect: {
     services: () => invoke("connect:services"),
-    run: (id, action) => invoke("connect:run", id, action),
+    run: (id, action, options) => invoke("connect:run", id, action, options),
   },
   engines: {
     list: () => invoke("engines:list"),
@@ -71,6 +85,7 @@ contextBridge.exposeInMainWorld("ml", {
     list: () => invoke("ide:list"),
     get: (id) => invoke("ide:get", id),
     readFile: (id, name) => invoke("ide:readFile", id, name),
+    narration: (id) => invoke("ide:narration", id),
     remove: (id) => invoke("ide:remove", id),
     generate: (req) => invoke("ide:generate", req),
     chat: (req) => invoke("ide:chat", req),

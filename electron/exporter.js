@@ -150,7 +150,7 @@ export async function exportMp4(lec, { ttsFile, outDir, fps = 30, captionsOn = f
       await write(img.toBitmap());
       if (i % 10 === 0) {
         const el = (Date.now() - started) / 1000;
-        onProgress?.({ phase: "frames", progress: i / frames, eta: i ? (el / i) * (frames - i) : 0 });
+        onProgress?.({ phase: "frames", progress: i / frames, eta: i ? (el / i) * (frames - i) : null, frame: i, frames, speed: el ? i / el : 0, fps, width: OW, height: OH });
       }
     }
     ff.stdin.end();

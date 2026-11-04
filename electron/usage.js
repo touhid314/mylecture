@@ -123,22 +123,27 @@ export function parseAntigravityUsage(result) {
 
 export function createUsageService(engines, capture = runCapture, options = {}) {
   const pending = new Map();
+  const generations = new Map();
   const codexHome = options.codexHome ?? process.env.CODEX_HOME ?? path.join(os.homedir(), ".codex");
   const claudeHome = options.claudeHome ?? process.env.CLAUDE_CONFIG_DIR ?? path.join(os.homedir(), ".claude");
   const fetchUsage = options.fetch ?? globalThis.fetch;
   let claudeCached, claudeRefreshAt = 0;
-  return function usage(id) {
+  function usage(id) {
     if (pending.has(id)) return pending.get(id);
+    const generation = generations.get(id) || 0;
     const request = (async () => {
       if (!["antigravity", "codex", "claude-code"].includes(id)) return unavailable("Account limits are not available for API keys. Check your provider's usage page.");
       try {
         if (id === "codex") return await codexUsage(codexHome);
         if (id === "claude-code") {
           if (claudeCached && Date.now() < claudeRefreshAt) return claudeCached;
-          claudeCached = await claudeUsage(claudeHome, fetchUsage);
-          claudeRefreshAt = Date.now() + (claudeCached.message?.includes("HTTP 429") ? 600000
-            : claudeCached.available || claudeCached.message?.includes("HTTP") ? 120000 : 0);
-          return claudeCached;
+          const result = await claudeUsage(claudeHome, fetchUsage);
+          if ((generations.get(id) || 0) === generation) {
+            claudeCached = result;
+            claudeRefreshAt = Date.now() + (result.message?.includes("HTTP 429") ? 600000
+              : result.available || result.message?.includes("HTTP") ? 120000 : 0);
+          }
+          return result;
         }
         const exe = engines.get(id).exe();
         if (!exe) throw new Error("Gemini is not connected. Connect it to see account limits.");
@@ -152,7 +157,13 @@ export function createUsageService(engines, capture = runCapture, options = {}) 
       }
     })();
     pending.set(id, request);
-    request.finally(() => pending.delete(id));
+    request.finally(() => { if (pending.get(id) === request) pending.delete(id); });
     return request;
+  }
+  usage.invalidate = id => {
+    generations.set(id, (generations.get(id) || 0) + 1);
+    pending.delete(id);
+    if (id === "claude-code") { claudeCached = undefined; claudeRefreshAt = 0; }
   };
+  return usage;
 }
