@@ -30,7 +30,9 @@ into the app. Users are only offered a **higher** version than they have; to rol
 a new higher version.
 
 Pushing the tag also runs `.github/workflows/release.yml`, which rebuilds on a clean Windows
-machine, launches the packaged app, and keeps a draft GitHub Release as an archive.
+machine, launches the packaged app, and publishes a GitHub Release with the installers.
+A GitHub Release alone does not reach users: only `release:publish` updates installed copies
+and the website download link.
 
 ## What users see
 
