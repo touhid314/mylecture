@@ -1365,7 +1365,6 @@ export class CreateView {
         "dl",
         { class: "ide-info" },
         ...row("Title", lec.title || ""),
-        ...row("Request", lec.question || ""),
         ...row("Length", `${fmtTime(lec.duration || 0)} (requested ${lec.length || "-"})`),
         ...row("Aspect", lec.aspect || "16:9"),
         ...row("Theme", lec.theme || "default"),
