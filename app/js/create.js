@@ -1371,12 +1371,36 @@ export class CreateView {
         ...row("Theme", lec.theme || "default"),
         ...row("Teaching style", lec.teachingStyle || "default"),
         ...row("Scenes", String((lec.scenes || []).length)),
-        ...row("Engine", `${lec.engine || ""} ${lec.model || ""}`),
+        ...row("Engine", engineInfo(lec)),
+        ...row("Harness", harnessInfo(lec)),
         ...row("Created", fmtDate(lec.createdAt)),
       ),
       actions: [{ label: "Close" }],
     });
   }
+}
+
+// Scenes from agents follow the MyLecture HTML contract (v0.2,
+// electron/lecturegen/resources/contracts/html-input-contract.md).
+const CONTRACT_VERSION = "0.2";
+function engineInfo(lec) {
+  return lec.format === "lecturegen-1" ? `MyLecture contract v${CONTRACT_VERSION}` : "MyLecture stream format";
+}
+const HARNESS = { "claude-code": "Claude Code", codex: "Codex", antigravity: "Antigravity", api: "API" };
+// "claude-opus-5-5" -> "Opus 5.5", "gpt-6.1-sol" -> "GPT-6.1-sol", "opus" -> "Opus".
+export function prettyModel(id) {
+  id = String(id || "").replace(/\[.*?\]$/, "").trim();
+  if (!id) return "";
+  const claude = /^claude-([a-z]+)-(\d+)(?:-(\d{1,2}))?(?:-\d{8})?$/i.exec(id);
+  if (claude) return `${cap(claude[1])} ${claude[2]}${claude[3] ? "." + claude[3] : ""}`;
+  if (/^gpt-/i.test(id)) return "GPT-" + id.slice(4);
+  if (/^gemini-/i.test(id)) return id.split("-").map(cap).join(" ");
+  return /^[a-z]+$/i.test(id) ? cap(id) : id;
+}
+function harnessInfo(lec) {
+  const harness = HARNESS[lec.engine] || lec.engine || "";
+  const model = prettyModel(lec.modelUsed || lec.model) || "default model";
+  return harness ? `${harness} ${model}` : model;
 }
 
 function cap(s) {

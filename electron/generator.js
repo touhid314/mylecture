@@ -152,6 +152,7 @@ export class Generator {
           },
         });
         if (!lec.title) lec.title = result.title || req.question.slice(0, 60);
+        if (result.model) lec.modelUsed = result.model;
         reply = result.reply || "";
         if (!lec.scenes.length) throw new Error(result.failures.length ? `No scene passed validation. ${result.failures[0]}` : "The pipeline produced no scenes.");
         lec.status = result.failures.length ? "partial" : "ready";
@@ -256,6 +257,9 @@ export class Generator {
         });
         lec.scenes = r.scenes;
         if (r.title) lec.title = r.title;
+        if (r.model) lec.modelUsed = r.model;
+        lec.engine = engine.id;
+        lec.model = model;
         reply = r.reply || "";
         if (r.failures.length) reply += `${reply ? "\n\n" : ""}_${r.failures.length} scene${r.failures.length > 1 ? "s" : ""} could not pass the checks and ${r.failures.length > 1 ? "were" : "was"} left out._`;
         lec.status = r.failures.length ? "partial" : "ready";
