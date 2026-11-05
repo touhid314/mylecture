@@ -1387,7 +1387,7 @@ function engineInfo(lec) {
   return lec.format === "lecturegen-1" ? `MyLecture contract v${CONTRACT_VERSION}` : "MyLecture stream format";
 }
 const HARNESS = { "claude-code": "Claude Code", codex: "Codex", antigravity: "Antigravity", api: "API" };
-// "claude-opus-5-5" -> "Opus 5.5", "gpt-6.1-sol" -> "GPT-6.1-sol", "opus" -> "Opus".
+// The model as picked: "opus" -> "Opus", "claude-opus-5-5" -> "Opus 5.5", "gpt-6.1-sol" -> "GPT-6.1-sol".
 export function prettyModel(id) {
   id = String(id || "").replace(/\[.*?\]$/, "").trim();
   if (!id) return "";
@@ -1399,7 +1399,7 @@ export function prettyModel(id) {
 }
 function harnessInfo(lec) {
   const harness = HARNESS[lec.engine] || lec.engine || "";
-  const model = prettyModel(lec.modelUsed || lec.model) || "default model";
+  const model = prettyModel(lec.model) || "default model";
   return harness ? `${harness} ${model}` : model;
 }
 

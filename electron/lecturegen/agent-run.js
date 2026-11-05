@@ -182,7 +182,7 @@ function sceneTitle(html, n) {
 // `activity` collects the agent's words and tool steps; the return value is
 // the agent's last message (its final answer).
 const WORKER_SYSTEM = "You are a skilled educator, script writer and creative coder working on a MyLecture video project. Work autonomously with all your tools (shell, web, downloads, files); never ask questions.";
-export async function runAgent({ engine, model, effort, signal, workspace, prompt, onStatus, onModel, activity, inbox, system = WORKER_SYSTEM }) {
+export async function runAgent({ engine, model, effort, signal, workspace, prompt, onStatus, activity, inbox, system = WORKER_SYSTEM }) {
   let text = "";
   let phase = "Working…";
   if (inbox) inbox.onDelivered = (t) => activity?.user(t);
@@ -194,7 +194,6 @@ export async function runAgent({ engine, model, effort, signal, workspace, promp
     effort,
     signal,
     workspace,
-    onModel,
     onDelta: (d) => { text += d; phase = "Generating…"; },
     onStatus: status => {
       if (!IDLE_STATUS.test(status)) {
@@ -237,7 +236,6 @@ export async function runAgentLecture({ lec, workspaceDir, engine, model, effort
   const failures = [];
   let title = "";
   let description = "";
-  let modelUsed = "";
   const seen = { answer: null, script: null, meta: null };
   const emitted = new Set();
   const failed = new Map(); // file -> { html, validation }
@@ -336,7 +334,6 @@ export async function runAgentLecture({ lec, workspaceDir, engine, model, effort
       signal,
       workspace: workspaceDir,
       prompt: agentTaskPrompt({ question: lec.question, length: lec.length, aspect, theme: lec.theme, teachingStyle: lec.teachingStyle, study, history, assets: bundledAssets(lg, workspaceDir, log) }) + "\n\n" + attachmentContext(lec.attachments),
-      onModel: (m) => { modelUsed = m; },
       activity,
       onStatus: (st) => {
         log?.(st);
@@ -371,7 +368,7 @@ export async function runAgentLecture({ lec, workspaceDir, engine, model, effort
     if (study && !seen.answer) emit("answer", { text: reply, done: true });
     readMeta();
     activity.flush();
-    return { title, description, failures, reply, model: modelUsed, activity: activity.items };
+    return { title, description, failures, reply, activity: activity.items };
   } finally {
     if (timer) clearInterval(timer);
     await scanning.catch(() => {});
@@ -472,7 +469,6 @@ export async function runAgentTurn({ lec, workspaceDir, engine, model, effort, t
   let agentDone = false;
   let title = "";
   let metaRaw = null;
-  let modelUsed = "";
   const browser = await lg.chromium.launch();
 
   const readMeta = () => {
@@ -550,7 +546,6 @@ export async function runAgentTurn({ lec, workspaceDir, engine, model, effort, t
       workspace: workspaceDir,
       system: LECTURE_AGENT_SYSTEM,
       prompt: agentTurnPrompt({ message, files, sceneFile, history, aspect, length: settings.length, theme: settings.theme, teachingStyle: settings.teachingStyle, assets: bundledAssets(lg, workspaceDir, log) }) + "\n\n" + attachmentContext(lec.attachments),
-      onModel: (m) => { modelUsed = m; },
       activity,
       onStatus: (st) => log?.(st),
     });
@@ -597,7 +592,7 @@ export async function runAgentTurn({ lec, workspaceDir, engine, model, effort, t
     }
     readMeta();
     activity.flush();
-    return { scenes, reply, title, failures, model: modelUsed, activity: activity.items };
+    return { scenes, reply, title, failures, activity: activity.items };
   } catch (error) {
     // A failed agent turn may have edited scene files in place. The caller
     // retains the previous project on fatal failure, so restore its HTML too.

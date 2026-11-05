@@ -100,7 +100,7 @@ export const codex = {
     return this.generate(opts);
   },
 
-  generate({ system, user, model, effort = "low", signal, onDelta, onStatus, onActivity, onModel, workspace, inbox }) {
+  generate({ system, user, model, effort = "low", signal, onDelta, onStatus, onActivity, workspace, inbox }) {
     const exe = this.exe();
     const cwd = workspace || scratchDir("codex");
     if (!exe) return Promise.reject(new Error("GPT isn't connected. Connect it from the welcome screen or Settings."));
@@ -191,7 +191,6 @@ export const codex = {
           } else if (m.id === 2) {
             if (m.error) return finish(new Error("GPT: " + (m.error.message || JSON.stringify(m.error))));
             threadId = m.result.thread.id;
-            if (m.result.model) onModel?.(String(m.result.model));
             const tp = { threadId, input: [{ type: "text", text: user }] };
             if (effort) tp.effort = effort;
             send({ id: 3, method: "turn/start", params: tp });

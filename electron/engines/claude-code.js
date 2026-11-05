@@ -63,7 +63,7 @@ export const claudeCode = {
     return this.generate(opts);
   },
 
-  async generate({ system, user, model, effort, signal, onDelta, onStatus, onActivity, onModel, workspace, inbox }) {
+  async generate({ system, user, model, effort, signal, onDelta, onStatus, onActivity, workspace, inbox }) {
     const exe = this.exe();
     if (!exe) throw new Error("Claude isn't connected. Connect it from the welcome screen or Settings.");
     // The (long) system prompt travels over stdin with the question, which
@@ -136,7 +136,6 @@ export const claudeCode = {
         } catch {
           return;
         }
-        if (ev.type === "system" && ev.subtype === "init" && ev.model) onModel?.(String(ev.model));
         if (ev.type === "user" && ev.isReplay) {
           echoed++;
           return;
