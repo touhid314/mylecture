@@ -27,7 +27,8 @@ test("a recording becomes a 24 kHz mono reference voice that OmniVoice lists", a
   assert.equal(wav.readUInt16LE(22), 1, "mono");
   assert.equal(wav.readUInt32LE(24), 24000, "24 kHz");
   const meta = JSON.parse(fs.readFileSync(path.join(dir, id, "voice.json"), "utf8"));
-  assert.ok(meta.seconds >= 5.5 && meta.seconds <= 6.5, `silence trimmed: ${meta.seconds}s`);
+  // The 1 s of leading silence is removed; ffmpeg builds differ on how much trailing silence they keep.
+  assert.ok(meta.seconds >= 5.5 && meta.seconds <= 7.5, `silence trimmed: ${meta.seconds}s`);
   assert.equal(fs.readFileSync(path.join(dir, id, "transcript.txt"), "utf8").trim(), "Hello, this is my voice for MyLecture.");
   assert.deepEqual(customVoices(dir).map(([v, n]) => [v, n]), [[id, "Glenn"]]);
   const omni = new OmniVoice({ modelDir: tmp(), getSettings: () => ({}), customDir: dir });

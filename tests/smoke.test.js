@@ -14,7 +14,7 @@ test("Electron boots, initializes services, and shuts down without sending smoke
   await new Promise(resolve => collector.listen(0, "127.0.0.1", resolve));
   t.after(() => new Promise(resolve => collector.close(resolve)));
   await new Promise((resolve, reject) => {
-    const child = spawn("npx.cmd", ["electron", ".", "--smoke-test"], {
+    const child = spawn(process.platform === "win32" ? "npx.cmd" : "npx", ["electron", ".", "--smoke-test"], {
       cwd: root,
       stdio: ["ignore", "pipe", "pipe"],
       shell: true,
