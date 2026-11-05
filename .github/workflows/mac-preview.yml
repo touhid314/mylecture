@@ -1,0 +1,71 @@
+# Test builds for macOS, run by hand. Builds, unit-tests and smoke-tests the
+# packaged app on Apple silicon and Intel Macs and uploads the DMG/ZIP as
+# workflow artifacts only: no GitHub Release, no update feed, nothing the
+# website links to. Ship macOS publicly by adding these jobs to release.yml.
+#
+#   gh workflow run mac-preview.yml --ref main
+#   gh run download <run-id> --dir mac-builds
+name: macOS preview
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: mac-preview-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    name: ${{ matrix.name }}
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 60
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: macOS Apple silicon
+            os: macos-latest
+            target: --mac --arm64
+            artifact: MyLecture-mac-arm64
+          - name: macOS Intel
+            os: macos-15-intel
+            target: --mac --x64
+            artifact: MyLecture-mac-x64
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install
+        run: npm ci
+
+      - name: Unit tests
+        run: npm test
+
+      # Ad-hoc signed, not notarized (no Apple Developer certificate): Apple
+      # silicon refuses unsigned apps. First launch: right-click -> Open, or
+      # `xattr -cr /Applications/MyLecture.app`.
+      - name: Package
+        env:
+          CSC_IDENTITY_AUTO_DISCOVERY: "false"
+        run: npx electron-builder ${{ matrix.target }} --publish never -c.mac.identity=-
+
+      - name: Smoke test the packaged app
+        env:
+          MYLECTURE_SMOKE_DEEP: "1"
+        run: node scripts/smoke-packaged.mjs
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.artifact }}
+          path: |
+            dist/*.dmg
+            dist/*.zip
+          if-no-files-found: error
+          retention-days: 30
