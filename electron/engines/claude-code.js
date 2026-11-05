@@ -6,6 +6,7 @@ import { findExecutable, scratchDir, spawnLines, runCapture, idleStatus } from "
 import fs from "node:fs";
 import { discoverClaudeModels } from "./model-discovery.js";
 import { log } from "../logger.js";
+import { BROWSER_SERVER, BROWSER_NOTE, claudeMcpConfig } from "./browser-mcp.js";
 
 // Claude Code records the signed-in account in ~/.claude.json (all platforms)
 // and, outside macOS, the login in ~/.claude/.credentials.json.
@@ -16,6 +17,9 @@ export function claudeSignedIn(home = os.homedir()) {
   } catch {}
   return fs.existsSync(path.join(home, ".claude", ".credentials.json"));
 }
+
+export const AGENT_TOOLS = ["Bash", "PowerShell", "Read", "Glob", "Grep", "WebFetch", "WebSearch", "Task", "Agent", "TodoWrite", "NotebookEdit", "Skill", "ToolSearch", `mcp__${BROWSER_SERVER}`];
+export const WRITE_SCOPE = "You have full tool access: shell, internet (search, fetch, downloads), subagents and file tools. You may read and copy from anywhere on this computer. Every file you create, download, copy, edit or delete yourself must be inside the current project folder; never put your own files anywhere else. Installing tools or packages (pip, npm, uv, winget, Playwright browsers, etc.) is allowed, and so are the caches, temp files and install folders those tools write to on their own.";
 
 const EXTRA = [path.join(os.homedir(), ".local", "bin"), path.join(os.homedir(), ".claude", "local")];
 
@@ -64,19 +68,30 @@ export const claudeCode = {
     if (!exe) throw new Error("Claude isn't connected. Connect it from the welcome screen or Settings.");
     // The (long) system prompt travels over stdin with the question, which
     // avoids Windows' command-line length limit.
-    // --safe-mode: ignore the user's personal Claude Code setup (CLAUDE.md,
-    // hooks, MCP servers, plugins). Those leak into MyLecture runs, slow them
-    // down and can contradict the lesson prompt (e.g. "never create .md files").
-    const args = ["-p", "--safe-mode", "--no-session-persistence", "--output-format", "stream-json", "--include-partial-messages", "--verbose"];
+    // Ignore the user's personal Claude Code setup (CLAUDE.md, hooks, MCP
+    // servers, plugins): it leaks into MyLecture runs, slows them down and can
+    // contradict the lesson prompt (e.g. "never create .md files").
+    // Text mode uses --safe-mode. Agent mode can't: safe mode also drops the
+    // --mcp-config browser, so it loads only local settings and our MCP config.
+    const args = ["-p", "--no-session-persistence", "--output-format", "stream-json", "--include-partial-messages", "--verbose"];
     // Agent mode streams its input too, so messages typed mid-run (inbox) are
     // injected into the live session; Claude reads them at its next step.
     const live = !!workspace;
     if (live) args.push("--input-format", "stream-json", "--replay-user-messages");
     if (workspace) {
-      args.push("--permission-mode", "acceptEdits", "--allowedTools", "Read,Write,Edit,MultiEdit,Glob,Grep");
-      args.push("--disallowedTools", "Bash,WebFetch,WebSearch,Task,NotebookEdit");
+      // Full agent: shell, web, a real browser (Playwright MCP), subagents
+      // and every file tool. acceptEdits auto-approves file edits inside the
+      // project folder only; edits elsewhere need approval, which headless
+      // mode denies. Reads are allowed anywhere. (Claude Code's Windows
+      // sandbox is feature-gated off, so shell writes are confined by
+      // instruction, not by the OS.)
+      args.push("--setting-sources", "local");
+      args.push("--permission-mode", "acceptEdits");
+      args.push("--allowedTools", AGENT_TOOLS.join(","));
+      args.push("--mcp-config", claudeMcpConfig(workspace), "--strict-mcp-config");
+      args.push("--append-system-prompt", `${WRITE_SCOPE} ${BROWSER_NOTE}`);
     } else {
-      args.push("--max-turns", "1", "--disallowedTools", "Bash,Edit,Write,Read,Glob,Grep,WebFetch,WebSearch,Task,NotebookEdit");
+      args.push("--safe-mode", "--max-turns", "1", "--disallowedTools", "Bash,Edit,Write,Read,Glob,Grep,WebFetch,WebSearch,Task,NotebookEdit");
     }
     if (model) args.push("--model", model);
     if (effort) args.push("--effort", effort);

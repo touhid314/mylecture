@@ -28,21 +28,20 @@ const { antigravity } = await import("../electron/engines/antigravity.js");
 test.after(() => { hooks.deregister(); delete globalThis.__agyFixture; });
 const generate = (extra = {}) => antigravity.generate({ system: "Make a video", user: "Explain rain", workspace: "project", onDelta() {}, ...extra });
 
-test("Gemini uses native file tools without granting terminal permissions", async () => {
+test("Gemini agent runs get full, auto-approved tool access scoped to the project folder", async () => {
   fixture.events = [{ event: "result", result: { status: "SUCCESS", response: "Files created." } }];
   fixture.result = { code: 0 };
   assert.equal((await generate()).text, "Files created.");
   const { args, opts } = fixture.call;
-  assert.ok(args.includes("accept-edits"));
-  assert.ok(!args.includes("--dangerously-skip-permissions"));
-  assert.ok(!args.includes("--settings"));
-  assert.match(JSON.parse(opts.stdin).message.content, /do not use run_command/);
+  assert.ok(args.includes("--dangerously-skip-permissions"));
+  assert.match(JSON.parse(opts.stdin).message.content, /full tool access/);
+  assert.match(JSON.parse(opts.stdin).message.content, /must be inside the current project folder/);
   assert.equal(opts.cwd, "project");
 });
 
 test("SUCCESS with denied_actions is an error even if Gemini returned text", async () => {
   fixture.events = [{ event: "result", result: { status: "SUCCESS", response: "I will list files.", denied_actions: [{ action: "command" }] } }];
-  await assert.rejects(generate(), /needed permission.*built-in file tools/);
+  await assert.rejects(generate(), /needed permission/);
 });
 
 test("an empty SUCCESS response does not silently complete", async () => {

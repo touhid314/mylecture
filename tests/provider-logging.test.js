@@ -51,6 +51,7 @@ const hooks = registerHooks({
       export const runCapture=async()=>({ok:true,stdout:""});
       export { idleStatus } from ${JSON.stringify(new URL("../electron/engines/cli-util.js", import.meta.url).href)};
       export const spawnLines=async(_exe,_args,opts)=>{
+        globalThis.__providerLoggingFixture.args=_args;
         for(const ev of globalThis.__providerLoggingFixture.events)opts.onLine(JSON.stringify(ev));
         opts.onIdle?.({idleMs:45000,elapsedMs:60000});
         return {code:0,stderr:"",aborted:false};
@@ -78,4 +79,31 @@ test("Claude diagnostics identify thought activity and tools without recording p
   for (const event of ["provider.start", "provider.thinking", "provider.tool", "provider.result", "provider.waiting", "provider.finish"]) assert(logged.some(entry => entry.event === event), event);
   const serialized = JSON.stringify(logged);
   for (const secret of ["PRIVATE_THOUGHT_TEXT", "PRIVATE_SCENE_CONTENT", "PRIVATE_RESPONSE_TEXT", "PRIVATE_SYSTEM", "PRIVATE_USER"]) assert(!serialized.includes(secret));
+});
+
+test("Claude agent runs get every tool, with edits auto-approved only inside the project folder", async () => {
+  fixture.events = [{ type: "result", is_error: false, result: "done" }];
+  await claudeCode.generate({ system: "s", user: "u", workspace: "project", onDelta() {} });
+  const args = fixture.args;
+  assert.equal(args[args.indexOf("--permission-mode") + 1], "acceptEdits");
+  assert(!args.includes("--disallowedTools"));
+  assert(!args.includes("--dangerously-skip-permissions"));
+  const allowed = args[args.indexOf("--allowedTools") + 1].split(",");
+  for (const tool of ["Bash", "WebFetch", "WebSearch", "Read", "Task"]) assert(allowed.includes(tool), tool);
+  assert(!allowed.some((tool) => /^(Write|Edit|MultiEdit)$/.test(tool)), "file edits stay under acceptEdits' folder scope");
+  assert.match(args[args.indexOf("--append-system-prompt") + 1], /must be inside the current project folder/);
+  assert.match(args[args.indexOf("--append-system-prompt") + 1], /real web browser/);
+  assert(!args.includes("--safe-mode"), "safe mode would drop the browser MCP server");
+  assert.equal(args[args.indexOf("--setting-sources") + 1], "local");
+  assert(args.includes("--strict-mcp-config"));
+  const mcp = JSON.parse(args[args.indexOf("--mcp-config") + 1]);
+  assert(mcp.mcpServers.browser.args.some((a) => a.startsWith("@playwright/mcp@")));
+  assert(allowed.includes("mcp__browser"));
+});
+
+test("Claude text mode keeps safe mode and no tools", async () => {
+  fixture.events = [{ type: "result", is_error: false, result: "done" }];
+  await claudeCode.generate({ system: "s", user: "u", onDelta() {} });
+  assert(fixture.args.includes("--safe-mode"));
+  assert(!fixture.args.includes("--mcp-config"));
 });

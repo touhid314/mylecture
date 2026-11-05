@@ -34,7 +34,7 @@ const hooks = registerHooks({
     return nextLoad(url, context);
   },
 });
-const { runAgent, runAgentLecture, runAgentTurn, agentTaskPrompt, agentTurnPrompt, LECTURE_AGENT_SYSTEM, supportsAgentFlow } = await import("../electron/lecturegen/agent-run.js");
+const { runAgent, runAgentLecture, runAgentTurn, agentTaskPrompt, agentTurnPrompt, bundledAssets, LECTURE_AGENT_SYSTEM, supportsAgentFlow } = await import("../electron/lecturegen/agent-run.js");
 const { lecturegenCatalog, resolveStyleResource } = await import("../electron/lecturegen/run.js");
 test.after(() => {
   hooks.deregister();
@@ -357,4 +357,21 @@ test("untouched saved scenes regenerate missing or empty cached audio before bei
     assert.equal(result.events.filter(event => event.type === "scene").length, 1);
     assert.equal(fs.readFileSync(path.join(ws, "index1.html"), "utf8"), html(1));
   }
+});
+
+test("agents get the bundled world basemap and its projection instructions", () => {
+  const copied = [];
+  const lg = {
+    ensureWorldBasemapInWorkspace: (dir) => (copied.push(dir), "assets/world-basemap.svg"),
+    formatWorldBasemapDescription: (p) => `- ${p}: Natural Earth basemap. projectLonLat helpers.`,
+  };
+  const assets = bundledAssets(lg, "project-dir");
+  assert.deepEqual(copied, ["project-dir"]);
+  assert.match(assets, /assets\/world-basemap\.svg/);
+  assert.match(assets, /country borders/);
+  for (const prompt of [agentTaskPrompt({ question: "Map the Silk Road", assets }), agentTurnPrompt({ message: "Map the Silk Road", assets })]) {
+    assert.match(prompt, /# Bundled assets \(already in this project folder\)/);
+    assert.match(prompt, /projectLonLat/);
+  }
+  assert.equal(bundledAssets({ ensureWorldBasemapInWorkspace() { throw new Error("missing"); } }, "d"), "");
 });

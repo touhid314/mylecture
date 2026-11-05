@@ -7,6 +7,7 @@ import { findExecutable, scratchDir, spawnLines, runCapture, idleStatus } from "
 import fs from "node:fs";
 import { parseAntigravityModels } from "./model-discovery.js";
 import { log } from "../logger.js";
+import { BROWSER_NOTE, PLAYWRIGHT_MCP, browserServer } from "./browser-mcp.js";
 
 // The active Google account, as recorded in ~/.gemini/google_accounts.json.
 export function antigravityEmail(home = os.homedir()) {
@@ -20,10 +21,27 @@ export function antigravityEmail(home = os.homedir()) {
 
 const EXTRA_DIRS = [path.join(os.homedir(), "AppData", "Local", "agy", "bin")];
 
-// Headless accept-edits permits native file tools, but cannot ask the user to
-// approve a terminal command. Do not grant unrestricted command permissions:
-// --sandbox currently does not confine terminal writes on Windows.
-export const ANTIGRAVITY_FILE_TOOLS = `You are running non-interactively in MyLecture. Use the native list_dir, find_by_name, view_file, write_to_file, replace_file_content and multi_replace_file_content tools to inspect and edit project files. Terminal commands cannot be approved here: do not use run_command, shell, scripts or terminal tools. Write the requested Markdown, JSON and HTML files directly with the native file tools. Browser JavaScript and Web Audio belong in the generated HTML; they do not require terminal commands. Finish with a short response describing the result.`;
+// Agent runs get every tool, auto-approved: terminal, browser/web and file
+// tools. Headless mode cannot ask the user, so nothing would run otherwise.
+// Antigravity's --sandbox does not confine terminal writes on Windows, so the
+// project-folder write scope is given as an instruction.
+export const ANTIGRAVITY_FILE_TOOLS = `You are running non-interactively in MyLecture with full tool access: terminal commands, internet (search, fetch, download), browser and file tools are all approved. You may read and copy files from anywhere on this computer. Every file you create, download, copy, edit or delete yourself must be inside the current project folder; never put your own files anywhere else. Installing tools or packages (pip, npm, uv, winget, Playwright browsers, etc.) is allowed, and so are the caches, temp files and install folders those tools write to on their own. ${BROWSER_NOTE} Finish with a short response describing the result.`;
+
+// agy has no per-run MCP option (--settings rejects mcpServers), so the
+// browser is registered once in its MCP list, unless a Playwright server is
+// already there.
+let browserReady = null;
+export function ensureAgyBrowser(exe) {
+  browserReady ||= (async () => {
+    const list = await runCapture(exe, ["mcp", "list"], { timeout: 20000 });
+    if (list.ok && /@playwright\/mcp/.test(list.stdout)) return true;
+    const { command, args } = browserServer();
+    const add = await runCapture(exe, ["mcp", "add", "mylecture-browser", "--", command, ...args], { timeout: 20000 });
+    log(add.ok ? "info" : "warn", "provider.browser", { provider: "antigravity", registered: !!add.ok, server: PLAYWRIGHT_MCP });
+    return !!add.ok;
+  })().catch(() => false);
+  return browserReady;
+}
 
 export const antigravity = {
   id: "antigravity",
@@ -70,7 +88,10 @@ export const antigravity = {
     const exe = this.exe();
     if (!exe) throw new Error("Gemini isn't connected. Connect it from the welcome screen or Settings.");
     const baseArgs = ["--input-format", "stream-json", "--output-format", "stream-json", "--disable-slash-commands"];
-    if (workspace) baseArgs.push("--mode", "accept-edits");
+    if (workspace) {
+      baseArgs.push("--dangerously-skip-permissions");
+      await ensureAgyBrowser(exe);
+    }
     if (model) baseArgs.push("--model", model);
     if (workspace && effort) baseArgs.push("--effort", effort);
     let content = `${system}${workspace ? `\n\n${ANTIGRAVITY_FILE_TOOLS}` : ""}\n\n---\n\n${user}`;
@@ -156,7 +177,7 @@ export const antigravity = {
           log(r.status === "SUCCESS" ? "info" : "error", "provider.result", { provider: "antigravity", status: r.status, deniedActions: r.denied_actions?.length || 0, outputBytes: Buffer.byteLength(full) });
           if (r.status && r.status !== "SUCCESS") error = r.error || r.status;
           if (r.denied_actions?.length) {
-            error = "A tool needed permission that Gemini cannot request inside MyLecture. Send the request again; Gemini must use its built-in file tools instead of terminal commands.";
+            error = "A tool needed permission that Gemini cannot request inside MyLecture. Send the request again.";
           }
           if (r.usage) usage = r.usage;
           // If deltas were missed, fall back to the full response.

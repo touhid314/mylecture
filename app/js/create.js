@@ -12,6 +12,7 @@ import { Player } from "./player.js";
 import { UsagePanel } from "./usage.js";
 import { AttachmentPicker, attachmentNames } from "./attachments.js";
 import { omniVoiceInstalled, showOmniVoiceDownloader } from "./omnivoice-download.js";
+import { openAddVoice, removeOwnVoice, isOwnVoice } from "./voice-add.js";
 
 const TL = window.MLTimeline;
 const LENGTH_PRESETS = ["0:15", "0:30", "0:45", ...Array.from({ length: 10 }, (_, i) => `${i + 1}:00`)];
@@ -46,6 +47,7 @@ export class CreateView {
     window.ml.ide.onProgress((p) => this._onProgress(p));
     window.ml.gen.onEvent((ev) => this._onGen(ev));
     bus.on("settings-changed", (settings) => this._syncSettingsSelects(settings));
+    bus.on("voices-changed", () => { this._voiceCatalog = null; this._refreshVoiceOptions(); });
     this._modelPoll = setInterval(() => {
       if (this.root.classList.contains("active") && document.visibilityState === "visible" && !this._modelsLoading &&
           ![this.modelInput, this.modelSelect, this.providerSelect].includes(document.activeElement)) this._refreshEngineOptions({ force: true });
@@ -412,15 +414,30 @@ export class CreateView {
           this._voiceDemoAudio?.pause();
           play.disabled = true; play.replaceChildren(h("span", { class: "spin" }));
           try {
-            const result = await window.ml.tts.preview("Hello! This is my voice. Let's learn something new together.", { engine, voice: id, speed: 1 });
+            const result = await window.ml.tts.demo(engine, id);
             if (request !== this._voiceDemoRequest) return;
             this._voiceDemoAudio = new Audio(result.url);
             await this._voiceDemoAudio.play();
           } catch (e) { toast(friendly(e), { kind: "bad" }); }
           finally { play.disabled = false; play.replaceChildren(icon("play")); }
         } }, icon("play"));
-        menu.append(h("div", { class: "voice-menu-row" + (this.voiceSelect.value === key ? " selected" : "") }, pick, play));
+        const remove = engine === "omnivoice" && isOwnVoice(id)
+          ? h("button", { class: "voice-demo", title: `Remove ${name}`, "aria-label": `Remove ${name}`, onclick: async () => {
+              menu.remove();
+              if (await removeOwnVoice(id, name)) { this._voiceCatalog = null; this.state.settings = await window.ml.settings.get(); await this._refreshVoiceOptions(); }
+            } }, icon("trash"))
+          : null;
+        menu.append(h("div", { class: "voice-menu-row" + (this.voiceSelect.value === key ? " selected" : "") }, pick, play, remove));
       }
+      if (engine === "omnivoice") menu.append(h("div", { class: "voice-menu-row" }, h("button", { class: "voice-pick voice-add", role: "menuitem", onclick: async () => {
+        menu.remove();
+        const added = await openAddVoice();
+        if (!added) return;
+        this._voiceCatalog = null;
+        await this._refreshVoiceOptions();
+        this.voiceSelect.value = `omnivoice:${added[0]}`;
+        this.voiceSelect.dispatchEvent(new Event("change"));
+      } }, icon("plus"), "Add your own voice…")));
     }
     // Reposition after adding the voice rows so the dropdown fits the viewport.
     const anchor = this.voiceButton.getBoundingClientRect();
@@ -985,7 +1002,7 @@ export class CreateView {
         this.project = { lecture: { id: r.lectureId, question: text, title: "", aspect, length, scenes: [], chat: [] }, files: [] };
         this._chatFor = r.lectureId;
         this.sceneIndex = 0;
-        this.player.setLecture({ scenes: [], aspect });
+        this.player.setLecture({ id: r.lectureId, scenes: [], aspect });
         this.player.setConfig({ aspect });
         this._fit();
       }
@@ -1170,7 +1187,19 @@ export class CreateView {
     const fillVoices = () => {
       const engine = engineSel.value;
       const current = engine === "omnivoice" ? s.omnivoiceVoice || "maruf" : s.voice;
-      voiceSel.replaceChildren(...(voices[engine] || []).map(([id, label]) => h("option", { value: id, selected: id === current }, label)));
+      voiceSel.replaceChildren(...(voices[engine] || []).map(([id, label]) => h("option", { value: id, selected: id === current }, label)),
+        ...(engine === "omnivoice" ? [h("option", { value: "__add__" }, "+ Add your own voice…")] : []));
+      voiceSel.dataset.last = voiceSel.value;
+    };
+    voiceSel.onchange = async () => {
+      if (voiceSel.value !== "__add__") return void (voiceSel.dataset.last = voiceSel.value);
+      voiceSel.value = voiceSel.dataset.last || "";
+      const added = await openAddVoice();
+      if (!added) return;
+      this._voiceCatalog = null;
+      voices = await window.ml.tts.voices();
+      fillVoices();
+      voiceSel.value = voiceSel.dataset.last = added[0];
     };
     engineSel.onchange = fillVoices;
     fillVoices();

@@ -8,6 +8,7 @@ import os from "node:os";
 import path from "node:path";
 import { createRequire } from "node:module";
 import { wavInfo, pcmToWav } from "./tts/index.js";
+import { readMusic, musicMix } from "./music.js";
 import "../app/shared/timeline.js";
 
 const TL = globalThis.MLTimeline;
@@ -90,7 +91,7 @@ export function captions(lec, kind = "srt") {
 }
 
 // ---------- MP4 ----------
-export async function exportMp4(lec, { ttsFile, outDir, fps = 30, captionsOn = false, height, onProgress, signal }) {
+export async function exportMp4(lec, { ttsFile, outDir, projectDir, fps = 30, captionsOn = false, height, onProgress, signal }) {
   const [W, H] = SIZES[lec.aspect] || SIZES["16:9"];
   // Optional downscale for faster export (e.g. 720p).
   const scale = height && height < Math.min(W, H) ? height / Math.min(W, H) : 1;
@@ -100,6 +101,8 @@ export async function exportMp4(lec, { ttsFile, outDir, fps = 30, captionsOn = f
   const { wav, duration } = buildAudioTrack(lec, ttsFile);
   const audioFile = path.join(tmp, "audio.wav");
   fs.writeFileSync(audioFile, wav);
+  const music = readMusic(projectDir);
+  const mix = music ? musicMix(music, { narrationInput: 1, musicInput: 2, duration }) : null;
   const out = uniquePath(outDir, safeName(lec.title), ".mp4");
   const pendingOut = out + ".rendering";
 
@@ -129,6 +132,7 @@ export async function exportMp4(lec, { ttsFile, outDir, fps = 30, captionsOn = f
         "-y",
         "-f", "rawvideo", "-pix_fmt", "bgra", "-s", `${OW}x${OH}`, "-r", String(fps), "-i", "-",
         "-i", audioFile,
+        ...(mix ? [...mix.inputs, "-filter_complex", mix.graph, "-map", "0:v", "-map", "[aout]"] : []),
         "-c:v", "libx264", "-preset", "veryfast", "-crf", "20", "-pix_fmt", "yuv420p",
         "-vf", "setsar=1",
         "-c:a", "aac", "-b:a", "160k", "-shortest", "-movflags", "+faststart",
@@ -185,15 +189,17 @@ export async function exportMp4(lec, { ttsFile, outDir, fps = 30, captionsOn = f
 }
 
 // ---------- standalone interactive HTML (one file, shareable) ----------
-export async function exportStandaloneHtml(lec, { ttsFile, outDir, appDir }) {
+export async function exportStandaloneHtml(lec, { ttsFile, outDir, appDir, projectDir }) {
   const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "mylecture-html-"));
   try {
-    const { wav } = buildAudioTrack(lec, ttsFile);
+    const { wav, duration } = buildAudioTrack(lec, ttsFile);
     const wf = path.join(tmp, "a.wav");
     const of = path.join(tmp, "a.mp3");
     fs.writeFileSync(wf, wav);
+    const music = readMusic(projectDir);
+    const mix = music ? musicMix(music, { narrationInput: 0, musicInput: 1, duration }) : null;
     await new Promise((resolve, reject) => {
-      const p = spawn(ffmpegPath(), ["-y", "-i", wf, "-c:a", "libmp3lame", "-b:a", "64k", of], { windowsHide: true });
+      const p = spawn(ffmpegPath(), ["-y", "-i", wf, ...(mix ? [...mix.inputs, "-filter_complex", mix.graph, "-map", "[aout]"] : []), "-c:a", "libmp3lame", "-b:a", mix ? "128k" : "64k", of], { windowsHide: true });
       p.on("close", (c) => (c === 0 ? resolve() : reject(new Error("audio encode failed"))));
     });
     const audio = "data:audio/mpeg;base64," + fs.readFileSync(of).toString("base64");

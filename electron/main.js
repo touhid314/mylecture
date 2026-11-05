@@ -9,6 +9,8 @@ import { createUsageService } from "./usage.js";
 import { accountRemovalPatch, accountRevisionPatch } from "./account-connections.js";
 import { listRenderedVideos } from "./video-library.js";
 import { TTSService, KOKORO_VOICES, OMNIVOICE_VOICES } from "./tts/index.js";
+import { VOICE_ALIASES } from "./tts/omnivoice.js";
+import { DEMO_TEXT, readDemo } from "./tts/demos.js";
 import { Generator, audioUrl, sceneUrl } from "./generator.js";
 import { IdeService, hydrateProject } from "./ide.js";
 import { SERVICES, connectService } from "./connect.js";
@@ -18,6 +20,8 @@ import { sendLaunchPing, launchPingSuppressed } from "./telemetry.js";
 import { createUpdater } from "./updater.js";
 import { ComponentManager, COMPONENT_IDS } from "./components.js";
 import { configureLogger, log, getLogInfo, readLogTail, onLogEntry, registerLogSecret } from "./logger.js";
+import { Readable } from "node:stream";
+import { mediaRange, contentType } from "./media-range.js";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const ROOT = path.join(here, "..");
@@ -360,7 +364,26 @@ function registerIpc() {
 
   // voice
   h("tts:status", () => tts.status());
-  h("tts:voices", () => ({ kokoro: KOKORO_VOICES, omnivoice: OMNIVOICE_VOICES, system: tts.sapi.voices }));
+  h("tts:voices", () => ({ kokoro: KOKORO_VOICES, omnivoice: tts.omni.voices(), system: tts.sapi.voices }));
+  h("tts:addVoice", (input) => tts.omni.addVoice(input || {}, DEMO_TEXT));
+  // Voice-menu demo: the saved recording. Only a voice without one (for
+  // example, its demo failed when it was added) is generated, once, and saved.
+  h("tts:demo", async (engine, voice) => {
+    const saved = readDemo(engine, voice, paths.voices);
+    if (saved) return { url: saved, saved: true };
+    if (engine === "omnivoice" && String(voice).startsWith("custom-")) {
+      await tts.omni.makeDemo(voice, DEMO_TEXT);
+      return { url: readDemo(engine, voice, paths.voices), saved: true };
+    }
+    const r = await tts.synth(DEMO_TEXT, { engine, voice, speed: 1 });
+    return { url: audioUrl(r.key), saved: false };
+  });
+  h("tts:removeVoice", (id) => {
+    tts.omni.removeVoice(id);
+    const s = getSettings();
+    if (s.omnivoiceVoice === id) saveSettings({ omnivoiceVoice: "maruf" });
+    return tts.omni.voices();
+  });
   h("tts:preview", async (text, opts) => {
     const r = await tts.synth(text || "Hi! I'm your MyLecture tutor. Ask me anything.", opts || {});
     return { url: audioUrl(r.key), dur: r.dur };
@@ -457,8 +480,9 @@ function registerIpc() {
         const ttsFile = (k) => tts.fileFor(k);
         const outDir = paths.exports;
         let out;
-        if (kind === "mp4") out = await exportMp4(lec, { ttsFile, outDir, fps: fps || 30, captionsOn: !!cap, height, onProgress: progress, signal: ac.signal });
-        else if (kind === "html") out = await exportStandaloneHtml(lec, { ttsFile, outDir, appDir: APP_DIR });
+        const projectDir = lectures.dir(lec.id);
+        if (kind === "mp4") out = await exportMp4(lec, { ttsFile, outDir, projectDir, fps: fps || 30, captionsOn: !!cap, height, onProgress: progress, signal: ac.signal });
+        else if (kind === "html") out = await exportStandaloneHtml(lec, { ttsFile, outDir, appDir: APP_DIR, projectDir });
         else if (kind === "contract") out = exportContractBundle(lec, { ttsFile, outDir, appDir: APP_DIR });
         else if (kind === "srt" || kind === "vtt") {
           fs.mkdirSync(outDir, { recursive: true });
@@ -502,16 +526,32 @@ app.whenReady().then(() => {
   protocol.handle("mylecture", async (req) => {
     const file = resolveAppUrl(req.url);
     if (!file || !fs.existsSync(file)) return new Response("Not found", { status: 404 });
+    // Media (music, narration, video clips) must be seekable: answer Range
+    // requests with 206 Partial Content, or Chromium treats the file as a
+    // non-seekable stream and seeking stalls playback.
+    const range = mediaRange(req.headers.get("range"), fs.statSync(file).size);
+    if (range) {
+      const headers = new Headers({
+        "Content-Type": contentType(file),
+        "Accept-Ranges": "bytes",
+        "Access-Control-Allow-Origin": "*",
+        "Cache-Control": "no-cache",
+        ...(range.ok ? { "Content-Range": `bytes ${range.start}-${range.end}/${range.size}`, "Content-Length": String(range.end - range.start + 1) } : { "Content-Range": `bytes */${range.size}` }),
+      });
+      if (!range.ok) return new Response(null, { status: 416, headers });
+      return new Response(Readable.toWeb(fs.createReadStream(file, { start: range.start, end: range.end })), { status: 206, headers });
+    }
     const res = await net.fetch(pathToFileURL(file).toString());
     // The stage runs in an opaque-origin sandbox; fonts need CORS headers.
     const headers = new Headers(res.headers);
     headers.set("Access-Control-Allow-Origin", "*");
     headers.set("Cache-Control", "no-cache");
+    headers.set("Accept-Ranges", "bytes");
     return new Response(res.body, { status: res.status, headers });
   });
 
   engines = createEngines(apiConfig);
-  tts = new TTSService({ cacheDir: paths.tts, modelDir: paths.models, getSettings });
+  tts = new TTSService({ cacheDir: paths.tts, modelDir: paths.models, voicesDir: paths.voices, getSettings });
   tts.on("status", (st) => send("tts:status", st));
   generator = new Generator({
     engines,
@@ -529,6 +569,8 @@ app.whenReady().then(() => {
     send("components:progress", p);
     if (p.id === "omnivoice" && p.state === "done") tts.omni.stop();
   });
+  // Renamed or removed OmniVoice voices: move saved settings to the new id.
+  { const v = getSettings().omnivoiceVoice; if (VOICE_ALIASES[v]) saveSettings({ omnivoiceVoice: VOICE_ALIASES[v] }); }
   registerIpc();
   if (SETUP_MODE) return runSetupMode();
   createWindow();

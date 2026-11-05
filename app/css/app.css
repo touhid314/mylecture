@@ -438,6 +438,8 @@ kbd { font: 11px var(--mono); background: var(--surface-2); border: 1px solid va
 .voice-menu-row .voice-pick { flex: 1; min-width: 0; text-align: left; }
 .voice-menu-row .voice-demo { flex: none; width: 28px; height: 28px; display: grid; place-items: center; padding: 5px; }
 .voice-demo .ico { width: 13px; height: 13px; }
+.voice-menu-row .voice-add { display: flex; align-items: center; gap: 6px; color: var(--accent); border-top: 1px solid var(--line); margin-top: 4px; padding-top: 8px; }
+.voice-add .ico { width: 13px; height: 13px; }
 .agent-toolbar { display: flex; align-items: center; gap: 5px; padding: 5px 9px 7px; min-width: 0; border-top: 1px solid var(--line); }
 .agent-option { display: inline-flex; align-items: center; justify-content: center; gap: 4px; min-width: 0; border: 0; border-radius: 6px; padding: 4px 5px; background: transparent; color: var(--muted); font-size: 11px; cursor: pointer; white-space: nowrap; }
 .agent-option:hover, .agent-option[aria-expanded="true"] { color: var(--fg); background: var(--agent-soft); }

@@ -251,14 +251,57 @@
   function prepareDoc(text, src, token) {
     const base = src.slice(0, src.lastIndexOf("/") + 1);
     const inject = `<base href="${base}"><script>window.__PLAYER_CONTROLLED__=true;<\/script><style>${EXPORT_CSS}</style>`;
-    const bridge = `<script>(${sceneBridge.toString()})(${JSON.stringify(token)});<\/script>`;
+    const bridge = `<script>(${sceneBridge.toString()})(${JSON.stringify(token)}, ${EXPORTING});<\/script>`;
     return (/<head[^>]*>/i.test(text) ? text.replace(/<head[^>]*>/i, (m) => m + inject + bridge) : inject + bridge + text);
   }
   // Each sandboxed document has its own opaque origin. Communicate through
   // postMessage so the preview keeps its sandbox and the exporter uses the
   // same renderer without accessing another document's globals.
-  function sceneBridge(token) {
+  // The exporter loads the stage with ?export=1 and seeks frame by frame.
+  const EXPORTING = new URLSearchParams(location.search).has("export");
+  function sceneBridge(token, exporting) {
     const send = (type, extra = {}) => parent.postMessage({ type, token, ...extra }, "*");
+    // <video> elements follow the scene clock automatically (opt out with
+    // data-ml-manual; data-ml-start="2" starts a clip 2 s into the scene).
+    // Export: exact seek per frame, and the frame waits for the seek. Player:
+    // play normally, correct drift, match the playback rate, pause when the
+    // timeline stops. Sound comes from the app's mix, so videos are muted.
+    let lastT = null, lastWall = 0, rate = 1, idle = 0;
+    const videos = () => [...document.querySelectorAll("video:not([data-ml-manual])")];
+    const pauseAll = () => { for (const v of videos()) if (!v.paused) v.pause(); };
+    const syncVideos = (t) => {
+      const now = performance.now();
+      const dt = lastT == null ? 0 : t - lastT, dw = (now - lastWall) / 1000;
+      const moving = !exporting && dt > 0 && dt < 0.5 && dw > 0;
+      if (moving) rate += (Math.min(4, Math.max(0.25, dt / dw)) - rate) * 0.2;
+      lastT = t; lastWall = now;
+      const waits = [];
+      for (const v of videos()) {
+        v.muted = true; v.playsInline = true;
+        const start = parseFloat(v.dataset.mlStart) || 0;
+        const d = v.duration;
+        let want = Math.max(0, t - start);
+        const known = Number.isFinite(d) && d > 0;
+        if (known) want = v.loop ? want % d : Math.min(want, d - 0.001);
+        const ended = known && !v.loop && t - start >= d - 0.05;
+        if (!exporting && moving && t >= start && !ended) {
+          v.playbackRate = Math.round(rate * 20) / 20;
+          if (Math.abs(v.currentTime - want) > 0.3) v.currentTime = want;
+          if (v.paused) v.play().catch(() => {});
+        } else {
+          if (!v.paused) v.pause();
+          if (Math.abs(v.currentTime - want) > (exporting ? 0.0005 : 0.05)) v.currentTime = want;
+        }
+        if (exporting && (v.seeking || v.readyState < 2)) waits.push(new Promise((resolve) => {
+          const done = () => resolve();
+          v.addEventListener("seeked", done, { once: true });
+          v.addEventListener("loadeddata", done, { once: true });
+          setTimeout(done, 5000);
+        }));
+      }
+      if (!exporting) { clearTimeout(idle); idle = setTimeout(pauseAll, 250); }
+      return Promise.all(waits);
+    };
     addEventListener("error", (e) => send("ml-scene-error", { message: e.message }));
     addEventListener("message", (e) => {
       const m = e.data;
@@ -272,7 +315,7 @@
           if (typeof render !== "function") throw new Error("Scene has no renderer");
           render(m.segment, m.local, m.global);
         }
-        send("ml-scene-rendered", { seq: m.seq });
+        syncVideos(m.global).then(() => send("ml-scene-rendered", { seq: m.seq }));
       } catch (e) { send("ml-scene-error", { message: String(e.message || e), seq: m.seq }); }
     });
     addEventListener("load", async () => {

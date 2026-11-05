@@ -33,9 +33,13 @@ for line in sys.stdin:
     job = {}
     try:
         job = json.loads(line)
-        folder = Path(os.environ["ML_OMNIVOICE_VOICES"]) / job["voice"]
         if not re.fullmatch(r"[\w-]+", job["voice"]):
             raise ValueError("Invalid reference voice")
+        # Bundled voices and the user's own voices live in separate folders.
+        roots = [Path(p) for p in os.environ["ML_OMNIVOICE_VOICES"].split(os.pathsep) if p]
+        folder = next((r / job["voice"] for r in roots if (r / job["voice"] / "reference.wav").exists()), None)
+        if folder is None:
+            raise ValueError("Reference voice not found: " + job["voice"])
         audio = folder / "reference.wav"
         ref_text = (folder / "transcript.txt").read_text(encoding="utf-8").strip()
         text = job["text"]

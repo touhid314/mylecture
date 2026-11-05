@@ -3,6 +3,7 @@ import { showApiKeyDialog } from "./api-key.js";
 import { h, icon, toast, bus } from "./ui.js";
 import { showLiveLog } from "./logs.js";
 import { showOmniVoiceDownloader } from "./omnivoice-download.js";
+import { openAddVoice, removeOwnVoice, isOwnVoice } from "./voice-add.js";
 
 const ENGINE_INFO = {
   codex: { title: "GPT", sub: "Uses your ChatGPT subscription." },
@@ -266,8 +267,25 @@ export class SettingsView {
       { class: "select", onchange: (e) => this.save({ voice: e.target.value }) },
       (this.voices?.kokoro || []).map(([id, label]) => h("option", { value: id, selected: s.voice === id }, label)),
     );
-    const omniSel = h("select", { class: "select", "aria-label": "OmniVoice reference voice", onchange: e => this.save({ omnivoiceVoice: e.target.value }) },
-      (this.voices?.omnivoice || []).map(([id, label]) => h("option", { value: id, selected: (s.omnivoiceVoice || "maruf") === id }, label)));
+    const current = s.omnivoiceVoice || "maruf";
+    const omniSel = h("select", { class: "select", "aria-label": "OmniVoice reference voice", onchange: async (e) => {
+      if (e.target.value !== "__add__") return this.save({ omnivoiceVoice: e.target.value });
+      e.target.value = current;
+      const added = await openAddVoice();
+      if (!added) return;
+      this.voices = await window.ml.tts.voices();
+      await this.save({ omnivoiceVoice: added[0] });
+      this.render();
+    } },
+      (this.voices?.omnivoice || []).map(([id, label]) => h("option", { value: id, selected: current === id }, label)),
+      h("option", { value: "__add__" }, "+ Add your own voice…"));
+    const ownLabel = (this.voices?.omnivoice || []).find(([id]) => id === current)?.[1];
+    const removeOwn = isOwnVoice(current) ? h("button", { class: "btn sm", title: "Remove this voice", onclick: async () => {
+      if (!(await removeOwnVoice(current, ownLabel || "this voice"))) return;
+      this.voices = await window.ml.tts.voices();
+      this.state.settings = await window.ml.settings.get();
+      this.render();
+    } }, icon("trash"), "Remove") : null;
     const python = h("input", { class: "input", value: s.omnivoicePython || "", placeholder: "Auto-detect Python environment", "aria-label": "OmniVoice Python executable" });
     const speed = h("input", { type: "range", min: "0.7", max: "1.4", step: "0.05", value: String(s.voiceSpeed || 1), style: { width: "160px" } });
     const speedLbl = h("span", { class: "small muted", style: { width: "40px" } }, (s.voiceSpeed || 1).toFixed(2) + "×");
@@ -276,7 +294,8 @@ export class SettingsView {
     const preview = h("button", { class: "btn sm", onclick: async () => {
       preview.disabled = true;
       try {
-        const r = await window.ml.tts.preview("Hi! I'm your MyLecture tutor. Ask me anything, and I'll explain it with pictures.");
+        const st = this.state.settings, omni = st.voiceEngine === "omnivoice";
+        const r = await window.ml.tts.demo(omni ? "omnivoice" : "kokoro", omni ? st.omnivoiceVoice || "maruf" : st.voice || "af_heart");
         const a = new Audio(r.url);
         a.play();
       } finally {
@@ -296,7 +315,7 @@ export class SettingsView {
       voiceEngine === "kokoro"
         ? h("div", { class: "set-row" }, h("div", { class: "set-label" }, h("b", {}, "Neural voice"), this.ttsMsg, h("div", { class: "progress", style: { marginTop: "6px", width: "260px" } }, this.ttsBar)), h("div", { class: "set-ctl" }, voiceSel))
         : h("div", {},
-              h("div", { class: "set-row" }, h("div", { class: "set-label" }, h("b", {}, "Reference voice"), this.ttsMsg, h("div", { class: "progress", style: { marginTop: "6px", width: "260px" } }, this.ttsBar)), h("div", { class: "set-ctl" }, omniSel)),
+              h("div", { class: "set-row" }, h("div", { class: "set-label" }, h("b", {}, "Reference voice"), this.ttsMsg, h("div", { class: "progress", style: { marginTop: "6px", width: "260px" } }, this.ttsBar)), h("div", { class: "set-ctl" }, omniSel, removeOwn)),
               h("div", { class: "set-row" }, h("div", { class: "set-label" }, h("b", {}, "OmniVoice Python"), h("span", {}, "Python environment with omnivoice and PyTorch installed. Leave blank to use the existing local setup.")), h("div", { class: "set-ctl" }, python, h("button", { class: "btn sm", onclick: () => this.save({ omnivoicePython: python.value.trim() }) }, "Save")))),
       h("div", { class: "set-row" }, h("div", { class: "set-label" }, h("b", {}, "Speaking speed")), h("div", { class: "set-ctl" }, speed, speedLbl, preview)),
     );

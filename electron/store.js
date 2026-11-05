@@ -62,6 +62,10 @@ export const paths = {
   get models() {
     return path.join(root(), "models");
   },
+  get voices() {
+    // The user's own OmniVoice reference voices.
+    return path.join(root(), "voices");
+  },
   get exports() {
     // A separate profile (MYLECTURE_PROFILE) keeps its videos with it.
     if (process.env.MYLECTURE_PROFILE) return path.join(root(), "videos");

@@ -14,6 +14,7 @@
 import fs from "node:fs";
 import { attachmentContext } from "../attachments.js";
 import path from "node:path";
+import { createRequire } from "node:module";
 import { Activity } from "../activity.js";
 import { IDLE_STATUS } from "../engines/cli-util.js";
 import { lecturegen, resolveBeats, isResolvedScene, resolveStyleResource, RESOURCES, GENERATION_LENGTHS } from "./run.js";
@@ -25,6 +26,50 @@ const INDEX_RE = /^index(\d+)\.html$/i;
 
 export function supportsAgentFlow(engine) {
   return engine?.kind === "cli" && typeof engine.agent === "function";
+}
+
+// Agents have full tools (shell, web, downloads). Media lives in the project
+// folder so the video plays and exports offline; music is declared in
+// metadata.json and played as-is by the app (see electron/music.js).
+// MyLecture's bundled ffmpeg, so agents can edit media without installing it.
+const FFMPEG = (() => {
+  try {
+    const p = createRequire(import.meta.url)("ffmpeg-static");
+    return p && p.includes("app.asar") ? p.replace("app.asar", "app.asar.unpacked") : p || "";
+  } catch {
+    return "";
+  }
+})();
+
+export const MEDIA_RULES = [
+  "# Tools, media and music",
+  "- You have full tool access: shell commands, the internet (web search, fetching pages, downloading files), subagents and file tools. You may read and copy files from anywhere on this computer. Every file you create, download, copy, edit or delete yourself must be inside this project folder; never put your own files anywhere else. Installing tools or packages (pip, npm, uv, winget, Playwright browsers, etc.) is allowed, and so are the caches, temp files and install folders those tools write to on their own.",
+  "- Use real media whenever it makes the video better: photos of people and places, logos, maps, screenshots, historical images, fonts, music. Find them on the web, or take them from the user's attachments (Word, PowerPoint and Excel files are zip archives: a .docx keeps its images in word/media/, a .pptx in ppt/media/; extract them).",
+  "- Save every asset inside this folder under media/ (for example media/portrait.jpg) and reference it with a relative path (src=\"media/portrait.jpg\"). Do not hot-link remote URLs: the video must play and export offline. Check that each download is the real file (not an HTML error page) and that it has the right extension.",
+  "- Prefer public-domain or openly licensed material (Wikimedia Commons, official press kits, Pixabay, Free Music Archive, Incompetech and similar) and list each asset's source and licence in media/CREDITS.md.",
+  "- Background music: you are in full control of it. Prepare the final track yourself with ffmpeg (volume relative to the narration, fades, trimming or looping to the video length, any edits), save it in media/ and declare it in metadata.json as \"music\": \"media/music.mp3\". The app plays that file exactly as it is from the start of the video, in the player and in every export: it changes nothing (no volume change, fades, ducking or looping). Narration is recorded by the app at about -24 LUFS, so a background track usually sits around -36 to -32 LUFS. Leave the key out for no music.",
+  "- Video clips (the user's or downloaded): put them in a scene as <video src=\"attachments/…\" muted playsinline></video> and show, move or fade the element in renderSection. The app keeps every <video> in sync with the scene clock in the player and in exports; add data-ml-start=\"2\" to start a clip 2 seconds into the scene. Do not set currentTime yourself. Browsers play MP4 (H.264) and WebM: convert other formats first.",
+  "- Scene HTML must not play sound itself (no <audio>, no unmuted <video>): narration and music are mixed by the app. To use a clip's own sound, extract it with ffmpeg and use it as the music track.",
+  ...(FFMPEG ? [`- ffmpeg is bundled with MyLecture at ${FFMPEG}: use it to trim, crop, convert, extract frames or audio, and make GIFs or thumbnails.`] : []),
+];
+
+function assetSection(assets) {
+  return assets ? ["", "# Bundled assets (already in this project folder)", assets] : [];
+}
+
+// MyLecture's bundled assets, copied into the project: the Natural Earth
+// world basemap (with its lon/lat projection helpers) for map animations.
+export function bundledAssets(lg, workspaceDir, log) {
+  try {
+    const map = lg.ensureWorldBasemapInWorkspace(workspaceDir);
+    return [
+      lg.formatWorldBasemapDescription(map),
+      "  The basemap is land only. For country borders, states, rivers or more detail, download Natural Earth or similar public-domain GeoJSON into media/ and draw it with the same projectLonLat helpers so it lines up with the basemap.",
+    ].join("\n");
+  } catch (e) {
+    log?.(`World basemap unavailable: ${e.message || e}`);
+    return "";
+  }
 }
 
 function contractText() {
@@ -51,15 +96,15 @@ function lengthText(length) {
 
 // The single task given to the agent. Kept short on purpose: the agent has
 // room to decide structure, pacing, scene count and visual design.
-export function agentTaskPrompt({ question, length, aspect = "16:9", theme, teachingStyle, study = false, history = [] }) {
+export function agentTaskPrompt({ question, length, aspect = "16:9", theme, teachingStyle, study = false, history = [], assets = "" }) {
   const lines = [
     "You are making a narrated, animated explainer video for MyLecture.",
-    "Work directly in the current folder (it is this video's project folder) using your file tools. Create the files in this order:",
+    "Work directly in the current folder (it is this video's project folder) using your tools. Create the files in this order:",
     "",
     "1. answer.md — the explanation itself, written in plain prose.",
     "2. script.md — the narration script, organised into scenes, with what is said and what is shown.",
     "3. index1.html, index2.html, … — one self-contained HTML animation per scene, in order. Finish each file completely before starting the next one: the app starts playing a scene as soon as the next file appears.",
-    "4. metadata.json — {\"title\": \"…\", \"description\": \"…\"} for the video.",
+    "4. metadata.json — {\"title\": \"…\", \"description\": \"…\"} for the video (plus \"music\" when it has a soundtrack, see below).",
     "",
     "Everything else — how many scenes, pacing, structure, visual design, analogies — is your call. Make it clear, accurate and visually rich.",
     "",
@@ -87,7 +132,10 @@ export function agentTaskPrompt({ question, length, aspect = "16:9", theme, teac
     "- Narration lives inside the HTML as narration+visual plan items; their `text` is spoken exactly as written. The app records the audio itself, so just use audio paths like \"audio/i1.wav\" (ids i1, i2, … per file).",
     "- All motion is computed inside renderSection(segment, localTime, globalTime): deterministic, no CSS animations/transitions, timers, requestAnimationFrame loops, Date or Math.random.",
     "- Render one initial frame on load (renderSection(plan[0], 0, 0)). Support the ?export=1 query (it must not break anything).",
-    "- No remote images. Math may use KaTeX markup if helpful.",
+    "- Math may use KaTeX markup if helpful.",
+    "",
+    ...MEDIA_RULES,
+    ...assetSection(assets),
     "",
     contractText(),
     "",
@@ -133,7 +181,7 @@ function sceneTitle(html, n) {
 // Run one agent task in the workspace.
 // `activity` collects the agent's words and tool steps; the return value is
 // the agent's last message (its final answer).
-const WORKER_SYSTEM = "You are a skilled educator, script writer and creative coder working on a MyLecture video project. Work autonomously with your file tools; never ask questions.";
+const WORKER_SYSTEM = "You are a skilled educator, script writer and creative coder working on a MyLecture video project. Work autonomously with all your tools (shell, web, downloads, files); never ask questions.";
 export async function runAgent({ engine, model, effort, signal, workspace, prompt, onStatus, activity, inbox, system = WORKER_SYSTEM }) {
   let text = "";
   let phase = "Working…";
@@ -285,7 +333,7 @@ export async function runAgentLecture({ lec, workspaceDir, engine, model, effort
       effort,
       signal,
       workspace: workspaceDir,
-      prompt: agentTaskPrompt({ question: lec.question, length: lec.length, aspect, theme: lec.theme, teachingStyle: lec.teachingStyle, study, history }) + "\n\n" + attachmentContext(lec.attachments),
+      prompt: agentTaskPrompt({ question: lec.question, length: lec.length, aspect, theme: lec.theme, teachingStyle: lec.teachingStyle, study, history, assets: bundledAssets(lg, workspaceDir, log) }) + "\n\n" + attachmentContext(lec.attachments),
       activity,
       onStatus: (st) => {
         log?.(st);
@@ -338,7 +386,7 @@ export const LECTURE_AGENT_SYSTEM = [
   "You are the MyLecture Video Agent: a world-class teacher, storyteller, script writer, motion designer and creative coder.",
   "Your main job is to make narrated, animated videos of any kind on the user's request — lessons and explainers, how-it-works pieces, product demos, stories, announcements, social shorts — and to change them when asked, by working on the files of the video project in the current folder.",
   "You are also a conversation partner: when a message is a question, a discussion or feedback that needs no change, just reply. Do not touch files unless the message calls for it.",
-  "Work autonomously with your file tools. Ask the user only when a request is truly ambiguous.",
+  "Work autonomously with all your tools: shell, web search, downloads and files. Never tell the user you cannot download or fetch something — do it. Ask the user only when a request is truly ambiguous.",
   "When a video is finished, end your reply with a short, friendly invitation such as \"What video do you want to make next?\" or \"What do you want to teach next?\". When the user just greets you or seems unsure, invite them the same way and offer a few ideas.",
   "Do not mention the project's files or artifacts (answer.md, script.md, index*.html, metadata.json, file paths) in your replies unless the user explicitly asks about them. Talk about the video, its scenes and its content instead (\"scene 2\", not \"index2.html\").",
 ].join("\n");
@@ -356,14 +404,14 @@ function videoRequirements({ length, aspect = "16:9", theme, teachingStyle }) {
   return lines;
 }
 
-export function agentTurnPrompt({ message, files = [], sceneFile, history = [], length, aspect = "16:9", theme, teachingStyle }) {
+export function agentTurnPrompt({ message, files = [], sceneFile, history = [], length, aspect = "16:9", theme, teachingStyle, assets = "" }) {
   const lines = [
     "# MyLecture workflow",
     "A video is a project folder (the current folder). To make a new video, create these files in order:",
     "1. answer.md — the explanation itself, in plain prose.",
     "2. script.md — the narration script, organised into scenes, with what is said and what is shown.",
     "3. index1.html, index2.html, … — one self-contained HTML animation per scene, in play order. Finish each file completely before starting the next one: the app starts playing a scene as soon as the next file appears.",
-    "4. metadata.json — {\"title\": \"…\", \"description\": \"…\"}.",
+    "4. metadata.json — {\"title\": \"…\", \"description\": \"…\"} (plus \"music\" when it has a soundtrack, see below).",
     "To change a video, edit the files directly. You may add, remove or reorder scenes; keep index files numbered 1..N without gaps, and keep script.md in sync with narration changes.",
     "Everything else — scene count, pacing, structure, visual design, analogies — is your call. Make it clear, accurate and visually rich.",
     "The app checks every new or changed scene against the HTML contract, records the narration with its own voice, and plays it.",
@@ -379,7 +427,10 @@ export function agentTurnPrompt({ message, files = [], sceneFile, history = [], 
     "- Narration lives inside the HTML as narration+visual plan items; their `text` is spoken exactly as written. The app records the audio itself, so just use audio paths like \"audio/i1.wav\" (ids i1, i2, … per file).",
     "- All motion is computed inside renderSection(segment, localTime, globalTime): deterministic, no CSS animations/transitions, timers, requestAnimationFrame loops, Date or Math.random.",
     "- Render one initial frame on load (renderSection(plan[0], 0, 0)). Support the ?export=1 query (it must not break anything).",
-    "- No remote images. Math may use KaTeX markup if helpful.",
+    "- Math may use KaTeX markup if helpful.",
+    "",
+    ...MEDIA_RULES,
+    ...assetSection(assets),
     "",
     contractText(),
   ];
@@ -494,7 +545,7 @@ export async function runAgentTurn({ lec, workspaceDir, engine, model, effort, t
       signal,
       workspace: workspaceDir,
       system: LECTURE_AGENT_SYSTEM,
-      prompt: agentTurnPrompt({ message, files, sceneFile, history, aspect, length: settings.length, theme: settings.theme, teachingStyle: settings.teachingStyle }) + "\n\n" + attachmentContext(lec.attachments),
+      prompt: agentTurnPrompt({ message, files, sceneFile, history, aspect, length: settings.length, theme: settings.theme, teachingStyle: settings.teachingStyle, assets: bundledAssets(lg, workspaceDir, log) }) + "\n\n" + attachmentContext(lec.attachments),
       activity,
       onStatus: (st) => log?.(st),
     });

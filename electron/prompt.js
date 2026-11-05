@@ -109,7 +109,7 @@ Rules:
 - Math: always typeset with KaTeX, never hand-draw it: <span data-tex="\\frac{a}{b}"></span> (inline) or <div data-tex="E=mc^2" data-display></div> renders at mount (single backslashes). In JS strings use ML.tex(el, String.raw\`\\frac{a}{b}\`). Highlight terms with \\color{#hex}{...}. Keep each equation line in its own div so lines never overlap.
 - Tables are HTML <table> elements (cell padding 12px 16px), never LaTeX arrays.
 - Code: <pre data-code="python">...code...</pre> is syntax-highlighted at mount.
-- Prefer inline SVG for diagrams (viewBox in canvas pixels) and HTML for text. When text belongs to an SVG diagram, layer an HTML element over it inside one position:relative wrapper (or use <foreignObject>). No external images, fonts or network requests — build every visual in code.
+- Prefer inline SVG for diagrams (viewBox in canvas pixels) and HTML for text. When text belongs to an SVG diagram, layer an HTML element over it inside one position:relative wrapper (or use <foreignObject>). When a real photo, logo, map or artwork helps, use <img> with a stable public URL (for example upload.wikimedia.org); build diagrams and everything else in code.
 - Use CSS grid/flex and normal flow for layout. No absolute positioning except overlays inside a diagram wrapper with position:relative (or stack layers with grid-area: 1 / 1). No scrollbars, no playback controls, no embedded subtitles.
 
 # ${T.prompt}

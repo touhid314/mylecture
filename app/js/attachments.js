@@ -1,7 +1,9 @@
 import { h, icon, toast } from "./ui.js";
 
-const EXTENSIONS = ["png", "jpg", "jpeg", "webp", "gif", "pdf", "doc", "docx", "ppt", "pptx", "xls", "xlsx", "txt", "md", "csv"];
+const MEDIA = ["png", "jpg", "jpeg", "webp", "gif", "svg", "avif", "bmp", "mp4", "webm", "mov", "m4v", "mkv", "avi", "mp3", "wav", "m4a", "aac", "ogg", "oga", "opus", "flac"];
+const EXTENSIONS = [...MEDIA, "pdf", "doc", "docx", "ppt", "pptx", "xls", "xlsx", "txt", "md", "csv"];
 const MAX_SIZE = 20 * 1024 * 1024;
+const MEDIA_MAX_SIZE = 500 * 1024 * 1024; // photos, video and audio
 const hasFiles = (e) => [...(e.dataTransfer?.types || [])].includes("Files");
 
 // A file dropped anywhere else must not make the window navigate to it.
@@ -66,8 +68,9 @@ export class AttachmentPicker {
         toast(`${file.name}: this file type is not supported.`, { kind: "bad" });
         continue;
       }
-      if (file.size > MAX_SIZE) {
-        toast(`${file.name} exceeds the 20 MB limit.`, { kind: "bad" });
+      const media = MEDIA.includes(ext);
+      if (file.size > (media ? MEDIA_MAX_SIZE : MAX_SIZE)) {
+        toast(`${file.name} exceeds the ${media ? "500 MB" : "20 MB"} limit.`, { kind: "bad" });
         continue;
       }
       if (this.files.length >= 10) {

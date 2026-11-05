@@ -12,3 +12,4 @@ tests/scratch/themes/
 # Local-only test launcher
 MyLecture (fresh install).bat
 dist-codex/
+voices-dev/*/demo.mp3

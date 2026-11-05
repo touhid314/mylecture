@@ -101,7 +101,7 @@ export function pcmToWav(pcm16, sampleRate) {
 }
 
 export class TTSService extends EventEmitter {
-  constructor({ cacheDir, modelDir, getSettings }) {
+  constructor({ cacheDir, modelDir, voicesDir, getSettings }) {
     super();
     this.cacheDir = cacheDir;
     this.modelDir = modelDir;
@@ -113,7 +113,7 @@ export class TTSService extends EventEmitter {
     this.jobs = new Map();
     this.seq = 0;
     this.sapi = new SapiVoice();
-    this.omni = new OmniVoice({ modelDir, getSettings });
+    this.omni = new OmniVoice({ modelDir, getSettings, customDir: voicesDir });
     this.omni.on("status", () => this.emit("status", this.status()));
     this.inflight = new Map();
   }

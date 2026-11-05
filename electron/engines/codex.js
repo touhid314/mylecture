@@ -7,6 +7,7 @@ import os from "node:os";
 import path from "node:path";
 import { findExecutable, scratchDir, runCapture, killTree, idleStatus } from "./cli-util.js";
 import { log } from "../logger.js";
+import { BROWSER_NOTE, codexMcpConfig } from "./browser-mcp.js";
 
 // The signed-in ChatGPT account (email, plan) from the saved sign-in's ID token.
 export function codexAccount(home = process.env.CODEX_HOME || path.join(os.homedir(), ".codex")) {
@@ -18,6 +19,19 @@ export function codexAccount(home = process.env.CODEX_HOME || path.join(os.homed
   } catch {
     return null;
   }
+}
+
+// Plain tokens (no quotes or spaces) so they survive the .cmd shim's shell;
+// a value that is not valid TOML ("live") is taken as a literal string.
+export const AGENT_CONFIG = ["web_search=live"];
+
+// Agent runs use Codex's full-access mode (no sandbox) so the agent can
+// install and run any tool. The project-folder rule for its own files is an
+// instruction, as with Claude and Gemini.
+export const CODEX_AGENT_NOTE = `You have full access to this computer: shell, internet, package installs (pip, npm, winget, …) and a real web browser. You may read and copy files from anywhere. Every file you create, download, copy, edit or delete yourself must be inside the current project folder; never put your own files anywhere else. Installing tools or packages is allowed, and so are the caches, temp files and install folders those tools write to on their own. ${BROWSER_NOTE}`;
+
+export function agentConfigArgs(workspace = "") {
+  return [...AGENT_CONFIG, ...(workspace ? codexMcpConfig(workspace) : [])].flatMap((c) => ["-c", c]);
 }
 
 export const codex = {
@@ -93,9 +107,11 @@ export const codex = {
     return new Promise((resolve, reject) => {
       const startedAt = Date.now();
       const isShim = /\.(cmd|bat)$/i.test(exe);
+      // Agent runs: full access (no sandbox), live web search and the browser.
+      const serverArgs = ["app-server", ...(workspace ? agentConfigArgs(workspace) : [])];
       const child = isShim
-        ? spawn(`"${exe}" app-server`, { shell: true, windowsHide: true, cwd })
-        : spawn(exe, ["app-server"], { windowsHide: true, cwd });
+        ? spawn(`"${exe}" ${serverArgs.map((a) => (/\s/.test(a) ? `"${a}"` : a)).join(" ")}`, { shell: true, windowsHide: true, cwd })
+        : spawn(exe, serverArgs, { windowsHide: true, cwd });
       let buf = "";
       let full = "";
       let done = false;
@@ -166,9 +182,9 @@ export const codex = {
             send({ method: "initialized" });
             const params = {
               cwd,
-              sandbox: workspace ? "workspace-write" : "read-only",
+              sandbox: workspace ? "danger-full-access" : "read-only",
               approvalPolicy: "never",
-              developerInstructions: system,
+              developerInstructions: workspace ? `${system}\n\n${CODEX_AGENT_NOTE}` : system,
             };
             if (model) params.model = model;
             send({ id: 2, method: "thread/start", params });

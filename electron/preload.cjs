@@ -48,6 +48,9 @@ contextBridge.exposeInMainWorld("ml", {
   tts: {
     status: () => invoke("tts:status"),
     voices: () => invoke("tts:voices"),
+    addVoice: (input) => invoke("tts:addVoice", input),
+    demo: (engine, voice) => invoke("tts:demo", engine, voice),
+    removeVoice: (id) => invoke("tts:removeVoice", id),
     preview: (t, o) => invoke("tts:preview", t, o),
     synth: (t) => invoke("tts:synth", t),
     retry: () => invoke("tts:retry"),

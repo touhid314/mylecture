@@ -477,6 +477,7 @@ export class IdeService {
       const out = await exportMp4(lec, {
         ttsFile: (key) => this.tts.fileFor(key),
         outDir,
+        projectDir: lectures.dir(id),
         fps,
         captionsOn: captions,
         height,

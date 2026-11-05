@@ -142,6 +142,8 @@ export class Player {
   // ---------- content ----------
   setLecture(lec) {
     this.pause();
+    this.lectureId = lec.id || null;
+    this.loadMusic(this.lectureId);
     this.t = 0;
     this.ended = false;
     this.lastPosted = -1;
@@ -186,6 +188,7 @@ export class Player {
   }
 
   setAllScenes(scenes) {
+    this.loadMusic(this.lectureId);
     this.scenes = [];
     this.meta = {};
     scenes.forEach((sc, si) => this._putScene(si, sc));
@@ -213,6 +216,7 @@ export class Player {
   }
 
   endLive() {
+    this.loadMusic(this.lectureId);
     this.generating = false;
     this.dirty = true;
   }
@@ -301,6 +305,50 @@ export class Player {
     this.cur = null;
   }
 
+  // ---------- background music (metadata.json "music") ----------
+  // The agent prepares the track (level, fades, length); the app plays the
+  // file exactly as it is, kept in sync with the timeline. Same in exports.
+  async loadMusic(lectureId) {
+    const id = lectureId;
+    if (!id) return this._setMusic(null);
+    const base = `mylecture://app/lib/${encodeURIComponent(id)}/`;
+    let spec = null;
+    try {
+      const r = await fetch(base + "metadata.json", { cache: "no-store" });
+      if (r.ok) spec = (await r.json())?.music || null;
+    } catch {}
+    if (id !== this.lectureId) return; // another lecture was loaded meanwhile
+    const file = typeof spec === "string" ? spec : spec?.file;
+    if (typeof file !== "string" || !file.trim() || /^[a-z]+:|^\/|\.\./i.test(file)) return this._setMusic(null);
+    this._setMusic(base + file.trim().replace(/\\/g, "/").split("/").map(encodeURIComponent).join("/"));
+  }
+  _setMusic(url) {
+    if (this.music?.src === url) return;
+    if (this.music) { try { this.music.pause(); } catch {} this.music.src = ""; }
+    this.music = null;
+    if (!url) return;
+    const a = new Audio();
+    a.preload = "auto";
+    a.src = url;
+    this.music = a;
+  }
+  _syncMusic() {
+    const a = this.music;
+    if (!a) return;
+    const len = a.duration;
+    const on = this.playing && !this.waiting && Number.isFinite(len) && this.t < len;
+    if (!on) {
+      if (!a.paused) a.pause();
+      return;
+    }
+    if (a.paused || Math.abs(a.currentTime - this.t) > 0.35) {
+      try { a.currentTime = this.t; } catch {}
+    }
+    a.playbackRate = this.rate;
+    a.muted = this.muted;
+    if (a.paused) a.play().catch(() => {});
+  }
+
   // ---------- main loop ----------
   _timelineScenes() {
     return this.scenes.filter(Boolean).map((sc, si) => ({
@@ -327,6 +375,7 @@ export class Player {
       this.lastPosted = -1;
     }
     if (this.playing) this._step(dt);
+    this._syncMusic();
     if (Math.abs(this.t - this.lastPosted) > 1e-4) {
       this._post({ type: "time", t: this.t });
       this.lastPosted = this.t;
@@ -464,6 +513,7 @@ export class Player {
     cancelAnimationFrame(this._raf);
     window.removeEventListener("message", this._onMsg);
     this._stopAudio();
+    this._setMusic(null);
     for (const a of this.audio.values()) a.src = "";
     this.audio.clear();
     if (Player.active === this) Player.active = null;
