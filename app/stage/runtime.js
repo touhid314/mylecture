@@ -209,8 +209,16 @@
     parent.postMessage({ type: "stage-error", scene: index, message: msg }, "*");
   }
 
+  function unmountAll() {
+    htmlFrame?.dispose?.();
+    htmlFrame = null;
+    mounted = { index: -1, key: "", render: null };
+    root.innerHTML = "";
+  }
   function mount(index) {
     const sc = scenes[index];
+    htmlFrame?.dispose?.();
+    htmlFrame = null;
     errBadge.style.display = "none";
     mounted = { index, key: sc ? sceneKey(sc) : "", render: null };
     root.innerHTML = "";
@@ -357,6 +365,8 @@
     };
     frame.render = (segment, local, global) => {
       const seq = ++frame.seq;
+      // A frame removed from the stage has no window; skip it (it is remounted).
+      if (!iframe.isConnected || !iframe.contentWindow) return Promise.resolve();
       const done = new Promise(resolve => frame.pending.set(seq, resolve));
       iframe.contentWindow.postMessage({ type: "ml-scene-render", token, seq, segment, local, global }, "*");
       return done;
@@ -392,7 +402,7 @@
   function renderAt(t) {
     lastT = t;
     if (!tl.scenes.length) {
-      root.innerHTML = "";
+      unmountAll();
       captionSpan.textContent = "";
       return;
     }
@@ -400,7 +410,8 @@
     const sc = scenes[loc.scene];
     const st = tl.scenes[loc.scene];
     if (sc && sc.kind === "html") {
-      if (mounted.index !== loc.scene || mounted.key !== sceneKey(sc)) mountHtml(loc.scene);
+      const attached = htmlFrame && htmlFrame.iframe.isConnected;
+      if (!attached || mounted.index !== loc.scene || mounted.key !== sceneKey(sc)) mountHtml(loc.scene);
       const rendered = renderHtml(loc, sc, st);
       root.style.opacity = "1";
       const beat = sc.beats[loc.beat];
