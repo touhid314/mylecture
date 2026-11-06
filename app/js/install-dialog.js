@@ -57,7 +57,8 @@ export async function showInstaller(id, { onDone } = {}) {
     fill.style.width = p.state === "done" ? "100%" : p.percent != null ? `${p.percent}%` : "";
     step.style.color = p.state === "error" ? "var(--bad)" : "";
     step.textContent = p.state === "done" ? `${info.title} is installed.` : p.message || "";
-    meta.textContent = busy && startedAt ? `${p.percent != null ? `${p.percent}% · ` : ""}${elapsed(Date.now() - startedAt)} elapsed` : "";
+    const pctText = p.percent != null && !String(p.message || "").includes(`${p.percent}%`) ? `${p.percent}% · ` : "";
+    meta.textContent = busy && startedAt ? `${pctText}${elapsed(Date.now() - startedAt)} elapsed` : "";
     log.hidden = !busy || !lines.length;
     log.textContent = lines.join("\n");
     if (go) {

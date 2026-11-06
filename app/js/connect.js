@@ -235,7 +235,7 @@ export function showWelcome(state, { onDone } = {}) {
       { class: "welcome-box" },
       h("img", { class: "welcome-logo", src: "assets/icon.png", alt: "" }),
       h("h1", {}, "Welcome to MyLecture"),
-      h("p", { class: "welcome-lead" }, "Make any video, from lessons and explainers to product demos and stories, with the AI subscription you already have."),
+      h("p", { class: "welcome-lead" }, "Make any video, from lessons and explainers to stories, with the AI subscription you already have."),
       h("h3", {}, "Connect your AI"),
       panel.el,
       h("p", { class: "small muted" }, "You sign in with your provider in a window MyLecture opens for you. Your password never passes through MyLecture."),
