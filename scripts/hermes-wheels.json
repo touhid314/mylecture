@@ -1,0 +1,9 @@
+[
+  {
+    "name": "cryptography",
+    "version": "50.0.2",
+    "url": "https://mylecture-server.touhid3-1416.workers.dev/updates/cryptography-50.0.2-cp314-abi3-macosx_13_0_x86_64.whl",
+    "hash": "sha256:2281d1c4a6e622ac2d97f5f52ebeba3f4830828e419d7af1ced47de3fae7512c",
+    "size": 3818235
+  }
+]

@@ -4,6 +4,8 @@ Official releases target Windows 10/11, 64-bit. The release workflow builds and 
 
 The same workflow builds macOS for Apple silicon and Intel. Every platform installs Hermes from the packaged source in a fresh profile, automatically selects a model from a local test API, writes files in two separate projects, and checks that an outside-project write is refused. This uses the real Hermes runtime without a paid API key. macOS packages are ad-hoc signed unless release signing credentials are configured; the website's Mac installation command installs the matching build.
 
+The Hermes check forces a private Python download even when the runner has Python installed. Cryptography must install from a wheel, so the runner's Rust compiler cannot hide a missing end-user dependency. Upstream cryptography 50.0.2 does not ship Intel Mac wheels; `hermes-intel-wheels.yml` builds that exact version with static OpenSSL, checks its native import, and uploads a wheel artifact. The verified wheel is hosted under `/updates/` on our release server. `scripts/hermes-wheels.json` records its URL, SHA-256 and size, and the bundler supplements Hermes's lock with it. When updating Hermes, rebuild and publish the wheel if its pinned cryptography version changes; do not downgrade the dependency to obtain an older wheel.
+
 To run the app without packaging it, see [Getting started from source](GETTING_STARTED.md).
 
 ## Publish a GitHub release

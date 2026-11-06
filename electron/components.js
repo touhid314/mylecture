@@ -260,7 +260,7 @@ export class ComponentManager extends EventEmitter {
       await fs.promises.cp(bundled, p.src, { recursive: true });
     } else await this._downloadHermes(p, step, onLine, signal);
     step("Downloading necessary things…", bundled ? 15 : 68);
-    await uv(["sync", "--project", p.src, "--frozen", "--no-dev", "--python", HERMES_PYTHON], { UV_PROJECT_ENVIRONMENT: p.env });
+    await uv(["sync", "--project", p.src, "--frozen", "--no-dev", "--no-build-package", "cryptography", "--python", HERMES_PYTHON], { UV_PROJECT_ENVIRONMENT: p.env });
     step("Almost done…", 95);
     await this.run(p.exe, ["--version"], { env: { HERMES_HOME: p.home, PYTHONIOENCODING: "utf-8" }, onLine, signal });
     fs.writeFileSync(p.marker, JSON.stringify({ version: HERMES_VERSION, installedAt: new Date().toISOString() }, null, 2));

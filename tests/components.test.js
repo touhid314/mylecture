@@ -181,7 +181,7 @@ test("Hermes installs from its pinned release with uv: no git, locked packages, 
   await t.manager.install("hermes");
   assert.deepEqual(downloads, ["https://github.com/NousResearch/hermes-agent/archive/refs/tags/v0.23.0.zip"]);
   const sync = t.runs.find((r) => / sync /.test(r));
-  assert.match(sync, /--frozen --no-dev --python 3\.14/);
+  assert.match(sync, /--frozen --no-dev --no-build-package cryptography --python 3\.14/);
   assert(!t.runs.some((r) => /git|hermes-agent\.nousresearch\.com\/install/.test(r)), "no git, no official installer");
   assert.equal(t.manager.installed("hermes"), true);
   assert.equal(t.events.at(-1).state, "done");

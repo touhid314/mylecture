@@ -11,11 +11,13 @@ import { execFileSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import { HERMES_VERSION, HERMES_SOURCE_URL, HERMES_BUNDLE_MARKER } from "../electron/engines/hermes.js";
 import { downloadFile } from "../electron/components.js";
+import { addHermesWheels } from "./hermes-wheels.mjs";
 
 const root = path.join(path.dirname(fileURLToPath(import.meta.url)), "..");
 const out = path.join(root, "vendor", "hermes");
 const cache = path.join(root, "vendor", ".cache");
 const marker = path.join(out, HERMES_BUNDLE_MARKER);
+const wheels = JSON.parse(fs.readFileSync(path.join(root, "scripts", "hermes-wheels.json"), "utf8"));
 
 // Development and documentation only; nothing here runs in `hermes chat`.
 export const HERMES_TRIM = [
@@ -26,6 +28,7 @@ export const HERMES_TRIM = [
 ];
 
 if (fs.existsSync(marker) && fs.readFileSync(marker, "utf8").trim() === HERMES_VERSION) {
+  addHermesWheels(out, wheels);
   console.log(`Hermes Agent ${HERMES_VERSION} is already in vendor/hermes.`);
   process.exit(0);
 }
@@ -52,6 +55,7 @@ fs.renameSync(path.join(unpack, top), out);
 fs.rmSync(unpack, { recursive: true, force: true });
 for (const name of HERMES_TRIM) fs.rmSync(path.join(out, name), { recursive: true, force: true });
 fs.writeFileSync(marker, HERMES_VERSION + "\n");
+addHermesWheels(out, wheels);
 
 let bytes = 0, files = 0;
 const walk = (d) => { for (const e of fs.readdirSync(d, { withFileTypes: true })) { const f = path.join(d, e.name); if (e.isDirectory()) walk(f); else { bytes += fs.statSync(f).size; files++; } } };

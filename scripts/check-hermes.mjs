@@ -20,6 +20,8 @@ import { makeApiEngine } from "../electron/engines/api.js";
 const root = path.join(path.dirname(fileURLToPath(import.meta.url)), "..");
 const base = fs.mkdtempSync(path.join(os.tmpdir(), "ml-hermes-check-"));
 const userData = path.join(base, "My Lecture");
+// Exercise Python installation too, even on developer-equipped CI runners.
+process.env.UV_PYTHON_PREFERENCE = "only-managed";
 const fail = (msg) => { console.error(`FAIL: ${msg}`); process.exit(1); };
 function bundledSource() {
   if (!process.argv.includes("--packaged")) return process.argv[2] || path.join(root, "vendor", "hermes");
