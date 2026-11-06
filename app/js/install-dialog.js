@@ -10,6 +10,7 @@ const ABOUT = {
   "claude-code": { intro: "Installing Claude Code with Anthropic's official installer.", time: "1 to 3 minutes" },
   codex: { intro: "Installing Codex with OpenAI's official package.", time: "2 to 5 minutes" },
   antigravity: { intro: "Installing the Antigravity CLI with Google's official installer.", time: "1 to 3 minutes" },
+  hermes: { intro: "Installing Hermes Agent with Nous Research's official installer. MyLecture uses it to make videos with your own API key.", time: "3 to 10 minutes" },
   kokoro: { intro: "Downloading the Kokoro voice model. It runs on your computer.", time: "1 to 4 minutes" },
   omnivoice: {
     intro: "OmniVoice is a high-quality, expressive voice that runs on your computer. It uses your NVIDIA graphics card if you have one; otherwise it runs slower on the processor.",

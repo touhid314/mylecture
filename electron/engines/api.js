@@ -3,6 +3,7 @@
 // OpenAI-compatible endpoint (OpenRouter, LiteLLM/Navigator, Ollama, LM Studio).
 import fs from "node:fs";
 import { log, registerLogSecret } from "../logger.js";
+import { runHermes, hermesExe } from "./hermes.js";
 
 export function imageAttachments(attachments = []) {
   return attachments.filter(a => /^image\/(png|jpeg|webp|gif)$/.test(a.mime || "")).map(a => ({
@@ -191,10 +192,20 @@ export function makeApiEngine(getConfig) {
       return makeApiEngine(() => config);
     },
 
+    // Videos made with an API key run in Hermes Agent (electron/engines/hermes.js).
+    // The staged LectureGen pipeline (generate() + lecturegen/run.js) stays in
+    // the code but is no longer used for videos.
+    agent({ system, user, model, signal, onDelta, onStatus, onActivity, workspace }) {
+      const c = getConfig();
+      const m = model || c.model || API_PROVIDERS[c.provider]?.defaultModel;
+      return runHermes({ system, user, model: m, config: c, workspace, signal, onDelta, onStatus, onActivity });
+    },
+
     async status() {
       const c = getConfig();
       const ok = !!c.apiKey || c.provider === "compatible";
-      return { installed: true, ready: ok, message: ok ? `${API_PROVIDERS[c.provider]?.label || c.provider} configured` : "Add an API key in Settings" };
+      const hermes = !!hermesExe();
+      return { installed: true, ready: ok && hermes, hermes, message: !ok ? "Add an API key in Settings" : !hermes ? "Install Hermes Agent in Settings → AI engines & voices" : `${API_PROVIDERS[c.provider]?.label || c.provider} configured` };
     },
 
     async models() {

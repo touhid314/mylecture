@@ -25,7 +25,7 @@ const isAuto = (v) => String(v || "").trim().toLowerCase() === AUTO;
 const INDEX_RE = /^index(\d+)\.html$/i;
 
 export function supportsAgentFlow(engine) {
-  return engine?.kind === "cli" && typeof engine.agent === "function";
+  return typeof engine?.agent === "function";
 }
 
 // Agents have full tools (shell, web, downloads). Media lives in the project

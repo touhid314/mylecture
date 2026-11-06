@@ -2,6 +2,7 @@
 // (model list + one short generation), choose the model, save and use.
 // API keys run MyLecture's fixed generation pipeline.
 import { h, modal, toast, bus } from "./ui.js";
+import { showInstaller, componentInstalled } from "./install-dialog.js";
 
 const friendly = (e) => String(e?.message || e).replace(/^Error invoking remote method '[^']+': (Error: )?/, "");
 
@@ -97,6 +98,8 @@ export async function showApiKeyDialog(state, { onDone } = {}) {
             bus.emit("settings-changed", state.settings);
             toast(`Using ${P[provider].label} with your API key.`);
             onDone?.();
+            // Videos made with an API key run in Hermes Agent: offer to install it.
+            if (!(await componentInstalled("hermes"))) void showInstaller("hermes");
           } catch (e) {
             toast(friendly(e), { kind: "bad" });
             return false;

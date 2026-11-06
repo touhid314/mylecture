@@ -10,6 +10,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { findExecutable, killTree } from "./engines/cli-util.js";
 import { resolveOmniPython } from "./tts/omnivoice.js";
+import { hermesDirs } from "./engines/hermes.js";
 
 const WIN = process.platform === "win32";
 
@@ -17,12 +18,13 @@ export const COMPONENTS = [
   { id: "claude-code", kind: "engine", title: "Claude", detail: "Claude Code. Needs a Claude Pro or Max plan.", size: "about 250 MB", byDefault: true },
   { id: "codex", kind: "engine", title: "GPT", detail: "Codex. Needs a ChatGPT Plus, Pro, Business or Enterprise plan.", size: "about 450 MB", byDefault: true },
   { id: "antigravity", kind: "engine", title: "Gemini", detail: "Antigravity CLI. Needs a Google account.", size: "about 250 MB", byDefault: true },
+  { id: "hermes", kind: "engine", title: "Hermes Agent", detail: "Makes videos with your own API key (Use with API key).", size: "about 700 MB", byDefault: false },
   { id: "kokoro", kind: "voice", title: "Kokoro voice", detail: "Fast, natural voice. The default.", size: "about 325 MB", byDefault: true },
   { id: "omnivoice", kind: "voice", title: "OmniVoice", detail: "High-quality, expressive voice. Best with an NVIDIA graphics card.", size: "about 6 GB", byDefault: false },
 ];
 export const COMPONENT_IDS = COMPONENTS.map(c => c.id);
 
-const ENGINE_BIN = { "claude-code": "claude", codex: "codex", antigravity: "agy" };
+const ENGINE_BIN = { "claude-code": "claude", codex: "codex", antigravity: "agy", hermes: "hermes" };
 const PS = (script) => ["powershell.exe", ["-NoProfile", "-ExecutionPolicy", "Bypass", "-Command", script]];
 const SH = (script) => ["/bin/bash", ["-lc", script]];
 
@@ -81,7 +83,7 @@ export class ComponentManager extends EventEmitter {
   get omniMarker() { return path.join(this.omniDir, "installed.json"); }
 
   installed(id) {
-    if (ENGINE_BIN[id]) return !!this.find([ENGINE_BIN[id]]);
+    if (ENGINE_BIN[id]) return !!this.find([ENGINE_BIN[id]], id === "hermes" ? hermesDirs() : undefined);
     if (id === "kokoro") {
       try { return fs.statSync(kokoroModelFile(this.modelDir)).size > 300 * 1024 * 1024; } catch { return false; }
     }
@@ -155,6 +157,12 @@ export class ComponentManager extends EventEmitter {
     if (id === "claude-code") {
       step("Installing Claude Code with Anthropic's installer…");
       cmd = win ? PS("irm https://claude.ai/install.ps1 | iex") : SH("curl -fsSL https://claude.ai/install.sh | bash");
+    } else if (id === "hermes") {
+      step("Installing Hermes Agent with Nous Research's installer…");
+      // Official installer, unattended; no browser or computer-use extras.
+      cmd = win
+        ? PS("& ([scriptblock]::Create((irm https://hermes-agent.nousresearch.com/install.ps1))) -NonInteractive -SkipSetup -SkipBrowser -SkipComputerUse")
+        : SH("curl -fsSL https://hermes-agent.nousresearch.com/install.sh | bash -s -- --non-interactive --skip-browser");
     } else if (id === "antigravity") {
       step("Installing the Antigravity CLI with Google's installer…");
       cmd = win ? PS("irm https://antigravity.google/cli/install.ps1 | iex") : SH("curl -fsSL https://antigravity.google/cli/install.sh | bash");

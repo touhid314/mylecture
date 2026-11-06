@@ -37,6 +37,7 @@ function harness({ platform = "win32", have = [], settings = {} } = {}) {
       const joined = args.join(" ");
       if (/claude\.ai\/install/.test(joined)) { opts.onLine?.("Downloading Claude Code... 42%"); found.add("claude"); }
       if (/antigravity\.google/.test(joined)) found.add("agy");
+      if (/hermes-agent\.nousresearch\.com/.test(joined)) found.add("hermes");
       if (/OpenAI\.Codex|@openai\/codex/.test(joined)) found.add("codex");
       if (/astral\.sh\/uv/.test(joined)) { fs.mkdirSync(opts.env.UV_INSTALL_DIR, { recursive: true }); fs.writeFileSync(path.join(opts.env.UV_INSTALL_DIR, "uv.exe"), ""); }
       if (args[0] === "venv") { fs.mkdirSync(path.join(args.at(-1), "Scripts"), { recursive: true }); fs.writeFileSync(path.join(args.at(-1), "Scripts", "python.exe"), ""); }
@@ -49,16 +50,17 @@ function harness({ platform = "win32", have = [], settings = {} } = {}) {
 }
 
 test("component list: engines and Kokoro ticked by default, OmniVoice not", () => {
-  assert.deepEqual(COMPONENTS.map(c => [c.id, c.byDefault]), [["claude-code", true], ["codex", true], ["antigravity", true], ["kokoro", true], ["omnivoice", false]]);
+  assert.deepEqual(COMPONENTS.map(c => [c.id, c.byDefault]), [["claude-code", true], ["codex", true], ["antigravity", true], ["hermes", false], ["kokoro", true], ["omnivoice", false]]);
 });
 
 test("engines install with the official installers, hidden, and are then found", async () => {
   const t = harness({ have: ["winget"] });
-  for (const id of ["claude-code", "codex", "antigravity"]) await t.manager.install(id);
+  for (const id of ["claude-code", "codex", "antigravity", "hermes"]) await t.manager.install(id);
   assert.match(t.runs[0], /^powershell\.exe .*irm https:\/\/claude\.ai\/install\.ps1 \| iex$/);
   assert.match(t.runs[1], /^winget install --id OpenAI\.Codex --exact --source winget --silent/);
   assert.match(t.runs[2], /irm https:\/\/antigravity\.google\/cli\/install\.ps1 \| iex$/);
-  assert.deepEqual(t.manager.status().filter(c => c.kind === "engine").map(c => c.installed), [true, true, true]);
+  assert.match(t.runs[3], /irm https:\/\/hermes-agent\.nousresearch\.com\/install\.ps1.*-NonInteractive/);
+  assert.deepEqual(t.manager.status().filter(c => c.kind === "engine").map(c => c.installed), [true, true, true, true]);
   assert.equal(t.events.at(-1).state, "done");
 });
 
