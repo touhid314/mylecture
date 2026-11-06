@@ -1,0 +1,50 @@
+# Runs the one-line Mac installer (scripts/install-mac.command) exactly as a
+# user would, on Apple silicon and Intel Macs, then checks that MyLecture is
+# installed, not quarantined, validly signed and starts. Run by hand after
+# publishing a Mac build:
+#
+#   gh workflow run mac-installer-test.yml --ref main
+name: macOS installer test
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  install:
+    name: ${{ matrix.name }}
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: Apple silicon
+            os: macos-latest
+            arch: arm64
+          - name: Intel
+            os: macos-15-intel
+            arch: x86_64
+    steps:
+      - name: Install with the one-line command
+        run: curl -fsSL "https://raw.githubusercontent.com/${{ github.repository }}/${{ github.sha }}/scripts/install-mac.command" | bash -s -- --no-open
+
+      - name: Check the installed app
+        run: |
+          app=/Applications/MyLecture.app
+          test -d "$app"
+          lipo -archs "$app/Contents/MacOS/MyLecture" | grep -qw "${{ matrix.arch }}"
+          if xattr -l "$app" | grep -q com.apple.quarantine; then echo "still quarantined"; exit 1; fi
+          codesign --verify --deep "$app"
+          spctl --assess --type execute "$app" 2>&1 || true   # informational: not notarized
+
+      - name: Start the app
+        run: |
+          out="$(/Applications/MyLecture.app/Contents/MacOS/MyLecture --smoke-test 2>&1 || true)"
+          echo "$out" | tail -n 20
+          echo "$out" | grep -q SMOKE_TEST_OK
+
+      - name: Re-run to update in place
+        run: curl -fsSL "https://raw.githubusercontent.com/${{ github.repository }}/${{ github.sha }}/scripts/install-mac.command" | bash -s -- --no-open
