@@ -28,7 +28,7 @@ const hooks = registerHooks({
     return next(url, context);
   },
 });
-const { hermesEndpoint, hermesArgs, writeHermesConfig, runHermes, hermesExe, hermesPaths, HERMES_CONFIG } = await import("../electron/engines/hermes.js");
+const { hermesEndpoint, hermesArgs, writeHermesConfig, runHermes, hermesExe, hermesPaths, hermesHome, HERMES_CONFIG } = await import("../electron/engines/hermes.js");
 const { makeApiEngine } = await import("../electron/engines/api.js");
 const { supportsAgentFlow } = await import("../electron/lecturegen/agent-run.js");
 test.after(() => { hooks.deregister(); delete globalThis.__hermesFixture; });
@@ -115,4 +115,13 @@ test("only MyLecture's own, fully installed Hermes is used", () => {
   fs.writeFileSync(p.marker, "{}");
   assert.equal(hermesExe(tools), p.exe);
   assert(p.home.startsWith(path.join(tools, "hermes")), "its HERMES_HOME lives with MyLecture, not the user's Hermes");
+});
+
+test("each project gets its own Hermes home, so a lingering gateway never carries another project's write limit", () => {
+  const tools = tmp();
+  const a = hermesHome(tools, "C:/lib/lec-1"), b = hermesHome(tools, "C:/lib/lec-2");
+  assert.notEqual(a, b);
+  assert.equal(hermesHome(tools, "C:/lib/lec-1"), a, "the same project keeps its home");
+  assert(a.startsWith(path.join(tools, "hermes", "homes")));
+  assert.match(HERMES_CONFIG, /curator:\n\s+enabled: false/);
 });

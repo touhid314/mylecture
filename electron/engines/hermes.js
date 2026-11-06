@@ -7,16 +7,17 @@
 // source, and Python 3.14 plus Hermes's locked packages through uv, under
 // <userData>/tools/hermes:
 //   src/   release source        env/   Python environment (hermes executable)
-//   home/  HERMES_HOME: MyLecture's own config, separate from any Hermes the
-//          user runs themselves.
+//   homes/<project>/  HERMES_HOME per project: MyLecture's own config,
+//          separate from any Hermes the user runs themselves.
 // Self-improvement is off: no memory, no automatic post-turn review (which
 // writes memory and skills), no skills toolset, no bundled skills, and the
-// skill curator paused. Each run is one-shot:
+// skill curator off. Each run is one-shot:
 //   hermes chat --format stream-json --query-file - --oneshot --yolo
 //          --provider custom --base-url <url> --api-key <key> -m <model>
+import crypto from "node:crypto";
 import fs from "node:fs";
 import path from "node:path";
-import { spawnLines, runCapture, idleStatus } from "./cli-util.js";
+import { spawnLines, idleStatus } from "./cli-util.js";
 import { log, registerLogSecret } from "../logger.js";
 
 export const HERMES_VERSION = "0.23.0";
@@ -79,6 +80,10 @@ auxiliary:
     enabled: false
 skills:
   write_approval: true
+curator:
+  enabled: false
+gateway:
+  unmanaged_idle_exit_seconds: 120
 agent:
   disabled_toolsets: [memory, skills, session_search, cronjob, messaging, discord, discord_admin, clarify, tts]
 `;
@@ -101,21 +106,22 @@ function readText(file) {
   try { return fs.readFileSync(file, "utf8"); } catch { return null; }
 }
 
-// Settings written and the skill curator paused, once per home.
-const homesReady = new Map();
-export function prepareHermesHome(exe, home) {
+// Hermes runs each chat through a background gateway that it starts once per
+// HERMES_HOME and keeps alive between runs. That gateway keeps the folder and
+// write limit (HERMES_WRITE_SAFE_ROOT) of the run that started it, so every
+// project gets its own home: a later project never inherits an earlier one's.
+export function hermesHome(tools, workspace) {
+  const id = crypto.createHash("sha1").update(path.resolve(workspace).toLowerCase()).digest("hex").slice(0, 16);
+  return path.join(hermesPaths(tools).root, "homes", id);
+}
+
+// MyLecture's settings, written once per home and app run.
+const homesReady = new Set();
+export function prepareHermesHome(home) {
   if (!homesReady.has(home)) {
-    homesReady.set(home, (async () => {
-      writeHermesConfig(home);
-      const paused = path.join(home, ".mylecture-curator-paused");
-      if (!fs.existsSync(paused)) {
-        const r = await runCapture(exe, ["curator", "pause"], { timeout: 120000, env: { ...process.env, HERMES_HOME: home } });
-        if (r.ok) fs.writeFileSync(paused, "", "utf8");
-      }
-      return home;
-    })().catch((e) => { homesReady.delete(home); throw e; }));
+    writeHermesConfig(home);
+    homesReady.add(home);
   }
-  return homesReady.get(home);
 }
 
 export function hermesArgs({ baseUrl, apiKey, model, maxTurns = 200 }) {
@@ -138,12 +144,13 @@ function hermesStep(name, input = {}) {
 }
 
 // One agent task in `workspace`. Returns { text } (the final reply).
-export async function runHermes({ exe = hermesExe(), home = toolsDir ? hermesPaths(toolsDir).home : "", system, user, model, config, workspace, signal, onDelta, onStatus, onActivity }) {
+export async function runHermes({ exe = hermesExe(), home, system, user, model, config, workspace, signal, onDelta, onStatus, onActivity }) {
   if (!exe) throw new Error("Hermes Agent isn't installed. Install it in Settings → AI engines & voices, then try again.");
   const { baseUrl, apiKey } = hermesEndpoint(config);
   if (!baseUrl) throw new Error("Add your API provider in Settings first.");
   registerLogSecret(apiKey);
-  await prepareHermesHome(exe, home);
+  home ||= hermesHome(toolsDir, workspace);
+  prepareHermesHome(home);
   const env = {
     ...process.env,
     HERMES_HOME: home,
