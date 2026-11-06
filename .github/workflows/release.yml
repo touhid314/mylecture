@@ -1,8 +1,10 @@
-# Builds MyLecture for Windows, checks the packaged app actually starts (and can
-# speak, run ffmpeg and check scenes), then publishes a GitHub Release with the
-# installers when a version tag is pushed. The website redirects to the latest GitHub
-# release; the in-app updater uses `npm run release:publish` (docs/RELEASING.md). macOS jobs were removed while
-# releases are Windows-only; restore them from git history when needed.
+# Builds MyLecture for Windows and macOS (Apple silicon and Intel), checks each
+# packaged app actually starts (and can speak, run ffmpeg and check scenes),
+# then publishes a GitHub Release with the installers when a version tag is
+# pushed. The website's Windows button redirects to the latest GitHub release;
+# Mac users install with scripts/install-mac.command, which downloads the
+# newest release's Mac zip. The in-app updater (Windows) uses
+# `npm run release:publish` (docs/RELEASING.md).
 #
 #   git tag v1.0.0 && git push origin v1.0.0   -> GitHub Release with the installers
 #   Actions -> Release -> Run workflow          -> builds + smoke tests only (artifacts)
@@ -36,6 +38,19 @@ jobs:
               dist/*.exe
               dist/*.exe.blockmap
               dist/latest.yml
+          # Ad-hoc signed, not notarized: installed with scripts/install-mac.command.
+          - name: macOS Apple silicon
+            os: macos-latest
+            target: --mac --arm64
+            artifacts: |
+              dist/*.dmg
+              dist/*.zip
+          - name: macOS Intel
+            os: macos-15-intel
+            target: --mac --x64
+            artifacts: |
+              dist/*.dmg
+              dist/*.zip
     steps:
       - uses: actions/checkout@v4
 

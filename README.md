@@ -2,9 +2,9 @@
 
 **Bring every lesson to life.**
 
-Turn complex ideas into narrated, animated videos. MyLecture gives teachers, tutors, students, and educational creators a Windows workspace for explaining anything, from mathematics and science to engineering, economics, and beyond.
+Turn complex ideas into narrated, animated videos. MyLecture gives teachers, tutors, students, and educational creators a Windows and macOS workspace for explaining anything, from mathematics and science to engineering, economics, and beyond.
 
-**[Download for Windows](https://mylecture-server.touhid3-1416.workers.dev/download/windows)** | [MyLecture.ai](https://www.mylecture.ai) | [Latest release](https://github.com/touhid314/mylecture/releases/latest)
+**[Download for Windows](https://mylecture-server.touhid3-1416.workers.dev/download/windows)** | **[Install on Mac](#install-on-mac)** | [MyLecture.ai](https://www.mylecture.ai) | [Latest release](https://github.com/touhid314/mylecture/releases/latest)
 
 ![MyLecture desktop app showing a narrated circuit lesson, recent projects, scene timeline, and AI editing panel](docs/images/mylecture-studio.png)
 
@@ -44,11 +44,27 @@ Make a quick concept explainer, a worked example, a revision video, or a complet
 
 ## Get started
 
-1. [Download the Windows installer](https://mylecture-server.touhid3-1416.workers.dev/download/windows) and select the AI engines and voices you want during setup.
+1. **Windows:** [download the installer](https://mylecture-server.touhid3-1416.workers.dev/download/windows) and select the AI engines and voices you want during setup. **Mac:** see [Install on Mac](#install-on-mac).
 2. Open MyLecture and connect your AI account or API key.
 3. Describe a lesson, preview and refine it, then **Render** your video.
 
-Windows 10/11, 64-bit. AI generation requires a supported provider account or API key; provider charges and usage limits apply. Voice models download separately, and narration synthesis and video rendering run locally. OmniVoice is optional and can be downloaded inside the app.
+Windows 10/11, 64-bit, or macOS on Apple silicon or Intel. AI generation requires a supported provider account or API key; provider charges and usage limits apply. Voice models download separately, and narration synthesis and video rendering run locally. OmniVoice is optional and can be downloaded inside the app.
+
+## Install on Mac
+
+Open **Terminal**, paste this command and press **Return**:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/touhid314/mylecture/main/scripts/install-mac.command | bash
+```
+
+The installer picks the build for your Mac (Apple silicon or Intel), downloads it from the [latest release](https://github.com/touhid314/mylecture/releases/latest), installs **MyLecture** into **Applications** and opens it. Run the same command again to update.
+
+> **How to open Terminal:** press **Command (⌘) + Space**, type **Terminal** and press **Return**. Or open **Finder → Applications → Utilities → Terminal**.
+
+**Why a command instead of a download?** MyLecture is free and open source, so it is not notarized by Apple (notarization requires a paid Apple Developer account). macOS blocks apps downloaded in a browser that are not notarized. Installing with the command above avoids that warning; the [installer script](scripts/install-mac.command) is short and readable.
+
+Prefer to install by hand? Download `MyLecture-<version>-mac-arm64.dmg` (Apple silicon) or `-mac-x64.dmg` (Intel) from the [latest release](https://github.com/touhid314/mylecture/releases/latest), drag MyLecture into Applications, then run `xattr -cr /Applications/MyLecture.app` in Terminal once (or use **System Settings → Privacy & Security → Open Anyway**).
 
 ## The MyLecture learning community
 
