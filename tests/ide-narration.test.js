@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
+import crypto from "node:crypto";
 import { registerHooks } from "node:module";
 
 const fixture = { project: null, dir: "", saves: 0 };
@@ -55,7 +56,7 @@ test("resolve and narration edits persist exact spoken strings while preserving 
   t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
   fixture.dir = dir;
   const raw = { id: "part1", kind: "narration+visual", text: "Caption with numbers: 42", ttsText: "**NASA** → 42" };
-  const synth = async input => ({ key: "fixture-audio", dur: 1, spokenText: normalizeForSpeech(input) });
+  const synth = async input => ({ key: crypto.createHash("sha1").update(input).digest("hex"), dur: 1, spokenText: normalizeForSpeech(input) });
   const page = { addInitScript: async () => {}, goto: async () => {}, evaluate: async () => [raw], close: async () => {} };
   const beats = await resolveBeats({ lg, browser: { newPage: async () => page }, workspaceDir: dir, file: "index1.html", tts: { synth } });
   assert.equal(beats[0].spokenText, normalizeForSpeech(lg.normalizeTtsText(raw.ttsText)));
@@ -63,14 +64,19 @@ test("resolve and narration edits persist exact spoken strings while preserving 
   assert.equal(beats[0].ttsText, raw.ttsText);
   fixture.project = { id: "project", scenes: [{ file: "index1.html", beats }] };
   const ide = new IdeService({ tts: { synth }, send() {} });
-  const requested = "**π** × 3";
+  const originalAudio = beats[0].audio;
+  const requested = "Dr. Mark Tehranipoor explains **π** × 3";
   await ide.editNarration("project", { sceneIndex: 0, sectionId: "part1", text: raw.text, ttsText: requested });
-  assert.equal(beats[0].spokenText, normalizeForSpeech(lg.normalizeTtsText(requested)));
+  assert.equal(beats[0].spokenText, normalizeForSpeech(requested));
+  assert.notEqual(beats[0].audio, originalAudio);
   assert.equal(beats[0].text, raw.text);
   assert.equal(beats[0].ttsText, requested);
   await ide.editNarration("project", { sceneIndex: 0, sectionId: "part1", text: "  Exact caption spacing  ", ttsText: requested });
   assert.equal(beats[0].text, "  Exact caption spacing  ");
   assert.equal(JSON.parse(fs.readFileSync(path.join(dir, "narration-edits.json"))).files["index1.html"].part1.ttsText, requested);
+  const reloaded = await resolveBeats({ lg, browser: { newPage: async () => page }, workspaceDir: dir, file: "index1.html", tts: { synth } });
+  assert.equal(reloaded[0].spokenText, normalizeForSpeech(requested), "manual pronunciation survives re-resolving the scene");
+  assert.equal(reloaded[0].audio, beats[0].audio);
   await ide.editNarration("project", { sceneIndex: 0, sectionId: "part1", text: "", ttsText: "Audio-only narration" });
   assert.equal(beats[0].text, "");
   assert.equal(beats[0].spokenText, "Audio-only narration");

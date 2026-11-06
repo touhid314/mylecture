@@ -133,7 +133,7 @@ export class CreateView {
       this.curFile,
       h("div", { class: "grow" }),
       this.changeVoiceBtn = h("button", { class: "btn sm", title: "Re-record all narration with another voice", onclick: () => this.changeVoice() }, icon("mic"), h("span", {}, "Change voice")),
-      h("button", { class: "btn sm", title: "View and edit narration for every beat", onclick: () => this.editNarration() }, icon("mic"), "Edit narration"),
+      h("button", { class: "btn sm", title: "Edit narration for the selected scene", onclick: () => this.editNarration() }, icon("mic"), "Edit narration"),
       h("button", { class: "btn sm", title: "Video info", onclick: () => this.info() }, "Info"),
       h("div", { class: "ide-split" }, this.renderBtn, this.renderMenu),
     );
@@ -1238,10 +1238,14 @@ export class CreateView {
   async editNarration() {
     const lec = this.project?.lecture;
     if (!lec?.scenes?.length || this.liveJob || this.job) return toast("Open a finished project first.");
+    const selectedScene = this.sceneIndex;
+    if (!lec.scenes[selectedScene]) return toast("Select a scene first.");
+    this.player.pause();
     let entries;
     try { entries = await window.ml.ide.narration(lec.id); }
     catch (e) { return toast(friendly(e), { kind: "bad" }); }
-    if (!entries.length) return toast("This project has no narration.");
+    entries = entries.filter((entry) => entry.sceneIndex === selectedScene);
+    if (!entries.length) return toast("This scene has no narration.");
     const body = h("div", { class: "narration-list" });
     const buttons = [];
     let sceneIndex = -1, saving = false;
@@ -1272,6 +1276,7 @@ export class CreateView {
           original = beat.spokenText ?? spoken.value;
           spoken.value = original;
           this._applyProject(p);
+          this.player.seek(this.player.beatStart(entry.sceneIndex, entry.beatIndex));
         } catch (e) { toast(friendly(e), { kind: "bad" }); }
         finally {
           saving = false;

@@ -325,8 +325,9 @@ export class IdeService {
     (overrides.files[sc.file] ||= {})[sectionId] = { text, ttsText };
     const beat = sc.beats.find((b) => b.segment?.id === sectionId);
     if (!beat) throw new Error("Narration cue not found.");
-    const lg = await lecturegen();
-    const r = await this.tts.synth(lg.normalizeTtsText(ttsText), { voice, speed });
+    // This is an explicit edit of the spoken wording. Automatic pronunciation
+    // substitutions must not turn it back into the previous narration.
+    const r = await this.tts.synth(ttsText, { voice, speed });
     abort.signal.throwIfAborted();
     fs.writeFileSync(path.join(ws, "narration-edits.json"), JSON.stringify(overrides, null, 2) + "\n", "utf8");
     Object.assign(beat, { text, ttsText, spokenText: r.spokenText, audio: r.key, dur: r.dur, segment: { ...beat.segment, text, ttsText } });

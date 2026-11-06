@@ -249,7 +249,8 @@ export async function resolveBeats({ lg, browser, workspaceDir, file, sourceFile
       if (!Number.isFinite(duration) || duration <= 0) throw new Error(`${file}: Visual cue ${item.id} has an invalid duration.`);
       beats.push({ text: "", dur: duration, visualOnly: true, segment: item });
     } else {
-      const spoken = lg.normalizeTtsText(String(item.ttsText ?? item.text ?? ""));
+      const source = String(item.ttsText ?? item.text ?? "");
+      const spoken = o?.ttsText != null ? source : lg.normalizeTtsText(source);
       const r = await tts.synth(spoken, { engine: voiceEngine, voice, speed });
       if (typeof r?.key !== "string" || !r.key.trim() || !Number.isFinite(r.dur) || r.dur <= 0) {
         throw new Error(`${file}: Narration for ${item.id} did not produce playable audio. Try generating the scene again.`);

@@ -77,27 +77,27 @@ function descendants(node, predicate) {
 }
 const rows = () => descendants(harness.dialog.body, node => node.className === "narration-beat");
 const buttons = () => descendants(harness.dialog.body, node => node.tagName === "BUTTON");
-async function openEditor(editNarration = async () => { throw Error("Unexpected regeneration"); }) {
+async function openEditor(editNarration = async () => { throw Error("Unexpected regeneration"); }, sceneIndex = 0) {
   harness.dialog = null;
   harness.notices = [];
-  const reads = [], applied = [];
+  const reads = [], applied = [], seeks = [];
   globalThis.window.ml = { ide: { narration: async id => { reads.push(id); return entries(); }, editNarration } };
   const view = {
     project: { lecture: { id: "lecture-7", scenes: [{ beats: [] }, { beats: [] }] } },
-    sceneIndex: 999, liveJob: null, job: null,
+    sceneIndex, liveJob: null, job: null, player: { pause() {}, beatStart: (si, bi) => si * 10 + bi, seek: t => seeks.push(t) },
     _applyProject: project => applied.push(project),
   };
   await CreateView.prototype.editNarration.call(view);
-  return { reads, applied, view };
+  return { reads, applied, seeks, view };
 }
 
-test("narration editor lists every scene and preserves exact spoken text, including empty text and legacy rows", async () => {
+test("narration editor shows only the selected scene and preserves exact spoken text", async () => {
   const { reads } = await openEditor();
   assert.deepEqual(reads, ["lecture-7"]);
   assert.equal(harness.dialog.title, "Edit narration");
   const headings = descendants(harness.dialog.body, node => node.tagName === "H3");
-  assert.deepEqual(headings.map(node => node.textContent), ["Scene 1", "Scene 2"]);
-  assert.equal(rows().length, 4);
+  assert.deepEqual(headings.map(node => node.textContent), ["Scene 1"]);
+  assert.equal(rows().length, 2);
   assert.equal(descendants(harness.dialog.body, node => node.tagName === "SELECT").length, 0);
   rows().forEach((row, index) => {
     const [line, caption] = row.children;
@@ -107,20 +107,27 @@ test("narration editor lists every scene and preserves exact spoken text, includ
     assert.equal(caption.className, "narration-caption");
     assert.equal(caption.textContent, entries()[index].caption);
   });
-  assert.equal(rows()[3].children[0].children[0].readOnly, true);
-  assert.equal(descendants(rows()[3], node => node.tagName === "BUTTON").length, 0);
-  assert.equal(buttons().length, 3);
+  assert.equal(buttons().length, 2);
   assert.ok(buttons().every(button => button.disabled));
+});
+
+test("selecting the second scene shows its narration and legacy rows only", async () => {
+  await openEditor(undefined, 1);
+  assert.deepEqual(descendants(harness.dialog.body, node => node.tagName === "H3").map(node => node.textContent), ["Scene 2"]);
+  assert.equal(rows().length, 2);
+  assert.equal(rows()[0].children[0].children[0].value, "Energy is conserved.");
+  assert.equal(rows()[1].children[0].children[0].readOnly, true);
+  assert.equal(descendants(rows()[1], node => node.tagName === "BUTTON").length, 0);
 });
 
 test("regenerating a later scene sends its cue and unchanged caption, then displays returned normalized narration", async () => {
   const calls = [];
   let finish;
-  const { applied } = await openEditor((id, request) => {
+  const { applied, seeks } = await openEditor((id, request) => {
     calls.push({ id, request });
     return new Promise(resolve => { finish = resolve; });
-  });
-  const [line, caption] = rows()[2].children;
+  }, 1);
+  const [line, caption] = rows()[0].children;
   const [spoken, button] = line.children;
   spoken.value = "Updated energy narration.";
   await spoken.dispatch("input");
@@ -133,6 +140,7 @@ test("regenerating a later scene sends its cue and unchanged caption, then displ
   finish(project);
   await pending;
   assert.deepEqual(applied, [project]);
+  assert.deepEqual(seeks, [10], "preview returns to the regenerated cue");
   assert.equal(spoken.value, "Updated, normalized energy narration.");
   assert.equal(caption.textContent, "ΔE = 0");
   assert.equal(spoken.readOnly, false);
