@@ -10,7 +10,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { findExecutable, killTree } from "./engines/cli-util.js";
 import { resolveOmniPython } from "./tts/omnivoice.js";
-import { hermesDirs } from "./engines/hermes.js";
+import { HERMES_VERSION, HERMES_SOURCE_URL, HERMES_PYTHON, hermesPaths, hermesExe } from "./engines/hermes.js";
 
 const WIN = process.platform === "win32";
 
@@ -18,13 +18,33 @@ export const COMPONENTS = [
   { id: "claude-code", kind: "engine", title: "Claude", detail: "Claude Code. Needs a Claude Pro or Max plan.", size: "about 250 MB", byDefault: true },
   { id: "codex", kind: "engine", title: "GPT", detail: "Codex. Needs a ChatGPT Plus, Pro, Business or Enterprise plan.", size: "about 450 MB", byDefault: true },
   { id: "antigravity", kind: "engine", title: "Gemini", detail: "Antigravity CLI. Needs a Google account.", size: "about 250 MB", byDefault: true },
-  { id: "hermes", kind: "engine", title: "Hermes Agent", detail: "Makes videos with your own API key (Use with API key).", size: "about 700 MB", byDefault: false },
+  { id: "hermes", kind: "engine", title: "Hermes Agent", detail: "Makes videos with your own API key (Use with API key).", size: "about 200 MB", byDefault: false },
   { id: "kokoro", kind: "voice", title: "Kokoro voice", detail: "Fast, natural voice. The default.", size: "about 325 MB", byDefault: true },
   { id: "omnivoice", kind: "voice", title: "OmniVoice", detail: "High-quality, expressive voice. Best with an NVIDIA graphics card.", size: "about 6 GB", byDefault: false },
 ];
 export const COMPONENT_IDS = COMPONENTS.map(c => c.id);
 
-const ENGINE_BIN = { "claude-code": "claude", codex: "codex", antigravity: "agy", hermes: "hermes" };
+// Streams a URL to a file, reporting (bytesSoFar, totalBytes|0).
+export async function downloadFile(url, file, { signal, onProgress } = {}) {
+  const res = await fetch(url, { signal, redirect: "follow" });
+  if (!res.ok || !res.body) throw new Error(`Download failed (HTTP ${res.status}).`);
+  const total = Number(res.headers.get("content-length")) || 0;
+  const out = fs.createWriteStream(file);
+  let got = 0, last = 0;
+  try {
+    for await (const chunk of res.body) {
+      got += chunk.length;
+      if (!out.write(chunk)) await new Promise((r) => out.once("drain", r));
+      if (Date.now() - last > 500) { last = Date.now(); onProgress?.(got, total); }
+    }
+  } finally {
+    await new Promise((r) => out.end(r));
+  }
+  onProgress?.(got, total);
+  if (total && got !== total) throw new Error("The download was interrupted. Try again.");
+}
+
+const ENGINE_BIN = { "claude-code": "claude", codex: "codex", antigravity: "agy" };
 const PS = (script) => ["powershell.exe", ["-NoProfile", "-ExecutionPolicy", "Bypass", "-Command", script]];
 const SH = (script) => ["/bin/bash", ["-lc", script]];
 
@@ -69,9 +89,9 @@ export function kokoroModelFile(modelDir) {
 }
 
 export class ComponentManager extends EventEmitter {
-  constructor({ userData, modelDir, tts, getSettings, saveSettings, log = () => {}, run = runHidden, find = findExecutable, platform = process.platform, resolvePython = resolveOmniPython, hasNvidiaGpu }) {
+  constructor({ userData, modelDir, tts, getSettings, saveSettings, log = () => {}, run = runHidden, find = findExecutable, platform = process.platform, resolvePython = resolveOmniPython, hasNvidiaGpu, download = downloadFile }) {
     super();
-    Object.assign(this, { userData, modelDir, tts, getSettings, saveSettings, log, run, find, platform, resolvePython });
+    Object.assign(this, { userData, modelDir, tts, getSettings, saveSettings, log, run, find, platform, resolvePython, download });
     this.hasNvidiaGpu = hasNvidiaGpu || (() => platform !== "darwin" && !!(find(["nvidia-smi"]) || (platform === "win32" && fs.existsSync("C:\\Windows\\System32\\nvidia-smi.exe"))));
     this.toolsDir = path.join(userData, "tools");
     this.omniDir = path.join(userData, "omnivoice");
@@ -83,7 +103,8 @@ export class ComponentManager extends EventEmitter {
   get omniMarker() { return path.join(this.omniDir, "installed.json"); }
 
   installed(id) {
-    if (ENGINE_BIN[id]) return !!this.find([ENGINE_BIN[id]], id === "hermes" ? hermesDirs() : undefined);
+    if (ENGINE_BIN[id]) return !!this.find([ENGINE_BIN[id]]);
+    if (id === "hermes") return !!hermesExe(this.toolsDir);
     if (id === "kokoro") {
       try { return fs.statSync(kokoroModelFile(this.modelDir)).size > 300 * 1024 * 1024; } catch { return false; }
     }
@@ -137,6 +158,7 @@ export class ComponentManager extends EventEmitter {
         return;
       }
       if (ENGINE_BIN[id]) await this._installEngine(id, step, onLine, signal);
+      else if (id === "hermes") await this._installHermes(step, onLine, signal);
       else if (id === "kokoro") await this._installKokoro(step);
       else await this._installOmniVoice(step, onLine, signal);
       if (!this.installed(id)) throw new Error(`${title} was installed but MyLecture cannot find it. Restart MyLecture and check again.`);
@@ -157,12 +179,6 @@ export class ComponentManager extends EventEmitter {
     if (id === "claude-code") {
       step("Installing Claude Code with Anthropic's installer…");
       cmd = win ? PS("irm https://claude.ai/install.ps1 | iex") : SH("curl -fsSL https://claude.ai/install.sh | bash");
-    } else if (id === "hermes") {
-      step("Installing Hermes Agent with Nous Research's installer…");
-      // Official installer, unattended; no browser or computer-use extras.
-      cmd = win
-        ? PS("& ([scriptblock]::Create((irm https://hermes-agent.nousresearch.com/install.ps1))) -NonInteractive -SkipSetup -SkipBrowser -SkipComputerUse")
-        : SH("curl -fsSL https://hermes-agent.nousresearch.com/install.sh | bash -s -- --non-interactive --skip-browser");
     } else if (id === "antigravity") {
       step("Installing the Antigravity CLI with Google's installer…");
       cmd = win ? PS("irm https://antigravity.google/cli/install.ps1 | iex") : SH("curl -fsSL https://antigravity.google/cli/install.sh | bash");
@@ -194,25 +210,68 @@ export class ComponentManager extends EventEmitter {
     });
   }
 
-  async _installOmniVoice(step, onLine, signal) {
-    const win = this.platform === "win32";
-    const env = {
+  // uv (the Python installer), kept in MyLecture's tools folder with its own
+  // Python and package cache. Shared by OmniVoice and Hermes Agent.
+  get uvEnv() {
+    return {
       UV_INSTALL_DIR: path.join(this.toolsDir, "uv"), UV_NO_MODIFY_PATH: "1",
       UV_PYTHON_INSTALL_DIR: path.join(this.toolsDir, "python"),
       UV_CACHE_DIR: path.join(this.toolsDir, "uv-cache"), UV_LINK_MODE: "copy",
       PYTHONIOENCODING: "utf-8",
     };
+  }
+
+  async _uv(step, onLine, signal, percent = 2) {
+    const win = this.platform === "win32";
+    const env = this.uvEnv;
     fs.mkdirSync(this.toolsDir, { recursive: true });
     // Use uv if it is already installed; otherwise get a private copy.
     const privateUv = path.join(env.UV_INSTALL_DIR, win ? "uv.exe" : "uv");
     let uvExe = fs.existsSync(privateUv) ? privateUv : this.find(["uv"]);
     if (!uvExe) {
-      step("Getting the Python installer (uv)…", 2);
+      step("Getting the Python installer (uv)…", percent);
       const [f, a] = win ? PS("irm https://astral.sh/uv/install.ps1 | iex") : SH("curl -LsSf https://astral.sh/uv/install.sh | sh");
       await this.run(f, a, { env, onLine, signal });
       uvExe = privateUv;
     }
-    const uv = (args, more = {}) => this.run(uvExe, args, { env: { ...env, ...more }, onLine, signal });
+    return (args, more = {}) => this.run(uvExe, args, { env: { ...env, ...more }, onLine, signal });
+  }
+
+  // Hermes Agent from its pinned release source: no git, no clone. uv
+  // installs Python 3.14 (reusing one already present) and Hermes's packages
+  // exactly as pinned in its uv.lock.
+  async _installHermes(step, onLine, signal) {
+    const p = hermesPaths(this.toolsDir, this.platform);
+    const uv = await this._uv(step, onLine, signal, 2);
+    fs.rmSync(p.root, { recursive: true, force: true });
+    fs.mkdirSync(p.root, { recursive: true });
+    const zip = path.join(p.root, "source.zip");
+    step(`Downloading Hermes Agent ${HERMES_VERSION} (about 100 MB)…`, 5);
+    await this.download(HERMES_SOURCE_URL, zip, {
+      signal,
+      onProgress: (got, total) => step(total ? `Downloading Hermes Agent ${HERMES_VERSION}… ${Math.round(got / 1048576)} of ${Math.round(total / 1048576)} MB` : `Downloading Hermes Agent ${HERMES_VERSION}… ${Math.round(got / 1048576)} MB`, total ? 5 + Math.round((got / total) * 55) : null),
+    });
+    step("Unpacking Hermes Agent…", 62);
+    const unpack = path.join(p.root, "unpack");
+    fs.mkdirSync(unpack, { recursive: true });
+    // Windows 10+ and macOS ship bsdtar, which reads zip files.
+    await this.run(this.platform === "win32" ? path.join(process.env.SystemRoot || "C:\\Windows", "System32", "tar.exe") : "tar", ["-xf", zip, "-C", unpack], { onLine, signal });
+    const top = fs.readdirSync(unpack).find((d) => fs.statSync(path.join(unpack, d)).isDirectory());
+    if (!top) throw new Error("The Hermes Agent download is incomplete. Try again.");
+    fs.renameSync(path.join(unpack, top), p.src);
+    fs.rmSync(unpack, { recursive: true, force: true });
+    fs.rmSync(zip, { force: true });
+    step(`Installing Python ${HERMES_PYTHON} and Hermes Agent's packages…`, 68);
+    await uv(["sync", "--project", p.src, "--frozen", "--no-dev", "--python", HERMES_PYTHON], { UV_PROJECT_ENVIRONMENT: p.env });
+    step("Checking Hermes Agent…", 95);
+    await this.run(p.exe, ["--version"], { env: { HERMES_HOME: p.home, PYTHONIOENCODING: "utf-8" }, onLine, signal });
+    fs.writeFileSync(p.marker, JSON.stringify({ version: HERMES_VERSION, installedAt: new Date().toISOString() }, null, 2));
+  }
+
+  async _installOmniVoice(step, onLine, signal) {
+    const win = this.platform === "win32";
+    const env = this.uvEnv;
+    const uv = await this._uv(step, onLine, signal, 2);
     const envDir = path.join(this.omniDir, "env");
     if (!fs.existsSync(this.omniPython)) {
       // Reuse a Python 3.10-3.12 already on the computer (PyTorch 2.5.1 and

@@ -153,7 +153,7 @@ export function killTree(child) {
   }
 }
 
-export function runCapture(file, args, { timeout = 30000, cwd } = {}) {
+export function runCapture(file, args, { timeout = 30000, cwd, env } = {}) {
   return new Promise((resolve) => {
     const startedAt = Date.now();
     const command = path.basename(file);
@@ -163,7 +163,7 @@ export function runCapture(file, args, { timeout = 30000, cwd } = {}) {
       log(error ? "warn" : "debug", "cli.check.finish", { command, ok: !error, elapsedMs: Date.now() - startedAt, stdoutBytes: Buffer.byteLength(stdout || ""), stderrBytes: Buffer.byteLength(stderr || ""), code: error?.code, timedOut: !!error?.killed });
       resolve({ ok: !error, stdout: String(stdout || ""), stderr: String(stderr || ""), error });
     };
-    if (isShim) execFile(`"${file}" ${args.map(winQuote).join(" ")}`, { timeout, cwd, shell: true, windowsHide: true }, cb);
-    else execFile(file, args, { timeout, cwd, windowsHide: true }, cb);
+    if (isShim) execFile(`"${file}" ${args.map(winQuote).join(" ")}`, { timeout, cwd, env, shell: true, windowsHide: true }, cb);
+    else execFile(file, args, { timeout, cwd, env, windowsHide: true }, cb);
   });
 }

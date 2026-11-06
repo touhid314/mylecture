@@ -37,7 +37,6 @@ function harness({ platform = "win32", have = [], settings = {} } = {}) {
       const joined = args.join(" ");
       if (/claude\.ai\/install/.test(joined)) { opts.onLine?.("Downloading Claude Code... 42%"); found.add("claude"); }
       if (/antigravity\.google/.test(joined)) found.add("agy");
-      if (/hermes-agent\.nousresearch\.com/.test(joined)) found.add("hermes");
       if (/OpenAI\.Codex|@openai\/codex/.test(joined)) found.add("codex");
       if (/astral\.sh\/uv/.test(joined)) { fs.mkdirSync(opts.env.UV_INSTALL_DIR, { recursive: true }); fs.writeFileSync(path.join(opts.env.UV_INSTALL_DIR, "uv.exe"), ""); }
       if (args[0] === "venv") { fs.mkdirSync(path.join(args.at(-1), "Scripts"), { recursive: true }); fs.writeFileSync(path.join(args.at(-1), "Scripts", "python.exe"), ""); }
@@ -55,12 +54,11 @@ test("component list: engines and Kokoro ticked by default, OmniVoice not", () =
 
 test("engines install with the official installers, hidden, and are then found", async () => {
   const t = harness({ have: ["winget"] });
-  for (const id of ["claude-code", "codex", "antigravity", "hermes"]) await t.manager.install(id);
+  for (const id of ["claude-code", "codex", "antigravity"]) await t.manager.install(id);
   assert.match(t.runs[0], /^powershell\.exe .*irm https:\/\/claude\.ai\/install\.ps1 \| iex$/);
   assert.match(t.runs[1], /^winget install --id OpenAI\.Codex --exact --source winget --silent/);
   assert.match(t.runs[2], /irm https:\/\/antigravity\.google\/cli\/install\.ps1 \| iex$/);
-  assert.match(t.runs[3], /irm https:\/\/hermes-agent\.nousresearch\.com\/install\.ps1.*-NonInteractive/);
-  assert.deepEqual(t.manager.status().filter(c => c.kind === "engine").map(c => c.installed), [true, true, true, true]);
+  assert.deepEqual(t.manager.status().filter(c => c.kind === "engine" && c.id !== "hermes").map(c => c.installed), [true, true, true]);
   assert.equal(t.events.at(-1).state, "done");
 });
 
@@ -152,4 +150,28 @@ test("installer output is forwarded live, and download percentages drive the bar
   const last = t.events.at(-1);
   assert.equal(last.state, "done");
   assert.equal(last.detail, "");
+});
+
+test("Hermes installs from its pinned release with uv: no git, locked packages, Python 3.14", async () => {
+  const t = harness({ have: ["uv"] });
+  const downloads = [];
+  t.manager.download = async (url, file) => { downloads.push(url); fs.writeFileSync(file, "zip"); };
+  const realRun = t.manager.run;
+  t.manager.run = async (file, args, opts) => {
+    if (/tar(\.exe)?$/i.test(file)) { fs.mkdirSync(path.join(args[3], "hermes-agent-0.23.0"), { recursive: true }); return []; }
+    if (args[0] === "sync") {
+      const exe = path.join(opts.env.UV_PROJECT_ENVIRONMENT, process.platform === "win32" ? "Scripts" : "bin", process.platform === "win32" ? "hermes.exe" : "hermes");
+      fs.mkdirSync(path.dirname(exe), { recursive: true });
+      fs.writeFileSync(exe, "");
+    }
+    return realRun(file, args, opts);
+  };
+  assert.equal(t.manager.installed("hermes"), false);
+  await t.manager.install("hermes");
+  assert.deepEqual(downloads, ["https://github.com/NousResearch/hermes-agent/archive/refs/tags/v0.23.0.zip"]);
+  const sync = t.runs.find((r) => / sync /.test(r));
+  assert.match(sync, /--frozen --no-dev --python 3\.14/);
+  assert(!t.runs.some((r) => /git|hermes-agent\.nousresearch\.com\/install/.test(r)), "no git, no official installer");
+  assert.equal(t.manager.installed("hermes"), true);
+  assert.equal(t.events.at(-1).state, "done");
 });

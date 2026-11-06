@@ -5,6 +5,7 @@ import fs from "node:fs";
 import { execFileSync } from "node:child_process";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { createEngines, API_PROVIDERS, OFFERED_API_PROVIDERS, verifyApiProvider } from "./engines/index.js";
+import { setHermesToolsDir } from "./engines/hermes.js";
 import { createUsageService } from "./usage.js";
 import { accountRemovalPatch, accountRevisionPatch } from "./account-connections.js";
 import { listRenderedVideos } from "./video-library.js";
@@ -551,6 +552,7 @@ app.whenReady().then(() => {
     return new Response(res.body, { status: res.status, headers });
   });
 
+  setHermesToolsDir(path.join(app.getPath("userData"), "tools"));
   engines = createEngines(apiConfig);
   tts = new TTSService({ cacheDir: paths.tts, modelDir: paths.models, voicesDir: paths.voices, getSettings });
   tts.on("status", (st) => send("tts:status", st));

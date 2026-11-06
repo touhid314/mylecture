@@ -28,7 +28,7 @@ const hooks = registerHooks({
     return next(url, context);
   },
 });
-const { hermesEndpoint, hermesArgs, writeHermesConfig, runHermes, HERMES_CONFIG, HERMES_PROFILE } = await import("../electron/engines/hermes.js");
+const { hermesEndpoint, hermesArgs, writeHermesConfig, runHermes, hermesExe, hermesPaths, HERMES_CONFIG } = await import("../electron/engines/hermes.js");
 const { makeApiEngine } = await import("../electron/engines/api.js");
 const { supportsAgentFlow } = await import("../electron/lecturegen/agent-run.js");
 test.after(() => { hooks.deregister(); delete globalThis.__hermesFixture; });
@@ -43,7 +43,7 @@ test("every API provider maps to an OpenAI-compatible endpoint for Hermes", () =
 
 test("Hermes runs one-shot, streaming JSON, auto-approved, with the user's endpoint and model", () => {
   const args = hermesArgs({ baseUrl: "https://x/v1", apiKey: "sk-1", model: "gpt-x" });
-  assert.deepEqual(args.slice(0, 3), ["-p", HERMES_PROFILE, "chat"], "MyLecture's own Hermes profile");
+  assert.equal(args[0], "chat");
   for (const a of ["--oneshot", "--yolo", "--ignore-rules"]) assert(args.includes(a), a);
   assert.equal(args[args.indexOf("--format") + 1], "stream-json");
   assert.equal(args[args.indexOf("--query-file") + 1], "-", "the prompt goes over stdin");
@@ -53,7 +53,7 @@ test("Hermes runs one-shot, streaming JSON, auto-approved, with the user's endpo
   assert.equal(args[args.indexOf("-m") + 1], "gpt-x");
 });
 
-test("MyLecture's Hermes profile has memory, self-review and skill writing switched off", () => {
+test("MyLecture's Hermes home has memory, self-review and skill writing switched off", () => {
   const home = tmp();
   fs.writeFileSync(path.join(home, "config.yaml"), "model:\n  provider: auto\n_config_version: 52\n");
   writeHermesConfig(home);
@@ -78,14 +78,15 @@ test("a Hermes run streams text and tool steps and stays confined to the project
   fixture.result = { code: 0 };
   const home = tmp(), workspace = tmp();
   const deltas = [], activity = [];
-  fs.writeFileSync(path.join(home, "config.yaml"), "_config_version: 52\n");
-  const r = await runHermes({ profileDir: home, system: "SYS", user: "USER", model: "m", config: { provider: "compatible", baseUrl: "https://api.ai.it.ufl.edu", apiKey: "k" }, workspace, onDelta: (d) => deltas.push(d), onActivity: (a) => activity.push(a) });
+  fs.writeFileSync(path.join(home, ".mylecture-curator-paused"), "");
+  const r = await runHermes({ exe: "C:/hermes/hermes.exe", home, system: "SYS", user: "USER", model: "m", config: { provider: "compatible", baseUrl: "https://api.ai.it.ufl.edu", apiKey: "k" }, workspace, onDelta: (d) => deltas.push(d), onActivity: (a) => activity.push(a) });
   assert.equal(r.text, "Done: one scene.");
   assert.deepEqual(deltas, ["Writing ", "scene 1."]);
   assert(activity.some((a) => a.type === "step" && a.text === "index1.html"));
   const { opts } = fixture.call;
   assert.equal(opts.cwd, workspace);
-  assert.equal(opts.env.HERMES_HOME, process.env.HERMES_HOME, "the install's home is left alone");
+  assert.equal(opts.env.HERMES_HOME, home, "MyLecture's own Hermes home");
+  assert.match(fs.readFileSync(path.join(home, "config.yaml"), "utf8"), /memory_enabled: false/);
   assert.equal(opts.env.HERMES_WRITE_SAFE_ROOT, workspace);
   assert.equal(opts.stdin, "SYS\n\n---\n\nUSER");
 });
@@ -93,8 +94,8 @@ test("a Hermes run streams text and tool steps and stays confined to the project
 test("a failed Hermes run reports its error", async () => {
   fixture.events = [{ type: "result", exit_code: 1, error: "401 invalid api key" }];
   fixture.result = { code: 1 };
-  const home2 = tmp(); fs.writeFileSync(path.join(home2, "config.yaml"), "");
-  await assert.rejects(runHermes({ profileDir: home2, system: "s", user: "u", config: { provider: "compatible", baseUrl: "https://x", apiKey: "bad" }, workspace: tmp() }), /Hermes: 401 invalid api key/);
+  const home2 = tmp(); fs.writeFileSync(path.join(home2, ".mylecture-curator-paused"), "");
+  await assert.rejects(runHermes({ exe: "C:/hermes/hermes.exe", home: home2, system: "s", user: "u", config: { provider: "compatible", baseUrl: "https://x", apiKey: "bad" }, workspace: tmp() }), /Hermes: 401 invalid api key/);
 });
 
 test("API-key videos now use the agent flow (Hermes), not the staged pipeline", () => {
@@ -102,4 +103,16 @@ test("API-key videos now use the agent flow (Hermes), not the staged pipeline", 
   assert.equal(typeof engine.agent, "function");
   assert.equal(supportsAgentFlow(engine), true);
   assert.equal(typeof engine.generate, "function", "the staged pipeline stays in the code");
+});
+
+test("only MyLecture's own, fully installed Hermes is used", () => {
+  const tools = tmp();
+  const p = hermesPaths(tools);
+  assert.equal(hermesExe(tools), null);
+  fs.mkdirSync(path.dirname(p.exe), { recursive: true });
+  fs.writeFileSync(p.exe, "");
+  assert.equal(hermesExe(tools), null, "an interrupted install (no marker) is not used");
+  fs.writeFileSync(p.marker, "{}");
+  assert.equal(hermesExe(tools), p.exe);
+  assert(p.home.startsWith(path.join(tools, "hermes")), "its HERMES_HOME lives with MyLecture, not the user's Hermes");
 });
