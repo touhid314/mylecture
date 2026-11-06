@@ -567,6 +567,7 @@ app.whenReady().then(() => {
   ide = new IdeService({ engines, tts, send });
   components = new ComponentManager({
     userData: app.getPath("userData"), modelDir: paths.models, tts, getSettings, saveSettings, log,
+    hermesSource: app.isPackaged ? path.join(process.resourcesPath, "hermes") : path.join(here, "..", "vendor", "hermes"),
   });
   components.on("progress", ({ promise, ...p }) => {
     send("components:progress", p);

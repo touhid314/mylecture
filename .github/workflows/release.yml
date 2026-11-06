@@ -70,6 +70,9 @@ jobs:
         shell: bash
         run: npm pkg set version="${GITHUB_REF_NAME#v}"
 
+      - name: Bundle Hermes Agent's source
+        run: node scripts/fetch-hermes.mjs
+
       # Signing is optional: without these secrets Windows builds are unsigned
       # (SmartScreen warns) and macOS builds are ad-hoc signed, not notarized
       # (users right-click -> Open the first time).

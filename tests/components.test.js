@@ -175,3 +175,34 @@ test("Hermes installs from its pinned release with uv: no git, locked packages, 
   assert.equal(t.manager.installed("hermes"), true);
   assert.equal(t.events.at(-1).state, "done");
 });
+
+test("Hermes installs from the source bundled with the app: nothing but Python and packages is downloaded", async () => {
+  const t = harness({ have: ["uv"] });
+  const bundle = fs.mkdtempSync(path.join(os.tmpdir(), "ml-hermes-bundle-"));
+  fs.writeFileSync(path.join(bundle, "pyproject.toml"), "[project]\nname = \"hermes-agent\"\n");
+  fs.writeFileSync(path.join(bundle, "MYLECTURE-HERMES-VERSION"), "0.23.0\n");
+  t.manager.hermesSource = bundle;
+  t.manager.download = async () => { throw new Error("must not download Hermes"); };
+  const realRun = t.manager.run;
+  t.manager.run = async (file, args, opts) => {
+    assert(!/tar(\.exe)?$/i.test(file), "nothing to unpack");
+    if (args[0] === "sync") {
+      assert(fs.existsSync(path.join(args[2], "pyproject.toml")), "the bundled source is copied before uv runs");
+      const exe = path.join(opts.env.UV_PROJECT_ENVIRONMENT, process.platform === "win32" ? "Scripts" : "bin", process.platform === "win32" ? "hermes.exe" : "hermes");
+      fs.mkdirSync(path.dirname(exe), { recursive: true });
+      fs.writeFileSync(exe, "");
+    }
+    return realRun(file, args, opts);
+  };
+  await t.manager.install("hermes");
+  assert.equal(t.manager.installed("hermes"), true);
+  assert(fs.existsSync(path.join(bundle, "pyproject.toml")), "the app's own copy is left untouched");
+
+  // A bundle from another Hermes version is not used.
+  fs.writeFileSync(path.join(bundle, "MYLECTURE-HERMES-VERSION"), "0.22.0\n");
+  fs.rmSync(path.join(t.dir, "tools", "hermes"), { recursive: true, force: true });
+  let downloaded = false;
+  t.manager.download = async (url, file) => { downloaded = true; throw new Error("offline"); };
+  await assert.rejects(t.manager.install("hermes"), /offline/);
+  assert(downloaded);
+});

@@ -49,6 +49,9 @@ jobs:
       - name: Unit tests
         run: npm test
 
+      - name: Bundle Hermes Agent's source
+        run: node scripts/fetch-hermes.mjs
+
       # Ad-hoc signed, not notarized (no Apple Developer certificate): Apple
       # silicon refuses unsigned apps. First launch: right-click -> Open, or
       # `xattr -cr /Applications/MyLecture.app`.

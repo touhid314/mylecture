@@ -10,7 +10,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { findExecutable, killTree } from "./engines/cli-util.js";
 import { resolveOmniPython } from "./tts/omnivoice.js";
-import { HERMES_VERSION, HERMES_SOURCE_URL, HERMES_PYTHON, hermesPaths, hermesExe } from "./engines/hermes.js";
+import { HERMES_VERSION, HERMES_SOURCE_URL, HERMES_PYTHON, hermesPaths, hermesExe, hermesBundle } from "./engines/hermes.js";
 
 const WIN = process.platform === "win32";
 
@@ -18,7 +18,7 @@ export const COMPONENTS = [
   { id: "claude-code", kind: "engine", title: "Claude", detail: "Claude Code. Needs a Claude Pro or Max plan.", size: "about 250 MB", byDefault: true },
   { id: "codex", kind: "engine", title: "GPT", detail: "Codex. Needs a ChatGPT Plus, Pro, Business or Enterprise plan.", size: "about 450 MB", byDefault: true },
   { id: "antigravity", kind: "engine", title: "Gemini", detail: "Antigravity CLI. Needs a Google account.", size: "about 250 MB", byDefault: true },
-  { id: "hermes", kind: "engine", title: "Hermes Agent", detail: "Makes videos with your own API key (Use with API key).", size: "about 200 MB", byDefault: false },
+  { id: "hermes", kind: "engine", title: "Hermes Agent", detail: "Makes videos with your own API key (Use with API key).", size: "about 100 MB", byDefault: false },
   { id: "kokoro", kind: "voice", title: "Kokoro voice", detail: "Fast, natural voice. The default.", size: "about 325 MB", byDefault: true },
   { id: "omnivoice", kind: "voice", title: "OmniVoice", detail: "High-quality, expressive voice. Best with an NVIDIA graphics card.", size: "about 6 GB", byDefault: false },
 ];
@@ -89,9 +89,9 @@ export function kokoroModelFile(modelDir) {
 }
 
 export class ComponentManager extends EventEmitter {
-  constructor({ userData, modelDir, tts, getSettings, saveSettings, log = () => {}, run = runHidden, find = findExecutable, platform = process.platform, resolvePython = resolveOmniPython, hasNvidiaGpu, download = downloadFile }) {
+  constructor({ userData, modelDir, tts, getSettings, saveSettings, log = () => {}, run = runHidden, find = findExecutable, platform = process.platform, resolvePython = resolveOmniPython, hasNvidiaGpu, download = downloadFile, hermesSource = "" }) {
     super();
-    Object.assign(this, { userData, modelDir, tts, getSettings, saveSettings, log, run, find, platform, resolvePython, download });
+    Object.assign(this, { userData, modelDir, tts, getSettings, saveSettings, log, run, find, platform, resolvePython, download, hermesSource });
     this.hasNvidiaGpu = hasNvidiaGpu || (() => platform !== "darwin" && !!(find(["nvidia-smi"]) || (platform === "win32" && fs.existsSync("C:\\Windows\\System32\\nvidia-smi.exe"))));
     this.toolsDir = path.join(userData, "tools");
     this.omniDir = path.join(userData, "omnivoice");
@@ -245,6 +245,23 @@ export class ComponentManager extends EventEmitter {
     const uv = await this._uv(step, onLine, signal, 2);
     fs.rmSync(p.root, { recursive: true, force: true });
     fs.mkdirSync(p.root, { recursive: true });
+    // The installer ships Hermes's code; copy it next to its Python
+    // environment (the install is editable, so the code must stay put and
+    // writable, unlike the app's own resources).
+    const bundled = hermesBundle(this.hermesSource);
+    if (bundled) {
+      step("Setting up Hermes Agent…", 10);
+      await fs.promises.cp(bundled, p.src, { recursive: true });
+    } else await this._downloadHermes(p, step, onLine, signal);
+    step(`Installing Python ${HERMES_PYTHON} and Hermes Agent's packages…`, bundled ? 15 : 68);
+    await uv(["sync", "--project", p.src, "--frozen", "--no-dev", "--python", HERMES_PYTHON], { UV_PROJECT_ENVIRONMENT: p.env });
+    step("Checking Hermes Agent…", 95);
+    await this.run(p.exe, ["--version"], { env: { HERMES_HOME: p.home, PYTHONIOENCODING: "utf-8" }, onLine, signal });
+    fs.writeFileSync(p.marker, JSON.stringify({ version: HERMES_VERSION, installedAt: new Date().toISOString() }, null, 2));
+  }
+
+  // Development builds without vendor/hermes: fetch the pinned release.
+  async _downloadHermes(p, step, onLine, signal) {
     const zip = path.join(p.root, "source.zip");
     step(`Downloading Hermes Agent ${HERMES_VERSION} (about 100 MB)…`, 5);
     await this.download(HERMES_SOURCE_URL, zip, {
@@ -261,11 +278,6 @@ export class ComponentManager extends EventEmitter {
     fs.renameSync(path.join(unpack, top), p.src);
     fs.rmSync(unpack, { recursive: true, force: true });
     fs.rmSync(zip, { force: true });
-    step(`Installing Python ${HERMES_PYTHON} and Hermes Agent's packages…`, 68);
-    await uv(["sync", "--project", p.src, "--frozen", "--no-dev", "--python", HERMES_PYTHON], { UV_PROJECT_ENVIRONMENT: p.env });
-    step("Checking Hermes Agent…", 95);
-    await this.run(p.exe, ["--version"], { env: { HERMES_HOME: p.home, PYTHONIOENCODING: "utf-8" }, onLine, signal });
-    fs.writeFileSync(p.marker, JSON.stringify({ version: HERMES_VERSION, installedAt: new Date().toISOString() }, null, 2));
   }
 
   async _installOmniVoice(step, onLine, signal) {

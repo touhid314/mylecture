@@ -12,13 +12,17 @@
     "dev": "electron . --dev",
     "pretest": "node node_modules/electron/install.js",
     "test": "node --test \"tests/**/*.test.js\"",
+    "predist": "node scripts/fetch-hermes.mjs",
     "dist": "electron-builder --publish never",
+    "predist:win": "node scripts/fetch-hermes.mjs",
     "dist:win": "electron-builder --win --x64 --publish never",
+    "predist:mac": "node scripts/fetch-hermes.mjs",
     "dist:mac": "electron-builder --mac --publish never",
     "smoke": "node scripts/smoke-packaged.mjs",
     "release:publish": "node scripts/publish-update.mjs",
     "server:configure": "node scripts/configure-server.mjs",
-    "release:build": "npm test && npm run dist:win && node scripts/smoke-packaged.mjs --deep"
+    "release:build": "npm test && npm run dist:win && node scripts/smoke-packaged.mjs --deep",
+    "hermes:bundle": "node scripts/fetch-hermes.mjs"
   },
   "dependencies": {
     "@fontsource/architects-daughter": "^5.3.0",
@@ -69,6 +73,15 @@
     ],
     "asarUnpack": [
       "node_modules/ffmpeg-static/**/*"
+    ],
+    "extraResources": [
+      {
+        "from": "vendor/hermes",
+        "to": "hermes",
+        "filter": [
+          "**/*"
+        ]
+      }
     ],
     "win": {
       "target": [

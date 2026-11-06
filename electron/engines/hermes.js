@@ -40,6 +40,17 @@ export function hermesPaths(toolsDir, platform = process.platform) {
 let toolsDir = "";
 export function setHermesToolsDir(dir) { toolsDir = dir || ""; }
 
+// The installer ships Hermes's source (scripts/fetch-hermes.mjs) with this
+// file inside, holding the version it was taken from.
+export const HERMES_BUNDLE_MARKER = "MYLECTURE-HERMES-VERSION";
+
+// The bundled source folder if it holds this exact version, else null.
+export function hermesBundle(dir) {
+  try {
+    return dir && fs.readFileSync(path.join(dir, HERMES_BUNDLE_MARKER), "utf8").trim() === HERMES_VERSION ? dir : null;
+  } catch { return null; }
+}
+
 // MyLecture's own Hermes, once fully installed; null otherwise.
 export function hermesExe(dir = toolsDir) {
   if (!dir) return null;
