@@ -9,7 +9,7 @@ const ENGINE_INFO = {
   codex: { title: "GPT", sub: "Uses your ChatGPT subscription." },
   antigravity: { title: "Gemini", sub: "Uses your Google account and Gemini plan." },
   "claude-code": { title: "Claude", sub: "Uses your Claude subscription." },
-  api: { title: "Use with API key", sub: "Your own Gemini API or LiteLLM key, with MyLecture's built-in pipeline." },
+  api: { title: "Use with API key", sub: "Your own Gemini API or LiteLLM key, with Hermes Agent." },
 };
 
 export function engineLabel(s) {

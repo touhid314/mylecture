@@ -71,7 +71,7 @@ export async function showApiKeyDialog(state, { onDone } = {}) {
   const body = h(
     "div",
     { class: "apikey" },
-    h("p", { class: "small muted", style: { margin: "0 0 12px" } }, "Use your own API key instead of a subscription. Videos are made with MyLecture's built-in pipeline."),
+    h("p", { class: "small muted", style: { margin: "0 0 12px" } }, "Use your own API key instead of a subscription. Videos are made by Hermes Agent, an open-source AI agent that runs on your computer."),
     providerPick,
     h("label", { class: "apikey-field" }, h("span", {}, "API key ", keyLink), keyInput),
     baseRow,
