@@ -108,14 +108,26 @@ export class ComponentManager extends EventEmitter {
     if (this.progress[id]?.state === "installing") return this.progress[id].promise;
     const promise = this.queue.then(() => this._install(id, signal));
     this.queue = promise.catch(() => {});
-    this._update(id, { state: "installing", message: "Waiting…", percent: null, promise });
+    this._update(id, { state: "installing", message: "Waiting…", percent: null, detail: "", startedAt: Date.now(), promise });
     return promise;
   }
 
   async _install(id, signal) {
     const title = COMPONENTS.find(c => c.id === id).title;
-    const step = (message, percent = null) => this._update(id, { state: "installing", message, percent });
-    const onLine = (line) => this.log("info", "component.output", { id, line: line.slice(0, 300) });
+    const step = (message, percent = null) => this._update(id, { state: "installing", message, percent, detail: "" });
+    // The installer's own output is shown live (latest line) so long installs
+    // visibly progress. Engine installers print download percentages; those
+    // drive the bar. OmniVoice's steps set the bar themselves.
+    let lastSent = 0, pending = null, timer = null;
+    const flush = () => { timer = null; if (pending) { this._update(id, pending); pending = null; lastSent = Date.now(); } };
+    const onLine = (line) => {
+      this.log("info", "component.output", { id, line: line.slice(0, 300) });
+      const detail = line.slice(0, 200);
+      const pct = ENGINE_BIN[id] ? /(\d{1,3}(?:\.\d+)?)\s?%/.exec(line) : null;
+      pending = { ...(pending || {}), detail, ...(pct && Number(pct[1]) <= 100 ? { percent: Math.min(99, Math.round(Number(pct[1]))) } : {}) };
+      if (Date.now() - lastSent >= 250) flush();
+      else timer ||= setTimeout(flush, 250);
+    };
     this.log("info", "component.install", { id });
     try {
       if (this.installed(id)) {
@@ -127,10 +139,12 @@ export class ComponentManager extends EventEmitter {
       else await this._installOmniVoice(step, onLine, signal);
       if (!this.installed(id)) throw new Error(`${title} was installed but MyLecture cannot find it. Restart MyLecture and check again.`);
       this.log("info", "component.installed", { id });
-      this._update(id, { state: "done", message: "Installed.", percent: 100 });
+      clearTimeout(timer); pending = null;
+      this._update(id, { state: "done", message: "Installed.", percent: 100, detail: "" });
     } catch (error) {
       this.log("error", "component.failed", { id, error: String(error.message || error) });
-      this._update(id, { state: "error", message: String(error.message || error), percent: null });
+      clearTimeout(timer); pending = null;
+      this._update(id, { state: "error", message: String(error.message || error), percent: null, detail: "" });
       throw error;
     }
   }

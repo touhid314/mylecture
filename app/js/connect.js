@@ -4,6 +4,7 @@
 // signed in on the computer are not connected until the user chooses so.
 // Used by the first-run welcome and by Create while nothing is connected.
 import { h, toast, bus, confirmBox } from "./ui.js";
+import { showInstaller } from "./install-dialog.js";
 import { showApiKeyDialog } from "./api-key.js";
 
 export const SERVICE_ORDER = ["codex", "antigravity", "claude-code"];
@@ -107,12 +108,14 @@ export function connectPanel(state, { compact = false, manageAccounts = false, o
         onChange?.(id);
       }));
     } else if (!st.installed) {
-      if (installs.has(id)) buttons.push(h("span", { class: "connect-account", "data-install-progress": id }, installs.get(id)));
+      if (installs.has(id)) buttons.push(h("span", { class: "connect-account", "data-install-progress": id }, installs.get(id)), button("Show progress", () => showInstaller(id)));
       else buttons.push(button("Set up", async () => {
         installs.set(id, "Starting…");
         paint(svc, id, st);
         try {
-          await window.ml.components.install(id);
+          const install = window.ml.components.install(id);
+          void showInstaller(id);
+          await install;
         } finally {
           installs.delete(id);
           if (alive) refresh();

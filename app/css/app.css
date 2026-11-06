@@ -714,5 +714,9 @@ body.light img[src$="assets/lockup.png"] { content: url("../assets/lockup-dark.p
 .omni-dl-fill { height: 100%; width: 0; background: var(--accent); transition: width .3s; }
 .omni-dl-bar.busy .omni-dl-fill { width: 30%; animation: omni-dl-slide 1.2s infinite ease-in-out; }
 @keyframes omni-dl-slide { from { margin-left: -30%; } to { margin-left: 100%; } }
+/* Shared install popup (install-dialog.js) */
+.install-step { font-weight: 600; min-height: 20px; overflow-wrap: anywhere; }
+.install-meta { margin-top: 2px; min-height: 16px; }
+.install-log { margin: 10px 0 0; padding: 8px 10px; max-height: 120px; overflow: hidden; border-radius: 8px; background: rgba(127, 127, 127, .1); font: 11px/1.5 var(--mono, ui-monospace, Consolas, monospace); color: var(--muted); white-space: pre-wrap; overflow-wrap: anywhere; }
 .voice-group-label .voice-download { flex: none; width: auto; margin-left: auto; font-size: 11px; padding: 3px 10px; min-height: 0; text-transform: none; letter-spacing: 0; white-space: nowrap; }
 .voice-group-label .voice-quality { white-space: nowrap; }

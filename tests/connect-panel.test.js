@@ -16,7 +16,7 @@ globalThis.__connectPanelFixture = {
   toast: (...args) => fixture.notices.push(args),
 };
 const hooks = registerHooks({ load(url, context, next) {
-  if (url.endsWith('/app/js/ui.js')) return { format:'module', shortCircuit:true, source:'export const h=globalThis.__connectPanelFixture.h; export const confirmBox=globalThis.__connectPanelFixture.confirmBox; export const toast=globalThis.__connectPanelFixture.toast; export const bus={emit(){}};' };
+  if (url.endsWith('/app/js/ui.js')) return { format:'module', shortCircuit:true, source:'export const h=globalThis.__connectPanelFixture.h; export const confirmBox=globalThis.__connectPanelFixture.confirmBox; export const toast=globalThis.__connectPanelFixture.toast; export const bus={emit(){}}; export const modal=()=>({ el: { querySelector(){ return null; } }, close(){} });' };
   if (url.endsWith('/app/js/api-key.js')) return { format:'module', shortCircuit:true, source:'export const showApiKeyDialog=()=>{};' };
   return next(url, context);
 } });

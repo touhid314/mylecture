@@ -2,7 +2,7 @@ import { connectPanel } from "./connect.js";
 import { showApiKeyDialog } from "./api-key.js";
 import { h, icon, toast, bus } from "./ui.js";
 import { showLiveLog } from "./logs.js";
-import { showOmniVoiceDownloader } from "./omnivoice-download.js";
+import { showInstaller } from "./install-dialog.js";
 import { openAddVoice, removeOwnVoice, isOwnVoice } from "./voice-add.js";
 
 const ENGINE_INFO = {
@@ -230,10 +230,11 @@ export class SettingsView {
       return h("div", { class: "set-row" },
         h("div", { class: "set-label" }, h("b", {}, c.title), h("span", {}, `${c.detail} Download: ${c.size}.`),
           h("span", { class: "small", style: { display: "block", marginTop: "2px", color: c.installed ? "var(--good, #4ade80)" : failed ? "var(--bad)" : "var(--muted)" }, "data-comp-status": c.id }, status)),
-        h("div", { class: "set-ctl" }, c.installed ? null : h("button", { class: "btn sm", disabled: busy && c.id !== "omnivoice", onclick: async () => {
-          // OmniVoice is a large, multi-step download: show its own progress popup.
-          if (c.id === "omnivoice") return showOmniVoiceDownloader({ onDone: () => load() });
+        h("div", { class: "set-ctl" }, c.installed ? null : h("button", { class: "btn sm", onclick: async () => {
+          // Running, or OmniVoice (a 6 GB download that asks first): the popup handles it.
+          if (busy || c.id === "omnivoice") return showInstaller(c.id, { onDone: () => load() });
           const install = window.ml.components.install(c.id);
+          void showInstaller(c.id, { onDone: () => load() });
           load();
           try {
             await install;
@@ -243,7 +244,7 @@ export class SettingsView {
           } finally {
             load();
           }
-        } }, busy ? (c.id === "omnivoice" ? "Show progress" : "Installing…") : failed ? "Try again" : "Install")));
+        } }, busy ? "Show progress" : failed ? "Try again" : "Install")));
     }))).catch(() => {});
     this._componentsLoad = load;
     if (!this._componentsSub) {

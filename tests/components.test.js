@@ -35,7 +35,7 @@ function harness({ platform = "win32", have = [], settings = {} } = {}) {
       runs.push([file, ...args].join(" "));
       // Simulate what each official installer leaves behind.
       const joined = args.join(" ");
-      if (/claude\.ai\/install/.test(joined)) found.add("claude");
+      if (/claude\.ai\/install/.test(joined)) { opts.onLine?.("Downloading Claude Code... 42%"); found.add("claude"); }
       if (/antigravity\.google/.test(joined)) found.add("agy");
       if (/OpenAI\.Codex|@openai\/codex/.test(joined)) found.add("codex");
       if (/astral\.sh\/uv/.test(joined)) { fs.mkdirSync(opts.env.UV_INSTALL_DIR, { recursive: true }); fs.writeFileSync(path.join(opts.env.UV_INSTALL_DIR, "uv.exe"), ""); }
@@ -139,3 +139,15 @@ test("OmniVoice reuses an installed uv and Python 3.10-3.12 instead of downloadi
   assert.match(steps, /uv\.exe venv --python C:\\Python310\\python\.exe --seed/);
 });
 
+
+test("installer output is forwarded live, and download percentages drive the bar", async () => {
+  const t = harness({ have: [] });
+  await t.manager.install("claude-code");
+  const live = t.events.find((e) => e.id === "claude-code" && e.detail);
+  assert.equal(live.detail, "Downloading Claude Code... 42%");
+  assert.equal(live.percent, 42);
+  assert.ok(live.startedAt > 0, "the popup can show elapsed time");
+  const last = t.events.at(-1);
+  assert.equal(last.state, "done");
+  assert.equal(last.detail, "");
+});
