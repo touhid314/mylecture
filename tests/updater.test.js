@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { EventEmitter } from "node:events";
-import { compareVersions, manifestVersion, updateMode, manualDownloadName, createUpdater } from "../electron/updater.js";
+import { compareVersions, manifestVersion, updateMode, manualDownloadName, createUpdater, MAC_INSTALL_COMMAND, GITHUB_LATEST_RELEASE } from "../electron/updater.js";
 
 test("version comparison and manifest parsing", () => {
   assert.equal(compareVersions("0.2.0", "0.1.9"), 1);
@@ -21,13 +21,14 @@ test("update mode per install type", () => {
   assert.equal(updateMode({ isPackaged: true, platform: "win32", env: { CI: "true" } }), "off");
   assert.equal(updateMode({ isPackaged: true, platform: "win32" }), "auto");
   assert.equal(updateMode({ isPackaged: true, platform: "win32", env: { PORTABLE_EXECUTABLE_FILE: "C:\\x.exe" } }), "manual");
-  assert.equal(updateMode({ isPackaged: true, platform: "darwin" }), "manual");
+  assert.equal(updateMode({ isPackaged: true, platform: "darwin" }), "command");
   assert.equal(manualDownloadName({ version: "0.2.0", platform: "darwin", arch: "arm64" }), "MyLecture-0.2.0-mac-arm64.dmg");
   assert.equal(manualDownloadName({ version: "0.2.0", platform: "win32", arch: "x64" }), "MyLecture-0.2.0-win-x64-portable.exe");
 });
 
-function harness({ platform = "win32", env = {}, feedUrl = "https://u.example/updates", version = "0.1.0", busy = false, manifest = "version: 0.2.0\n" } = {}) {
-  const sent = [], opened = [], fetched = [];
+function harness({ platform = "win32", env = {}, feedUrl = "https://u.example/updates", version = "0.1.0", busy = false, manifest = "version: 0.2.0\n", arch = "x64", release } = {}) {
+  const sent = [], opened = [], fetched = [], paths = [];
+  release ||= { tag_name: "v0.2.0", draft: false, prerelease: false, assets: [{ name: "MyLecture-0.2.0-mac-arm64.zip" }, { name: "MyLecture-0.2.0-mac-x64.zip" }] };
   const auto = Object.assign(new EventEmitter(), {
     feed: null, installs: [],
     setFeedURL(o) { this.feed = o; },
@@ -36,13 +37,13 @@ function harness({ platform = "win32", env = {}, feedUrl = "https://u.example/up
   });
   const updater = createUpdater({
     app: { isPackaged: true, getVersion: () => version },
-    shell: { openExternal: async u => opened.push(u) },
+    shell: { openExternal: async u => opened.push(u), openPath: async p => (paths.push(p), "") },
     send: (ch, p) => sent.push([ch, p]),
-    isBusy: () => busy, feedUrl, env, argv: [], platform, arch: "x64",
-    fetchImpl: async url => { fetched.push(url); return { ok: true, text: async () => manifest }; },
+    isBusy: () => busy, feedUrl, env, argv: [], platform, arch,
+    fetchImpl: async url => { fetched.push(url); return { ok: true, text: async () => (url === GITHUB_LATEST_RELEASE ? JSON.stringify(release) : manifest) }; },
     loadAutoUpdater: () => auto,
   });
-  return { updater, auto, sent, opened, fetched };
+  return { updater, auto, sent, opened, fetched, paths };
 }
 
 test("Windows installer builds download in the background, then install on Update now", async () => {
@@ -65,14 +66,30 @@ test("a running job asks for confirmation before installing", async () => {
   assert.deepEqual(await t.updater.install({ force: true }), { ok: true });
 });
 
-test("macOS and portable builds prompt and open the matching download", async () => {
-  const mac = harness({ platform: "darwin", manifest: "version: 0.2.0\n" });
-  await mac.updater.start();
-  assert.match(mac.fetched[0], /\/latest-mac\.yml$/);
-  assert.equal(mac.updater.state.status, "available");
-  assert.deepEqual(await mac.updater.install(), { ok: true, opened: true });
-  assert.match(mac.opened[0], /\/MyLecture-0\.2\.0-mac-x64\.dmg$/);
+test("macOS prompts with the install command when the latest release has a build for this Mac", async () => {
+  for (const arch of ["arm64", "x64"]) {
+    const mac = harness({ platform: "darwin", arch });
+    await mac.updater.start();
+    assert.equal(mac.fetched[0], GITHUB_LATEST_RELEASE);
+    assert.equal(mac.updater.state.status, "available");
+    assert.equal(mac.updater.state.version, "0.2.0");
+    assert.equal(mac.updater.state.command, MAC_INSTALL_COMMAND);
+    assert.match(MAC_INSTALL_COMMAND, /install-mac\.command \| bash$/);
+    assert.deepEqual(await mac.updater.openTerminal(), { ok: true });
+    assert.match(mac.paths[0], /Terminal\.app$/);
+  }
+  for (const release of [
+    { tag_name: "v0.2.0", assets: [{ name: "MyLecture-0.2.0-win-x64.exe" }] },
+    { tag_name: "v0.2.0", prerelease: true, assets: [{ name: "MyLecture-0.2.0-mac-x64.zip" }] },
+    { tag_name: "v0.1.0", assets: [{ name: "MyLecture-0.1.0-mac-x64.zip" }] },
+  ]) {
+    const mac = harness({ platform: "darwin", release });
+    await mac.updater.start();
+    assert.equal(mac.updater.state.status, "idle", JSON.stringify(release));
+  }
+});
 
+test("Windows portable builds prompt and open the matching download", async () => {
   const portable = harness({ env: { PORTABLE_EXECUTABLE_FILE: "C:\\MyLecture.exe" } });
   await portable.updater.start();
   assert.match(portable.updater.state.downloadUrl, /MyLecture-0\.2\.0-win-x64-portable\.exe$/);

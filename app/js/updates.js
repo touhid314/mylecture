@@ -15,9 +15,40 @@ async function install() {
   else if (!result?.ok) toast("The update isn't ready yet. Try again in a moment.", { kind: "bad" });
 }
 
+// macOS: the update is installed by running the install command in Terminal.
+function showCommand(state) {
+  const copyBtn = h("button", { class: "btn sm", onclick: async () => {
+    try {
+      await navigator.clipboard.writeText(state.command);
+      copyBtn.textContent = "Copied";
+      setTimeout(() => (copyBtn.textContent = "Copy"), 2000);
+    } catch { toast("Could not copy. Select the command and copy it.", { kind: "bad" }); }
+  } }, "Copy");
+  modal({
+    title: "Update available",
+    width: "560px",
+    body: h("div", {},
+      h("p", { style: { margin: "0 0 8px" } }, `MyLecture ${state.version} is available. You have ${state.current}.`),
+      h("p", { style: { margin: "0 0 8px" } }, "To update, open Terminal, paste this command and press Return:"),
+      h("div", { class: "update-cmd" }, h("code", {}, state.command), copyBtn),
+      h("p", { class: "muted small", style: { margin: "10px 0 0" } },
+        "To open Terminal, press ⌘ + Space, type Terminal and press Return, or click Open Terminal below. The command closes MyLecture, installs the new version and opens it again. This reminder appears each time you open MyLecture until you update.")),
+    actions: [
+      { label: "Later" },
+      { label: "Open Terminal", run: async () => {
+        await navigator.clipboard.writeText(state.command).catch(() => {});
+        const r = await window.ml.updates.openTerminal();
+        toast(r?.ok ? "The command is copied. Paste it into Terminal (⌘ + V) and press Return." : "Could not open Terminal. Open it from Applications → Utilities.", { timeout: 9000, kind: r?.ok ? "" : "bad" });
+        return false;
+      } },
+    ],
+  });
+}
+
 function show(state) {
   if (!["ready", "available"].includes(state?.status) || !state.version || prompted === state.version) return;
   prompted = state.version;
+  if (state.command) return showCommand(state);
   const auto = state.status === "ready";
   modal({
     title: "Update available",

@@ -510,6 +510,7 @@ function registerIpc() {
   });
   h("update:state", () => updater?.state || { status: "idle", mode: "off" });
   h("update:install", (options) => updater?.install({ force: !!options?.force }) || { ok: false });
+  h("update:openTerminal", () => updater?.openTerminal() || { ok: false });
   h("shell:openExternal", (url) => (/^https?:\/\//.test(url) ? shell.openExternal(url) : null));
   h("shell:openExports", () => {
     fs.mkdirSync(paths.exports, { recursive: true });

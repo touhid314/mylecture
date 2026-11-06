@@ -6,9 +6,15 @@
 // Windows installer builds: electron-updater downloads the new installer in the
 // background, then the user is prompted "Update now", which restarts into the
 // new version. If they choose Later, it installs when the app is closed.
-// macOS (unsigned builds cannot self-install), the Windows portable .exe and
-// Linux: the user is prompted and "Update now" opens the new installer download.
+// macOS: builds are not notarized, so they cannot self-install and a browser
+// download would be quarantined. The app checks the latest GitHub release and,
+// when it is newer and has a build for this Mac, prompts on every launch with
+// the one-line install command (scripts/install-mac.command) to run in Terminal.
+// The Windows portable .exe and Linux: "Update now" opens the new download.
 import { createRequire } from "node:module";
+
+export const MAC_INSTALL_COMMAND = "curl -fsSL https://raw.githubusercontent.com/touhid314/mylecture/main/scripts/install-mac.command | bash";
+export const GITHUB_LATEST_RELEASE = "https://api.github.com/repos/touhid314/mylecture/releases/latest";
 
 
 export function compareVersions(a, b) {
@@ -33,6 +39,7 @@ export function manifestVersion(yml) {
 export function updateMode({ isPackaged, platform, env = {}, argv = [] }) {
   if (!isPackaged || argv.includes("--dev") || argv.includes("--smoke-test") || env.CI) return "off";
   if (platform === "win32") return env.PORTABLE_EXECUTABLE_FILE ? "manual" : "auto";
+  if (platform === "darwin") return "command";
   return "manual";
 }
 
@@ -87,11 +94,28 @@ export function createUpdater({
     set({ status: "available", version, downloadUrl: `${feed}/${encodeURIComponent(file)}` });
   }
 
+  // macOS: the newest published GitHub release, if it has a build for this Mac.
+  async function checkCommand() {
+    const response = await fetchImpl(GITHUB_LATEST_RELEASE, {
+      cache: "no-store", credentials: "omit",
+      headers: { accept: "application/vnd.github+json", "user-agent": "MyLecture-updater" },
+    });
+    if (!response.ok) return;
+    const release = JSON.parse(await response.text());
+    const version = String(release?.tag_name || "").replace(/^v/, "");
+    const macArch = arch === "arm64" ? "arm64" : "x64";
+    const hasBuild = (release?.assets || []).some(a => new RegExp(`-mac-${macArch}\\.zip$`).test(String(a?.name)));
+    if (!version || release?.draft || release?.prerelease || !hasBuild || compareVersions(version, current) <= 0) return;
+    log("info", "update.available", { version, mode: "command" });
+    set({ status: "available", version, command: MAC_INSTALL_COMMAND });
+  }
+
   async function check() {
     if (mode === "off" || checking || state.status === "ready") return;
     checking = true;
     try {
       if (mode === "auto") await auto.checkForUpdates();
+      else if (mode === "command") await checkCommand();
       else await checkManual();
     } catch (error) {
       log("warn", "update.checkFailed", { error: String(error?.message || error) });
@@ -109,6 +133,13 @@ export function createUpdater({
       return check();
     },
     check,
+    // macOS: open Terminal so the user can paste the install command.
+    async openTerminal() {
+      for (const p of ["/System/Applications/Utilities/Terminal.app", "/Applications/Utilities/Terminal.app"]) {
+        if (!(await shell.openPath(p))) return { ok: true };
+      }
+      return { ok: false };
+    },
     // Returns { busy: true } when a job is running and force was not given.
     async install({ force = false } = {}) {
       if (!force && isBusy()) return { busy: true };

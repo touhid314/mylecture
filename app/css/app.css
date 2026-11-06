@@ -714,6 +714,9 @@ body.light img[src$="assets/lockup.png"] { content: url("../assets/lockup-dark.p
 .omni-dl-fill { height: 100%; width: 0; background: var(--accent); transition: width .3s; }
 .omni-dl-bar.busy .omni-dl-fill { width: 30%; animation: omni-dl-slide 1.2s infinite ease-in-out; }
 @keyframes omni-dl-slide { from { margin-left: -30%; } to { margin-left: 100%; } }
+/* macOS update prompt (updates.js) */
+.update-cmd { display: flex; gap: 8px; align-items: stretch; }
+.update-cmd code { flex: 1; min-width: 0; overflow-x: auto; white-space: nowrap; padding: 9px 10px; border-radius: 8px; background: rgba(127, 127, 127, .12); font: 12px/1.5 var(--mono, ui-monospace, Menlo, monospace); user-select: all; }
 /* Shared install popup (install-dialog.js) */
 .install-step { font-weight: 600; min-height: 20px; overflow-wrap: anywhere; }
 .install-meta { margin-top: 2px; min-height: 16px; }
