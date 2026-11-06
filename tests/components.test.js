@@ -122,6 +122,17 @@ test("runHidden reports lines and fails with the output tail", async () => {
   await assert.rejects(runHidden(process.execPath, ["-e", "console.log('bad thing'); process.exit(3)"]), /exited with code 3: bad thing/);
 });
 
+test("Windows installers do not inherit incompatible PowerShell modules", { skip: process.platform !== "win32" }, async () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "ml-ps-modules-"));
+  try {
+    const module = path.join(dir, "Microsoft.PowerShell.Security");
+    fs.mkdirSync(module);
+    fs.writeFileSync(path.join(module, "Microsoft.PowerShell.Security.psm1"), "throw 'incompatible inherited module'");
+    const lines = await runHidden("powershell.exe", ["-NoProfile", "-Command", "Import-Module Microsoft.PowerShell.Security -ErrorAction Stop; Get-ExecutionPolicy"], { env: { PSModulePath: dir } });
+    assert(lines.some((line) => /^(Restricted|RemoteSigned|AllSigned|Unrestricted|Bypass|Undefined)$/.test(line)));
+  } finally { fs.rmSync(dir, { recursive: true, force: true }); }
+});
+
 test("OmniVoice reuses an installed uv and Python 3.10-3.12 instead of downloading them", async () => {
   const t = harness({ have: ["uv"] });
   const run = t.manager.run;

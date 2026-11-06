@@ -58,6 +58,12 @@ export function runHidden(file, args, { env, onLine = () => {}, signal } = {}) {
       // are fixed strings without spaces or shell characters.
       const shell = WIN && /\.(cmd|bat)$/i.test(file);
       const options = { windowsHide: true, env: { ...process.env, ...env }, stdio: ["ignore", "pipe", "pipe"] };
+      // PowerShell 7's inherited module paths can make Windows PowerShell 5
+      // load incompatible modules (including Get-ExecutionPolicy). Let the
+      // Windows shell initialize its own module paths for official installers.
+      if (WIN && /^powershell(?:\.exe)?$/i.test(path.basename(file))) {
+        for (const key of Object.keys(options.env)) if (/^PSModulePath$/i.test(key)) delete options.env[key];
+      }
       child = shell ? spawn(`"${file}" ${args.join(" ")}`, { ...options, shell: true }) : spawn(file, args, options);
     } catch (error) { reject(error); return; }
     const tail = [];
