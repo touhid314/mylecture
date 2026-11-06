@@ -17,7 +17,8 @@ export async function showApiKeyDialog(state, { onDone } = {}) {
   const keyInput = h("input", { class: "input", type: "password", autocomplete: "off", spellcheck: false, "aria-label": "API key" });
   const keyLink = h("a", { class: "small", href: "#", onclick: (e) => (e.preventDefault(), P[provider].keyUrl && window.open(P[provider].keyUrl, "_blank")) }, "Get a key");
   const baseInput = h("input", { class: "input", placeholder: "https://your-litellm-server", spellcheck: false, "aria-label": "LiteLLM server address" });
-  const baseRow = h("label", { class: "apikey-field" }, h("span", {}, "Server address"), baseInput);
+  const baseRow = h("label", { class: "apikey-field" }, h("span", {}, "Server address"), baseInput,
+    h("span", { class: "small muted" }, "Example: for the University of Florida's NaviGator API, use https://api.ai.it.ufl.edu"));
   const modelSelect = h("select", { class: "select", disabled: true, "aria-label": "Model" }, h("option", {}, "Check the key to load models"));
   const result = h("div", { class: "apikey-result small" });
   const checkBtn = h("button", { class: "btn", onclick: () => check() }, "Check");
