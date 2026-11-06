@@ -14,9 +14,10 @@ import { S3Client } from "@aws-sdk/client-s3";
 import { Upload } from "@aws-sdk/lib-storage";
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
-const dist = path.join(root, "dist");
 const BUCKET = process.env.UPDATE_BUCKET || "mylecture-releases";
 const version = JSON.parse(fs.readFileSync(path.join(root, "package.json"), "utf8")).version;
+// Releases are kept by version (dist/<version>/); a fresh local build is flat in dist/.
+const dist = fs.existsSync(path.join(root, "dist", version)) ? path.join(root, "dist", version) : path.join(root, "dist");
 
 function credentials() {
   const env = { ...process.env };
@@ -38,7 +39,7 @@ const installers = files.filter(f => f.startsWith(`MyLecture-${version}-`) && /\
 const manifests = files.filter(f => /^latest(-mac|-linux)?\.yml$/.test(f))
   .filter(f => (/^version:\s*['"]?([^'"\s]+)/m.exec(fs.readFileSync(path.join(dist, f), "utf8")) || [])[1] === version);
 if (!installers.length || !manifests.length) {
-  console.error(`No release files for version ${version} in dist/. Build first (npm run dist:win), and bump "version" in package.json for each release.`);
+  console.error(`No release files for version ${version} in dist/${version}/ or dist/. Build first (npm run dist:win), and bump "version" in package.json for each release.`);
   process.exit(1);
 }
 

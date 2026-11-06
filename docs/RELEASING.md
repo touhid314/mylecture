@@ -45,15 +45,15 @@ Download counts belong to individual assets. Save historical counts before delet
 
 Installed apps use a separate Cloudflare R2 update feed. Publishing a GitHub Release alone does not update that feed.
 
-After the GitHub workflow succeeds, download the same verified assets into `dist/` and publish them:
+After the GitHub workflow succeeds, download the same verified assets into `dist/<version>/` and publish them:
 
 ```powershell
 $releaseVersion = node -p "require('./package.json').version"
-gh release download "v$releaseVersion" --dir dist --clobber
+gh release download "v$releaseVersion" --dir "dist/$releaseVersion" --clobber
 npm run release:publish
 ```
 
-The version in `package.json` must match the downloaded release. The publisher uploads binaries first and `latest.yml` last.
+The version in `package.json` must match the downloaded release. The publisher reads `dist/<version>/` (or `dist/` for a fresh local build), uploads binaries first and `latest.yml` last. Keep each release's files in its own `dist/<version>/` folder.
 
 Maintainers need `R2_ACCESS_KEY_ID`, `R2_SECRET_ACCESS_KEY`, and `R2_ENDPOINT` in their environment or the sibling website's local `.env`. These are not required to run MyLecture and must never be committed or bundled.
 
