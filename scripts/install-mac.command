@@ -38,8 +38,19 @@ else
 fi
 say "Installing MyLecture for ${CHIP}..."
 
-# The newest GitHub release (pre-releases included) that has a build for this chip.
+# The latest release's build for this chip. github.com/.../releases/latest
+# redirects to the newest release's tag; unlike the GitHub API it is not rate
+# limited (the API allows 60 requests an hour per address, which shared school
+# or office networks can exceed). The API is only a fallback.
 url="${MYLECTURE_ZIP_URL:-}"
+if [ -z "${url}" ]; then
+  latest="$(curl -fsSL -o /dev/null -w '%{url_effective}' "https://github.com/${REPO}/releases/latest" 2>/dev/null || true)"
+  tag="${latest##*/tag/}"
+  if [ -n "${latest}" ] && [ "${tag}" != "${latest}" ] && [ -n "${tag}" ]; then
+    candidate="https://github.com/${REPO}/releases/download/${tag}/MyLecture-${tag#v}-mac-${ARCH}.zip"
+    if curl -fsSIL -o /dev/null "${candidate}" 2>/dev/null; then url="${candidate}"; fi
+  fi
+fi
 if [ -z "${url}" ]; then
   releases="$(curl -fsSL -H "Accept: application/vnd.github+json" "https://api.github.com/repos/${REPO}/releases?per_page=30")" \
     || fail "could not reach GitHub. Check your internet connection and try again."
