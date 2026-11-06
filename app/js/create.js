@@ -82,7 +82,7 @@ export class CreateView {
     const left = h(
       "aside",
       { class: "ide-left" },
-      h("div", { class: "ide-left-head" }, h("div", { class: "panel-title", style: { padding: 0 } }, "Recent projects"), h("div", { class: "grow" }), h("button", { class: "btn sm", onclick: () => this.newLecture() }, icon("plus"), "New")),
+      h("div", { class: "ide-left-head" }, h("div", { class: "panel-title", style: { padding: 0 } }, "Projects"), h("div", { class: "grow" }), h("button", { class: "btn sm", title: "Import project", onclick: () => this.importProject() }, "Import"), h("button", { class: "btn sm", onclick: () => this.newLecture() }, icon("plus"), "New")),
       this.projList,
       this.artifactDrawer,
     );
@@ -572,7 +572,8 @@ export class CreateView {
               "div",
               { class: "ide-proj" + (p.id === cur ? " active" : ""), onclick: () => this.open(p.id), title: p.question },
               h("div", { class: "grow" }, h("div", { class: "ide-proj-title" }, p.title || "Untitled"), h("div", { class: "small faint" }, `${p.scenes} scenes · ${fmtTime(p.duration)} · ${fmtDate(p.updatedAt)}`)),
-              h("button", { class: "btn ghost sm icon ide-x", title: "Delete project", onclick: async (e) => {
+              h("button", { class: "btn ghost sm icon ide-x", title: "Export project", "aria-label": "Export project", onclick: (e) => { e.stopPropagation(); this.exportProject(p.id); } }, icon("download")),
+              h("button", { class: "btn ghost sm icon ide-x", title: "Delete project", disabled: !!this.job, onclick: async (e) => {
                 e.stopPropagation();
                 if (!(await confirmBox("Delete project?", `“${p.title}” and its files will be removed.`))) return;
                 await window.ml.ide.remove(p.id);
@@ -602,6 +603,25 @@ export class CreateView {
     this._loadPlayer();
     this.showPreview("lecture");
     this._paintAll();
+  }
+
+  async exportProject(id) {
+    if (this.job || this.liveJob) return toast("Wait for the current job to finish.");
+    try {
+      const result = await window.ml.ide.exportProject(id);
+      if (result) toast("Project exported. Share the .lecture file to let someone else edit it.", { kind: "good", timeout: 7000 });
+    } catch (e) { toast(friendly(e), { kind: "bad" }); }
+  }
+
+  async importProject() {
+    if (this.job || this.liveJob) return toast("Wait for the current job to finish.");
+    try {
+      const result = await window.ml.ide.importProject();
+      if (!result) return;
+      await this.open(result.id);
+      await this.refreshProjects();
+      toast("Project imported. You can edit it now.", { kind: "good" });
+    } catch (e) { toast(friendly(e), { kind: "bad" }); }
   }
 
   async reload() {
@@ -1068,7 +1088,7 @@ export class CreateView {
     // Render is local (no AI): its progress lives in the header status, not
     // in the agent's "Working · Claude" chat block.
     if (j.type === "render") this._renderBar(j.state === "running" ? 0 : null);
-    if (j.state === "running" && j.type !== "render") this._workStart();
+    if (j.state === "running" && !["render", "project export", "project import"].includes(j.type)) this._workStart();
     else if (j.state !== "running" && this.work && !this.liveJob) this._workFinish("");    this.job = j.state === "running" ? { type: j.type, projectId: j.projectId } : null;
     this._paintAll();
   }
@@ -1264,7 +1284,7 @@ export class CreateView {
       setTimeout(fit, 0);
       // Only show the on-screen caption when it differs from what is spoken.
       const caption = entry.caption && entry.caption.trim() !== (original || "").trim() ? h("div", { class: "narration-caption" }, entry.caption) : null;
-      const regenerate = h("button", { class: "btn sm", disabled: true, onclick: async () => {
+      const regenerate = h("button", { class: "btn sm", onclick: async () => {
         if (saving) return;
         saving = true;
         for (const { button } of buttons) button.disabled = true;
@@ -1282,13 +1302,13 @@ export class CreateView {
           saving = false;
           spoken.readOnly = !entry.sectionId;
           regenerate.textContent = "Regenerate";
-          for (const { button, changed } of buttons) { button.disabled = !changed(); button.hidden = !changed(); }
+          for (const { button, ready } of buttons) button.disabled = !ready();
         }
       } }, "Regenerate");
-      const changed = () => !!entry.sectionId && !!spoken.value.trim() && spoken.value !== original;
-      buttons.push({ button: regenerate, changed });
-      regenerate.hidden = true;
-      spoken.addEventListener("input", () => { regenerate.disabled = saving || !changed(); regenerate.hidden = !changed() && !saving; });
+      const ready = () => !!entry.sectionId && !!spoken.value.trim();
+      buttons.push({ button: regenerate, ready });
+      regenerate.disabled = !ready();
+      spoken.addEventListener("input", () => { regenerate.disabled = saving || !ready(); });
       body.append(h("div", { class: "narration-beat" }, h("div", { class: "narration-row" }, spoken, entry.sectionId ? regenerate : null), caption));
     }
     modal({ title: "Edit narration", width: "min(820px, 92vw)", body, actions: [{ label: "Done" }] });

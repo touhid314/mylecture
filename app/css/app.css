@@ -308,6 +308,7 @@ kbd { font: 11px var(--mono); background: var(--surface-2); border: 1px solid va
 .ide-proj-title { font-size: 13px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .ide-proj .ide-x { opacity: 0; }
 .ide-proj:hover .ide-x { opacity: .7; }
+.ide-proj:focus-within .ide-x { opacity: .7; }
 .ide-sep { border-top: 1px solid var(--line); margin: 4px 0; }
 .ide-actions { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; padding: 4px 12px 8px; }
 .ide-split { display: flex; gap: 2px; }

@@ -23,6 +23,7 @@ import { ComponentManager, COMPONENT_IDS } from "./components.js";
 import { configureLogger, log, getLogInfo, readLogTail, onLogEntry, registerLogSecret } from "./logger.js";
 import { Readable } from "node:stream";
 import { mediaRange, contentType } from "./media-range.js";
+import { exportProject, importProject } from "./project-archive.js";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const ROOT = path.join(here, "..");
@@ -236,6 +237,30 @@ function registerIpc() {
   h("ide:readFile", (id, name) => ide.readFile(id, name));
   h("ide:narration", (id) => ide.narration(id));
   h("ide:remove", (id) => ide.remove(id));
+  h("ide:exportProject", async (id) => {
+    if (ide.job) throw new Error("Wait for the current job to finish.");
+    const lecture = lectures.get(id);
+    if (!lecture) throw new Error("Project not found.");
+    const selected = await dialog.showSaveDialog(win, { title: "Export project", defaultPath: path.join(app.getPath("documents"), safeName(lecture.title) + ".lecture"), filters: [{ name: "MyLecture project", extensions: ["lecture"] }] });
+    if (selected.canceled || !selected.filePath) return null;
+    const abort = ide._begin("project export", id);
+    try {
+      const destination = /\.lecture$/i.test(selected.filePath) ? selected.filePath : selected.filePath + ".lecture";
+      const file = await exportProject({ lecture, workspaceDir: lectures.dir(id), audioDir: paths.tts, file: destination, signal: abort.signal });
+      return { file };
+    } finally { ide._end(id); }
+  });
+  h("ide:importProject", async () => {
+    if (ide.job) throw new Error("Wait for the current job to finish.");
+    const selected = await dialog.showOpenDialog(win, { title: "Import project", properties: ["openFile"], filters: [{ name: "MyLecture project", extensions: ["lecture"] }] });
+    if (selected.canceled || !selected.filePaths[0]) return null;
+    const id = newId("lec-");
+    const abort = ide._begin("project import", id);
+    try {
+      await importProject({ file: selected.filePaths[0], libraryDir: paths.library, audioDir: paths.tts, id, signal: abort.signal });
+      return { id };
+    } finally { ide._end(id); }
+  });
   h("ide:generate", (req) => ide.generate(req, generator));
   h("ide:chat", (req) => ide.chat(req, generator));
   h("ide:stop", () => ide.stop());

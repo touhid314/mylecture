@@ -194,7 +194,8 @@ export class TTSService extends EventEmitter {
     if (!["kokoro", "omnivoice", "system"].includes(engine)) throw new Error(`Unknown voice engine: ${engine}`);
     const voice = engine === "kokoro" ? opts.voice || s.voice || "af_heart"
       : engine === "omnivoice" ? opts.voice || s.omnivoiceVoice || "maruf" : opts.systemVoice || s.systemVoice || "";
-    const key = this.keyFor(text, engine, voice, speed);
+    // Explicit regeneration gets a new file, preserving clips used elsewhere.
+    const key = opts.force ? crypto.randomBytes(10).toString("hex") : this.keyFor(text, engine, voice, speed);
     const started = Date.now();
     log("info", "tts.request", { engine, voice, speed, key, characters: text.length });
     const file = this.fileFor(key);

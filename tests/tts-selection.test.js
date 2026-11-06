@@ -91,6 +91,26 @@ test("Kokoro synthesis waits for readiness, surfaces load failure, and preserves
   assert.equal(systemCalls, 1);
 });
 
+test("explicit regeneration synthesizes unchanged text again without replacing shared audio", async t => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "mylecture-tts-regenerate-"));
+  t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
+  const tts = service({ voiceEngine: "kokoro" }, dir);
+  let calls = 0;
+  tts.sapi.synthToFile = async (_text, file) => {
+    calls++;
+    fs.writeFileSync(file, pcmToWav(new Int16Array(2400).fill(calls), 24000));
+  };
+  const first = await tts.synth("Same narration", { engine: "system" });
+  const original = fs.readFileSync(first.file);
+  assert.equal((await tts.synth("Same narration", { engine: "system" })).key, first.key);
+  const regenerated = await tts.synth("Same narration", { engine: "system", force: true });
+  const again = await tts.synth("Same narration", { engine: "system", force: true });
+  assert.equal(calls, 3);
+  assert.notEqual(regenerated.key, first.key);
+  assert.notEqual(again.key, regenerated.key);
+  assert.deepEqual(fs.readFileSync(first.file), original);
+});
+
 test("Settings displays Kokoro for legacy system selections and retains honest load errors", () => {
   const view = Object.create(SettingsView.prototype);
   view.state = { settings: { voiceEngine: "system" } };

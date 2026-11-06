@@ -97,6 +97,8 @@ contextBridge.exposeInMainWorld("ml", {
     readFile: (id, name) => invoke("ide:readFile", id, name),
     narration: (id) => invoke("ide:narration", id),
     remove: (id) => invoke("ide:remove", id),
+    exportProject: id => invoke("ide:exportProject", id),
+    importProject: () => invoke("ide:importProject"),
     generate: (req) => invoke("ide:generate", req),
     chat: (req) => invoke("ide:chat", req),
     stop: () => invoke("ide:stop"),

@@ -197,6 +197,7 @@ export class IdeService {
   }
 
   remove(id) {
+    if (this.job?.projectId === id) throw new Error("Wait for the current job to finish before deleting this project.");
     const lec = lectures.get(id);
     if (lec?.source === "ide") lectures.remove(id);
   }
@@ -327,7 +328,7 @@ export class IdeService {
     if (!beat) throw new Error("Narration cue not found.");
     // This is an explicit edit of the spoken wording. Automatic pronunciation
     // substitutions must not turn it back into the previous narration.
-    const r = await this.tts.synth(ttsText, { voice, speed });
+    const r = await this.tts.synth(ttsText, { voice, speed, force: true });
     abort.signal.throwIfAborted();
     fs.writeFileSync(path.join(ws, "narration-edits.json"), JSON.stringify(overrides, null, 2) + "\n", "utf8");
     Object.assign(beat, { text, ttsText, spokenText: r.spokenText, audio: r.key, dur: r.dur, segment: { ...beat.segment, text, ttsText } });

@@ -108,7 +108,8 @@ test("narration editor shows only the selected scene and preserves exact spoken 
     assert.equal(caption.textContent, entries()[index].caption);
   });
   assert.equal(buttons().length, 2);
-  assert.ok(buttons().every(button => button.disabled));
+  assert.equal(buttons()[0].disabled, false, "unchanged narration can be regenerated");
+  assert.equal(buttons()[1].disabled, true, "empty narration cannot be regenerated");
 });
 
 test("selecting the second scene shows its narration and legacy rows only", async () => {
@@ -144,7 +145,7 @@ test("regenerating a later scene sends its cue and unchanged caption, then displ
   assert.equal(spoken.value, "Updated, normalized energy narration.");
   assert.equal(caption.textContent, "ΔE = 0");
   assert.equal(spoken.readOnly, false);
-  assert.equal(button.disabled, true);
+  assert.equal(button.disabled, false, "the clip can be regenerated again without an edit");
   assert.equal(button.textContent, "Regenerate");
   assert.deepEqual(harness.notices, []);
 });
@@ -160,4 +161,19 @@ test("regeneration failure preserves the edited narration and enables retry", as
   assert.equal(button.disabled, false);
   assert.deepEqual(applied, []);
   assert.deepEqual(harness.notices, [["Voice unavailable", { kind: "bad" }]]);
+});
+
+test("unchanged narration can be regenerated repeatedly", async () => {
+  const calls = [];
+  await openEditor(async (id, request) => {
+    calls.push(request);
+    return { lecture: { scenes: [{ beats: [{ spokenText: entries()[0].spokenText }] }] } };
+  });
+  const button = rows()[0].children[0].children[1];
+  assert.equal(button.disabled, false);
+  await button.dispatch("click");
+  await button.dispatch("click");
+  assert.equal(calls.length, 2);
+  assert.equal(calls[0].ttsText, entries()[0].spokenText);
+  assert.equal(calls[1].ttsText, entries()[0].spokenText);
 });
