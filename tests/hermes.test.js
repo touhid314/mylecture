@@ -95,7 +95,7 @@ test("a failed Hermes run reports its error", async () => {
   fixture.events = [{ type: "result", exit_code: 1, error: "401 invalid api key" }];
   fixture.result = { code: 1 };
   const home2 = tmp(); fs.writeFileSync(path.join(home2, ".mylecture-curator-paused"), "");
-  await assert.rejects(runHermes({ exe: "C:/hermes/hermes.exe", home: home2, system: "s", user: "u", config: { provider: "compatible", baseUrl: "https://x", apiKey: "bad" }, workspace: tmp() }), /Hermes: 401 invalid api key/);
+  await assert.rejects(runHermes({ exe: "C:/hermes/hermes.exe", home: home2, system: "s", user: "u", model: "m", config: { provider: "compatible", baseUrl: "https://x", apiKey: "bad" }, workspace: tmp() }), /Hermes: 401 invalid api key/);
 });
 
 test("API-key videos now use the agent flow (Hermes), not the staged pipeline", () => {

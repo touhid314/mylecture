@@ -105,6 +105,10 @@ jobs:
           MYLECTURE_SMOKE_DEEP: "1"
         run: node scripts/smoke-packaged.mjs
 
+      - name: Install and exercise the packaged Hermes source
+        timeout-minutes: 15
+        run: node scripts/check-hermes.mjs --packaged
+
       - uses: actions/upload-artifact@v4
         with:
           name: MyLecture-${{ runner.os }}-${{ runner.arch }}

@@ -44,6 +44,22 @@ function providerMessage(e) {
   return loose ? `${m[1]}: ${loose[1].slice(0, 300)}` : text.slice(0, 300);
 }
 
+// The model to use when none is chosen: the provider's default, else a fast
+// chat model the server lists, else its first chat model.
+function preferredModels(c, models) {
+  const ids = models.map((m) => m.id).filter((id) => id && !NON_CHAT.test(id));
+  return [...new Set([API_PROVIDERS[c.provider]?.defaultModel, ...ids.filter((id) => /flash|mini|haiku/i.test(id)), ...ids].filter((id) => id && ids.includes(id)))];
+}
+
+export async function pickApiModel(c) {
+  let models = [];
+  try { models = await discoverApiModels(c); } catch (e) { throw new Error(`Choose a model in Settings. The server's model list could not be read: ${providerMessage(e)}`); }
+  const id = preferredModels(c, models)[0];
+  if (!id) throw new Error("Choose a model in Settings; the server lists no chat models.");
+  log("info", "api.model.auto", { provider: c.provider, model: id });
+  return id;
+}
+
 // Checks a key for real: lists models, then makes one short request.
 // Returns { models, model } or throws with the provider's own error.
 export async function verifyApiProvider(config) {
@@ -62,8 +78,7 @@ export async function verifyApiProvider(config) {
     throw new Error(`The key or address was not accepted. ${providerMessage(e)}`);
   }
   if (!models.length) throw new Error("The key works, but no chat models are available to it.");
-  const preferred = [API_PROVIDERS[c.provider]?.defaultModel, ...models.map((m) => m.id).filter((id) => /flash|mini|haiku/i.test(id)), ...models.map((m) => m.id)];
-  const candidates = [...new Set(preferred.filter((id) => id && models.some((m) => m.id === id)))].slice(0, 4);
+  const candidates = preferredModels(c, models).slice(0, 4);
   let lastError = null;
   for (const model of candidates) {
     try {
@@ -195,9 +210,10 @@ export function makeApiEngine(getConfig) {
     // Videos made with an API key run in Hermes Agent (electron/engines/hermes.js).
     // The staged LectureGen pipeline (generate() + lecturegen/run.js) stays in
     // the code but is no longer used for videos.
-    agent({ system, user, model, signal, onDelta, onStatus, onActivity, workspace }) {
+    async agent({ system, user, model, signal, onDelta, onStatus, onActivity, workspace }) {
       const c = getConfig();
-      const m = model || c.model || API_PROVIDERS[c.provider]?.defaultModel;
+      // No model chosen (LiteLLM has no default): use one the server offers.
+      const m = model || c.model || API_PROVIDERS[c.provider]?.defaultModel || await pickApiModel(c);
       return runHermes({ system, user, model: m, config: c, workspace, signal, onDelta, onStatus, onActivity });
     },
 

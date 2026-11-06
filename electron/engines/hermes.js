@@ -111,7 +111,8 @@ function readText(file) {
 // write limit (HERMES_WRITE_SAFE_ROOT) of the run that started it, so every
 // project gets its own home: a later project never inherits an earlier one's.
 export function hermesHome(tools, workspace) {
-  const id = crypto.createHash("sha1").update(path.resolve(workspace).toLowerCase()).digest("hex").slice(0, 16);
+  const resolved = path.resolve(workspace);
+  const id = crypto.createHash("sha1").update(process.platform === "win32" ? resolved.toLowerCase() : resolved).digest("hex").slice(0, 16);
   return path.join(hermesPaths(tools).root, "homes", id);
 }
 
@@ -148,6 +149,7 @@ export async function runHermes({ exe = hermesExe(), home, system, user, model, 
   if (!exe) throw new Error("Hermes Agent isn't installed. Install it in Settings → AI engines & voices, then try again.");
   const { baseUrl, apiKey } = hermesEndpoint(config);
   if (!baseUrl) throw new Error("Add your API provider in Settings first.");
+  if (!model) throw new Error("Choose a model in Settings first.");
   registerLogSecret(apiKey);
   home ||= hermesHome(toolsDir, workspace);
   prepareHermesHome(home);

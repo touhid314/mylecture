@@ -1,6 +1,8 @@
-# Releasing MyLecture for Windows
+# Releasing MyLecture
 
 Official releases target Windows 10/11, 64-bit. The release workflow builds and tests Windows x64 installers and portable executables.
+
+The same workflow builds macOS for Apple silicon and Intel. Every platform installs Hermes from the packaged source in a fresh profile, automatically selects a model from a local test API, writes files in two separate projects, and checks that an outside-project write is refused. This uses the real Hermes runtime without a paid API key. macOS packages are ad-hoc signed unless release signing credentials are configured; the website's Mac installation command installs the matching build.
 
 To run the app without packaging it, see [Getting started from source](GETTING_STARTED.md).
 

@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { makeApiEngine } from "../electron/engines/api.js";
+import { makeApiEngine, pickApiModel } from "../electron/engines/api.js";
 
 async function withFetch(fn, run) {
   const original = globalThis.fetch;
@@ -8,6 +8,18 @@ async function withFetch(fn, run) {
   try { await run(); } finally { globalThis.fetch = original; }
 }
 const json = value => new Response(JSON.stringify(value), { status: 200, headers: { "content-type": "application/json" } });
+
+test("a compatible provider without a selected model uses an available chat model", async () => {
+  await withFetch(async () => json({ data: [{ id: "embedding-only" }, { id: "chat-pro" }, { id: "chat-mini" }] }), async () => {
+    assert.equal(await pickApiModel({ provider: "compatible", baseUrl: "http://localhost:7654/v1" }), "chat-mini");
+  });
+  await withFetch(async () => json({ data: [{ id: "embedding-only" }] }), async () => {
+    await assert.rejects(pickApiModel({ provider: "compatible", baseUrl: "http://localhost:7654/v1" }), /no chat models/);
+  });
+  await withFetch(async () => new Response("denied", { status: 401 }), async () => {
+    await assert.rejects(pickApiModel({ provider: "compatible", baseUrl: "http://localhost:7654/v1" }), /Choose a model.*HTTP 401/);
+  });
+});
 
 test("Gemini discovers generation models across pages without inventing thinking levels", async () => {
   const requests = [];
