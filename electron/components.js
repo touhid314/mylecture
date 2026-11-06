@@ -250,12 +250,12 @@ export class ComponentManager extends EventEmitter {
     // writable, unlike the app's own resources).
     const bundled = hermesBundle(this.hermesSource);
     if (bundled) {
-      step("Setting up Hermes Agent…", 10);
+      step("Downloading necessary things…", 10);
       await fs.promises.cp(bundled, p.src, { recursive: true });
     } else await this._downloadHermes(p, step, onLine, signal);
-    step(`Installing Python ${HERMES_PYTHON} and Hermes Agent's packages…`, bundled ? 15 : 68);
+    step("Downloading necessary things…", bundled ? 15 : 68);
     await uv(["sync", "--project", p.src, "--frozen", "--no-dev", "--python", HERMES_PYTHON], { UV_PROJECT_ENVIRONMENT: p.env });
-    step("Checking Hermes Agent…", 95);
+    step("Almost done…", 95);
     await this.run(p.exe, ["--version"], { env: { HERMES_HOME: p.home, PYTHONIOENCODING: "utf-8" }, onLine, signal });
     fs.writeFileSync(p.marker, JSON.stringify({ version: HERMES_VERSION, installedAt: new Date().toISOString() }, null, 2));
   }
@@ -263,12 +263,12 @@ export class ComponentManager extends EventEmitter {
   // Development builds without vendor/hermes: fetch the pinned release.
   async _downloadHermes(p, step, onLine, signal) {
     const zip = path.join(p.root, "source.zip");
-    step(`Downloading Hermes Agent ${HERMES_VERSION} (about 100 MB)…`, 5);
+    step("Downloading necessary things…", 5);
     await this.download(HERMES_SOURCE_URL, zip, {
       signal,
-      onProgress: (got, total) => step(total ? `Downloading Hermes Agent ${HERMES_VERSION}… ${Math.round(got / 1048576)} of ${Math.round(total / 1048576)} MB` : `Downloading Hermes Agent ${HERMES_VERSION}… ${Math.round(got / 1048576)} MB`, total ? 5 + Math.round((got / total) * 55) : null),
+      onProgress: (got, total) => step(total ? `Downloading necessary things… ${Math.round(got / 1048576)} of ${Math.round(total / 1048576)} MB` : `Downloading necessary things… ${Math.round(got / 1048576)} MB`, total ? 5 + Math.round((got / total) * 55) : null),
     });
-    step("Unpacking Hermes Agent…", 62);
+    step("Downloading necessary things…", 62);
     const unpack = path.join(p.root, "unpack");
     fs.mkdirSync(unpack, { recursive: true });
     // Windows 10+ and macOS ship bsdtar, which reads zip files.

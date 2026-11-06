@@ -10,7 +10,7 @@ const ABOUT = {
   "claude-code": { intro: "Installing Claude Code with Anthropic's official installer.", time: "1 to 3 minutes" },
   codex: { intro: "Installing Codex with OpenAI's official package.", time: "2 to 5 minutes" },
   antigravity: { intro: "Installing the Antigravity CLI with Google's official installer.", time: "1 to 3 minutes" },
-  hermes: { intro: "Setting up Hermes Agent, the open-source agent by Nous Research, and downloading Python and the packages it needs.", time: "1 to 3 minutes" },
+  hermes: { title: "Getting ready", intro: "Downloading the necessary things to make videos with your API key.", time: "1 to 3 minutes", done: "All set.", quiet: true },
   kokoro: { intro: "Downloading the Kokoro voice model. It runs on your computer.", time: "1 to 4 minutes" },
   omnivoice: {
     intro: "OmniVoice is a high-quality, expressive voice that runs on your computer. It uses your NVIDIA graphics card if you have one; otherwise it runs slower on the processor.",
@@ -57,10 +57,10 @@ export async function showInstaller(id, { onDone } = {}) {
     bar.classList.toggle("busy", busy && p.percent == null);
     fill.style.width = p.state === "done" ? "100%" : p.percent != null ? `${p.percent}%` : "";
     step.style.color = p.state === "error" ? "var(--bad)" : "";
-    step.textContent = p.state === "done" ? `${info.title} is installed.` : p.message || "";
+    step.textContent = p.state === "done" ? about.done || `${info.title} is installed.` : p.message || "";
     const pctText = p.percent != null && !String(p.message || "").includes(`${p.percent}%`) ? `${p.percent}% · ` : "";
     meta.textContent = busy && startedAt ? `${pctText}${elapsed(Date.now() - startedAt)} elapsed` : "";
-    log.hidden = !busy || !lines.length;
+    log.hidden = about.quiet || !busy || !lines.length;
     log.textContent = lines.join("\n");
     if (go) {
       go.style.display = p.state === "done" || (busy && !about.confirm) ? "none" : "";
@@ -86,13 +86,13 @@ export async function showInstaller(id, { onDone } = {}) {
       await window.ml.components.install(id);
     } catch (e) {
       apply({ state: "error", message: friendly(e) });
-      toast(`${info.title}: ${friendly(e)}`, { kind: "bad", timeout: 9000 });
+      toast(`${about.title || info.title}: ${friendly(e)}`, { kind: "bad", timeout: 9000 });
     }
   };
 
   return new Promise((resolve) => {
     const { el } = modal({
-      title: `Install ${info.title}`,
+      title: about.title || `Install ${info.title}`,
       width: "500px",
       body,
       actions: [{ label: "Close" }, { label: about.confirm ? "Download" : "Install", primary: true, run: () => { void start(); return false; } }],
