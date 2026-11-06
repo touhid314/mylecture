@@ -4,7 +4,7 @@
 # website links to. Ship macOS publicly by adding these jobs to release.yml.
 #
 #   gh workflow run mac-preview.yml --ref main
-#   gh run download <run-id> --dir mac-builds
+#   gh run download <run-id> --dir dist/.mac && mv dist/.mac/*/* dist/ && rm -r dist/.mac
 name: macOS preview
 
 on:
