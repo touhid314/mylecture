@@ -31,6 +31,13 @@ export const DEFAULT_SETTINGS = {
   autoplay: true,
   uiTheme: "dark",
   onboarded: false,
+  // Study (live tutor). Empty engine uses the main engine and its model.
+  tutorEngine: "",
+  tutorModel: "",
+  tutorEffort: "low",
+  tutorVoice: "omnivoice:mark-2", // Mark (natural conversation)
+  tutorSpeed: 0.95,
+  boardStyle: "auto", // "auto": blackboard in dark mode, whiteboard in light mode
   // Services the user connected in MyLecture (codex, antigravity, claude-code).
   connected: {},
   accountRevision: {},
@@ -58,6 +65,10 @@ export const paths = {
   },
   get tts() {
     return path.join(root(), "tts-cache");
+  },
+  get tutor() {
+    // Live tutor sessions (Study).
+    return path.join(root(), "tutor-sessions");
   },
   get models() {
     return path.join(root(), "models");
@@ -219,5 +230,42 @@ export const sessions = {
   },
   remove(id) {
     fs.rmSync(this.file(id), { force: true });
+  },
+};
+
+// ---------- live tutor sessions ----------
+export const tutorSessions = {
+  file(id) {
+    if (!/^[\w-]+$/.test(id)) throw new Error("bad session id");
+    return path.join(paths.tutor, id + ".json");
+  },
+  // Files the student shared in the lesson live in <id>/attachments.
+  dir(id) {
+    if (!/^[\w-]+$/.test(id)) throw new Error("bad session id");
+    return path.join(paths.tutor, id);
+  },
+  get(id) {
+    return readJson(this.file(id), null);
+  },
+  save(s) {
+    if (!s?.id) throw new Error("session id missing");
+    s.updatedAt = new Date().toISOString();
+    writeJson(this.file(s.id), s);
+    return { id: s.id, updatedAt: s.updatedAt };
+  },
+  list() {
+    let files = [];
+    try {
+      files = fs.readdirSync(paths.tutor).filter((f) => f.endsWith(".json"));
+    } catch {}
+    return files
+      .map((f) => readJson(path.join(paths.tutor, f), null))
+      .filter(Boolean)
+      .map((s) => ({ id: s.id, title: s.title, topic: s.topic, updatedAt: s.updatedAt, createdAt: s.createdAt, plan: s.plan || [], section: s.section || 0, seconds: s.seconds || 0, finished: !!s.finished }))
+      .sort((a, b) => String(b.updatedAt).localeCompare(String(a.updatedAt)));
+  },
+  remove(id) {
+    fs.rmSync(this.file(id), { force: true });
+    fs.rmSync(this.dir(id), { recursive: true, force: true });
   },
 };

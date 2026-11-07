@@ -2,6 +2,7 @@ import { h, icon, toast } from "./ui.js";
 
 const MEDIA = ["png", "jpg", "jpeg", "webp", "gif", "svg", "avif", "bmp", "mp4", "webm", "mov", "m4v", "mkv", "avi", "mp3", "wav", "m4a", "aac", "ogg", "oga", "opus", "flac"];
 const EXTENSIONS = [...MEDIA, "pdf", "doc", "docx", "ppt", "pptx", "xls", "xlsx", "txt", "md", "csv"];
+export const STUDY_EXTENSIONS = ["png", "jpg", "jpeg", "webp", "gif", "pdf", "doc", "docx", "ppt", "pptx", "xls", "xlsx", "txt", "md", "csv"];
 const MAX_SIZE = 20 * 1024 * 1024;
 const MEDIA_MAX_SIZE = 500 * 1024 * 1024; // photos, video and audio
 const hasFiles = (e) => [...(e.dataTransfer?.types || [])].includes("Files");
@@ -14,23 +15,32 @@ if (typeof document !== "undefined") {
 
 // Shared by Create and Study; files stay in memory until the message is sent.
 export class AttachmentPicker {
-  constructor(input) {
+  constructor(input, { extensions = EXTENSIONS } = {}) {
     this.files = [];
     this.locked = false;
     this.input = input;
+    this.extensions = extensions;
     this.list = h("div", { class: "attachment-list", hidden: true, "aria-label": "Attached files" });
-    this.fileInput = h("input", { type: "file", hidden: true, multiple: true, accept: EXTENSIONS.map(ext => `.${ext}`).join(","), onchange: () => {
+    this.fileInput = h("input", { type: "file", hidden: true, multiple: true, accept: extensions.map(ext => `.${ext}`).join(","), onchange: () => {
       this.add(this.fileInput.files);
       this.fileInput.value = "";
     } });
     this.button = h("button", { class: "btn ghost sm icon attachment-add", type: "button", title: "Attach files", "aria-label": "Attach files", onclick: () => this.fileInput.click() }, icon("plus"));
     this.controls = h("span", { class: "attachment-controls" }, this.button, this.fileInput);
-    input.addEventListener("paste", event => {
-      const images = [...(event.clipboardData?.items || [])].filter(item => item.kind === "file" && item.type.startsWith("image/")).map(item => item.getAsFile()).filter(Boolean);
-      if (!images.length) return;
-      event.preventDefault();
-      this.add(images);
-    });
+    input.addEventListener("paste", event => this.paste(event));
+  }
+
+  paste(event) {
+    if (this.locked) return false;
+    const hasText = !!event.clipboardData?.getData?.("text/plain");
+    const files = [...(event.clipboardData?.items || [])]
+      .filter(item => item.kind === "file" && (item.type.startsWith("image/") || !hasText))
+      .map(item => item.getAsFile())
+      .filter(Boolean);
+    if (!files.length) return false;
+    event.preventDefault();
+    this.add(files);
+    return true;
   }
 
   // Files dragged onto `el` are attached; it highlights while they hover.
@@ -62,10 +72,14 @@ export class AttachmentPicker {
 
   add(files) {
     if (this.locked) return;
-    for (const file of files) {
-      const ext = file.name.split(".").pop().toLowerCase();
-      if (!EXTENSIONS.includes(ext)) {
-        toast(`${file.name}: this file type is not supported.`, { kind: "bad" });
+    for (let file of files) {
+      let ext = (file.name || "").includes(".") ? file.name.split(".").pop().toLowerCase() : "";
+      if (!ext && file.type?.startsWith("image/")) {
+        ext = file.type.split("/")[1]?.replace("jpeg", "jpg") || "png";
+        file = new File([file], `pasted-image.${ext}`, { type: file.type });
+      }
+      if (!this.extensions.includes(ext)) {
+        toast(`${file.name || "File"}: this file type is not supported.`, { kind: "bad" });
         continue;
       }
       const media = MEDIA.includes(ext);

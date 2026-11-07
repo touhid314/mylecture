@@ -42,6 +42,10 @@ const ICONS = {
   x: '<path d="M6 6l12 12M18 6 6 18"/>',
   bolt: '<path d="M13 3 4 14h7l-1 7 9-11h-7l1-7Z"/>',
   book: '<path d="M4 5a2 2 0 0 1 2-2h13v16H6a2 2 0 0 0-2 2V5Z"/><path d="M4 19a2 2 0 0 1 2-2h13"/>',
+  rewind: '<path d="M11 7 5 12l6 5V7ZM19 7l-6 5 6 5V7Z"/>',
+  pause: '<rect x="7" y="5" width="3.5" height="14" rx="1" fill="currentColor" stroke="none"/><rect x="13.5" y="5" width="3.5" height="14" rx="1" fill="currentColor" stroke="none"/>',
+  cc: '<rect x="3" y="5" width="18" height="14" rx="2"/><path d="M10 10.5a2 2 0 1 0 0 3M16 10.5a2 2 0 1 0 0 3"/>',
+  expand: '<path d="M4 9V4h5M20 9V4h-5M4 15v5h5M20 15v5h-5"/>',
   wand: '<path d="m15 4 5 5L9 20l-5-5L15 4Z"/><path d="M13 6l5 5"/>',
 };
 export function icon(name, cls = "ico") {

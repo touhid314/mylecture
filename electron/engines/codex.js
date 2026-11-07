@@ -100,7 +100,7 @@ export const codex = {
     return this.generate(opts);
   },
 
-  generate({ system, user, model, effort = "low", signal, onDelta, onStatus, onActivity, onModel, workspace, inbox }) {
+  generate({ system, user, model, effort = "low", signal, onDelta, onStatus, onActivity, onModel, workspace, inbox, images = [] }) {
     const exe = this.exe();
     const cwd = workspace || scratchDir("codex");
     if (!exe) return Promise.reject(new Error("GPT isn't connected. Connect it from the welcome screen or Settings."));
@@ -192,7 +192,9 @@ export const codex = {
             if (m.error) return finish(new Error("GPT: " + (m.error.message || JSON.stringify(m.error))));
             threadId = m.result.thread.id;
             if (m.result.model) onModel?.(String(m.result.model));
-            const tp = { threadId, input: [{ type: "text", text: user }] };
+            // Pictures go in as local image files.
+            const pics = images.filter((i) => /^image\/(png|jpeg|webp|gif)$/.test(i?.mime || "") && i.path).slice(0, 6);
+            const tp = { threadId, input: [{ type: "text", text: user }, ...pics.map((i) => ({ type: "localImage", path: i.path }))] };
             if (effort) tp.effort = effort;
             send({ id: 3, method: "turn/start", params: tp });
           } else if (m.id === 3 && m.error) {

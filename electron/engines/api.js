@@ -228,7 +228,8 @@ export function makeApiEngine(getConfig) {
       return discoverApiModels(getConfig());
     },
 
-    async generate({ system, user, model, effort = "low", signal, onDelta, attachments = [] }) {
+    async generate({ system, user, model, effort = "low", signal, onDelta, attachments = [], images = [] }) {
+      if (images.length) attachments = [...attachments, ...images];
       const c = getConfig();
       registerLogSecret(c.apiKey);
       const m = model || c.model || API_PROVIDERS[c.provider]?.defaultModel;

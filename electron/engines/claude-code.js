@@ -2,7 +2,7 @@
 // Print mode with stream-json output and partial messages gives token deltas.
 import os from "node:os";
 import path from "node:path";
-import { findExecutable, scratchDir, spawnLines, runCapture, idleStatus } from "./cli-util.js";
+import { findExecutable, scratchDir, spawnLines, runCapture, idleStatus, imageBlocks } from "./cli-util.js";
 import fs from "node:fs";
 import { discoverClaudeModels } from "./model-discovery.js";
 import { log } from "../logger.js";
@@ -63,7 +63,7 @@ export const claudeCode = {
     return this.generate(opts);
   },
 
-  async generate({ system, user, model, effort, signal, onDelta, onStatus, onActivity, onModel, workspace, inbox }) {
+  async generate({ system, user, model, effort, signal, onDelta, onStatus, onActivity, onModel, workspace, inbox, images = [] }) {
     const exe = this.exe();
     if (!exe) throw new Error("Claude isn't connected. Connect it from the welcome screen or Settings.");
     // The (long) system prompt travels over stdin with the question, which
@@ -95,6 +95,10 @@ export const claudeCode = {
     }
     if (model) args.push("--model", model);
     if (effort) args.push("--effort", effort);
+    // Pictures (text mode): the prompt goes in as one stream-json message
+    // with image blocks.
+    const pics = live ? [] : imageBlocks(images);
+    if (pics.length) args.push("--input-format", "stream-json");
     let full = "";
     let err = null;
     // Live input: stdin closes at a result once every message we sent has been
@@ -111,7 +115,7 @@ export const claudeCode = {
       // Uncapped hidden thinking made Claude plan for minutes before writing
       // anything; a small budget gets it writing files in seconds.
       env: { ...process.env, MAX_THINKING_TOKENS: process.env.MAX_THINKING_TOKENS || "1024" },
-      stdin: live ? null : `${system}\n\n---\n\n${user}`,
+      stdin: live ? null : pics.length ? JSON.stringify({ type: "user", message: { role: "user", content: [{ type: "text", text: `${system}\n\n---\n\n${user}` }, ...pics] } }) + "\n" : `${system}\n\n---\n\n${user}`,
       keepStdin: live,
       onStdin: (io) => {
         input = io;

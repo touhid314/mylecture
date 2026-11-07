@@ -15,7 +15,13 @@ import { DEMO_TEXT, readDemo } from "./tts/demos.js";
 import { Generator, audioUrl, sceneUrl } from "./generator.js";
 import { IdeService, hydrateProject } from "./ide.js";
 import { SERVICES, connectService } from "./connect.js";
-import { getSettings, saveSettings, getSecret, setSecret, hasSecret, lectures, sessions, paths, newId } from "./store.js";
+import { prepareAttachments } from "./attachments.js";
+// What the tutor can take in: pictures it can see, documents it can read.
+const STUDY_FILE = /\.(png|jpe?g|webp|gif|pdf|docx?|pptx?|xlsx?|txt|md|csv)$/i;
+import { getSettings, saveSettings, getSecret, setSecret, hasSecret, lectures, sessions, tutorSessions, paths, newId } from "./store.js";
+import { TutorService, tutorEngineChoice } from "./tutor/service.js";
+import { SpeechToText } from "./tutor/stt.js";
+import { ImageFinder } from "./tutor/images.js";
 import { exportMp4, exportStandaloneHtml, exportContractBundle, captions, safeName } from "./exporter.js";
 import { sendLaunchPing, launchPingSuppressed } from "./telemetry.js";
 import { createUpdater } from "./updater.js";
@@ -73,7 +79,7 @@ protocol.registerSchemesAsPrivileged([
 ]);
 
 let win = null;
-let engines, tts, generator, ide;
+let engines, tts, generator, ide, tutor, stt, images;
 const exportJobs = new Map();
 let updater;
 let components;
@@ -121,6 +127,7 @@ function resolveAppUrl(u) {
     ["tts/", paths.tts],
     ["lib/", paths.library],
     ["exports/", paths.exports],
+    ["tutor-img/", path.join(paths.tutor, "images")],
   ];
   for (const [prefix, dir] of map) {
     if (p.startsWith(prefix)) return safeJoin(dir, p.slice(prefix.length));
@@ -163,6 +170,8 @@ function createWindow() {
     if (details.level === "error") log("error", "renderer.consoleError", { message: details.message, line: details.lineNumber, source: details.sourceId });
   });
   win.on("unresponsive", () => log("warn", "renderer.unresponsive"));
+  win.on("enter-full-screen", () => send("window:fullscreen", true));
+  win.on("leave-full-screen", () => send("window:fullscreen", false));
   win.on("responsive", () => log("info", "renderer.responsive"));
   win.loadURL("mylecture://app/index.html");
   win.webContents.setWindowOpenHandler(({ url }) => {
@@ -414,8 +423,9 @@ function registerIpc() {
     const r = await tts.synth(text || "Hi! I'm your MyLecture tutor. Ask me anything.", opts || {});
     return { url: audioUrl(r.key), dur: r.dur };
   });
-  h("tts:synth", async (text) => {
-    const r = await tts.synth(text);
+  h("tts:synth", async (text, opts) => {
+    const o = opts && typeof opts === "object" ? { engine: opts.engine, voice: opts.voice, speed: Number(opts.speed) || undefined } : {};
+    const r = await tts.synth(text, o);
     return { key: r.key, url: audioUrl(r.key), dur: r.dur };
   });
   h("tts:retry", () => {
@@ -478,6 +488,26 @@ function registerIpc() {
   h("lectures:remove", (id) => lectures.remove(id));
 
   // sessions
+  // study: live tutor
+  h("study:turn", (req) => tutor.turn(req));
+  h("study:cancel", (turnId) => tutor.cancel(turnId));
+  h("study:engine", () => tutorEngineChoice(getSettings()));
+  h("study:list", () => tutorSessions.list());
+  h("study:get", (id) => tutorSessions.get(id));
+  h("study:save", (session) => tutorSessions.save(session));
+  h("study:remove", (id) => tutorSessions.remove(id));
+  h("study:newId", () => newId("tut-"));
+  h("study:image", (query) => images.find(query));
+  // Files the student shares with the tutor: stored with the lesson; the
+  // records (name, type, extracted text, path) go back into the session.
+  h("study:attach", async ({ sessionId, files }) => {
+    const ok = (files || []).filter((f) => STUDY_FILE.test(String(f?.name || "")));
+    if (ok.length < (files || []).length) throw new Error("The tutor can read pictures (PNG, JPG, WebP, GIF) and documents (PDF, Word, PowerPoint, Excel, text).");
+    return prepareAttachments(ok, tutorSessions.dir(sessionId));
+  });
+  h("stt:warm", () => { stt.start(); return stt.state; });
+  h("stt:status", () => stt.state);
+  ipcMain.handle("stt:transcribe", (_e, pcm) => stt.transcribe(pcm instanceof Float32Array ? pcm : new Float32Array(pcm)));
   h("sessions:list", () => sessions.list());
   h("sessions:get", (id) => sessions.get(id));
   h("sessions:new", () => ({ id: newId("ses-") }));
@@ -590,6 +620,10 @@ app.whenReady().then(() => {
     },
   });
   ide = new IdeService({ engines, tts, send });
+  tutor = new TutorService({ engines, getSettings, send });
+  stt = new SpeechToText({ modelDir: paths.models });
+  images = new ImageFinder({ dir: path.join(paths.tutor, "images") });
+  stt.on("status", (st) => send("stt:status", st));
   components = new ComponentManager({
     userData: app.getPath("userData"), modelDir: paths.models, tts, getSettings, saveSettings, log,
     hermesSource: app.isPackaged ? path.join(process.resourcesPath, "hermes") : path.join(here, "..", "vendor", "hermes"),
@@ -627,6 +661,7 @@ app.whenReady().then(() => {
 
 app.on("window-all-closed", () => {
   tts?.stop();
+  stt?.stop();
   app.quit();
 });
 app.on("before-quit", () => log("info", "app.quit"));
@@ -670,7 +705,7 @@ function runSmokeTest() {
   const check = async () => {
     try {
       const r = await win.webContents.executeJavaScript(`({ view: document.querySelector(".view.active")?.id || "", tabs: [...document.querySelectorAll(".rail-btn[data-view]")].map(b => b.dataset.view).join(",") })`);
-      if (r.view === "view-create") {
+      if (r.view === "view-create" || r.view === "view-study") {
         const deep = process.env.MYLECTURE_SMOKE_DEEP ? await deepSmoke() : "";
         clearTimeout(timer);
         report(true, `${process.platform}-${process.arch} ${app.getVersion()} tabs=${r.tabs}${deep}`);

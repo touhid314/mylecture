@@ -1,5 +1,5 @@
 import { bus, toast } from "./ui.js";
-import { StudyView } from "./study.js";
+import { StudyView } from "./study/tutor-view.js";
 import { CreateView } from "./create.js";
 import { LibraryView } from "./library.js";
 import { SettingsView } from "./settings.js";
@@ -27,13 +27,13 @@ async function boot() {
   document.body.classList.toggle("light", state.settings.uiTheme === "light");
 
   const exportsCenter = new ExportCenter();
-  if (FEATURES.study) views.study = new StudyView(document.getElementById("view-study"), { state, exportsCenter });
+  views.create = new CreateView(document.getElementById("view-create"), { state, exportsCenter });
+  if (FEATURES.study) views.study = new StudyView(document.getElementById("view-study"), { state, createView: views.create });
   else {
     // Study is under development (feature/study): only Create ships for now.
     document.querySelector('.rail-btn[data-view="study"]')?.remove();
     document.getElementById("view-study")?.remove();
   }
-  views.create = new CreateView(document.getElementById("view-create"), { state, exportsCenter });
   views.library = new LibraryView(document.getElementById("view-library"), { state, exportsCenter });
   views.settings = new SettingsView(document.getElementById("view-settings"), { state });
 

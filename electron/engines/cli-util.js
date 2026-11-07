@@ -167,3 +167,13 @@ export function runCapture(file, args, { timeout = 30000, cwd, env } = {}) {
     else execFile(file, args, { timeout, cwd, env, windowsHide: true }, cb);
   });
 }
+
+// Pictures for a text-mode turn (the live tutor): png/jpeg/webp/gif files,
+// read as base64 content blocks.
+export const VISION_MIMES = /^image\/(png|jpeg|webp|gif)$/;
+export function imageBlocks(images = []) {
+  return images.filter((i) => VISION_MIMES.test(i?.mime || "") && i.path).slice(0, 6).map((i) => ({
+    type: "image",
+    source: { type: "base64", media_type: i.mime, data: fs.readFileSync(i.path).toString("base64") },
+  }));
+}

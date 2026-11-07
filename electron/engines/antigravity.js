@@ -3,7 +3,7 @@
 // command-line length limit) and text deltas stream back line by line.
 import os from "node:os";
 import path from "node:path";
-import { findExecutable, scratchDir, spawnLines, runCapture, idleStatus } from "./cli-util.js";
+import { findExecutable, scratchDir, spawnLines, runCapture, idleStatus, VISION_MIMES } from "./cli-util.js";
 import fs from "node:fs";
 import { parseAntigravityModels } from "./model-discovery.js";
 import { log } from "../logger.js";
@@ -84,7 +84,7 @@ export const antigravity = {
     return this.generate(opts);
   },
 
-  async generate({ system, user, model, effort, signal, onDelta, onStatus, onActivity, workspace, inbox }) {
+  async generate({ system, user, model, effort, signal, onDelta, onStatus, onActivity, workspace, inbox, images = [] }) {
     const exe = this.exe();
     if (!exe) throw new Error("Gemini isn't connected. Connect it from the welcome screen or Settings.");
     const baseArgs = ["--input-format", "stream-json", "--output-format", "stream-json", "--disable-slash-commands"];
@@ -94,7 +94,12 @@ export const antigravity = {
     }
     if (model) baseArgs.push("--model", model);
     if (workspace && effort) baseArgs.push("--effort", effort);
-    let content = `${system}${workspace ? `\n\n${ANTIGRAVITY_FILE_TOOLS}` : ""}\n\n---\n\n${user}`;
+    // Pictures: its stream input takes text only, so it opens the files
+    // itself (their folder is added to its workspace).
+    const pics = images.filter((i) => VISION_MIMES.test(i?.mime || "") && i.path).slice(0, 6);
+    for (const dir of new Set(pics.map((i) => path.dirname(i.path)))) baseArgs.push("--add-dir", dir);
+    const picNote = pics.length ? `\n\nThe student attached ${pics.length === 1 ? "a picture" : `${pics.length} pictures`}. Open and look at ${pics.length === 1 ? "it" : "each one"} with your file viewing tool before you answer:\n${pics.map((i) => `- ${i.path}`).join("\n")}` : "";
+    let content = `${system}${workspace ? `\n\n${ANTIGRAVITY_FILE_TOOLS}` : ""}\n\n---\n\n${user}${picNote}`;
     let full = "";
     let error = null;
     let usage = null;

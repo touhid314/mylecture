@@ -1,15 +1,15 @@
 import { h, icon, bus } from "./ui.js";
 
 const subscriptionProviders = new Set(["antigravity", "codex", "claude-code"]);
-const usageKey = settings => {
-  const id = settings.engine;
-  return JSON.stringify([id, settings.models?.[id] || "", settings.accountRevision?.[id] || 0,
-    settings.connected?.[id]]);
-};
+// Which account to report on: Create's engine by default; Study passes its
+// own (the tutor can use a different engine and model).
+const createSource = settings => ({ id: settings.engine, model: settings.models?.[settings.engine] || "" });
+const usageKey = (settings, { id, model }) => JSON.stringify([id, model || "", settings.accountRevision?.[id] || 0, settings.connected?.[id]]);
 
 export class UsagePanel {
-  constructor({ state, compact = false }) {
+  constructor({ state, compact = false, source = null }) {
     this.state = state;
+    this.source = () => (source ? source() : createSource(this.state.settings)) || { id: "", model: "" };
     this.compact = compact;
     this.summary = h("summary", { class: "small", "aria-live": "polite", title: "Usage remaining. Click for reset times and all model groups." }, "Usage: checking...");
     this.refreshButton = h("button", { class: "btn sm", onclick: () => this.refresh() }, icon("refresh"), "Refresh");
@@ -31,9 +31,8 @@ export class UsagePanel {
   }
 
   async refresh() {
-    const id = this.state.settings.engine;
-    const model = this.state.settings.models?.[id] || "";
-    const key = usageKey(this.state.settings);
+    const { id, model = "" } = this.source();
+    const key = usageKey(this.state.settings, this.source());
     const unavailable = !id || (subscriptionProviders.has(id) && this.state.settings.connected?.[id] === false);
     if (unavailable) {
       this.request = (this.request || 0) + 1;
@@ -42,6 +41,7 @@ export class UsagePanel {
       this.refreshButton.disabled = false;
       const message = id ? "Connect this account to see its limits." : "Select a provider to see account limits.";
       this.summary.textContent = this.compact ? "Limits —" : "Usage unavailable";
+      this.root.dataset.state = "none";
       this.summary.title = message;
       this.summary.removeAttribute("aria-label");
       this.body.replaceChildren(h("p", { class: "muted" }, message));
@@ -53,14 +53,16 @@ export class UsagePanel {
     this.refreshButton.disabled = true;
     this.loadedKey = null;
     this.summary.textContent = this.compact ? "Limits …" : "Usage: checking...";
+    this.root.dataset.state = "checking";
     this.summary.title = "Checking account limits...";
     this.summary.removeAttribute("aria-label");
     this.body.replaceChildren(h("p", { class: "muted" }, "Checking account limits..."));
     try {
       const result = await window.ml.engines.usage(id);
-      if (request !== this.request || key !== usageKey(this.state.settings)) return;
+      if (request !== this.request || key !== usageKey(this.state.settings, this.source())) return;
       if (!result.available || !result.groups.length) {
         this.summary.textContent = this.compact ? "Limits —" : "Usage unavailable";
+        this.root.dataset.state = "none";
         this.summary.title = result.message || "Account limits unavailable";
         this.body.replaceChildren(h("p", { class: "muted" }, result.message || "No account limits were returned. Try refreshing."));
         return;
@@ -70,6 +72,8 @@ export class UsagePanel {
       const percent = (n) => n == null ? "Unavailable" : `${n.toFixed(1)}% remaining`;
       const remaining = selected.buckets.map((b) => `${b.window === "weekly" ? (this.compact ? "W" : "Weekly") : b.window === "5h" ? "5h" : b.name} ${b.remaining == null ? "—" : b.remaining.toFixed(0) + "%"}`).join(" · ");
       this.summary.textContent = remaining + (this.compact ? "" : " left");
+      const least = Math.min(...selected.buckets.map((b) => b.remaining ?? 100));
+      this.root.dataset.state = least < 10 ? "out" : least < 25 ? "low" : "ok";
       this.summary.setAttribute("aria-label", `Account usage remaining: ${remaining}`);
       this.summary.title = `Remaining: ${remaining}. Click for reset times and all limits.`;
       this.loadedKey = key;
@@ -86,8 +90,9 @@ export class UsagePanel {
         h("div", { class: "small muted" }, `Updated ${new Date(result.checkedAt).toLocaleTimeString()} · Refreshes every minute`),
       );
     } catch {
-      if (request !== this.request || key !== usageKey(this.state.settings)) return;
+      if (request !== this.request || key !== usageKey(this.state.settings, this.source())) return;
       this.summary.textContent = this.compact ? "Limits —" : "Usage unavailable";
+      this.root.dataset.state = "none";
       this.body.replaceChildren(h("p", { class: "muted" }, "Could not load usage limits. Try Refresh."));
     } finally {
       if (request === this.request) { this.pendingKey = null; this.refreshButton.disabled = false; }
