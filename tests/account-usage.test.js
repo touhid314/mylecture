@@ -75,7 +75,7 @@ test("invalidation also detaches pending CLI usage without deleting its replacem
 });
 
 class Element {
-  constructor() { this.children = []; this.attributes = {}; this.disabled = false; }
+  constructor() { this.children = []; this.attributes = {}; this.dataset = {}; this.disabled = false; }
   addEventListener() {}
   setAttribute(name, value) { this.attributes[name] = value; }
   removeAttribute(name) { delete this.attributes[name]; }

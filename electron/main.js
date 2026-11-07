@@ -759,5 +759,42 @@ window.__RENDER_SECTION__=renderSection;renderSection(VIDEO_PLAN[0],0,0);
   } catch (e) {
     throw fail("validator", e);
   }
+  // Study: hold-to-talk speech recognition (Whisper in a utility process)
+  // hears the Kokoro sentence back, and the lesson board draws.
+  try {
+    const r = await tts.synth("Hello, the tutor is ready.", { engine: "kokoro" });
+    const wav = fs.readFileSync(r.file);
+    const rate = wav.readUInt32LE(24);
+    const pcm16 = new Int16Array(wav.buffer.slice(wav.byteOffset + 44, wav.byteOffset + wav.length - ((wav.length - 44) % 2)));
+    const n = Math.floor((pcm16.length * 16000) / rate);
+    const pcm = new Float32Array(n);
+    for (let i = 0; i < n; i++) pcm[i] = (pcm16[Math.min(pcm16.length - 1, Math.round((i * rate) / 16000))] || 0) / 32768;
+    const text = await stt.transcribe(pcm);
+    if (!/ready/i.test(text)) throw new Error(`heard "${text}"`);
+    parts.push("stt=ok");
+  } catch (e) {
+    throw fail("speech recognition", e);
+  } finally {
+    stt.stop();
+  }
+  try {
+    const r = await win.webContents.executeJavaScript(`(() => {
+      const v = window.__mlStudy;
+      if (!v) return "no Study view";
+      v._enter({ id: "tut-smoke", topic: "Smoke", title: "Smoke", plan: ["One"], section: 1, history: [], board: [] });
+      const b = v.board;
+      b.draw({ type: "page", text: "Smoke" });
+      b.draw({ type: "math", id: "eq", text: "\\\\frac{\\\\htmlId{top}{a}}{b} = c" });
+      b.draw({ type: "svg", id: "fig", text: '<svg viewBox="0 0 100 50"><rect id="box" x="10" y="10" width="30" height="20"/></svg>' });
+      b.draw({ type: "scene", id: "sc", data: { items: [{ type: "emoji", id: "car", char: "🚗", x: 50, y: 50 }], anim: [{ target: "car", to: { x: 300 }, dur: 1 }] } });
+      const ok = document.querySelector(".wb-math .katex") && document.querySelector(".wb-svg #box") && b.point("eq.top") && b.point("fig.box") && b.point("sc.car");
+      v.lesson?.stop?.();
+      return ok ? "ok" : "board did not draw";
+    })()`);
+    if (r !== "ok") throw new Error(r);
+    parts.push("board=ok");
+  } catch (e) {
+    throw fail("study board", e);
+  }
   return " " + parts.join(" ");
 }

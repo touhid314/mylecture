@@ -49,7 +49,7 @@ const hooks = registerHooks({
       export const findExecutable=()=>"claude";
       export const scratchDir=()=>"scratch";
       export const runCapture=async()=>({ok:true,stdout:""});
-      export { idleStatus } from ${JSON.stringify(new URL("../electron/engines/cli-util.js", import.meta.url).href)};
+      export { idleStatus, VISION_MIMES, imageBlocks } from ${JSON.stringify(new URL("../electron/engines/cli-util.js", import.meta.url).href)};
       export const spawnLines=async(_exe,_args,opts)=>{
         globalThis.__providerLoggingFixture.args=_args;
         for(const ev of globalThis.__providerLoggingFixture.events)opts.onLine(JSON.stringify(ev));

@@ -2,9 +2,27 @@
 
 **Bring every lesson to life.**
 
-Turn complex ideas into narrated, animated videos. MyLecture gives teachers, tutors, students, and educational creators a Windows and macOS workspace for explaining anything, from mathematics and science to engineering, economics, and beyond.
+Learn anything one-on-one with a live AI tutor at a whiteboard, or turn complex ideas into narrated, animated videos. MyLecture gives students, teachers, tutors, and educational creators a Windows and macOS app for learning and explaining anything, from mathematics and science to engineering, economics, and beyond.
 
 **[Download for Windows](https://mylecture-server.touhid3-1416.workers.dev/download/windows)** | **[Install on Mac](#install-on-mac)** | [MyLecture.ai](https://www.mylecture.ai) | [Latest release](https://github.com/touhid314/mylecture/releases/latest)
+
+![MyLecture Study: a live tutor explaining a supermesh circuit on a blackboard, pointing at the 2 ohm resistor while it speaks, with the lesson agenda on the left](docs/images/mylecture-study.png)
+
+*Study: ask a question and your tutor teaches it live, talking you through it while it draws on the board.*
+
+## New in 2.0: Study, a live tutor at your whiteboard
+
+Type or say what you want to learn, and a tutor teaches it to you on a live call. It speaks, writes and draws on a whiteboard or blackboard as it goes, and you can interrupt at any time.
+
+- **Talks and draws at the same time:** equations step by step, graphs, tables, code, diagrams, animated scenes and real pictures appear as the tutor talks about them.
+- **Points at what it means:** "this term", "this resistor", "the blue curve": the exact part lights up on the board while it speaks.
+- **Teaches like a real tutor:** a lesson agenda, questions and guided practice problems with instant feedback, and graphs with sliders to explore. It adapts to your answers.
+- **Ask anything, any time:** hold **Space** to talk or type a question. Speech is recognized on your computer.
+- **Bring your material:** paste a screenshot, drop a PDF or attach your notes, and the tutor teaches from them.
+- **Your board, your pace:** whiteboard or blackboard (matches your theme by default), pause and rewind, captions, full screen, and every lesson saved to return to.
+- **Use your own AI:** pick the tutor's model separately from Create, with its remaining usage shown on the start screen.
+
+## Create: narrated, animated videos
 
 ![MyLecture desktop app showing a narrated circuit lesson, recent projects, scene timeline, and AI editing panel](docs/images/mylecture-studio.png)
 
@@ -46,9 +64,9 @@ Make a quick concept explainer, a worked example, a revision video, or a complet
 
 1. **Windows:** [download the installer](https://mylecture-server.touhid3-1416.workers.dev/download/windows) and select the AI engines and voices you want during setup. **Mac:** see [Install on Mac](#install-on-mac).
 2. Open MyLecture and connect your AI account or API key.
-3. Describe a lesson, preview and refine it, then **Render** your video.
+3. Open **Study** and ask your tutor anything, or open **Create**, describe a lesson, preview and refine it, then **Render** your video.
 
-Windows 10/11, 64-bit, or macOS on Apple silicon or Intel. AI generation requires a supported provider account or API key; provider charges and usage limits apply. Voice models download separately, and narration synthesis and video rendering run locally. OmniVoice is optional and can be downloaded inside the app.
+Windows 10/11, 64-bit, or macOS on Apple silicon or Intel. AI generation requires a supported provider account or API key; provider charges and usage limits apply. Voice models download separately, and narration synthesis, speech recognition and video rendering run locally. Study's hold-to-talk asks for microphone access the first time you use it. OmniVoice is optional and can be downloaded inside the app.
 
 ## Install on Mac
 

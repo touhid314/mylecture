@@ -13,6 +13,8 @@ const hooks = registerHooks({
         export const runCapture = async () => ({ok:true,stdout:""});
         export const killTree = () => {};
         export const idleStatus = () => "Working…";
+        export const VISION_MIMES = new RegExp("^image/(png|jpeg|webp|gif)$");
+        export const imageBlocks = () => [];
         export const spawnLines = async (exe,args,opts) => {
           const f = globalThis.__agyFixture;
           f.call = {exe,args,opts};
