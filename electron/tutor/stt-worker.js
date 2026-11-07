@@ -8,12 +8,16 @@ import { env, pipeline } from "@huggingface/transformers";
 const port = process.parentPort;
 let asr = null;
 let loading = null;
+let initMsg = null;
+let initError = "";
 
 async function init({ cacheDir, model }) {
   if (loading) return loading;
+  initMsg = { cacheDir, model };
   env.cacheDir = cacheDir;
   env.allowLocalModels = true;
   loading = pipeline("automatic-speech-recognition", model || "onnx-community/whisper-base.en", {
+    device: "cpu",
     dtype: { encoder_model: "fp32", decoder_model_merged: "q8" },
     progress_callback: (p) => {
       if (p.status === "progress") port.postMessage({ type: "progress", file: p.file, loaded: p.loaded, total: p.total });
@@ -25,6 +29,7 @@ async function init({ cacheDir, model }) {
     })
     .catch((e) => {
       loading = null;
+      initError = String(e?.message || e);
       port.postMessage({ type: "init-error", message: String(e?.message || e) });
     });
   return loading;
@@ -38,7 +43,9 @@ async function pump() {
   const job = queue.shift();
   try {
     if (!asr) await loading;
-    if (!asr) throw new Error("Speech recognition isn't ready");
+    // A failed load (a network blip mid-download) is retried once per request.
+    if (!asr && initMsg) await init(initMsg);
+    if (!asr) throw new Error(`Speech recognition couldn't load: ${initError || "unknown error"}`);
     const audio = new Float32Array(job.pcm);
     const r = await asr(audio, { language: undefined });
     port.postMessage({ type: "done", id: job.id, text: String(r?.text || "").trim() });
