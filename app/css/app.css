@@ -433,7 +433,7 @@ kbd { font: 11px var(--mono); background: var(--surface-2); border: 1px solid va
 .voice-control { min-width: 0; }
 .voice-control select[hidden] { display: none; }
 .voice-picker-button { display: block; text-align: left; overflow: hidden; white-space: nowrap; cursor: pointer; }
-.voice-menu { min-width: 250px; }
+.voice-menu { min-width: 250px; z-index: 90; }
 .voice-menu-row { display: flex; align-items: center; gap: 6px; }
 .voice-menu-row.selected { background: var(--accent-soft); border-radius: 6px; }
 .voice-menu-row .voice-pick { flex: 1; min-width: 0; text-align: left; }

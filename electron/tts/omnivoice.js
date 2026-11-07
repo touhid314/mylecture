@@ -11,6 +11,16 @@ import { killTree } from "../engines/cli-util.js";
 const here = path.dirname(fileURLToPath(import.meta.url));
 const ALL_VOICES = [
   ["maruf", "Maruf"], ["haroon", "Haroon"], ["ovi", "Ovi"], ["onik", "Onik"],
+  ["adam", "Adam"], ["alex", "Alex"], ["arabella", "Arabella"],
+  ["bradford", "Bradford"], ["cassidy", "Cassidy"],
+  ["christopher", "Christopher"], ["christopher-2", "Christopher 2"],
+  ["david-castlemore", "David Castlemore"], ["declan-sage", "Declan Sage"],
+  ["frederick-surrey", "Frederick Surrey"], ["hope", "Hope"],
+  ["ian-cartwell", "Ian Cartwell"], ["james", "James"],
+  ["jessica-anne-bogart", "Jessica Anne Bogart"], ["jessica-anne-bogart-2", "Jessica Anne Bogart 2"],
+  ["john-doe", "John Doe"], ["jon", "Jon"], ["mark", "Mark"], ["mark-2", "Mark 2"],
+  ["michael-c-vincent", "Michael C. Vincent"], ["nassim", "Nassim"],
+  ["peter", "Peter"], ["spuds-oxley", "Spuds Oxley"],
   ["johnny-harris", "Johnny Harris"],
 ];
 // Saved settings may name voices that were renamed or removed.

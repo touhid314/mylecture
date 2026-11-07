@@ -5,6 +5,7 @@
 //         electron/tts/voices/<voice>/demo.mp3 (and voices-dev/<voice>/demo.mp3).
 // Uses the local models in MyLecture's userData (%APPDATA%/MyLecture/models).
 import fs from "node:fs";
+import crypto from "node:crypto";
 import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -47,18 +48,23 @@ if (only !== "omnivoice") {
 
 if (only !== "kokoro") {
   const { OmniVoice, OMNIVOICE_VOICES } = await import(new URL("../electron/tts/omnivoice.js", import.meta.url));
+  const generated = JSON.parse(fs.readFileSync(path.join(root, "electron/tts/voices/generated-references.json"), "utf8"));
+  const generatedIds = new Set(generated.voices.map(v => v.id));
   const todo = OMNIVOICE_VOICES.filter(([id]) => force || !fs.existsSync(omniDemoFile(id)));
   if (todo.length) {
     const omni = new OmniVoice({ modelDir, getSettings: () => ({}) });
     try {
       for (const [id] of todo) {
         const wav = path.join(tmp, `${id}.wav`);
-        await omni.synth(DEMO_TEXT, wav, { voice: id, speed: 1 });
+        await omni.synth(generatedIds.has(id) ? generated.text : DEMO_TEXT, wav, { voice: id, speed: 1 });
         toMp3(wav, omniDemoFile(id));
+        const entry = generated.voices.find(v => v.id === id);
+        if (entry) entry.demoSha256 = crypto.createHash("sha256").update(fs.readFileSync(omniDemoFile(id))).digest("hex");
         console.log("omnivoice", id);
       }
     } finally {
       omni.stop();
+      fs.writeFileSync(path.join(root, "electron/tts/voices/generated-references.json"), JSON.stringify(generated, null, 2) + "\n");
     }
   }
 }

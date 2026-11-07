@@ -389,9 +389,14 @@ export class CreateView {
     } catch (e) { toast(friendly(e), { kind: "bad" }); }
   }
 
-  async _voiceMenu() {
+  async _voiceMenu({ anchor = this.voiceButton, value, onSelect } = {}) {
     await this._refreshVoiceOptions();
-    const menu = popMenu(this.voiceButton, []);
+    const selected = value ?? this.voiceSelect.value;
+    const choose = onSelect || ((key) => {
+      this.voiceSelect.value = key;
+      this.voiceSelect.dispatchEvent(new Event("change"));
+    });
+    const menu = popMenu(anchor, []);
     menu.classList.add("voice-menu");
     menu.setAttribute("role", "menu");
     const omniReady = await omniVoiceInstalled();
@@ -405,8 +410,7 @@ export class CreateView {
       for (const [id, name] of this._voiceCatalog[engine] || []) {
         const key = `${engine}:${id}`;
         const pick = h("button", { class: "voice-pick", role: "menuitem", onclick: () => {
-          this.voiceSelect.value = key;
-          this.voiceSelect.dispatchEvent(new Event("change"));
+          choose(key);
           menu.remove();
         } }, name);
         const play = h("button", { class: "voice-demo", title: `Play ${name} demo`, "aria-label": `Play ${name} demo`, onclick: async () => {
@@ -424,10 +428,15 @@ export class CreateView {
         const remove = engine === "omnivoice" && isOwnVoice(id)
           ? h("button", { class: "voice-demo", title: `Remove ${name}`, "aria-label": `Remove ${name}`, onclick: async () => {
               menu.remove();
-              if (await removeOwnVoice(id, name)) { this._voiceCatalog = null; this.state.settings = await window.ml.settings.get(); await this._refreshVoiceOptions(); }
+              if (await removeOwnVoice(id, name)) {
+                this._voiceCatalog = null;
+                this.state.settings = await window.ml.settings.get();
+                await this._refreshVoiceOptions();
+                if (onSelect && selected === key) choose(this.voiceSelect.value);
+              }
             } }, icon("trash"))
           : null;
-        menu.append(h("div", { class: "voice-menu-row" + (this.voiceSelect.value === key ? " selected" : "") }, pick, play, remove));
+        menu.append(h("div", { class: "voice-menu-row" + (selected === key ? " selected" : "") }, pick, play, remove));
       }
       if (engine === "omnivoice") menu.append(h("div", { class: "voice-menu-row" }, h("button", { class: "voice-pick voice-add", role: "menuitem", onclick: async () => {
         menu.remove();
@@ -435,15 +444,15 @@ export class CreateView {
         if (!added) return;
         this._voiceCatalog = null;
         await this._refreshVoiceOptions();
-        this.voiceSelect.value = `omnivoice:${added[0]}`;
-        this.voiceSelect.dispatchEvent(new Event("change"));
+        choose(`omnivoice:${added[0]}`);
       } }, icon("plus"), "Add your own voice…")));
     }
     // Reposition after adding the voice rows so the dropdown fits the viewport.
-    const anchor = this.voiceButton.getBoundingClientRect();
+    const bounds = anchor.getBoundingClientRect();
     const rect = menu.getBoundingClientRect();
-    menu.style.top = Math.max(8, anchor.top - rect.height - 6) + "px";
-    menu.style.left = Math.max(8, Math.min(anchor.right - rect.width, innerWidth - rect.width - 8)) + "px";
+    menu.style.top = Math.max(8, bounds.top - rect.height - 6) + "px";
+    menu.style.left = Math.max(8, Math.min(bounds.right - rect.width, innerWidth - rect.width - 8)) + "px";
+    return menu;
   }
 
   async _saveAgentSettings(patch) {
@@ -1195,34 +1204,24 @@ export class CreateView {
   async changeVoice() {
     const lec = this.project?.lecture;
     if (!lec?.scenes?.length || this.liveJob || this.job) return toast("Open a finished project first.");
-    let voices, comps;
-    try { [voices, comps] = await Promise.all([window.ml.tts.voices(), window.ml.components.status().catch(() => [])]); }
+    try { this._voiceCatalog = await window.ml.tts.voices(); }
     catch (e) { return toast(friendly(e), { kind: "bad" }); }
     const s = this.state.settings;
-    const omniReady = comps.find((c) => c.id === "omnivoice")?.installed !== false;
-    const engineSel = h("select", { class: "select" },
-      h("option", { value: "kokoro", selected: s.voiceEngine !== "omnivoice" }, "Kokoro"),
-      h("option", { value: "omnivoice", selected: s.voiceEngine === "omnivoice", disabled: !omniReady }, omniReady ? "OmniVoice" : "OmniVoice (install it in Settings)"));
-    const voiceSel = h("select", { class: "select" });
-    const fillVoices = () => {
-      const engine = engineSel.value;
-      const current = engine === "omnivoice" ? s.omnivoiceVoice || "maruf" : s.voice;
-      voiceSel.replaceChildren(...(voices[engine] || []).map(([id, label]) => h("option", { value: id, selected: id === current }, label)),
-        ...(engine === "omnivoice" ? [h("option", { value: "__add__" }, "+ Add your own voice…")] : []));
-      voiceSel.dataset.last = voiceSel.value;
+    let selected = s.voiceEngine === "omnivoice" ? `omnivoice:${s.omnivoiceVoice || "maruf"}` : `kokoro:${s.voice || "af_heart"}`;
+    let voiceMenu = null, closed = false;
+    const choose = (key) => {
+      if (closed) return;
+      selected = key;
+      const [engine, id] = key.split(":");
+      voiceButton.textContent = this._voiceCatalog[engine]?.find(([voice]) => voice === id)?.[1] || id;
+      voiceButton.title = `${engine === "omnivoice" ? "OmniVoice" : "Kokoro"} · ${voiceButton.textContent}`;
     };
-    voiceSel.onchange = async () => {
-      if (voiceSel.value !== "__add__") return void (voiceSel.dataset.last = voiceSel.value);
-      voiceSel.value = voiceSel.dataset.last || "";
-      const added = await openAddVoice();
-      if (!added) return;
-      this._voiceCatalog = null;
-      voices = await window.ml.tts.voices();
-      fillVoices();
-      voiceSel.value = voiceSel.dataset.last = added[0];
-    };
-    engineSel.onchange = fillVoices;
-    fillVoices();
+    const voiceButton = h("button", { class: "select voice-picker-button", "aria-label": "Choose voice", "aria-haspopup": "menu", onclick: async () => {
+      const menu = await this._voiceMenu({ anchor: voiceButton, value: selected, onSelect: choose });
+      if (closed) menu?.remove();
+      else voiceMenu = menu;
+    } });
+    choose(selected);
     const speed = h("input", { type: "range", min: "0.7", max: "1.4", step: "0.05", value: String(s.voiceSpeed || 1) });
     const speedLbl = h("span", { class: "small muted" }, `${Number(speed.value).toFixed(2)}×`);
     speed.oninput = () => { speedLbl.textContent = `${Number(speed.value).toFixed(2)}×`; };
@@ -1232,11 +1231,18 @@ export class CreateView {
       width: "440px",
       body: h("div", {},
         h("p", { class: "muted small", style: { marginTop: 0 } }, "Re-records all narration in this video with the voice you pick. Visuals and narration text don't change."),
-        row("Engine", engineSel), row("Voice", voiceSel), row("Speed", speed, speedLbl)),
+        row("Voice", voiceButton), row("Speed", speed, speedLbl)),
+      onClose: () => {
+        closed = true;
+        voiceMenu?.remove();
+        this._voiceDemoRequest = (this._voiceDemoRequest || 0) + 1;
+        this._voiceDemoAudio?.pause();
+      },
       actions: [
         { label: "Cancel" },
         { label: "Change voice", primary: true, run: async () => {
-          const voiceEngine = engineSel.value, voice = voiceSel.value, voiceSpeed = Number(speed.value);
+          const [voiceEngine, voice] = selected.split(":");
+          const voiceSpeed = Number(speed.value);
           // New narration (and later per-beat edits) use this voice from now on.
           if (this.job || this._revoicing) return void toast("Wait for the current job to finish.");
           try {

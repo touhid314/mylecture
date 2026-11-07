@@ -1,0 +1,121 @@
+{
+  "generator": "OmniVoice",
+  "text": "Hello! This is my voice. I narrate lessons, explainers, and stories in MyLecture. Let's learn something new together.",
+  "voices": [
+    {
+      "id": "adam",
+      "referenceSha256": "9f251485f2f3de307c246e7244dea86592af28f6109bc7d4b1851d2e5e9e5fc6",
+      "demoSha256": "0fafddd5e61f4b17ece2aacd9aacfdd5d517cc4b2ec7f9abd5bb86f0c8a519ab"
+    },
+    {
+      "id": "alex",
+      "referenceSha256": "b1a126ca9531e15d304003c94141c24daf116b0c60308a38c5eb6c80c7f3714c",
+      "demoSha256": "2244f1eb566fdc8b1bedf2590bf5c47e9727ee9f176e49fd91fadfdefd8e1d53"
+    },
+    {
+      "id": "arabella",
+      "referenceSha256": "b6e3a01b66aab498fe1423a3a85aa345d6288f517bc85f2c7616a3f7d12d2e21",
+      "demoSha256": "199c098af50855015bfd7223c1bcd77bbe3b9deb70455f1329be02bae89909be"
+    },
+    {
+      "id": "bradford",
+      "referenceSha256": "5ee298ab4a622df948d880da9262a0a46335b2d60298b0efea70fc61246ebb22",
+      "demoSha256": "66e8e4d7f0400d4b127ad2bd62fe6c337076103a6327ab1b8fe58a56ea5d72cc"
+    },
+    {
+      "id": "cassidy",
+      "referenceSha256": "a964d738b96d8f4ca360f6f6ecf12f750880bf6de343d75d1db5f2b93711b753",
+      "demoSha256": "b157da027deea2dbed65ffaf48fd615d8776e7374fd8a73198b71457986b1e91"
+    },
+    {
+      "id": "christopher",
+      "referenceSha256": "230ea3707b027ce818124c6e69bc6de73d57e9e948eb4d76b10bf2a43ec74171",
+      "demoSha256": "5347492264671545dabafb5f384df944ec5b0cbd07ed15b90caf260033828441"
+    },
+    {
+      "id": "christopher-2",
+      "referenceSha256": "867acc5d8b82e5a6ddc64c7a52ff78215f39e36b40cc9a8b76e3b23aa0fb2304",
+      "demoSha256": "af31e3e5378f166dff270d9919d22ef14e76bdc3e47077660be6f8fc84252601"
+    },
+    {
+      "id": "david-castlemore",
+      "referenceSha256": "8eb640dc134870bb08b46edd749dcc66f100d4474501f1a54f777f01186712bb",
+      "demoSha256": "7d9fb0b9002c358227fe7ded891ee27ea9698779dff0943fccbd4f9e81d4e595"
+    },
+    {
+      "id": "declan-sage",
+      "referenceSha256": "2fdd90de47797ef06f60e4e8ea66d75a8730bf553fa7f09e715558f1e232a58a",
+      "demoSha256": "01fe398b88840605ce1a9afb036ebd2cbabf3439d94dc6d898ae07f16cf821d9"
+    },
+    {
+      "id": "frederick-surrey",
+      "referenceSha256": "af5d38cef3d6ba28ea4b61614e7ead60c8cebe334afd4d4fafac538cd4912c7b",
+      "demoSha256": "db52827b358e4afe8a71de1450e7c5dd5898fbc01b3bf1bf207bdfdf310cac16"
+    },
+    {
+      "id": "hope",
+      "referenceSha256": "29c9cff9f2346cb6fa8d601ea3d64700ae49c21d44c497603d2f309a7be620f0",
+      "demoSha256": "5636c1f49403304cf9610d8e62e8d3ca542a54f01232802635aba42f7ad67d77"
+    },
+    {
+      "id": "ian-cartwell",
+      "referenceSha256": "d8b802fc4dad121c6847790df4b9e970aaf99a9026e54155ae825b52790a87a2",
+      "demoSha256": "a1377191db2d846ac6176c6bef4b6e20c5918bb2647510499e1686c3478eaf16"
+    },
+    {
+      "id": "james",
+      "referenceSha256": "59efb5e4af5fc2b1baef4381e4854eed4a221779da2ce038c0a5c74b8bc54e56",
+      "demoSha256": "99f3558af51fc3b2c29c914bffdbccb14eedbc35326b520747def514aed529bd"
+    },
+    {
+      "id": "jessica-anne-bogart",
+      "referenceSha256": "2f98444749c81dd3fa9033d64bbce3e63891fe90f06b533963af98ee6837e978",
+      "demoSha256": "a8892ed52b590ab0a17d35e74deb1afcbfdf2bc4907d834648fc2e7c44959e6c"
+    },
+    {
+      "id": "jessica-anne-bogart-2",
+      "referenceSha256": "ea8fa6b5b20f226741886b5afca89bf97bea270e2610db492d6f4198c62f70bf",
+      "demoSha256": "e3403e0b404b2c99354b072553eec754413ada416c759dc9eb5ff189ebda19a4"
+    },
+    {
+      "id": "john-doe",
+      "referenceSha256": "f8a5b177fd34d0fd7a2a0673b521885ae2ba2037f33cbbbd00f8f60ced1f375b",
+      "demoSha256": "8f6083f9c1fb9017626fbc1927cbc3ed99c307ad367bf568fa11f1d8c03efc83"
+    },
+    {
+      "id": "jon",
+      "referenceSha256": "4b917f78ea83f2824c25d6af2635b53031df94b22a8ea0962cc73bb267a7ac78",
+      "demoSha256": "31813d19dc27fa5c29bd0f3c35e3a537007c2785b0aa2fecad7c8fb2ac074f53"
+    },
+    {
+      "id": "mark",
+      "referenceSha256": "d288ec565ae39868b155a110630318d8ee6e9a009a32661b7b94e3df530e7075",
+      "demoSha256": "40595a8beed41806d65cb1ad8855b9a5ae519a9cf3196f9b9f3362fc58827da6"
+    },
+    {
+      "id": "mark-2",
+      "referenceSha256": "e30153300aceff81521a3b30d484a8914f78f7b7e24a9fbbd4e98d8fa2f9d915",
+      "demoSha256": "c8a5f4c458b0a46119472561f6404bf0340c86041805b7c319297aa8b3e6a06e"
+    },
+    {
+      "id": "michael-c-vincent",
+      "referenceSha256": "b3e89c714fe1bd63d53abc002d5276659cd9d466ca450c8d15be7225d15d5ebb",
+      "demoSha256": "c580f65e439a77f9ee13967a4a587bfd13f244508dc680ad5d6ac68b1ab1f1c2"
+    },
+    {
+      "id": "nassim",
+      "referenceSha256": "bb49fd14a45de1baff7a79364f6408a54ece1882eb318c301b49af9e7a85daae",
+      "demoSha256": "1637fb2e3d8b7384c685f627536ff448729595d3a4417929ff47054c10f96da0"
+    },
+    {
+      "id": "peter",
+      "referenceSha256": "c3e86e813d9966873c3f38bac7c751b4d88adea85eb4e4bd5700254ac672a239",
+      "demoSha256": "5d974d0dd2eebfcee1cc59e64c5855a4d5e422611a58e6a6fc299b72da963c1a"
+    },
+    {
+      "id": "spuds-oxley",
+      "referenceSha256": "7399d9d8339345eb7c34b908b640ce75c6acc1df5f694219902f79d314a97307",
+      "demoSha256": "fa61b7097a586cff1a4d2137ebd66bc43751cfa8ea0aa3edf6c666c7de63d816"
+    }
+  ]
+}
