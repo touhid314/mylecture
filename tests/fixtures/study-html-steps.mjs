@@ -59,12 +59,17 @@ app.whenReady().then(async () => {
     const state = () => f.executeJavaScript(`({ bars: ${bars}, msg: document.getElementById('msg').textContent, api: typeof tutor.on })`);
     await new Promise((r) => setTimeout(r, 400));
     const start = await state();
+    // Observe the actual cue handlers, not a cross-process sample that can
+    // arrive after the next cue has already run on a busy CI compositor.
+    await f.executeJavaScript(`window.cueTrace=[];for(const id of ['s1','c2','s2'])tutor.on(id,()=>{cueTrace.push({id,at:performance.now(),msg:document.getElementById('msg').textContent})});
+      window.slideSample=new Promise((ok)=>{const t0=performance.now();const poll=()=>{const five=[...document.querySelectorAll('#row > div')].find(b=>b.textContent==='5');const x=parseFloat(getComputedStyle(five).left);if((x>5&&x<85)||performance.now()-t0>5000)ok({x});else requestAnimationFrame(poll);};requestAnimationFrame(poll);});true;`);
     // One sentence: swap, compare, swap, back to back. The swap must slide
     // (the 5 is seen between slots 0 and 90 px), and the next cue waits for it.
     await win.webContents.executeJavaScript(`board.reveal('bs.s1'); board.reveal('bs.c2'); board.reveal('bs.s2');`);
-    const slide = await f.executeJavaScript(`new Promise((ok) => { const t0 = performance.now(); const poll = () => { const five = [...document.querySelectorAll('#row > div')].find((b) => b.textContent === '5'); const x = parseFloat(getComputedStyle(five).left); if ((x > 5 && x < 85) || performance.now() - t0 > 2000) ok({ x, msg: document.getElementById('msg').textContent }); else requestAnimationFrame(poll); }; poll(); })`);
-    await new Promise((r) => setTimeout(r, 1500));
+    const slide = await f.executeJavaScript('slideSample');
+    await f.executeJavaScript(`new Promise((resolve,reject)=>{const start=performance.now();const poll=()=>{if(cueTrace.length===3)resolve();else if(performance.now()-start>5000)reject(new Error('Queued cues did not finish'));else setTimeout(poll,20)};poll()})`);
+    const cues = await f.executeJavaScript('cueTrace');
     const end = await state();
-    finish({ start, slide, end, errors });
+    finish({ start, slide, cues, end, errors });
   } catch (error) { finish({ error: String(error.stack || error) }); }
 });

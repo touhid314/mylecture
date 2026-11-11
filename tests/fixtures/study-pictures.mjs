@@ -19,7 +19,7 @@ app.whenReady().then(async () => {
     const b=document.getElementById('detail');b.onclick=()=>b.textContent=String(Number(b.textContent)+1);b.click();
     let blocked=false;try{parent.document.body}catch{blocked=true}
     parent.postMessage({test:'html-state',count:b.textContent,ipc:typeof window.ml,blocked},'*');
-    addEventListener('message',e=>{if(e.data?.type==='tutor:point')setTimeout(()=>parent.postMessage({test:'html-point',animated:b.getAnimations().length>0},'*'),20)});
+    tutor.on('detail',()=>{parent.postMessage({test:'html-point',animated:b.getAnimations().length>0},'*')});
   </script></body>` }, { workspace: temp, sessionId: "picture-check" });
   const updatedVisual = prepareHtml({ html: `<body><script>parent.postMessage({test:'html-updated'},'*')</script>Updated visual</body>` }, { workspace: temp, sessionId: "picture-check" });
   protocol.handle("mylecture", (req) => {
@@ -35,7 +35,7 @@ app.whenReady().then(async () => {
     const svg = '<svg xmlns="http://www.w3.org/2000/svg" width="600" height="300"><rect width="600" height="300" fill="lightblue"/></svg>';
     return { url: `data:image/svg+xml;base64,${Buffer.from(svg).toString("base64")}`, credit: "Test diagram" };
   });
-  const win = new BrowserWindow({ show: false, width: 960, height: 700, webPreferences: { preload: fileURLToPath(new URL("../../electron/preload.cjs", import.meta.url)), contextIsolation: true } });
+  const win = new BrowserWindow({ show: false, width: 960, height: 700, webPreferences: { preload: fileURLToPath(new URL("../../electron/preload.cjs", import.meta.url)), contextIsolation: true, backgroundThrottling: false, offscreen: true } });
   try {
     await win.loadURL("mylecture://app/picture-check");
     const result = await win.webContents.executeJavaScript(`(async () => {

@@ -93,7 +93,9 @@ test("a stepped HTML visual animates each step on its cue, in order", { timeout:
     assert.deepEqual(r.start, { api: "function", bars: ["5", "2", "8", "1"], msg: "Compare 5 and 2" });
     // The swap slides, and the compare cued right after it waits its turn.
     assert.ok(r.slide.x > 5 && r.slide.x < 85, `the 5 was at ${r.slide.x}px`);
-    assert.equal(r.slide.msg, "Bigger one moves right: swap");
+    assert.deepEqual(r.cues.map(c=>c.id), ["s1", "c2", "s2"]);
+    assert.equal(r.cues[0].msg, "Bigger one moves right: swap");
+    assert.ok(r.cues[1].at-r.cues[0].at>=750, "compare must wait for the 800 ms swap");
     assert.deepEqual(r.end, { api: "function", bars: ["2", "5", "8", "1"], msg: "5 < 8: leave them" });
   } finally { fs.rmSync(dir, { recursive: true, force: true }); }
 });
