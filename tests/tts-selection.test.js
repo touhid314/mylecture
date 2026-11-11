@@ -154,3 +154,18 @@ test("synthesis returns the exact engine input on fresh, concurrent and cached r
   for (const result of [...results, cached]) assert.equal(result.spokenText, submitted[0]);
   assert.equal(cached.key, results[0].key);
 });
+
+test("the voice engine receives spoken math instead of LaTeX source", async t => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "mylecture-math-voice-"));
+  t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
+  const tts = service({ voiceEngine: "kokoro" }, dir);
+  tts.kokoro.state = "ready";
+  const submitted = [];
+  tts._kokoroSynth = async text => {
+    submitted.push(text);
+    return { pcm: new Int16Array(2400).fill(500), sampleRate: 24000 };
+  };
+  const clip = await tts.synth(String.raw`Choose $u$, then calculate $\frac{du}{dx}$.`);
+  assert.deepEqual(submitted, ["Choose u, then calculate the derivative of u with respect to x."]);
+  assert.equal(clip.spokenText, submitted[0]);
+});

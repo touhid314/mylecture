@@ -59,7 +59,9 @@ test("connected tutor engines get native agent workspaces and can publish HTML f
 test("the step API loads before the visual's own scripts, without breaking its doctype", () => {
   const api = (out) => out.indexOf("window.tutor=");
   const doc = withTutorApi("<!DOCTYPE html><html lang='en'><header>Top</header><script>tutor.on('s1',()=>1)</script></html>");
-  assert.match(doc, /^<!DOCTYPE html><html lang='en'><style>/);
+  assert.match(doc, /^<!DOCTYPE html><html lang='en'><meta charset="utf-8"><style>/);
+  // The charset comes early enough for the browser to honour it (first 1024 bytes).
+  assert.ok(withTutorApi("<html><head><meta charset='utf-8'><title>t</title></head><body>↑ low</body></html>").indexOf('charset="utf-8"') < 1024);
   assert.ok(api(doc) < doc.indexOf("<header>") && api(doc) < doc.indexOf("tutor.on("));
   const withHead = withTutorApi("<html><head><title>x</title></head><body><script>tutor.on('a',f)</script></body></html>");
   assert.ok(withHead.indexOf("<head>") < api(withHead) && api(withHead) < withHead.indexOf("<title>"));

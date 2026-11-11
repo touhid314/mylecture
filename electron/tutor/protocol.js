@@ -57,7 +57,7 @@ export function takeSentences(text, { final = false, min = 60 } = {}) {
 }
 
 function classify(line) {
-  const m = line.match(/^\s*[-*]?\s*([A-Za-z_]+)\s*(?:#([\w-]+))?\s*:\s?(.*)$/s);
+  const m = line.match(/^\s*[-*]?\s*([A-Za-z_]+)\s*(?:#([\w-]+(?:\.[\w-]+)?))?\s*:\s?(.*)$/s);
   if (!m) return null;
   let kind = m[1].toLowerCase();
   kind = ALIASES[kind] || kind;

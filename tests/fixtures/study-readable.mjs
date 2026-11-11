@@ -13,6 +13,9 @@ const shot = process.argv[3];
 const temp = fs.mkdtempSync(path.join(os.tmpdir(), "ml-readable-profile-"));
 const appDir = fileURLToPath(new URL("../../app/", import.meta.url));
 const katexDir = fileURLToPath(new URL("../../node_modules/katex/dist/", import.meta.url));
+// Same malformed raw-SVG encoding as the integration-by-parts lesson:
+// escaped quotes, missing namespace, and double-escaped LaTeX commands.
+const escapedSvg = String.raw`<svg viewBox=\"0 0 500 220\"><rect x=\"40\" y=\"30\" width=\"180\" height=\"150\" fill=\"#dbeafe\"/><text id=\"factor\" x=\"130\" y=\"80\" text-anchor=\"middle\" font-size=\"22\">$u(x)$</text><text id=\"derivative\" x=\"130\" y=\"130\" text-anchor=\"middle\" font-size=\"22\">$\\frac{du}{dx}$</text></svg>`;
 app.setPath("userData", temp);
 protocol.registerSchemesAsPrivileged([{ scheme: "mylecture", privileges: { standard: true, secure: true, supportFetchAPI: true } }]);
 const finish = (result) => { fs.writeFileSync(report, JSON.stringify(result)); app.exit(result.error ? 1 : 0); };
@@ -48,12 +51,26 @@ app.whenReady().then(async () => {
       // An svg diagram: white text on a white box, dark text on a dark box, LaTeX on a light box.
       board.draw({ type: 'svg', id: 'cmp', text: '<svg viewBox="0 0 600 220" xmlns="http://www.w3.org/2000/svg"><rect x="20" y="30" width="250" height="150" rx="12" fill="#ffffff"/><text id="t1" x="145" y="70" text-anchor="middle" font-size="20" fill="#ffffff">Standard attention</text><text id="eq" x="145" y="120" text-anchor="middle" font-size="18">$\\\\mathrm{softmax}(QK^\\\\top/\\\\sqrt{d})\\\\,V$</text><rect x="330" y="30" width="250" height="150" rx="12" fill="#0b1f12"/><text id="t2" x="455" y="100" text-anchor="middle" font-size="20" fill="#111111">Flash attention</text><text id="cost" x="455" y="140" text-anchor="middle" font-size="16">Costs $5 and $10</text><text id="free" x="300" y="210" text-anchor="middle" font-size="16" fill="#ffffff">on the board</text></svg>' });
       board.draw({ type: 'html', id: 'h', data: ${JSON.stringify(visual)} });
+      board.draw({ type: 'svg', id: 'uv', text: ${JSON.stringify(escapedSvg)} });
+      const {StudyView, Lesson} = await import('mylecture://app/js/study/tutor-view.js');
+      const caption = document.createElement('div'); document.body.append(caption);
+      StudyView.prototype.setCaption.call({caption}, 'Use $u$ times $v$.');
+      let preparedText = '';
+      const lesson = new Lesson({voice:{prepare(text){preparedText=text;return Promise.resolve({});}}}, {history:[],board:[]});
+      lesson._run = () => {};
+      lesson._receive({turnId:'math'}, {type:'say',text:${JSON.stringify(String.raw`Use $\frac{du}{dx}$ then {look:prod} $u$ times $v$.`)}});
+      const spoken = lesson.queue[0].action;
       await wait(1500);
       const fillOf = (sel) => { const t = document.querySelector(sel); return t && getComputedStyle(t).fill; };
       const scene = document.querySelector('svg.wb-scene');
       const sceneText = (id) => getComputedStyle(scene.querySelector('[data-id="' + id + '"] text')).fill;
       const svg = document.querySelector('svg.wb-svg');
+      const uv = board.items.get('uv')?.querySelector('svg');
       return {
+        repairedSvg: uv instanceof SVGSVGElement && uv.querySelector('rect').getBBox().width === 180,
+        repairedMath: uv?.querySelectorAll('.katex').length === 2 && !uv.querySelector('.katex-error'),
+        captionMath: caption.querySelectorAll('.katex').length === 2 && !caption.textContent.includes('$'),
+        spokenText: preparedText, cuePosition: spoken.cues[0].pos,
         qkv: sceneText('qkv'), nn: sceneText('nn'), sram: sceneText('sram'), hbm: sceneText('hbm'),
         t1: getComputedStyle(svg.querySelector('#t1')).fill, t2: getComputedStyle(svg.querySelector('#t2')).fill,
         free: getComputedStyle(svg.querySelector('#free')).fill, filtered: getComputedStyle(svg).filter !== 'none',

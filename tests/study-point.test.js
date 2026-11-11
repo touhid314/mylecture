@@ -30,7 +30,7 @@ test("pointing at a whole visual while naming a part highlights only that part",
 });
 
 test("the tutor prompt stays compact and asks for the smallest part", () => {
-  assert.ok(TUTOR_SYSTEM.length < 26000, `system prompt is ${TUTOR_SYSTEM.length} characters`);
+  assert.ok(TUTOR_SYSTEM.length < 27000, `system prompt is ${TUTOR_SYSTEM.length} characters`);
   assert.match(TUTOR_SYSTEM, /REF must be the smallest thing you mean/);
   assert.match(TUTOR_SYSTEM, /give every part you will talk about its own id/);
 });

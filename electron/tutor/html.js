@@ -1,4 +1,5 @@
 import fs from "node:fs";
+import { normalizeLatex, isMathExpression } from "../../app/shared/speech-text.js";
 import path from "node:path";
 import { createHash } from "node:crypto";
 
@@ -69,8 +70,9 @@ const BRIDGE = `<script>(()=>{
 // \(...\), \[...\] and $$...$$ in the visual's text, including text its
 // scripts add later. window.katex is there for scripts to use directly.
 export const MATH_BRIDGE = String.raw`<link rel="stylesheet" href="mylecture://app/vendor/katex/katex.min.css"><script src="mylecture://app/vendor/katex/katex.min.js"></script><script>(()=>{
+  const normalizeLatex=${normalizeLatex.toString()};
   const RE=/\$\$([^$]+?)\$\$|\\\[([\s\S]+?)\\\]|\\\(([\s\S]+?)\\\)|\$([^$\n]+?)\$/g;
-  const isMath=(s)=>/[\\^_{}=]/.test(s)||/^\s*[A-Za-z](?:_?\d)?\s*$/.test(s);
+  const isMath=${isMathExpression.toString()};
   const skip=(n)=>n.parentElement&&n.parentElement.closest('script,style,textarea,code,pre,.katex,[data-no-math]');
   let busy=false;
   const render=()=>{
@@ -83,7 +85,7 @@ export const MATH_BRIDGE = String.raw`<link rel="stylesheet" href="mylecture://a
         const tex=m[1]??m[2]??m[3]??m[4];const display=m[1]!=null||m[2]!=null;
         if(m[4]!=null&&!isMath(tex))continue;
         html+=t.slice(last,m.index).replace(/[&<>]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;'}[c]));
-        html+=katex.renderToString(tex,{displayMode:display,throwOnError:false,strict:'ignore'});
+        html+=katex.renderToString(normalizeLatex(tex),{displayMode:display,throwOnError:false,strict:'ignore'});
         last=m.index+m[0].length;hit=true;
       }
       if(!hit)continue;

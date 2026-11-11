@@ -2,13 +2,14 @@
 // whose content has $...$ math is shown with KaTeX, in a foreignObject at
 // the same spot, size, colour and alignment as the text it replaces. Plain
 // text (and amounts like "$5 and $10") stays as it is.
+import { normalizeLatex, isMathExpression } from "../../shared/speech-text.js";
 const NS = "http://www.w3.org/2000/svg";
 const XHTML = "http://www.w3.org/1999/xhtml";
 
 // $...$ that is math, not money: a LaTeX command, ^ _ { } =, or a lone variable.
-const MATH = /\$([^$\n]+?)\$/g;
-const looksLikeMath = (s) => /[\\^_{}=]/.test(s) || /^\s*[A-Za-z](?:_?\d)?\s*$/.test(s);
-export const hasMath = (text) => [...String(text || "").matchAll(MATH)].some((m) => looksLikeMath(m[1]));
+const MATH = /\$\$([^$]+?)\$\$|\\\[([\s\S]+?)\\\]|\\\(([\s\S]+?)\\\)|(?<![\\$])\$([^$\n]+?)\$/g;
+const content = m => m[1] ?? m[2] ?? m[3] ?? m[4];
+export const hasMath = (text) => [...String(text || "").matchAll(MATH)].some((m) => m[4] == null || isMathExpression(content(m)));
 
 const esc = (s) => String(s).replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
 
@@ -17,9 +18,9 @@ export function mathHtml(text) {
   const katex = window.katex;
   let out = "", last = 0;
   for (const m of String(text).matchAll(MATH)) {
-    if (!looksLikeMath(m[1])) continue;
+    if (m[4] != null && !isMathExpression(content(m))) continue;
     out += esc(text.slice(last, m.index));
-    out += katex ? katex.renderToString(m[1], { throwOnError: false, strict: "ignore", output: "html" }) : esc(m[1]);
+    out += katex ? katex.renderToString(normalizeLatex(content(m)), { throwOnError: false, strict: "ignore", output: "html" }) : esc(content(m));
     last = m.index + m[0].length;
   }
   return out + esc(String(text).slice(last));

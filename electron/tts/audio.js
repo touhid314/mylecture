@@ -1,31 +1,7 @@
 // Pure helpers for speech text and WAV files (no Electron imports).
 import fs from "node:fs";
 
-export function normalizeForSpeech(text) {
-  return String(text || "")
-    .replace(/[*_`#]/g, "")
-    .replace(/\s*→\s*/g, " to ")
-    .replace(/\s*⇒\s*/g, " implies ")
-    .replace(/≈/g, " approximately ")
-    .replace(/×/g, " times ")
-    .replace(/÷/g, " divided by ")
-    .replace(/≤/g, " less than or equal to ")
-    .replace(/≥/g, " greater than or equal to ")
-    .replace(/≠/g, " not equal to ")
-    .replace(/√/g, " square root of ")
-    .replace(/π/g, " pi ")
-    .replace(/θ/g, " theta ")
-    .replace(/λ/g, " lambda ")
-    .replace(/Δ/g, " delta ")
-    .replace(/∑/g, " the sum of ")
-    .replace(/∞/g, " infinity ")
-    .replace(/(\w)\^2\b/g, "$1 squared")
-    .replace(/(\w)\^3\b/g, "$1 cubed")
-    .replace(/²/g, " squared")
-    .replace(/³/g, " cubed")
-    .replace(/\s+/g, " ")
-    .trim();
-}
+export { normalizeForSpeech } from "../../app/shared/speech-text.js";
 
 export function wavInfo(buf) {
   // Walk RIFF chunks; returns {sampleRate, channels, bits, dataBytes}.

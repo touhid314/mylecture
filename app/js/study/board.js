@@ -6,6 +6,8 @@ import { renderScene } from "./scene.js";
 import { pictureRequest } from "./pictures.js";
 import { drawPictureMarks } from "./picture-marks.js";
 import { mathifySvg } from "./svg-math.js";
+import { normalizeLatex, isMathExpression } from "../../shared/speech-text.js";
+import { replaceMathTerm } from "./math-update.js";
 import { fixContrast } from "./contrast.js";
 import { renderMap, loadWorld, zoomMap, traceRoute, markShown, bringIntoView, settle } from "./map.js";
 
@@ -52,7 +54,7 @@ const md = window.markdownit ? window.markdownit({ html: false, linkify: true, b
 // ---------- math + markdown ----------
 export function tex(src, display = false) {
   try {
-    return window.katex ? window.katex.renderToString(String(src), { displayMode: display, throwOnError: false, strict: "ignore", output: "html", trust: (c) => c.command === "\\htmlId" || c.command === "\\htmlClass" }) : escapeHtml(src);
+    return window.katex ? window.katex.renderToString(normalizeLatex(src), { displayMode: display, throwOnError: false, strict: "ignore", output: "html", trust: (c) => c.command === "\\htmlId" || c.command === "\\htmlClass" }) : escapeHtml(src);
   } catch {
     return escapeHtml(src);
   }
@@ -71,7 +73,7 @@ export function richHtml(src, { inline = false } = {}) {
   s = s.replace(/\$\$([\s\S]+?)\$\$/g, (_, m) => keep(m, true));
   s = s.replace(/\\\[([\s\S]+?)\\\]/g, (_, m) => keep(m, true));
   s = s.replace(/\\\(([\s\S]+?)\\\)/g, (_, m) => keep(m, false));
-  s = s.replace(/(^|[^\\$])\$([^$\n]+?)\$/g, (_, pre, m) => pre + keep(m, false));
+  s = s.replace(/(^|[^\\$])\$([^$\n]+?)\$/g, (match, pre, m) => isMathExpression(m) ? pre + keep(m, false) : match);
   let html = md ? (inline ? md.renderInline(s) : md.render(s)) : escapeHtml(s);
   html = html.replace(/@@M(\d+)@@/g, (_, i) => maths[Number(i)]);
   return html;
@@ -92,7 +94,11 @@ function svgEl(tag, attrs = {}, ...kids) {
 // Only drawing elements and presentational attributes survive.
 const SVG_TAGS = new Set(["svg", "g", "path", "rect", "circle", "ellipse", "line", "polyline", "polygon", "text", "tspan", "defs", "marker", "lineargradient", "radialgradient", "stop", "title", "clippath", "use", "pattern"]);
 export function sanitizeSvg(markup) {
-  const doc = new DOMParser().parseFromString(String(markup), "image/svg+xml");
+  // Raw svg: lines are not JSON. Repair JSON-escaped attributes without
+  // changing backslashes inside math labels, then establish the namespace.
+  let source = String(markup).replace(/<[^>]*>/g, tag => tag.replace(/\\+"/g, '"'));
+  source = source.replace(/<svg\b([^>]*)>/i, (tag, attrs) => /\bxmlns\s*=/.test(attrs) ? tag : `<svg xmlns="${SVGNS}"${attrs}>`);
+  const doc = new DOMParser().parseFromString(source, "image/svg+xml");
   const root = doc.documentElement;
   if (!root || root.nodeName.toLowerCase() !== "svg" || doc.querySelector("parsererror")) return null;
   const walk = (el) => {
@@ -352,7 +358,7 @@ export function writeOut(el, { max = 9000, speed = 1 } = {}) {
 
 // ---------- the board ----------
 // Visuals that can be docked while the tutor talks about them.
-const FIGURES = ".wb-figure, .wb-table-wrap, .wb-flow, .wb-code";
+const FIGURES = ".wb-figure, .wb-table-wrap, .wb-flow, .wb-code, .wb-math";
 const STUCK_ITEMS = 6; // notes added without referring to the docked visual
 
 export class Board {
@@ -384,9 +390,12 @@ export class Board {
   // can't scroll it (they pause to look back). hold: the app is scrolling it
   // itself (rewind), so don't snap back to the end.
   setLocked(on) {
+    const wasLocked = this.locked;
     this.locked = !!on;
     this.root.classList.toggle("locked", this.locked);
-    if (this.locked) this.toLive();
+    // Lookahead requests reassert this while speech is still playing. They
+    // must not reset the camera away from what the tutor is explaining.
+    if (this.locked && !wasLocked && !this.hold) this.toLive();
   }
 
   setHold(on) {
@@ -437,6 +446,11 @@ export class Board {
 
   showPage(i, { instant = false } = {}) {
     if (i < 0 || i >= this.pages.length) return;
+    if (i !== this.viewing) {
+      clearTimeout(this._pointTimer);
+      this._unpoint?.(); this._unpoint = null;
+      this.root.querySelectorAll(".wb-mark").forEach(mark => mark.remove());
+    }
     this.viewing = i;
     this.pages.forEach((p, k) => p.el.classList.toggle("shown", k === i));
     // Diagrams drawn while their page was hidden (a restored lesson) get
@@ -461,11 +475,20 @@ export class Board {
 
   _scrollEnd(instant) {
     if (!this.follow || this.viewing !== this.current) return;
-    requestAnimationFrame(() => this.scroller.scrollTo({ top: this.scroller.scrollHeight, behavior: instant ? "auto" : "smooth" }));
+    requestAnimationFrame(() => {
+      // A spoken reference may have changed the view since this was queued.
+      if (this.follow && !this.hold && this.viewing === this.current) this.scroller.scrollTo({ top: this.scroller.scrollHeight, behavior: instant ? "auto" : "smooth" });
+    });
   }
 
   _append(el, action, { animate = true } = {}) {
     const page = this._page();
+    // A newly delivered board item marks the next part of the explanation.
+    // Until then, keep the view at the earlier item the tutor referred to.
+    if (this.locked && !this.hold) {
+      if (this.viewing !== this.current) this.showPage(this.current, { instant: true });
+      this.follow = true;
+    }
     el.classList.add("wb-item");
     // Text items fade in whole, quickly; figures keep their drawing animation.
     const fade = animate && ["write", "math", "flow", "table", "code"].includes(action?.type);
@@ -596,13 +619,13 @@ export class Board {
       r = this._rect(target);
     }
     this._unpoint?.();
-    this._unpoint = this._glow(target) || this._box(r);
+    this._unpoint = this._glow(target) || this._box(r, target.el);
     clearTimeout(this._pointTimer);
     this._pointTimer = setTimeout(() => {
       this._unpoint?.();
       this._unpoint = null;
-      // Pointed back at something older: return to the latest content.
-      if (this.locked && !this.hold) this.toLive();
+      // Only the highlight expires. The tutor may discuss this for much
+      // longer; the next board action or reference controls the viewport.
     }, 3200);
     return true;
   }
@@ -678,14 +701,15 @@ export class Board {
   _pinFromEarlierPage(target) {
     if (this.current < 0 || this.viewing !== this.current) return false;
     const item = target.closest(".wb-item");
-    if (!item?.dataset.ref || !item.matches(".wb-figure, .wb-table-wrap, .wb-flow, .wb-code")) return false;
+    if (!item?.dataset.ref || !item.matches(FIGURES)) return false;
     const live = this.pages[this.current];
     if (!item.closest(".wb-page") || live.el.contains(item)) return false;
     // The tutor already redrew it here (same labels): point at that instead.
     const words = (el) => new Set((el.textContent.match(/[\p{L}\p{N}Ωµ.]+/gu) || []).map((w) => w.toLowerCase()));
     const mine = words(item);
     const twin = [...live.body.children].find((el) => {
-      if (!el.matches(".wb-figure, .wb-table-wrap, .wb-flow, .wb-code")) return false;
+      if (!el.matches(FIGURES)) return false;
+      if (item.classList.contains("wb-math")) return el.classList.contains("wb-math") && el._mathSource === item._mathSource;
       const theirs = words(el);
       const shared = [...mine].filter((w) => theirs.has(w)).length;
       return mine.size && shared / Math.max(mine.size, theirs.size) >= 0.6;
@@ -697,8 +721,9 @@ export class Board {
       return true;
     }
     const copy = uniqueSvgIds(item.cloneNode(true));
+    if (item._mathSource != null) copy._mathSource = item._mathSource;
     copy.classList.remove("enter", "enter-fade", "active");    copy.classList.add("wb-pinned", "enter");
-    copy.querySelectorAll(".wb-halo, .wb-replay").forEach((e) => e.remove());
+    copy.querySelectorAll(".wb-halo, .wb-replay, .wb-mark").forEach((e) => e.remove());
     copy.querySelectorAll(".wb-focused").forEach((e) => e.classList.remove("wb-focused"));
     copy.querySelectorAll(".wb-focus").forEach((e) => e.classList.remove("wb-focus"));
     // Next to the latest notes (not at the top of the page, which may be
@@ -719,12 +744,16 @@ export class Board {
   }
 
   // Highlighter box over a screen rect.
-  _box(r) {
-    const sc = this.scroller.getBoundingClientRect();
-    const top = r.top - sc.top + this.scroller.scrollTop, left = r.left - sc.left + this.scroller.scrollLeft;
+  _box(r, target) {
+    // Anchor the highlight to the item. A scroller-level absolute box can
+    // artificially extend scrollHeight after its page is hidden, scrolling
+    // the actual lesson completely out of view.
+    const host = target?.closest?.(".wb-item") || this.scroller;
+    const sc = host.getBoundingClientRect();
+    const top = r.top - sc.top + host.scrollTop, left = r.left - sc.left + host.scrollLeft;
     const pad = 6, px = 3;
     const mark = h("div", { class: "wb-mark", style: { top: `${top - pad}px`, left: `${left - px}px`, width: `${r.width + px * 2}px`, height: `${r.height + pad * 2}px` } });
-    this.scroller.append(mark);
+    host.append(mark);
     return () => {
       mark.classList.add("out");
       setTimeout(() => mark.remove(), 500);
@@ -907,8 +936,34 @@ export class Board {
         const heading = /^#{1,3}\s/.test(t);
         return this._append(rich(t, `wb-write${heading ? " heading" : ""}${/^\s*[-*]\s/.test(t) ? " bullet" : ""}`), a, opts);
       }
-      case "math":
-        return this._append(h("div", { class: "wb-math", html: tex(a.text.replace(/^\$\$?|\$\$?$/g, ""), true) }), a, opts);
+      case "math": {
+        const source = normalizeLatex(a.text.replace(/^\$\$?|\$\$?$/g, ""));
+        const [id, part] = String(a.id || "").split(".");
+        const existing = id && this.items.get(id);
+        const live = this.pages[this.current]?.el;
+        if (existing?.classList.contains("wb-math") && live?.contains(existing)) {
+          const updated = part ? replaceMathTerm(existing._mathSource, part, source) : source;
+          if (updated == null) return null;
+          this._unpoint?.(); this._unpoint = null;
+          existing.innerHTML = tex(updated, true);
+          existing._mathSource = updated;
+          existing._writeMs = opts.animate === false ? 0 : 300;
+          existing.classList.remove("enter", "enter-fade");
+          const changed = part ? existing.querySelector(`[id="${CSS.escape(part)}"]`) : existing;
+          if (opts.animate !== false && !matchMedia("(prefers-reduced-motion: reduce)").matches) changed?.animate([
+            { backgroundColor: "rgba(56,189,248,.25)", opacity: 0.5 },
+            { backgroundColor: "transparent", opacity: 1 },
+          ], { duration: 450 });
+          this.markActive(existing);
+          return existing;
+        }
+        // A patch for an unknown or previous-page equation must not create a
+        // stray new line containing just its replacement term.
+        if (part) return null;
+        const el = h("div", { class: "wb-math", html: tex(source, true) });
+        el._mathSource = source;
+        return this._append(el, a, opts);
+      }
       case "map": {
         const d = a.data || {};
         const id = a.id || d.id;

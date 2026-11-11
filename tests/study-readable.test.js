@@ -31,6 +31,11 @@ test("text in diagrams stays readable and LaTeX renders inside visuals", { timeo
     assert.ok(fs.existsSync(report), "Readability test did not report");
     const r = JSON.parse(fs.readFileSync(report, "utf8"));
     assert.equal(r.error, undefined, r.error);
+    assert.equal(r.repairedSvg, true, "escaped SVG attributes must still create real positioned shapes");
+    assert.equal(r.repairedMath, true, "escaped math must render in the repaired diagram");
+    assert.equal(r.captionMath, true, "captions must render inline math rather than expose dollar markers");
+    assert.equal(r.spokenText, "Use the derivative of u with respect to x then u times v.");
+    assert.equal(r.cuePosition, r.spokenText.indexOf("u times v"), "cues must use positions in the spoken words");
     // The user's scene on the blackboard: chalk-coloured and white text on pale boxes turns dark...
     assert.deepEqual([r.qkv, r.nn, r.sram], [DARK, DARK, DARK]);
     // ...while text on the board itself keeps the chalk colour.

@@ -9,6 +9,7 @@ import { LESSONS_PER_PAGE, pageNumbers } from "./paging.js";
 import { UsagePanel } from "../usage.js";
 import { ModelPicker } from "../model-picker.js";
 import { AttachmentPicker, STUDY_EXTENSIONS, attachmentNames } from "../attachments.js";
+import { normalizeForSpeech } from "../../shared/speech-text.js";
 
 // Faint, half-erased notes left on the home board, so it reads as a board at a glance.
 const DOODLES = `
@@ -390,7 +391,7 @@ export class StudyView {
       return;
     }
     this.caption.hidden = false;
-    this.caption.textContent = text;
+    this.caption.innerHTML = richHtml(text, { inline: true });
   }
 
   addTranscript(who, text, extra = "", files = []) {
@@ -862,11 +863,17 @@ export class Lesson {
         return m;
       });
       clean = (clean + a.text.slice(last)).replace(/\s+/g, " ").trim();
-      a.spoken = clean;
+      // Cue offsets must refer to what the voice actually says, including
+      // expanded fractions and powers, rather than LaTeX source positions.
+      for (const cue of cues) {
+        const prefix = clean.slice(0, cue.pos);
+        cue.pos = normalizeForSpeech(prefix).length + (/\s$/.test(prefix) ? 1 : 0);
+      }
+      a.spoken = normalizeForSpeech(clean);
       a.cues = cues;
-      item.prepared = this.v.voice.prepare(clean);
+      item.prepared = this.v.voice.prepare(a.spoken);
       // A visual written before this sentence waits for its word.
-      for (const c of cues) if (c.show && !/[./]/.test(c.ref)) this._hold(c.ref);
+      for (const c of cues) if (c.show) this._hold(c.ref);
     }
     const vid = BOARD_HOLDABLE.has(a.type) ? a.id || a.data?.id : "";
     if (vid && this.shown.has(vid)) {
@@ -876,7 +883,7 @@ export class Lesson {
       this._saveSoon();
       return;
     }
-    if (vid && this._wantsShow(vid)) {
+    if (vid && this._wantsShow(vid) && !(a.type === "math" && this.held.has(vid))) {
       this.held.set(vid, item);
       this._wake?.();
       return;
@@ -895,6 +902,9 @@ export class Lesson {
 
   // Moves a queued visual with this id to the held set.
   _hold(id) {
+    // Keep repeated equation changes in order while the model runs ahead
+    // of speech; a later substitution must not overwrite the next one.
+    if (this.held.has(id)) return;
     const k = this.queue.findIndex((q) => BOARD_HOLDABLE.has(q.action.type) && (q.action.id === id || q.action.data?.id === id));
     if (k >= 0) this.held.set(id, this.queue.splice(k, 1)[0]);
   }
@@ -904,6 +914,14 @@ export class Lesson {
     if (this.closed || epoch !== this.epoch) return;
     const id = String(ref).split(/[./]/)[0];
     if (id !== ref) {
+      // A term replacement is held under its full equation.term id, so it
+      // changes on the spoken cue rather than when generation reaches it.
+      const patch = this.held.get(ref);
+      if (patch) {
+        this.held.delete(ref);
+        this._drawVisual(patch);
+        this._saveSoon();
+      } else if (this.v.board.items.get(id)?.classList.contains("wb-math")) this.shown.add(ref);
       // One part of a visual: draw the visual first if it is still waiting.
       const whole = this.held.get(id);
       if (whole) {
