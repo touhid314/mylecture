@@ -37,14 +37,38 @@ test("usage requests are read-only, deduplicated, and do not substitute another 
   assert.equal(calls, 1);
 });
 
-test("quota failures remain unavailable and can be retried", async () => {
+test("quota failures remain unavailable and can be retried with Refresh", async () => {
   let calls = 0;
   const read = createUsageService({ get: () => ({ exe: () => "agy.exe" }) }, async () => {
     calls++;
     return calls === 1 ? { ok: false } : { ok: true, stdout: JSON.stringify(response([])) };
   });
   assert.equal((await read("antigravity")).available, false);
-  assert.equal((await read("antigravity")).available, true);
+  // Background refreshes don't poke a CLI that failed (it may want a sign-in)...
+  assert.equal((await read("antigravity")).available, false);
+  assert.equal(calls, 1);
+  // ...the Refresh button does.
+  assert.equal((await read("antigravity", { force: true })).available, true);
+  assert.equal(calls, 2);
+});
+
+test("Gemini's usage CLI isn't started again by every panel refresh and window focus", async () => {
+  let calls = 0;
+  const logged = [];
+  const read = createUsageService({ get: () => ({ exe: () => "agy.exe" }) }, async () => {
+    calls++;
+    return { ok: true, stdout: JSON.stringify(response([])) };
+  }, { log: (level, event, details) => logged.push([event, details]) });
+  // Two panels (Create and Study), refreshing every minute and on focus.
+  for (let i = 0; i < 10; i++) assert.equal((await read("antigravity")).available, true);
+  assert.equal(calls, 1);
+  assert.equal((await read("antigravity", { force: true })).available, true);
+  assert.equal(calls, 2);
+  // Each real run is logged, so its frequency is visible in the app log.
+  assert.deepEqual(logged.map(([event, d]) => [event, d.provider, d.force]), [["usage.check", "antigravity", false], ["usage.check", "antigravity", true]]);
+  read.invalidate("antigravity");
+  await read("antigravity");
+  assert.equal(calls, 3);
 });
 
 const codexEvent = (used, timestamp = "2026-11-03T08:00:00Z") => JSON.stringify({ timestamp, type: "event_msg", payload: {

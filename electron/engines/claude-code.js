@@ -97,14 +97,14 @@ export const claudeCode = {
     if (effort) args.push("--effort", effort);
     // Pictures (text mode): the prompt goes in as one stream-json message
     // with image blocks.
-    const pics = live ? [] : imageBlocks(images);
-    if (pics.length) args.push("--input-format", "stream-json");
+    const pics = imageBlocks(images);
+    if (pics.length && !live) args.push("--input-format", "stream-json");
     let full = "";
     let err = null;
     // Live input: stdin closes at a result once every message we sent has been
     // consumed (echoed back); otherwise Claude takes another turn for it.
     let input = null, sent = 0, echoed = 0, detach = null;
-    const userLine = (text) => JSON.stringify({ type: "user", message: { role: "user", content: [{ type: "text", text }] } }) + "\n";
+    const userLine = (text, pictures = []) => JSON.stringify({ type: "user", message: { role: "user", content: [{ type: "text", text }, ...pictures] } }) + "\n";
     const closeInput = () => { detach?.(); detach = null; input?.end(); input = null; };
     let msgId = "m";
     const startedAt = Date.now();
@@ -120,7 +120,7 @@ export const claudeCode = {
       onStdin: (io) => {
         input = io;
         sent++;
-        io.write(userLine(`${system}\n\n---\n\n${user}`));
+        io.write(userLine(`${system}\n\n---\n\n${user}`, pics));
         if (inbox) detach = inbox.attach((text) => {
           if (!input || !input.write(userLine(text))) return false;
           sent++;

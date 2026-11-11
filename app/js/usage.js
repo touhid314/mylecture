@@ -12,7 +12,7 @@ export class UsagePanel {
     this.source = () => (source ? source() : createSource(this.state.settings)) || { id: "", model: "" };
     this.compact = compact;
     this.summary = h("summary", { class: "small", "aria-live": "polite", title: "Usage remaining. Click for reset times and all model groups." }, "Usage: checking...");
-    this.refreshButton = h("button", { class: "btn sm", onclick: () => this.refresh() }, icon("refresh"), "Refresh");
+    this.refreshButton = h("button", { class: "btn sm", onclick: () => this.refresh({ force: true }) }, icon("refresh"), "Refresh");
     this.body = h("div", { class: "usage-body" });
     this.details = h("details", { class: "usage-details" + (compact ? " usage-compact" : "") },
       this.summary,
@@ -23,17 +23,29 @@ export class UsagePanel {
     this.details.addEventListener("toggle", () => { if (this.details.open) this.refresh(); });
     document.addEventListener("mousedown", (e) => { if (this.details.open && !this.details.contains(e.target)) this.details.open = false; });
     document.addEventListener("keydown", (e) => { if (e.key === "Escape") this.details.open = false; });
-    bus.on("settings-changed", () => this.refresh());
-    window.ml.gen.onEvent((e) => { if (["done", "error", "cancelled"].includes(e.type)) this.refresh(); });
-    window.addEventListener("focus", () => this.refresh());
-    setInterval(() => { if (!document.hidden) this.refresh(); }, 60000);
+    // Checked only for the provider in use on this panel's screen, and only
+    // when something calls for it: the screen opens (its tab calls refresh),
+    // the provider, model or account changes, a run finishes, or the user
+    // presses Refresh. No timers: each check of a subscription may start the
+    // provider's tool.
+    bus.on("settings-changed", () => { if (usageKey(this.state.settings, this.source()) !== this.checkedKey) this.refresh(); });
+    // Create's panel: a finished video used up some of the limit.
+    if (!source) window.ml.gen.onEvent((e) => { if (["done", "error", "cancelled"].includes(e.type)) this.refresh({ force: true }); });
     this.refresh();
   }
 
-  async refresh() {
+  // On screen (its tab is the one open)?
+  visible() {
+    return this.root.isConnected !== false && this.root.offsetParent !== null;
+  }
+
+  async refresh({ force = false } = {}) {
     const { id, model = "" } = this.source();
     const key = usageKey(this.state.settings, this.source());
-    const unavailable = !id || (subscriptionProviders.has(id) && this.state.settings.connected?.[id] === false);
+    // Its screen isn't open: checked when it is (the tab calls refresh).
+    if (!force && !this.visible()) return;
+    this.checkedKey = key;
+    const unavailable = !id || (subscriptionProviders.has(id) && !this.state.settings.connected?.[id]);
     if (unavailable) {
       this.request = (this.request || 0) + 1;
       this.pendingKey = null;
@@ -58,7 +70,7 @@ export class UsagePanel {
     this.summary.removeAttribute("aria-label");
     this.body.replaceChildren(h("p", { class: "muted" }, "Checking account limits..."));
     try {
-      const result = await window.ml.engines.usage(id);
+      const result = await window.ml.engines.usage(id, { force });
       if (request !== this.request || key !== usageKey(this.state.settings, this.source())) return;
       if (!result.available || !result.groups.length) {
         this.summary.textContent = this.compact ? "Limits —" : "Usage unavailable";

@@ -6,7 +6,7 @@ import path from "node:path";
 import crypto from "node:crypto";
 import { log } from "../logger.js";
 
-const UA = "MyLecture/1.2 (educational desktop app; https://github.com/touhid314/mylecture)";
+const UA = "MyLecture/2.0 (educational desktop app; https://github.com/touhid314/mylecture)";
 const OK_MIME = /^image\/(jpeg|png|gif|webp|svg\+xml)$/;
 
 async function getJson(url, signal) {
@@ -69,7 +69,10 @@ export class ImageFinder {
     const q = String(query || "").replace(/\s+/g, " ").trim().slice(0, 160);
     if (!q) return Promise.resolve(null);
     const key = crypto.createHash("sha1").update(q.toLowerCase()).digest("hex").slice(0, 16);
-    if (!this.memo.has(key)) this.memo.set(key, this._find(q, key).catch((error) => {
+    if (!this.memo.has(key)) this.memo.set(key, this._find(q, key).then((result) => {
+      if (!result) this.memo.delete(key);
+      return result;
+    }).catch((error) => {
       log("warn", "tutor.image.failed", { query: q, error });
       this.memo.delete(key);
       return null;
@@ -89,14 +92,37 @@ export class ImageFinder {
     // A Commons file whose title matches the query well; otherwise the lead
     // image of the best-matching Wikipedia article (usually a good diagram).
     const [c, w] = await Promise.all([commons(q, signal).catch(() => null), wikipedia(q, signal).catch(() => null)]);
-    const hit = c && c.score >= 0.6 ? c : w || (c && c.score >= 0.3 ? c : null);
-    if (!hit) return null;
-    const res = await fetch(hit.src, { headers: { "user-agent": UA }, signal });
+    const candidates = [c && c.score >= 0.6 ? c : null, w, c && c.score >= 0.3 ? c : null].filter(Boolean);
+    for (const hit of [...new Set(candidates)]) {
+      try {
+        return await this._download(hit, q, key, metaFile, started);
+      } catch (error) {
+        log("warn", "tutor.image.download.failed", { error });
+      }
+    }
+    return null;
+  }
+
+  async _download(hit, q, key, metaFile, started) {
+    const res = await fetch(hit.src, { headers: { "user-agent": UA }, signal: AbortSignal.timeout(12000) });
     if (!res.ok) throw new Error(`image HTTP ${res.status}`);
-    const type = res.headers.get("content-type") || "";
+    const type = (res.headers.get("content-type") || "").split(";")[0].trim();
+    if (!OK_MIME.test(type)) throw new Error("Not an image");
+    const limit = 8 * 1024 * 1024;
+    if (Number(res.headers.get("content-length")) > limit) {
+      await res.body?.cancel();
+      throw new Error("image too large");
+    }
     const ext = /png/.test(type) ? "png" : /gif/.test(type) ? "gif" : /webp/.test(type) ? "webp" : /svg/.test(type) ? "svg" : "jpg";
-    const buf = Buffer.from(await res.arrayBuffer());
-    if (buf.length > 8 * 1024 * 1024) throw new Error("image too large");
+    const chunks = [];
+    let size = 0;
+    for await (const chunk of res.body) {
+      size += chunk.length;
+      if (size > limit) throw new Error("image too large");
+      chunks.push(chunk);
+    }
+    const buf = Buffer.concat(chunks);
+    if (!buf.length) throw new Error("Empty image");
     const file = `${key}.${ext}`;
     fs.writeFileSync(path.join(this.dir, file), buf);
     fs.writeFileSync(metaFile, JSON.stringify({ query: q, file, page: hit.page, credit: hit.credit }));

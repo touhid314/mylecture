@@ -52,6 +52,8 @@ const hooks = registerHooks({
       export { idleStatus, VISION_MIMES, imageBlocks } from ${JSON.stringify(new URL("../electron/engines/cli-util.js", import.meta.url).href)};
       export const spawnLines=async(_exe,_args,opts)=>{
         globalThis.__providerLoggingFixture.args=_args;
+        globalThis.__providerLoggingFixture.input=[];
+        opts.onStdin?.({write:line=>{globalThis.__providerLoggingFixture.input.push(line);return true},end(){}});
         for(const ev of globalThis.__providerLoggingFixture.events)opts.onLine(JSON.stringify(ev));
         opts.onIdle?.({idleMs:45000,elapsedMs:60000});
         return {code:0,stderr:"",aborted:false};
@@ -106,4 +108,14 @@ test("Claude text mode keeps safe mode and no tools", async () => {
   await claudeCode.generate({ system: "s", user: "u", onDelta() {} });
   assert(fixture.args.includes("--safe-mode"));
   assert(!fixture.args.includes("--mcp-config"));
+});
+
+test("Claude agent mode retains image input for independent picture work", async () => {
+  fixture.events = [{ type: "result", is_error: false, result: "done" }];
+  const picture = path.join(directory, "picture.png");
+  fs.writeFileSync(picture, Buffer.from([137, 80, 78, 71]));
+  await claudeCode.generate({ system: "s", user: "u", workspace: "project", images: [{ name: "picture.png", mime: "image/png", path: picture }], onDelta() {} });
+  const input = JSON.parse(fixture.input[0]);
+  assert.equal(input.message.content[1].type, "image");
+  assert.equal(input.message.content[1].source.media_type, "image/png");
 });

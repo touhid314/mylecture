@@ -90,13 +90,14 @@ function panelFixture(t, settings) {
   t.after(() => { for (const [key, value] of Object.entries(previous)) {
     if (value === undefined) delete globalThis[key]; else globalThis[key] = value;
   } });
-  const calls = [];
+  const calls = [], windowEvents = [];
+  let intervals = 0;
   globalThis.Node = Element;
   globalThis.document = { createElement: () => new Element(), createElementNS: () => new Element(), createTextNode: String, addEventListener() {} };
-  globalThis.window = { addEventListener() {}, ml: { gen: { onEvent() {} }, engines: { usage: id => {
+  globalThis.window = { addEventListener(event) { windowEvents.push(event); }, ml: { gen: { onEvent() {} }, engines: { usage: id => {
     const request = deferred(); calls.push({ id, ...request }); return request.promise;
   } } } };
-  globalThis.setInterval = () => 0;
+  globalThis.setInterval = () => { intervals++; return 0; };
   const subscribe = bus.on.bind(bus);
   t.mock.method(bus, "on", (event, listener) => {
     const unsubscribe = subscribe(event, listener);
@@ -105,7 +106,7 @@ function panelFixture(t, settings) {
   });
   const state = { settings };
   const panel = new UsagePanel({ state });
-  return { state, panel, calls };
+  return { state, panel, calls, windowEvents, intervals: () => intervals };
 }
 
 test("same-provider revision changes immediately clear quotas and reject late UI results", async t => {
@@ -157,4 +158,27 @@ test("a revision change rejects a response even before the settings event refres
   assert.doesNotMatch(panel.summary.textContent, /99%/);
   assert.doesNotMatch(panel.body.textContent, /99.0%/);
   assert.equal(panel.refreshButton.disabled, false);
+});
+
+test("usage is checked only for the visible screen's connected provider, when something changes: no timers or focus checks", async t => {
+  const { state, panel, calls, windowEvents, intervals } = panelFixture(t, { engine: "antigravity", models: { antigravity: "gemini" }, connected: { antigravity: true }, accountRevision: { antigravity: 1 } });
+  assert.equal(calls.length, 1); // the screen opened
+  assert.equal(intervals(), 0, "no polling timer");
+  assert.ok(!windowEvents.includes("focus"), "no check on every window focus");
+  calls[0].resolve(quota(80));
+  await Promise.resolve();
+  // A setting unrelated to this provider (the voice) doesn't check again.
+  state.settings = { ...state.settings, voice: "af_bella" };
+  bus.emit("settings-changed");
+  assert.equal(calls.length, 1);
+  // Another screen is open: nothing is checked until this one is shown.
+  panel.root.offsetParent = null;
+  await panel.refresh();
+  state.settings = { ...state.settings, models: { antigravity: "gemini-pro" } };
+  bus.emit("settings-changed");
+  assert.equal(calls.length, 1);
+  // Shown again (its tab calls refresh), or Refresh pressed: checked.
+  delete panel.root.offsetParent;
+  panel.refresh();
+  assert.equal(calls.length, 2);
 });

@@ -11,6 +11,7 @@ import { accountRemovalPatch, accountRevisionPatch } from "./account-connections
 import { listRenderedVideos } from "./video-library.js";
 import { TTSService, KOKORO_VOICES, OMNIVOICE_VOICES } from "./tts/index.js";
 import { VOICE_ALIASES } from "./tts/omnivoice.js";
+import { wordTimings } from "./tts/timing.js";
 import { DEMO_TEXT, readDemo } from "./tts/demos.js";
 import { Generator, audioUrl, sceneUrl } from "./generator.js";
 import { IdeService, hydrateProject } from "./ide.js";
@@ -128,6 +129,7 @@ function resolveAppUrl(u) {
     ["lib/", paths.library],
     ["exports/", paths.exports],
     ["tutor-img/", path.join(paths.tutor, "images")],
+    ["tutor-file/", paths.tutor],
   ];
   for (const [prefix, dir] of map) {
     if (p.startsWith(prefix)) return safeJoin(dir, p.slice(prefix.length));
@@ -163,6 +165,9 @@ function createWindow() {
     },
   });
   Menu.setApplicationMenu(null);
+  // Which sounds the window makes, and when: the log shows any audio the
+  // app plays without being asked.
+  win.webContents.on("audio-state-changed", (e) => log("info", "window.audio", { audible: !!e.audible }));
   win.webContents.on("did-finish-load", () => log("info", "renderer.loaded"));
   win.webContents.on("did-fail-load", (_event, errorCode, errorDescription, _url, isMainFrame) => log("error", "renderer.loadFailed", { errorCode, errorDescription, isMainFrame }));
   win.webContents.on("render-process-gone", (_event, details) => log("error", "renderer.gone", details));
@@ -203,16 +208,16 @@ function hydrate(lec) {
 }
 
 function registerIpc() {
-  const readUsage = createUsageService(engines);
+  const readUsage = createUsageService(engines, undefined, { log });
   const statusCache = new Map();
   const modelRequests = new Map();
   const invalidateAccount = id => { statusCache.delete(id); modelRequests.delete(id); readUsage.invalidate(id); };
-  ipcMain.handle("engines:usage", async (_event, id) => {
+  ipcMain.handle("engines:usage", async (_event, id, { force = false } = {}) => {
     const s = getSettings();
     id ||= s.engine;
     if (!id || (id !== "api" && !s.connected?.[id])) return { available: false, groups: [], message: "Connect an account to see its limits." };
     const revision = s.accountRevision?.[id] ?? 0;
-    const result = await readUsage(id);
+    const result = await readUsage(id, { force: !!force });
     if (revision !== (getSettings().accountRevision?.[id] ?? 0) || (id !== "api" && !getSettings().connected?.[id])) return { available: false, groups: [], message: "Account changed. Refresh to see its limits." };
     if (id === "codex" && s.accountChangedAt?.[id] && (!result.measuredAt || Date.parse(result.measuredAt) < s.accountChangedAt[id])) return { available: false, groups: [], message: "Make a video with this GPT account, then refresh its limits." };
     return result;
@@ -324,7 +329,7 @@ function registerIpc() {
       if (!st.ready || (switching && (options.email || "") !== (st.account?.email || ""))) throw new Error("The signed-in account changed. Check the account shown and try again.");
       if (options.automatic && (!s.accountSwitchFrom?.[id] || s.accountSwitchFrom[id].toLowerCase() === (st.account?.email || "").toLowerCase())) throw new Error("Finish signing in with the new account, or select Use this account.");
       invalidateAccount(id);
-      return saveSettings({ connected: { [id]: true }, accountSwitch: { [id]: false }, accountSwitchFrom: { [id]: "" }, accountChangedAt: { [id]: Date.now() }, engine: id, ...accountRevisionPatch(getSettings(), id) });
+      return saveSettings({ connected: { [id]: true }, accountEmail: { [id]: st.account?.email || "" }, accountSwitch: { [id]: false }, accountSwitchFrom: { [id]: "" }, accountChangedAt: { [id]: Date.now() }, engine: id, ...accountRevisionPatch(getSettings(), id) });
     }
     let previousEmail = "";
     if (action === "switch-account") {
@@ -334,19 +339,30 @@ function registerIpc() {
       previousEmail = previous.account?.email || "";
     }
     invalidateAccount(id);
-    const s = saveSettings({ ...accountRemovalPatch(getSettings(), id), accountSwitchFrom: { [id]: previousEmail }, accountChangedAt: { [id]: Date.now() }, accountSwitch: { [id]: action === "switch-account" } });
+    const s = saveSettings({ ...accountRemovalPatch(getSettings(), id), accountEmail: { [id]: "" }, accountSwitchFrom: { [id]: previousEmail }, accountChangedAt: { [id]: Date.now() }, accountSwitch: { [id]: action === "switch-account" } });
     if (action === "switch-account") {
       try { connectService(id, action); }
       catch (error) { saveSettings({ accountSwitch: { [id]: false } }); throw error; }
     }
     return s;
   });
-  // Cached briefly: the connect cards poll, and the checks start the provider tools.
-  h("engines:status", async (id, { fresh = false } = {}) => {
+  // A live sign-in check starts the provider's tool (Gemini's can open a
+  // sign-in prompt), so it runs only when the user is connecting or switching
+  // an account. installed: just whether the tool is on this computer (a file
+  // lookup, nothing is started); a connected account counts as connected.
+  h("engines:status", async (id, { fresh = false, installed = false } = {}) => {
     if (!id || !engines.list.some(e => e.id === id)) return { installed: false, ready: false, message: "Connect an account in Settings." };
+    if (installed && id !== "api") {
+      let found = false;
+      try { found = !!engines.get(id).exe?.(); } catch {}
+      return { installed: found, ready: undefined, message: found ? "" : "Not set up yet" };
+    }
     const revision = getSettings().accountRevision?.[id] ?? 0;
     const hit = statusCache.get(id);
-    if (!fresh && hit && Date.now() - hit.at < (hit.value?.ready ? 60000 : 8000)) {
+    // Not signed in: checked again after 2 minutes (each check starts the
+    // provider's tool, which may ask to sign in); a connect in progress asks
+    // with fresh.
+    if (!fresh && hit && Date.now() - hit.at < (hit.value?.ready ? 60000 : 120000)) {
       const result = await hit.promise;
       return revision === (getSettings().accountRevision?.[id] ?? 0) ? result : { installed: true, ready: false, message: "Account changed. Refresh to check sign-in." };
     }
@@ -426,7 +442,9 @@ function registerIpc() {
   h("tts:synth", async (text, opts) => {
     const o = opts && typeof opts === "object" ? { engine: opts.engine, voice: opts.voice, speed: Number(opts.speed) || undefined } : {};
     const r = await tts.synth(text, o);
-    return { key: r.key, url: audioUrl(r.key), dur: r.dur };
+    let words = null;
+    try { words = wordTimings(fs.readFileSync(r.file), text); } catch {}
+    return { key: r.key, url: audioUrl(r.key), dur: r.dur, words };
   });
   h("tts:retry", () => {
     if (getSettings().voiceEngine === "omnivoice") { tts.omni.stop(); tts.omni.start().catch(() => {}); }
@@ -620,9 +638,9 @@ app.whenReady().then(() => {
     },
   });
   ide = new IdeService({ engines, tts, send });
-  tutor = new TutorService({ engines, getSettings, send });
-  stt = new SpeechToText({ modelDir: paths.models });
   images = new ImageFinder({ dir: path.join(paths.tutor, "images") });
+  tutor = new TutorService({ engines, getSettings, send, sessions: tutorSessions, imageFinder: images });
+  stt = new SpeechToText({ modelDir: paths.models });
   stt.on("status", (st) => send("stt:status", st));
   components = new ComponentManager({
     userData: app.getPath("userData"), modelDir: paths.models, tts, getSettings, saveSettings, log,

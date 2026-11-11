@@ -1,8 +1,11 @@
 // "Connect your AI": GPT, Gemini and Claude subscriptions.
-// A service counts as connected only once the user connects it in MyLecture
-// (settings.connected) and its sign-in is valid. Tools that happen to be
-// signed in on the computer are not connected until the user chooses so.
-// Used by the first-run welcome and by Create while nothing is connected.
+// A service is connected once the user connects it in MyLecture
+// (settings.connected), and it stays connected until they remove it: the app
+// doesn't keep re-checking sign-ins. A live sign-in check (which starts the
+// provider's tool) runs only while the user is connecting or switching an
+// account, and stops as soon as that is done. Tools that happen to be signed
+// in on the computer are not connected until the user chooses so.
+// Used by the first-run welcome, Settings, and Create while nothing is connected.
 import { h, toast, bus, confirmBox } from "./ui.js";
 import { showInstaller } from "./install-dialog.js";
 import { showApiKeyDialog } from "./api-key.js";
@@ -22,11 +25,10 @@ async function saveSettings(state, patch) {
   return s;
 }
 
-export const isConnected = (settings, id, status) => !!settings.connected?.[id] && !!status?.ready;
+export const isConnected = (settings, id) => !!settings.connected?.[id];
 
 export async function anyConnected(state) {
-  const st = await Promise.all(SERVICE_ORDER.map((id) => window.ml.engines.status(id).catch(() => ({}))));
-  return SERVICE_ORDER.some((id, i) => isConnected(state.settings, id, st[i]));
+  return SERVICE_ORDER.some((id) => isConnected(state.settings, id));
 }
 
 // Engine installs in progress (id -> latest message), shared by every panel.
@@ -40,7 +42,8 @@ globalThis.window?.ml?.components?.onProgress((p) => {
 
 const friendly = (e) => String(e?.message || e).replace(/^Error invoking remote method '[^']+': (Error: )?/, "");
 
-// Returns { el, refresh, stop }. Polls status while mounted.
+// Returns { el, refresh, stop }. Checks sign-in only while a connect or
+// account switch the user started is waiting for them to sign in.
 export function connectPanel(state, { compact = false, manageAccounts = false, onChange } = {}) {
   const el = h("div", { class: "connect" + (compact ? " compact" : "") });
   const cards = {};
@@ -75,14 +78,15 @@ export function connectPanel(state, { compact = false, manageAccounts = false, o
 
   const paint = (svc, id, st) => {
     const c = cards[id];
-    const connected = isConnected(state.settings, id, st);
+    const connected = isConnected(state.settings, id);
     const selected = connected && state.settings.engine === id;
     const switching = !!state.settings.accountSwitch?.[id];
     const waiting = pending.has(id) || switching;
     const chip = st == null ? ["checking", "Checking…"] : connected ? ["good", "Connected"] : switching && st.ready ? ["good", "Sign-in ready"] : waiting ? ["warn", "Waiting for sign-in…"] : ["muted", "Not connected"];
     c.chip.className = `connect-chip ${chip[0]}`;
     c.chip.textContent = chip[1];
-    const acct = st?.ready && st.account?.email ? [st.account.email, st.account.plan].filter(Boolean).join(" · ") : "";
+    const saved = connected ? state.settings.accountEmail?.[id] || "" : "";
+    const acct = saved || (st?.ready && st.account?.email ? [st.account.email, st.account.plan].filter(Boolean).join(" · ") : "");
     c.account.textContent = acct ? `${connected ? "Signed in as" : "Signed in on this computer as"} ${acct}` : st && st.installed && !st.ready && st.message && st.message !== "Not signed in" ? st.message : "";
     c.account.hidden = !c.account.textContent;
     c.el.classList.toggle("ready", connected);
@@ -155,12 +159,19 @@ export function connectPanel(state, { compact = false, manageAccounts = false, o
     c.actions.replaceChildren(...buttons);
   };
 
+  // Connected services are painted from the settings; the others only need
+  // to know whether their tool is installed (a file lookup). A live sign-in
+  // check runs only for a connect or switch in progress.
+  const live = (id) => pending.has(id) || !!state.settings.accountSwitch?.[id];
   const refresh = async () => {
     if (busy || !alive) return;
     busy = true;
     try {
       const list = await services();
-      const all = await Promise.all(SERVICE_ORDER.map((id) => window.ml.engines.status(id, { fresh: pending.has(id) || !!state.settings.accountSwitch?.[id] }).catch(() => ({ installed: false, ready: false }))));
+      const all = await Promise.all(SERVICE_ORDER.map((id) => live(id)
+        ? window.ml.engines.status(id, { fresh: true }).catch(() => ({ installed: true, ready: false }))
+        : isConnected(state.settings, id) ? Promise.resolve({ installed: true, ready: true })
+        : window.ml.engines.status(id, { installed: true }).catch(() => ({ installed: false, ready: false }))));
       if (!alive) return;
       const byId = Object.fromEntries(SERVICE_ORDER.map((id, i) => [id, all[i]]));
       // The replacement identity is now signed in: finish without another
@@ -175,20 +186,18 @@ export function connectPanel(state, { compact = false, manageAccounts = false, o
       if (!alive) return;
       // Finish connections the user started once their sign-in is valid.
       for (const id of [...pending]) if (alive && byId[id].ready && !state.settings.accountSwitch?.[id]) await connect(id);
-      if (!alive) return;
-      // The chosen service stopped working but another connected one works: use that.
-      const current = state.settings.engine;
-      if (current && current !== "api" && !isConnected(state.settings, current, byId[current])) {
-        const other = SERVICE_ORDER.find((id) => isConnected(state.settings, id, byId[id]));
-        if (other) {
-          await saveSettings(state, { engine: other });
-          onChange?.(other);
-        }
-      }
       if (alive) for (const id of SERVICE_ORDER) paint(list[id], id, byId[id]);
     } finally {
       busy = false;
+      schedule();
     }
+  };
+  // Waiting for the user to finish signing in: look again in a few seconds.
+  // Nothing to wait for: no timer at all.
+  const schedule = () => {
+    clearTimeout(timer);
+    timer = null;
+    if (alive && SERVICE_ORDER.some(live)) timer = setTimeout(() => { if (el.isConnected !== false) refresh(); else schedule(); }, 3000);
   };
 
   services().then((list) => {
@@ -210,13 +219,10 @@ export function connectPanel(state, { compact = false, manageAccounts = false, o
       el.append(card);
     }
     refresh();
-    timer = setInterval(() => document.visibilityState === "visible" && el.isConnected && refresh(), 3000);
   });
-  window.addEventListener("focus", refresh);
   const stop = () => {
     alive = false;
-    clearInterval(timer);
-    window.removeEventListener("focus", refresh);
+    clearTimeout(timer);
   };
   return { el, refresh, stop };
 }
@@ -244,17 +250,15 @@ export function showWelcome(state, { onDone } = {}) {
   );
   document.body.append(overlay);
 
-  async function update() {
-    const engine = state.settings.engine;
-    const st = engine ? await window.ml.engines.status(engine).catch(() => ({})) : {};
-    start.disabled = !isConnected(state.settings, engine, st);
+  function update() {
+    start.disabled = !isConnected(state.settings, state.settings.engine);
     start.title = start.disabled ? "Connect GPT, Gemini or Claude first" : "";
   }
-  const poll = setInterval(update, 3000);
+  const unlisten = bus.on("settings-changed", () => update());
   update();
 
   async function finish(goto) {
-    clearInterval(poll);
+    unlisten();
     panel.stop();
     const s = await window.ml.settings.set({ onboarded: true });
     state.settings = s;

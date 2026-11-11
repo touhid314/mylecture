@@ -44,6 +44,9 @@ export const DEFAULT_SETTINGS = {
   accountSwitch: {},
   accountSwitchFrom: {},
   accountChangedAt: {},
+  // The email each connected account signed in with, saved when it was
+  // connected, so the app can show it without asking the provider again.
+  accountEmail: {},
 };
 
 function root() {

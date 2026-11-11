@@ -118,9 +118,14 @@ export class SettingsView {
     this.accountRevisions = { ...revisions };
   }
 
+  // Subscriptions: connected is what the user chose; otherwise only whether
+  // the tool is installed (a file lookup). No live sign-in check: that starts
+  // the provider's tool. The API key check reads settings only.
   async _checkEngine(id) {
     const revision = this.state.settings.accountRevision?.[id] ?? 0;
-    const status = await window.ml.engines.status(id);
+    const status = id === "api" ? await window.ml.engines.status(id)
+      : this.state.settings.connected?.[id] ? { installed: true, ready: true, message: "Connected" }
+      : { ...(await window.ml.engines.status(id, { installed: true })), ready: false };
     if (revision !== (this.state.settings.accountRevision?.[id] ?? 0)) return;
     this.statusCache[id] = status;
     this._paintStatus(id);
@@ -131,7 +136,7 @@ export class SettingsView {
     const st = this.statusCache[id];
     if (!el || !st) return;
     el.className = `badge ${st.ready ? "good" : st.installed ? "warn" : "bad"}`;
-    el.replaceChildren(st.ready ? "Ready" : st.installed ? "Needs sign-in" : "Not installed");
+    el.replaceChildren(st.ready ? (id === "api" ? "Ready" : "Connected") : st.installed ? (id === "api" ? "Needs setup" : "Not connected") : "Not installed");
     el.title = st.message || "";
     if (id === this.state.settings.engine && this.engineMsg) this.engineMsg.textContent = st.message + (st.version ? ` · ${st.version}` : "");
   }

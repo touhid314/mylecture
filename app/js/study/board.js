@@ -3,6 +3,26 @@
 import { h, icon } from "../ui.js";
 import { compileExpr, checkNumber, checkText } from "./expr.js";
 import { renderScene } from "./scene.js";
+import { pictureRequest } from "./pictures.js";
+import { drawPictureMarks } from "./picture-marks.js";
+import { mathifySvg } from "./svg-math.js";
+import { fixContrast } from "./contrast.js";
+import { renderMap, loadWorld, zoomMap, traceRoute, markShown, bringIntoView, settle } from "./map.js";
+
+// Generated documents can report layout and errors, but cannot invoke app APIs.
+window.addEventListener("message", (event) => {
+  const frame = [...document.querySelectorAll("iframe.wb-html-frame")].find((el) => el.contentWindow === event.source);
+  if (!frame) return;
+  if (event.data?.type === "tutor:height" && frame.dataset.autoHeight === "true") {
+    const height = Number(event.data.height);
+    if (Number.isFinite(height)) frame.style.height = `${Math.max(160, Math.min(900, height))}px`;
+  }
+  if (event.data?.type === "tutor:html-error") {
+    console.error("Tutor visual error:", String(event.data.message || "").slice(0, 500));
+    const status = frame.parentElement.querySelector(".wb-html-status");
+    if (status) { status.hidden = false; status.textContent = "This visual had an error. Ask your tutor to fix it."; }
+  }
+});
 
 const md = window.markdownit ? window.markdownit({ html: false, linkify: true, breaks: false }) : null;
 
@@ -280,6 +300,10 @@ export function writeOut(el, { max = 9000, speed = 1 } = {}) {
 }
 
 // ---------- the board ----------
+// Visuals that can be docked while the tutor talks about them.
+const FIGURES = ".wb-figure, .wb-table-wrap, .wb-flow, .wb-code";
+const STUCK_ITEMS = 6; // notes added without referring to the docked visual
+
 export class Board {
   constructor({ onAnswer, onExplore } = {}) {
     this.onAnswer = onAnswer || (() => {});
@@ -289,6 +313,7 @@ export class Board {
     this.viewing = -1;
     this.items = new Map();
     this.follow = true;
+    loadWorld().catch(() => {}); // maps draw at once when the tutor needs one
     this.tabs = h("div", { class: "wb-tabs" });
     this.prevBtn = h("button", { class: "wb-nav", title: "Previous page", onclick: () => this.showPage(this.viewing - 1) }, icon("up"));
     this.nextBtn = h("button", { class: "wb-nav", title: "Next page", onclick: () => this.showPage(this.viewing + 1) }, icon("down"));
@@ -342,6 +367,7 @@ export class Board {
       cur.head.replaceChildren(rich(title || "", "", true));
       return cur;
     }
+    this.unstick();
     const head = h("h1", { class: "wb-title" }, rich(title || "", "", true));
     const body = h("div", { class: "wb-body" });
     const el = h("section", { class: "wb-page" }, head, body);
@@ -362,6 +388,9 @@ export class Board {
     if (i < 0 || i >= this.pages.length) return;
     this.viewing = i;
     this.pages.forEach((p, k) => p.el.classList.toggle("shown", k === i));
+    // Diagrams drawn while their page was hidden (a restored lesson) get
+    // their text contrast checked now that they're laid out.
+    requestAnimationFrame(() => { for (const svg of this.pages[i]?.el.querySelectorAll('svg.wb-svg:not([data-contrast]), svg.wb-scene:not([data-contrast])') || []) fixContrast(svg); });
     if (i === this.current) {
       this.follow = true;
       this._scrollEnd(instant);
@@ -391,6 +420,10 @@ export class Board {
     const fade = animate && ["write", "math", "flow", "table", "code"].includes(action?.type);
     if (animate) el.classList.add(fade ? "enter-fade" : "enter");
     page.body.append(el);
+    // A new visual means the tutor has moved on from the docked one; a
+    // docked visual nobody refers to again is released after a while.
+    if (el.matches(FIGURES)) this.unstick();
+    else if (this.stuck && ++this.stuckAge > STUCK_ITEMS) this.unstick();
     el._writeMs = fade ? 650 : animate ? (action?.type === "plot" ? 2600 : action?.type === "svg" ? 1200 : 450) : 0;
     const id = action?.id || action?.data?.id;
     if (id) {
@@ -401,6 +434,32 @@ export class Board {
     if (this.viewing !== this.current) this._updateNav();
     this._scrollEnd(!animate);
     return el;
+  }
+
+  // The visual the tutor is talking about stays in view: it docks at the top
+  // of the board (sticky) once later notes would push it off screen, and the
+  // notes keep scrolling beneath it. Only one at a time.
+  focus(el) {
+    const item = el?.closest?.(".wb-item");
+    if (!item || !item.matches(FIGURES)) return false;
+    const live = this.pages[this.current];
+    if (!live?.el.contains(item) || this.viewing !== this.current) return false;
+    this.stuckAge = 0;
+    if (this.stuck === item) return true;
+    this.unstick();
+    item.classList.add("wb-stuck");
+    // Too tall to dock without hiding the notes: leave it in place.
+    if (item.getBoundingClientRect().height > this.scroller.clientHeight * 0.62) {
+      item.classList.remove("wb-stuck");
+      return false;
+    }
+    this.stuck = item;
+    return true;
+  }
+
+  unstick() {
+    this.stuck?.classList.remove("wb-stuck");
+    this.stuck = null;
   }
 
   // Points at something on the board, like a teacher: scrolls it into view
@@ -414,17 +473,47 @@ export class Board {
     ref = String(ref || "").trim();
     let target = this._resolve(ref, hint);
     if (!target) return false;
+    // Pointing at an older picture mark brings it back to full strength.
+    for (const el of target.els || [target.el]) el.classList?.remove("wb-pmark-old");
     // A diagram from an earlier page that the tutor is still talking about:
     // bring a copy onto the live page so it stays in view, like a teacher
     // redrawing the circuit next to the working.
     if (this._pinFromEarlierPage(target.el)) target = this._resolve(ref, hint) || target;
+    // A visual further up: dock it so it stays visible while it's discussed.
+    if (this.focus(target.el) && this.locked && !this.hold) {
+      this.follow = true;
+      this.scroller.scrollTop = this.scroller.scrollHeight;
+      target = this._resolve(ref, hint) || target;
+    }
     const page = target.el.closest(".wb-page");
     const pi = this.pages.findIndex((p) => p.el === page);
     if (pi >= 0 && pi !== this.viewing) this.showPage(pi);
+    if (target.htmlPart) {
+      target.el.scrollIntoView({ block: "nearest", behavior: "smooth" });
+      const frame = target.el.querySelector("iframe.wb-html-frame");
+      const send = () => frame?.contentWindow?.postMessage({ type: "tutor:point", id: target.htmlPart }, "*");
+      if (frame?.dataset.ready === "true") send();
+      else frame?.addEventListener("load", send, { once: true });
+      return true;
+    }
+    // A place, route, area or country on a map: make it glow on the map
+    // itself, so the highlight follows it when the map zooms.
+    const feature = target.el.closest?.("svg.wb-map [data-id]");
+    if (feature) {
+      bringIntoView(feature.closest("svg.wb-map"), feature);
+      this._unpoint?.();
+      feature.classList.remove("wb-map-hl");
+      void feature.getBoundingClientRect();
+      feature.classList.add("wb-map-hl");
+      this._unpoint = () => feature.classList.remove("wb-map-hl");
+      clearTimeout(this._pointTimer);
+      this._pointTimer = setTimeout(() => { this._unpoint?.(); this._unpoint = null; }, 3200);
+      return true;
+    }
     const sc = this.scroller.getBoundingClientRect();
     let r = this._rect(target);
     // Bring it into view first if it's off screen.
-    if (r.top < sc.top + 20 || r.bottom > sc.bottom - 120) {
+    if (!this.stuck?.contains(target.el) && (r.top < sc.top + 20 || r.bottom > sc.bottom - 120)) {
       this.follow = false;
       this.scroller.scrollTop += r.top - sc.top - sc.height * 0.3;
       target = this._resolve(ref, hint) || target;
@@ -440,6 +529,74 @@ export class Board {
       if (this.locked && !this.hold) this.toLive();
     }, 3200);
     return true;
+  }
+
+  // The map svg of a map item ("m1", "m1.part" or "m1/Country").
+  _mapOf(ref) {
+    const m = String(ref || "").trim().match(/^([\w-]+)(?:[./](.*))?$/);
+    const svg = m && this.items.get(m[1])?.querySelector("svg.wb-map");
+    return svg ? { svg, item: this.items.get(m[1]), part: (m[2] || "").trim() } : null;
+  }
+
+  // {zoom:m1.india} / {zoom:m1/Japan} / {zoom:m1}: the map's camera moves to
+  // that item or country, or back to the map's own view.
+  zoomMap(ref) {
+    const t = this._mapOf(ref);
+    if (!t) return false;
+    if (this.focus(t.item) && this.locked) this._scrollEnd(true);
+    zoomMap(t.svg, t.part);
+    return true;
+  }
+
+  // {trace:m1.r1}: draw that route along its path now.
+  traceMap(ref) {
+    const t = this._mapOf(ref);
+    if (!t || !t.part) return false;
+    if (this.focus(t.item) && this.locked) this._scrollEnd(true);
+    traceRoute(t.svg, t.part);
+    return true;
+  }
+
+  // {show:id.part}: make a hidden part of a visual appear at this word (and
+  // let an HTML visual's own script react to the cue).
+  reveal(ref) {
+    ref = String(ref || "").trim();
+    const target = this._resolve(ref, "");
+    if (!target) return false;
+    const mapItem = target.el.closest?.("svg.wb-map [data-id]");
+    if (mapItem) {
+      const svg = mapItem.closest("svg.wb-map");
+      markShown(svg, mapItem.dataset.id);
+      // Something outside the current view: widen the view to show it;
+      // then keep everything readable (labels apart, not lost in a corner).
+      if (mapItem.dataset.trace !== "true") {
+        svg._chosen = false;
+        if (!bringIntoView(svg, mapItem)) settle(svg);
+      }
+      // A route to trace draws itself along its path as it appears.
+      if (mapItem.dataset.trace === "true") {
+        traceRoute(svg, mapItem.dataset.id);
+        this.focus(svg);
+        return true;
+      }
+    }
+    if (target.htmlPart) {
+      const frame = target.el.querySelector("iframe.wb-html-frame");
+      const send = () => frame?.contentWindow?.postMessage({ type: "tutor:reveal", id: target.htmlPart }, "*");
+      if (frame?.dataset.ready === "true") send();
+      else frame?.addEventListener("load", send, { once: true });
+      return true;
+    }
+    for (const el of target.els || [target.el]) {
+      el.hidden = false;
+      el.style.transition = "opacity .45s ease";
+      el.style.visibility = "visible";
+      el.style.opacity = "1";
+      if (el.hasAttribute("opacity")) el.setAttribute("opacity", "1");
+      // A scene item hidden with "opacity": 0 carries it on its shape too.
+      for (const c of el.querySelectorAll?.("[opacity]") || []) c.style.opacity = "1";
+    }
+    return this.point(ref, "");
   }
 
   _pinFromEarlierPage(target) {
@@ -460,6 +617,7 @@ export class Board {
     if (twin) {
       if (!twin.dataset.ref) twin.dataset.ref = item.dataset.ref;
       this.items.set(item.dataset.ref, twin);
+      this.focus(twin);
       return true;
     }
     const copy = uniqueSvgIds(item.cloneNode(true));
@@ -467,8 +625,12 @@ export class Board {
     copy.querySelectorAll(".wb-halo, .wb-replay").forEach((e) => e.remove());
     copy.querySelectorAll(".wb-focused").forEach((e) => e.classList.remove("wb-focused"));
     copy.querySelectorAll(".wb-focus").forEach((e) => e.classList.remove("wb-focus"));
-    live.body.prepend(copy);
+    // Next to the latest notes (not at the top of the page, which may be
+    // scrolled away), docked while it's discussed.
+    live.body.append(copy);
     this.items.set(item.dataset.ref, copy);
+    this.focus(copy);
+    this._scrollEnd(true);
     return true;
   }
 
@@ -524,6 +686,7 @@ export class Board {
     if (!el) return null;
     if (!m[2]) return this._fromHint(el, hint) || { el };
     const part = m[3].trim();
+    if (el.querySelector("iframe.wb-html-frame")) return { el, htmlPart: part };
     if (m[2] === ".") {
       const byId = el.querySelector(`[id="${CSS.escape(part)}"], .${CSS.escape(part)}, [data-id="${CSS.escape(part)}"], [data-label="${CSS.escape(part)}"]`);
       if (byId) return this._expand(byId);
@@ -663,6 +826,52 @@ export class Board {
       }
       case "math":
         return this._append(h("div", { class: "wb-math", html: tex(a.text.replace(/^\$\$?|\$\$?$/g, ""), true) }), a, opts);
+      case "map": {
+        const d = a.data || {};
+        const id = a.id || d.id;
+        const existing = id && this.items.get(String(id));
+        // The same map again on the live page: change it in place (and zoom
+        // smoothly to its new view), like a teacher redrawing on the same map.
+        const live = this.pages[this.current]?.el;
+        if (existing?.querySelector("svg.wb-map") && live?.contains(existing)) {
+          const svg = existing.querySelector("svg.wb-map");
+          // A highlight drawn for the old view would sit in the wrong place.
+          this._unpoint?.();
+          this._unpoint = null;
+          renderMap(svg, d, { animate: opts.animate !== false });
+          // A new caption replaces the old one; an update without one keeps it.
+          if (d.caption) {
+            existing.querySelector(".wb-cap")?.remove();
+            svg.after(rich(d.caption, "wb-cap", true));
+          }
+          this.markActive(existing);
+          existing._writeMs = 900;
+          if (opts.animate !== false && this.focus(existing)) this._scrollEnd(true);
+          return existing;
+        }
+        const svg = svgEl("svg", { class: "wb-map", viewBox: "0 0 1920 1080", role: "img", "aria-label": d.caption || "Map" });
+        renderMap(svg, d, { animate: opts.animate !== false });
+        const el = this._append(h("figure", { class: "wb-figure wb-map-fig" }, svg, d.caption ? rich(d.caption, "wb-cap", true) : null, h("span", { class: "wb-credit" }, "Map: Natural Earth")), a, opts);
+        el._writeMs = 900;
+        return el;
+      }
+      case "html": {
+        const d = a.data || {};
+        if (!/^mylecture:\/\/app\/tutor-file\//.test(d.src || "")) return null;
+        const frame = h("iframe", { class: "wb-html-frame", sandbox: "allow-scripts", title: d.caption || "Interactive tutor visual", src: d.src, onload: (event) => { event.currentTarget.dataset.ready = "true"; } });
+        frame.style.height = `${Number.isFinite(Number(d.height)) ? Math.max(160, Math.min(900, Number(d.height))) : 360}px`;
+        frame.dataset.autoHeight = String(d.height == null);
+        const status = h("div", { class: "wb-html-status", hidden: true });
+        const id = a.id || d.id;
+        const existing = id && this.items.get(String(id));
+        if (existing?.querySelector("iframe.wb-html-frame")) {
+          existing.replaceChildren(frame, status, d.caption ? rich(d.caption, "wb-cap", true) : "");
+          this.markActive(existing);
+          existing._writeMs = 450;
+          return existing;
+        }
+        return this._append(h("figure", { class: "wb-figure wb-html" }, frame, status, d.caption ? rich(d.caption, "wb-cap", true) : null), a, opts);
+      }
       case "plot": {
         const d = a.data || {};
         return this._append(h("figure", { class: "wb-figure" }, d.title ? rich(d.title, "wb-cap", true) : null, drawPlot(d), legend(d)), a, opts);
@@ -691,14 +900,19 @@ export class Board {
         const svg = sanitizeSvg(a.text);
         if (!svg) return null;
         svg.classList.add("wb-svg");
-        return this._append(h("figure", { class: "wb-figure" }, svg), a, opts);
+        mathifySvg(svg); // $...$ in its text is real math
+        const fig = this._append(h("figure", { class: "wb-figure" }, svg), a, opts);
+        requestAnimationFrame(() => fixContrast(svg)); // no white text on a white box
+        return fig;
       }
       case "scene": {
         const d = a.data || {};
         const svg = renderScene(d);
+        mathifySvg(svg);
         const again = h("button", { class: "wb-replay", title: "Play the animation again", onclick: () => svg._replay?.() }, icon("refresh"), "Replay");
         const fig = h("figure", { class: "wb-figure wb-scene-wrap" }, svg, d.caption ? rich(d.caption, "wb-cap", true) : null, again);
         const el = this._append(fig, a, opts);
+        requestAnimationFrame(() => fixContrast(svg));
         el._writeMs = Math.min(6000, (svg._duration || 1) * 1000 * 0.6);
         return el;
       }
@@ -706,19 +920,38 @@ export class Board {
         const d = a.data || {};
         const img = h("img", { class: "wb-img", alt: d.caption || d.query || "" });
         const credit = h("a", { class: "wb-credit", href: "#", onclick: (e) => { e.preventDefault(); if (img._page) window.ml.shell.openExternal(img._page); } });
-        const fig = h("figure", { class: "wb-figure wb-image loading" }, img, d.caption ? rich(d.caption, "wb-cap", true) : null, credit);
+        const stage = h("div", { class: "wb-picture-stage" }, img);
+        if (d.marks) drawPictureMarks(stage, d.marks);
+        const fig = h("figure", { class: "wb-figure wb-image loading" }, stage, d.caption ? rich(d.caption, "wb-cap", true) : null, credit);
         const el = this._append(fig, a, opts);
-        const found = a._image || window.ml.study.image(d.query || d.caption || "");
+        const found = pictureRequest(a);
+        const unavailable = () => {
+          fig.classList.remove("loading");
+          img.remove();
+          credit.replaceWith(h("span", { class: "wb-credit" }, "Picture unavailable. Try a more specific subject."));
+        };
         Promise.resolve(found).then((r) => {
-          if (!r?.url) return fig.remove();
-          img.src = r.url;
+          if (!r?.url) return unavailable();
           img._page = r.page;
           credit.textContent = r.credit || "";
           img.onload = () => fig.classList.remove("loading");
-          img.onerror = () => fig.remove();
-        }, () => fig.remove());
+          img.onerror = unavailable;
+          img.src = r.url;
+        }, unavailable);
         el._writeMs = 1200;
         return el;
+      }
+      case "annotate": {
+        const d = a.data || {};
+        const target = this.items.get(String(d.target || ""));
+        if (!target?.querySelector(".wb-picture-stage")) return null;
+        this._pinFromEarlierPage(target);
+        const live = this.items.get(String(d.target)) || target;
+        drawPictureMarks(live.querySelector(".wb-picture-stage"), d.marks, { clear: d.clear === true, unfocus: d.unfocus === true || d.focus === false, animate: opts.animate !== false });
+        this.markActive(live);
+        if (opts.animate !== false && this.focus(live)) this._scrollEnd(true);
+        live._writeMs = 450;
+        return live;
       }
       case "flow": {
         const d = a.data || {};

@@ -14,11 +14,16 @@ Learn anything one-on-one with a live AI tutor at a whiteboard, or turn complex 
 
 Type or say what you want to learn, and a tutor teaches it to you on a live call. It speaks, writes and draws on a whiteboard or blackboard as it goes, and you can interrupt at any time.
 
-- **Talks and draws at the same time:** equations step by step, graphs, tables, code, diagrams, animated scenes and real pictures appear as the tutor talks about them.
+- **Talks and draws at the same time:** equations step by step, graphs, tables, code, diagrams, animated scenes and real pictures appear on the exact word the tutor is saying, and diagrams can build up part by part as each part is named.
+- **Real maps:** for geography, history, trade or anything about where things are, the tutor shows a real world map with country borders, highlights countries, plots cities and animated routes as it names them, and zooms smoothly from the world into a region.
+- **Real pictures for real things:** for anything that exists in the world, such as a cell, a planet, a machine or a painting, the tutor shows a real photo or published diagram first, then marks it up, rather than drawing a rough sketch.
 - **Points at what it means:** "this term", "this resistor", "the blue curve": the exact part lights up on the board while it speaks.
 - **Teaches like a real tutor:** a lesson agenda, questions and guided practice problems with instant feedback, and graphs with sliders to explore. It adapts to your answers.
 - **Ask anything, any time:** hold **Space** to talk or type a question. Speech is recognized on your computer.
 - **Bring your material:** paste a screenshot, drop a PDF or attach your notes, and the tutor teaches from them.
+- **Explain pictures directly:** the tutor can circle details, draw arrows and boxes, add labels, and point to marked regions on uploaded or inspected downloaded images.
+- **Original interactive visuals:** the tutor can write HTML, CSS and JavaScript for custom diagrams, picture overlays, animations and simulations as it teaches. Connected agent engines can browse, download assets and write lesson files independently; API providers can stream HTML directly.
+- **Research while learning:** ask the tutor to search the web for current information, with source links on the board. It can also find and download real photos and diagrams from Wikimedia Commons and Wikipedia, with attribution. Internet access is required for searches and new pictures; downloaded pictures are cached locally.
 - **Your board, your pace:** whiteboard or blackboard (matches your theme by default), pause and rewind, captions, full screen, and every lesson saved to return to.
 - **Use your own AI:** pick the tutor's model separately from Create, with its remaining usage shown on the start screen.
 

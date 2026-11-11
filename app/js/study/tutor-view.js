@@ -3,7 +3,9 @@
 // answers the tutor's questions and practice on the board.
 import { h, icon, toast, bus, confirmBox, popMenu, fmtDate } from "../ui.js";
 import { Board, richHtml } from "./board.js";
-import { Voice, Mic, cleanTranscript } from "./speech.js";
+import { pictureRequest, sessionSnapshot } from "./pictures.js";
+import { Voice, Mic, cleanTranscript, cueTime } from "./speech.js";
+import { LESSONS_PER_PAGE, pageNumbers } from "./paging.js";
 import { engineLabel } from "../settings.js";
 import { UsagePanel } from "../usage.js";
 import { AttachmentPicker, STUDY_EXTENSIONS, attachmentNames } from "../attachments.js";
@@ -30,12 +32,15 @@ const SUGGESTIONS = [
 ];
 
 // Board items that are visuals (drawn in place of where they are introduced).
-const VISUAL_KINDS = new Set(["plot", "svg", "scene", "image", "flow", "table", "math", "code", "explore"]);
+const VISUAL_KINDS = new Set(["plot", "svg", "scene", "image", "html", "map", "flow", "table", "math", "code", "explore"]);
 // A sentence that introduces a visual.
 const INTRODUCES = /\b(look|see|picture|draw|drawn|sketch|diagram|graph|plot|chart|image|photo|board|here(?:'s| is| are)|this (?:triangle|curve|line|equation|formula|table|map|figure|shape|circle|scene|car|one))\b/i;
 const FILLERS = ["Mm, let me think.", "Good question.", "Okay, let's see.", "Right, so.", "Ah, I see."];
 const ENGINE_NAMES = { codex: "GPT", antigravity: "Gemini", "claude-code": "Claude", api: "API key" };
-const LOOKAHEAD_WORDS = 140; // ask for the next segment when less speech than this is queued
+// Board items a {show:id} word can reveal.
+const BOARD_HOLDABLE = new Set([...VISUAL_KINDS, "write", "annotate"]);
+const LOOKAHEAD_WORDS = 140;
+ // ask for the next segment when less speech than this is queued
 const rid = () => Math.random().toString(36).slice(2, 10);
 const words = (s) => (String(s).match(/\S+/g) || []).length;
 
@@ -231,9 +236,18 @@ export class StudyView {
       this.recent.replaceChildren();
       return;
     }
+    // 15 lessons per page; stay on the same page after a delete if it still exists.
+    const pages = Math.ceil(list.length / LESSONS_PER_PAGE);
+    const page = (this.recentPage = Math.min(Math.max(0, this.recentPage || 0), pages - 1));
+    const from = page * LESSONS_PER_PAGE;
+    const shown = list.slice(from, from + LESSONS_PER_PAGE);
+    const go = (p) => {
+      this.recentPage = p;
+      this.refreshRecent().then(() => this.recent.scrollIntoView({ block: "start", behavior: "smooth" }));
+    };
     this.recent.replaceChildren(
       h("div", { class: "st-recent-head" }, h("h2", {}, "Your lessons"), h("span", { class: "faint small" }, `${list.length}`)),
-      h("div", { class: "st-recent-grid" }, list.slice(0, 12).map((s) => {
+      h("div", { class: "st-recent-grid" }, shown.map((s) => {
         const pct = s.finished ? 100 : s.plan.length ? Math.round((100 * Math.max(0, s.section - 1)) / s.plan.length) : 0;
         const card = h("div", { class: "st-lesson-card", tabindex: 0, onclick: () => this.open(s.id), onkeydown: (e) => e.key === "Enter" && this.open(s.id) },
           h("div", { class: "st-lesson-top" }, h("b", {}, s.title || s.topic || "Lesson"),
@@ -249,6 +263,13 @@ export class StudyView {
           h("div", { class: "small faint" }, s.finished ? "Finished" : s.plan[Math.max(0, s.section - 1)] ? `Up to: ${s.plan[Math.max(0, s.section - 1)]}` : "Started"));
         return card;
       })),
+      pages > 1 ? h("nav", { class: "st-pager", "aria-label": "Lesson pages" },
+        h("button", { class: "btn ghost sm", disabled: page === 0, onclick: () => go(page - 1), "aria-label": "Previous page" }, "‹ Previous"),
+        h("div", { class: "st-pager-pages" }, pageNumbers(page, pages).map((p) => p == null
+          ? h("span", { class: "st-pager-gap faint" }, "…")
+          : h("button", { class: `st-pager-num${p === page ? " on" : ""}`, "aria-current": p === page ? "page" : null, "aria-label": `Page ${p + 1}`, onclick: () => p !== page && go(p) }, String(p + 1)))),
+        h("button", { class: "btn ghost sm", disabled: page === pages - 1, onclick: () => go(page + 1), "aria-label": "Next page" }, "Next ›"),
+        h("span", { class: "st-pager-count small faint" }, `${from + 1}–${from + shown.length} of ${list.length}`)) : null,
     );
   }
 
@@ -678,7 +699,7 @@ export class StudyView {
 }
 
 // One live lesson: generation, the playback queue, interruptions and saving.
-class Lesson {
+export class Lesson {
   constructor(view, session) {
     this.v = view;
     this.s = session;
@@ -697,6 +718,8 @@ class Lesson {
     this.replay = null; // {cursor, live, done, resolve, jump}
     this.epoch = 0;
     this.writing = null;
+    this.held = new Map(); // visual id -> queued item waiting for its {show:id} word
+    this.shown = new Set(); // {show:id} words already spoken before their visual arrived
   }
 
   // ----- lifecycle -----
@@ -753,7 +776,10 @@ class Lesson {
 
   save() {
     clearTimeout(this._saveTimer);
-    return window.ml.study.save(this.s).catch(() => {});
+    return Promise.resolve().then(() => window.ml.study.save(sessionSnapshot(this.s))).catch((error) => {
+      console.error("Lesson save failed", error);
+      toast("Your lesson could not be saved. Please try again.", { kind: "bad" });
+    });
   }
 
   _saveSoon() {
@@ -850,17 +876,19 @@ class Lesson {
       return;
     }
     if (a.type === "invalid") return;
-    if (a.type === "image") a._image = window.ml.study.image(a.data?.query || a.data?.caption || "").catch(() => null);
+    if (a.type === "image") pictureRequest(a);
     if (a.type === "end") seg.end = a.value;
     const item = { turnId: seg.turnId, action: a, epoch: this.epoch };
     if (a.type === "say") {
       const cues = [];
       let clean = "";
       let last = 0;
-      a.text.replace(/\s*\{(?:look|point|see)\s*:\s*([^}]+)\}\s*/gi, (m, ref, i) => {
+      a.text.replace(/\s*\{(look|point|see|show|reveal|zoom|trace)\s*:\s*([^}]+)\}\s*/gi, (m, kind, ref, i) => {
         clean += a.text.slice(last, i);
         if (clean && !/\s$/.test(clean)) clean += " ";
-        cues.push({ pos: clean.length, ref: ref.trim() });
+        kind = kind.toLowerCase();
+        const show = kind === "show" || kind === "reveal";
+        cues.push({ pos: clean.length, ref: ref.trim(), ...(show ? { show: true } : {}), ...(kind === "zoom" || kind === "trace" ? { kind } : {}) });
         last = i + m.length;
         return m;
       });
@@ -868,10 +896,63 @@ class Lesson {
       a.spoken = clean;
       a.cues = cues;
       item.prepared = this.v.voice.prepare(clean);
+      // A visual written before this sentence waits for its word.
+      for (const c of cues) if (c.show && !/[./]/.test(c.ref)) this._hold(c.ref);
+    }
+    const vid = BOARD_HOLDABLE.has(a.type) ? a.id || a.data?.id : "";
+    if (vid && this.shown.has(vid)) {
+      // Its word was already spoken: show it now.
+      this.shown.delete(vid);
+      this._drawVisual(item);
+      this._saveSoon();
+      return;
+    }
+    if (vid && this._wantsShow(vid)) {
+      this.held.set(vid, item);
+      this._wake?.();
+      return;
     }
     if (VISUAL_KINDS.has(a.type)) this._placeVisual(item);
     else this.queue.push(item);
     this._run();
+  }
+
+  // {show:id} in a queued or playing sentence?
+  _wantsShow(id) {
+    const has = (it) => it?.action.type === "say" && it.action.cues?.some((c) => c.show && c.ref === id);
+    // ({show:fig.part} reveals a part of an already drawn visual; it doesn't hold fig.)
+    return has(this.speaking) || this.queue.some(has);
+  }
+
+  // Moves a queued visual with this id to the held set.
+  _hold(id) {
+    const k = this.queue.findIndex((q) => BOARD_HOLDABLE.has(q.action.type) && (q.action.id === id || q.action.data?.id === id));
+    if (k >= 0) this.held.set(id, this.queue.splice(k, 1)[0]);
+  }
+
+  // A {show:id} word is spoken: draw that visual right now.
+  _show(ref, epoch) {
+    if (this.closed || epoch !== this.epoch) return;
+    const id = String(ref).split(/[./]/)[0];
+    if (id !== ref) {
+      // One part of a visual: draw the visual first if it is still waiting.
+      const whole = this.held.get(id);
+      if (whole) {
+        this.held.delete(id);
+        this._drawVisual(whole);
+        this._saveSoon();
+      }
+      return this.v.board.reveal(ref);
+    }
+    if (this.v.board.items.has(id) && !this.held.has(id)) return this.v.board.point(id, "");
+    const item = this.held.get(id);
+    if (!item) {
+      this.shown.add(id); // still being written: show it as soon as it arrives
+      return;
+    }
+    this.held.delete(id);
+    this._drawVisual(item);
+    this._saveSoon();
   }
 
   // The tutor often introduces a visual ("let's start with a picture...")
@@ -926,10 +1007,15 @@ class Lesson {
   _pullForward(cues) {
     const out = [];
     for (const c of cues || []) {
+      if (c.show) continue;
       const id = String(c.ref).split(/[./]/)[0];
       if (this.v.board.items.has(id)) continue;
       const k = this.queue.findIndex((q) => VISUAL_KINDS.has(q.action.type) && (q.action.id === id || q.action.data?.id === id));
       if (k >= 0) out.push(...this.queue.splice(k, 1));
+      else if (this.held.has(id) && !(cues || []).some((x) => x.show && x.ref === id)) {
+        out.push(this.held.get(id));
+        this.held.delete(id);
+      }
     }
     return out;
   }
@@ -957,7 +1043,8 @@ class Lesson {
         if (ep !== this.epoch) return;
         if (!this.queue.length || this.paused || this.closed) break;
         const head = this.queue[0];
-        if (head.action.type === "say" && this.queue.length === 1 && this.gen?.turnId === head.turnId) {
+        // (A sentence with {show:...} cues reveals its visual at the word itself.)
+        if (head.action.type === "say" && this.queue.length === 1 && this.gen?.turnId === head.turnId && !head.action.cues?.some((c) => c.show)) {
           await this._awaitNext(head);
           if (ep !== this.epoch) return;
           if (!this.queue.length || this.paused || this.closed) break;
@@ -1003,10 +1090,10 @@ class Lesson {
           this.v.setStatus("speaking", "");
           this.v.setCaption(a.spoken ?? a.text);
           this.speaking = item;
-          r = await this.v.voice.play(item.prepared, a.spoken ?? a.text, { onStart: (dur) => {
-            this.speakAt = performance.now();
-            this._cue(a.cues, a.spoken ?? a.text, dur, item.epoch);
-          } });
+          r = await this.v.voice.play(item.prepared, a.spoken ?? a.text, {
+            onStart: () => { this.speakAt = performance.now(); },
+            marks: (clip) => this._marks(a.cues, a.spoken ?? a.text, clip, item.epoch),
+          });
           this.speaking = null;
           // Rewound mid-sentence: after the replay catches up, say it again.
           if (r.stopped && this.replay) {
@@ -1043,6 +1130,20 @@ class Lesson {
       default: {
         // One thing at a time on the board: finish writing the last item first.
         if (this.writing) await this.writing;
+        // A visual written just before its sentence may be meant for a
+        // {show:id} word in it: wait for that sentence to stream in.
+        const vid = BOARD_HOLDABLE.has(a.type) ? a.id || a.data?.id : "";
+        if (vid && this.gen?.turnId === item.turnId && !this.queue.some((i) => i.action.type === "say")) {
+          const t0 = performance.now();
+          while (performance.now() - t0 < 2000 && this.gen?.turnId === item.turnId && !this.queue.some((i) => i.action.type === "say") && !this._interruptedSince(item)) {
+            await new Promise((r) => setTimeout(r, 60));
+          }
+        }
+        if (this.closed || this._interruptedSince(item)) return;
+        if (vid && this._wantsShow(vid)) {
+          this.held.set(vid, item);
+          break;
+        }
         // Draw it when the words about it are ready to play, so the board
         // never runs ahead of the voice.
         const nextSay = this.queue.find((i) => i.action.type === "say");
@@ -1068,24 +1169,28 @@ class Lesson {
     if (!el && a.type !== "page") return null;
     const ms = el?._writeMs || 0;
     this.writing = ms ? this._sleep(ms + 350, { board: true }).then(() => (this.writing = null)) : null;
-    this.s.history.push({ role: "tutor", text: a.raw });
+    if (typeof a.raw === "string" && a.raw.trim()) this.s.history.push({ role: "tutor", text: a.raw });
     this.s.board.push(a);
     return el;
   }
 
-  // Fires the pointing cues of a sentence at their moment in the audio
-  // (by position in the text, which tracks speech closely enough).
-  _cue(cues, text, dur, epoch) {
-    if (!cues?.length) return;
-    const len = Math.max(1, text.length);
-    for (const c of cues) {
-      const ms = Math.max(0, (c.pos / len) * dur * 1000 - 150);
-      setTimeout(() => {
+  // The cues of a sentence as audio-clock marks, each at the word it sits
+  // before. Word onsets come from the voice engine's timing of the clip;
+  // without them the text position is spread over the clip's duration.
+  _marks(cues, text, clip, epoch) {
+    if (!cues?.length) return [];
+    const dur = clip?.dur || (text.split(/\s+/).length / 2.8);
+    return cues.map((c) => ({
+      t: cueTime(text, c.pos, clip?.words, dur),
+      run: () => {
         if (this.closed || epoch !== this.epoch) return;
+        if (c.show) return this._show(c.ref, epoch);
+        if (c.kind === "zoom") return this.v.board.zoomMap(c.ref);
+        if (c.kind === "trace") return this.v.board.traceMap(c.ref);
         // The words right after the cue ("...this blue line") help find the exact part.
         this.v.board.point(c.ref, text.slice(c.pos, c.pos + 60));
-      }, ms);
-    }
+      },
+    }));
   }
 
   // ----- rewind: replay what was said, then catch up to the live lesson -----
@@ -1142,7 +1247,8 @@ class Lesson {
       this.v.setStatus("replaying", "");
       this.v.setCaption(e.text);
       this.v.setReplayPosition(rp.live - rp.cursor);
-      const r = await this.v.voice.play(e.prepared, e.text, { onStart: (dur) => this._cue(e.cues, e.text, dur, this.epoch) });
+      const ep = this.epoch;
+      const r = await this.v.voice.play(e.prepared, e.text, { marks: (clip) => this._marks(e.cues.filter((c) => !c.show), e.text, clip, ep) });
       if (this.replay !== rp) return;
       if (rp.jump) continue;
       if (r.stopped) break;
@@ -1250,6 +1356,8 @@ class Lesson {
     if (this.gen) window.ml.study.cancel(this.gen.turnId);
     this.gen = null;
     this.queue = [];
+    this.held.clear();
+    this.shown.clear();
     this.lastSay = null;
     this.paused = false;
     this.wasPaused = false;

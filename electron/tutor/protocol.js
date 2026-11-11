@@ -12,11 +12,11 @@
 // Speech is emitted sentence by sentence while a `say:` line is still
 // streaming, so the voice can start before the model finishes the line.
 
-export const BOARD_KINDS = ["write", "math", "page", "plot", "table", "code", "svg", "flow", "image", "scene"];
+export const BOARD_KINDS = ["write", "math", "page", "plot", "table", "code", "svg", "flow", "image", "scene", "annotate", "html", "map"];
 export const INTERACTIVE_KINDS = ["ask", "practice", "explore"];
-const JSON_KINDS = new Set(["plan", "plot", "table", "code", "flow", "ask", "practice", "explore", "image", "scene"]);
-const KNOWN = new Set(["say", "section", "end", "pause", ...BOARD_KINDS, ...INTERACTIVE_KINDS, "plan", "note"]);
-const ALIASES = { speak: "say", says: "say", tutor: "say", board: "write", text: "write", heading: "write", title: "page", latex: "math", equation: "math", question: "ask", quiz: "ask", exercise: "practice", interactive: "explore", graph: "plot", diagram: "svg", animation: "scene", animate: "scene", picture: "image", photo: "image", outline: "plan", agenda: "plan" };
+const JSON_KINDS = new Set(["plan", "plot", "table", "code", "flow", "ask", "practice", "explore", "image", "scene", "annotate", "html", "map"]);
+const KNOWN = new Set(["say", "section", "end", "pause", "search", "inspect", ...BOARD_KINDS, ...INTERACTIVE_KINDS, "plan", "note"]);
+const ALIASES = { speak: "say", says: "say", tutor: "say", board: "write", text: "write", heading: "write", title: "page", latex: "math", equation: "math", question: "ask", quiz: "ask", exercise: "practice", interactive: "explore", graph: "plot", diagram: "svg", animation: "scene", animate: "scene", picture: "image", photo: "image", outline: "plan", agenda: "plan", geo: "map", globe: "map", atlas: "map" };
 
 // Lenient JSON for model output: tolerates code fences, trailing commas and
 // text around the object.
@@ -105,11 +105,16 @@ export function lineToAction(line) {
 // onUpcoming(kind), optional: called as soon as it's known what comes after the
 // last action ("say" while a say line goes on, or the command of the next
 // line, e.g. "scene", before that line has finished streaming).
+// The first end line is final: everything written after it is dropped
+// (counted in `dropped`), so trailing chatter never reaches the student.
 export function createTutorParser(onAction, { onUpcoming } = {}) {
   let emitted = 0, announced = -1;
+  let ended = false, dropped = 0;
   const emit = onAction;
   onAction = (a) => {
+    if (ended) return;
     emitted++;
+    if (a.type === "end") ended = true;
     emit(a);
   };
   const announce = (kind) => {
@@ -153,13 +158,24 @@ export function createTutorParser(onAction, { onUpcoming } = {}) {
   };
 
   return {
+    get ended() { return ended; },
+    get dropped() { return dropped; },
     feed(chunk) {
+      if (ended) {
+        dropped += chunk.length;
+        return;
+      }
       buf += chunk;
       let i;
       while ((i = buf.indexOf("\n")) !== -1) {
         const line = buf.slice(0, i).replace(/\r$/, "");
         buf = buf.slice(i + 1);
         finishLine(line);
+        if (ended) {
+          dropped += buf.length;
+          buf = "";
+          return;
+        }
       }
       // Stream speech from a say line that hasn't ended yet.
       const m = buf.match(/^\s*(?:say|speak|tutor)\s*:\s?(.*)$/is);
@@ -178,7 +194,7 @@ export function createTutorParser(onAction, { onUpcoming } = {}) {
       }
     },
     end() {
-      if (buf.trim()) finishLine(buf);
+      if (!ended && buf.trim()) finishLine(buf);
       buf = "";
     },
   };

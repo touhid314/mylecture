@@ -77,7 +77,7 @@ export class Voice {
       this.fallback = true;
       return window.ml.tts.synth(job.text);
     }).then(
-      (r) => job.resolve({ url: r.url, dur: r.dur }),
+      (r) => job.resolve({ url: r.url, dur: r.dur, words: r.words || null }),
       (e) => job.resolve({ error: String(e?.message || e) }),
     ).finally(() => {
       this.inflight--;
@@ -96,7 +96,10 @@ export class Voice {
   }
 
   // Plays a prepared clip. Resolves {done} or {stopped}.
-  async play(prepared, text = "", { onStart } = {}) {
+  // marks(clip) -> [{t, run}]: callbacks at t seconds of clip time (before
+  // the playback rate), fired by the audio clock, so pausing and speed
+  // changes keep them on their words.
+  async play(prepared, text = "", { onStart, marks } = {}) {
     const token = (this._playToken = (this._playToken || 0) + 1);
     this._waiting = token;
     const clip = await prepared;
@@ -109,16 +112,21 @@ export class Voice {
       const finish = (r) => {
         if (this.current?.resolve !== resolve) return;
         clearTimeout(this.current.timer);
+        const left = this.current.marks;
         this.current = null;
+        // Marks not reached yet (a clip that ended early) still run in order.
+        if (r.done) for (const m of left) { try { m.run(); } catch (e) { console.error(e); } }
         this.onLevel(0);
         resolve(r);
       };
-      this.current = { resolve };
+      this.current = { resolve, marks: [] };
+      try { this.current.marks = (marks?.(clip) || []).filter((m) => m && typeof m.run === "function").sort((a, b) => a.t - b.t); } catch {}
+      this._clock();
       if (clip.error || !clip.url) {
         // No voice available: hold the caption for reading time.
         const ms = Math.max(1200, (text.split(/\s+/).length / 2.8) * 1000) / this.rate;
         this.current.timer = setTimeout(() => finish({ done: true, silent: true }), ms);
-        this.current.silent = { remaining: ms, startedAt: Date.now(), finish };
+        this.current.silent = { remaining: ms, startedAt: Date.now(), finish, total: ms };
         onStart?.(ms / 1000);
         return;
       }
@@ -131,6 +139,32 @@ export class Voice {
       if (!this.paused) this.audio.play().then(() => { this._meter(); started(); }).catch(() => finish({ done: true, error: true }));
       else this.current.onResume = started;
     });
+  }
+
+  // Clip time in seconds (unaffected by the playback rate).
+  _clipTime() {
+    const c = this.current;
+    if (!c) return 0;
+    if (c.silent) {
+      const left = c.silent.remaining - (this.paused ? 0 : Date.now() - c.silent.startedAt);
+      return ((c.silent.total - left) / 1000) * this.rate;
+    }
+    return this.audio.currentTime || 0;
+  }
+
+  _clock() {
+    clearInterval(this._clockTimer);
+    this._clockTimer = setInterval(() => {
+      const c = this.current;
+      if (!c) return clearInterval(this._clockTimer);
+      if (this.paused || !c.marks.length) return;
+      // Fire a little early: the eye needs a moment to land on the board.
+      const t = this._clipTime() + 0.15;
+      while (c.marks.length && c.marks[0].t <= t) {
+        const m = c.marks.shift();
+        try { m.run(); } catch (e) { console.error(e); }
+      }
+    }, 30);
   }
 
   setRate(r) {
@@ -177,6 +211,19 @@ export class Voice {
     this.onLevel(0);
     return heard;
   }
+}
+
+// Clip time (seconds) of the word that starts at or after character pos.
+export function cueTime(text, pos, words, dur) {
+  const before = (String(text).slice(0, pos).match(/\S+/g) || []).length;
+  // A cue glued to the middle of a word belongs to that word.
+  const mid = pos > 0 && /\S/.test(text[pos - 1] || "") && /\S/.test(text[pos] || "");
+  const k = mid ? before - 1 : before;
+  if (Array.isArray(words) && words.length) {
+    if (k >= words.length) return words[words.length - 1][1];
+    return Math.max(0, words[Math.max(0, k)][0]);
+  }
+  return Math.max(0, (pos / Math.max(1, String(text).length)) * dur - 0.15);
 }
 
 // Push-to-talk microphone capture -> 16 kHz mono Float32Array.

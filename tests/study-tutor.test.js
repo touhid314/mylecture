@@ -82,6 +82,15 @@ test("plot expressions are safe and correct", () => {
   assert.throws(() => compileExpr("x.constructor"));
 });
 
+test("long saved lessons tolerate missing history text from old board messages", () => {
+  const history = Array.from({ length: 1500 }, (_, i) => ({ role: "tutor", text: `say: Previous lesson sentence ${i} explaining the current topic in detail.` }));
+  history.push({ role: "tutor" }, null, { role: "tutor", text: null });
+  history.push({ role: "student", text: "Please continue the explanation.", via: "voice" });
+  const prompt = buildTurn({ topic: "Saved lesson", history, task: { kind: "student", text: "Continue" } });
+  assert.match(prompt, /Please continue the explanation/);
+  assert.doesNotMatch(prompt, /undefined|null/);
+});
+
 test("answers are checked leniently", () => {
   assert.equal(checkNumber("3/4", 0.75), true);
   assert.equal(checkNumber("41", 42), false);

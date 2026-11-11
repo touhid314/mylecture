@@ -48,10 +48,6 @@ export class CreateView {
     window.ml.gen.onEvent((ev) => this._onGen(ev));
     bus.on("settings-changed", (settings) => this._syncSettingsSelects(settings));
     bus.on("voices-changed", () => { this._voiceCatalog = null; this._refreshVoiceOptions(); });
-    this._modelPoll = setInterval(() => {
-      if (this.root.classList.contains("active") && document.visibilityState === "visible" && !this._modelsLoading &&
-          ![this.modelInput, this.modelSelect, this.providerSelect].includes(document.activeElement)) this._refreshEngineOptions({ force: true });
-    }, 60000);
     this._artifactPoll = setInterval(() => {
       if (this.job?.projectId && this.project?.lecture.id === this.job.projectId) this._refreshArtifacts();
     }, 2000);
@@ -60,6 +56,7 @@ export class CreateView {
   onShow() {
     this.refreshProjects();
     this._refreshEngineOptions();
+    this.usage?.refresh();
     this._refreshVoiceOptions();
     this._fit();
   }
@@ -492,8 +489,15 @@ export class CreateView {
         this.effortSelect.replaceChildren(h("option", { value: "" }, "Standard"));
         this.effortSelect.disabled = true;
       }
+      // Only a connected subscription is asked for its models (that starts its tool).
+      if (id !== "api" && !s.connected?.[id]) {
+        this.modelStatus.textContent = id ? "Connect this account in Settings to see its models." : "";
+        this.modelStatus.classList.remove("error");
+        return;
+      }
       const cached = this._agentModels[cacheKey];
-      const shouldFetch = force || !cached || Date.now() - cached.fetchedAt >= 60000;
+      // Ten minutes: each fetch starts the provider's CLI (Gemini's may ask to sign in).
+      const shouldFetch = force || !cached || Date.now() - cached.fetchedAt >= 600000;
       if (shouldFetch) {
         this._modelsLoading = true;
         this.refreshModelsBtn.disabled = true;
@@ -691,16 +695,16 @@ export class CreateView {
       const panel = connectPanel(this.state, { compact: true, onChange: () => this._refreshEngineOptions?.({ force: true }) });
       const box = h("div", { class: "agent-connect" }, h("div", { class: "agent-connect-title" }, "Connect your AI to start"), panel.el);
       welcome.append(box);
-      const done = setInterval(async () => {
-        if (!welcome.isConnected) return clearInterval(done), panel.stop();
-        // Gone once anything is in use: a connected subscription or an API key.
+      // Gone once anything is in use: a connected subscription or an API key.
+      const unlisten = bus.on("settings-changed", async () => {
+        if (!welcome.isConnected) return unlisten(), panel.stop();
         if (this.state.settings.engine === "api" || (this.state.settings.engine && (await anyConnected(this.state)))) {
-          clearInterval(done);
+          unlisten();
           panel.stop();
           box.remove();
           this._refreshEngineOptions?.({ force: true });
         }
-      }, 1500);
+      });
     });
   }
 

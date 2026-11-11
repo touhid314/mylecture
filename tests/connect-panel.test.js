@@ -193,3 +193,33 @@ test('stop prevents an in-flight pending sign-in poll from connecting after it b
   assert.equal(h.state.settings.connected.codex,false);
   assert.deepEqual(h.writes,[]);
 });
+
+test('a mounted panel never checks sign-ins on its own: connected is connected, others only check they are installed', async t=>{
+  t.mock.timers.enable({apis:['setTimeout','setInterval']});
+  const h=await setup(t,{connected:{codex:true},accountEmail:{codex:'me@example.test'}});
+  // Connected GPT isn't asked anything; the others are only looked up on disk.
+  assert.deepEqual(h.statusCalls.map(c=>[c.id,c.options]),[['antigravity',{installed:true}],['claude-code',{installed:true}]]);
+  assert.match(descendants(h.panel.el).map(n=>n.textContent).join(' '),/me@example\.test/);
+  const before=h.statusCalls.length;
+  // Minutes pass, nothing is pending: no further checks.
+  t.mock.timers.tick(10*60*1000); await settle();
+  assert.equal(h.statusCalls.length,before);
+});
+
+test('a connect the user started is checked live until it is done, then checking stops', async t=>{
+  t.mock.timers.enable({apis:['setTimeout','setInterval']});
+  const h=await setup(t,{engine:'',connected:{codex:false}});
+  h.statuses.codex={installed:true,ready:false};
+  await h.panel.refresh();
+  await button(h.panel,'Connect').onclick(); await settle(); await settle();
+  const live=()=>h.statusCalls.filter(c=>c.id==='codex'&&c.options?.fresh).length;
+  const first=live();
+  t.mock.timers.tick(3000); await settle(); await settle();
+  assert.ok(live()>first,'polls while waiting for the sign-in');
+  h.statuses.codex={installed:true,ready:true,account:{email:'new@example.test'}};
+  t.mock.timers.tick(3000); await settle(); await settle(); await settle();
+  assert.equal(h.state.settings.connected.codex,true);
+  const done=h.statusCalls.length;
+  t.mock.timers.tick(10*60*1000); await settle();
+  assert.equal(h.statusCalls.length,done,'no more checks once connected');
+});

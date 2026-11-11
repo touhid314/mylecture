@@ -128,7 +128,14 @@ export function createUsageService(engines, capture = runCapture, options = {}) 
   const claudeHome = options.claudeHome ?? process.env.CLAUDE_CONFIG_DIR ?? path.join(os.homedir(), ".claude");
   const fetchUsage = options.fetch ?? globalThis.fetch;
   let claudeCached, claudeRefreshAt = 0;
-  function usage(id) {
+  // Gemini's limits come from running its CLI, which may ask the user to sign
+  // in. Panels refresh every minute and on every window focus, so results are
+  // reused: 5 minutes when they worked, 15 when they didn't (a CLI that wants
+  // a sign-in is left alone until the user presses Refresh).
+  let geminiCached, geminiRefreshAt = 0;
+  const log = options.log || (() => {});
+  function usage(id, { force = false } = {}) {
+    if (id === "antigravity" && !force && geminiCached && Date.now() < geminiRefreshAt) return Promise.resolve(geminiCached);
     if (pending.has(id)) return pending.get(id);
     const generation = generations.get(id) || 0;
     const request = (async () => {
@@ -147,6 +154,7 @@ export function createUsageService(engines, capture = runCapture, options = {}) 
         }
         const exe = engines.get(id).exe();
         if (!exe) throw new Error("Gemini is not connected. Connect it to see account limits.");
+        log("info", "usage.check", { provider: id, force });
         const r = await capture(exe, ["-p", "/usage", "--output-format", "json"], { timeout: 20000 });
         if (!r.ok) throw new Error("Could not read Gemini limits. Check your connection and sign-in, then refresh.");
         return parseAntigravityUsage(JSON.parse(r.stdout));
@@ -155,7 +163,13 @@ export function createUsageService(engines, capture = runCapture, options = {}) 
           ? "Could not read the usage response. Refresh to try again."
           : id === "codex" ? "Could not read GPT limits. Refresh to try again." : error.message };
       }
-    })();
+    })().then((result) => {
+      if (id === "antigravity" && (generations.get(id) || 0) === generation) {
+        geminiCached = result;
+        geminiRefreshAt = Date.now() + (result.available ? 300000 : 900000);
+      }
+      return result;
+    });
     pending.set(id, request);
     request.finally(() => { if (pending.get(id) === request) pending.delete(id); });
     return request;
@@ -164,6 +178,7 @@ export function createUsageService(engines, capture = runCapture, options = {}) 
     generations.set(id, (generations.get(id) || 0) + 1);
     pending.delete(id);
     if (id === "claude-code") { claudeCached = undefined; claudeRefreshAt = 0; }
+    if (id === "antigravity") { geminiCached = undefined; geminiRefreshAt = 0; }
   };
   return usage;
 }
