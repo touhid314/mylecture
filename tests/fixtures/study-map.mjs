@@ -48,7 +48,8 @@ app.whenReady().then(async () => {
       const o = { countries: svg().querySelectorAll('.wb-map-country').length, land: !!q('.wb-map-land'), delhiInIndia: inside(box(q('[data-id=delhi] circle:last-of-type')), box(q('[data-id=india] path'))),
         londonHidden: q('[data-id=london]').getAttribute('opacity') === '0', mover: !!q('[data-id=r1] animateMotion'), viewWorld: svg().getAttribute('viewBox'), labelWorld: labelPx('delhi') };
       o.revealed = board.reveal('m1.london');
-      await wait(800);
+      // Fades in over ~0.45 s; a slow machine may take longer: wait up to 3 s.
+      for (let t = 0; t < 3000 && getComputedStyle(q('[data-id=london]')).opacity !== '1'; t += 100) await wait(100);
       o.londonShown = getComputedStyle(q('[data-id=london]')).opacity === '1';
       // Zoom in to India on a cue, then back out to the map's own view.
       o.zoomIn = board.zoomMap('m1.india');

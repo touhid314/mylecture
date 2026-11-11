@@ -24,10 +24,37 @@ export const COMPONENTS = [
 ];
 export const COMPONENT_IDS = COMPONENTS.map(c => c.id);
 
-// Streams a URL to a file, reporting (bytesSoFar, totalBytes|0).
-export async function downloadFile(url, file, { signal, onProgress } = {}) {
-  const res = await fetch(url, { signal, redirect: "follow" });
-  if (!res.ok || !res.body) throw new Error(`Download failed (HTTP ${res.status}).`);
+// Streams a URL to a file, reporting (bytesSoFar, totalBytes|0). Rate
+// limits (429), server errors and dropped connections are retried a few
+// times with growing waits (GitHub's Retry-After is honoured, up to a minute).
+export async function downloadFile(url, file, { signal, onProgress, attempts = 5, wait = (ms) => new Promise((r) => setTimeout(r, ms)) } = {}) {
+  for (let attempt = 1; ; attempt++) {
+    try {
+      return await downloadOnce(url, file, { signal, onProgress });
+    } catch (error) {
+      const retryable = !signal?.aborted && attempt < attempts && (error.status >= 500 || error.status === 429 || error.network);
+      if (!retryable) throw error;
+      const ms = Math.min(60000, error.retryAfter != null ? error.retryAfter * 1000 : 2000 * 2 ** (attempt - 1));
+      console.warn?.(`Download failed (${error.message}); retrying in ${Math.round(ms / 1000)} s (attempt ${attempt + 1} of ${attempts}).`);
+      await wait(ms);
+    }
+  }
+}
+
+async function downloadOnce(url, file, { signal, onProgress }) {
+  let res;
+  try {
+    res = await fetch(url, { signal, redirect: "follow" });
+  } catch (error) {
+    if (signal?.aborted) throw error;
+    throw Object.assign(new Error(`Download failed (${error.message}).`), { network: true });
+  }
+  if (!res.ok || !res.body) {
+    // Retry-After in seconds, when the server sends it (only for retryable replies).
+    const header = res.headers?.get?.("retry-after");
+    const after = header != null && header.trim() !== "" ? Number(header) : NaN;
+    throw Object.assign(new Error(`Download failed (HTTP ${res.status}).`), { status: res.status, retryAfter: Number.isFinite(after) && after >= 0 ? after : null });
+  }
   const total = Number(res.headers.get("content-length")) || 0;
   const out = fs.createWriteStream(file);
   let got = 0, last = 0;
