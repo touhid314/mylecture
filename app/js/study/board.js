@@ -9,6 +9,19 @@ import { mathifySvg } from "./svg-math.js";
 import { fixContrast } from "./contrast.js";
 import { renderMap, loadWorld, zoomMap, traceRoute, markShown, bringIntoView, settle } from "./map.js";
 
+// Asks an HTML visual to highlight the element the spoken words name.
+// Resolves true when it found one (false if not, or no answer in time).
+const finds = new Map();
+let findSeq = 0;
+function findInFrame(frame, words) {
+  const seq = ++findSeq;
+  return new Promise((done) => {
+    finds.set(seq, done);
+    setTimeout(() => { if (finds.delete(seq)) done(false); }, 400);
+    frame.contentWindow.postMessage({ type: "tutor:find", words, seq }, "*");
+  });
+}
+
 // Generated documents can report layout and errors, but cannot invoke app APIs.
 window.addEventListener("message", (event) => {
   const frame = [...document.querySelectorAll("iframe.wb-html-frame")].find((el) => el.contentWindow === event.source);
@@ -16,6 +29,16 @@ window.addEventListener("message", (event) => {
   if (event.data?.type === "tutor:height" && frame.dataset.autoHeight === "true") {
     const height = Number(event.data.height);
     if (Number.isFinite(height)) frame.style.height = `${Math.max(160, Math.min(900, height))}px`;
+  }
+  // An activity's result: sent on to the tutor (at most once a second).
+  if (event.data?.type === "tutor:answer" && frame._answer && Date.now() - (frame._answeredAt || 0) > 1000) {
+    frame._answeredAt = Date.now();
+    const c = event.data.correct;
+    frame._answer({ answer: String(event.data.answer ?? "").slice(0, 800), correct: c === true ? true : c === false ? false : null });
+  }
+  if (event.data?.type === "tutor:found") {
+    finds.get(event.data.seq)?.(!!event.data.found);
+    finds.delete(event.data.seq);
   }
   if (event.data?.type === "tutor:html-error") {
     console.error("Tutor visual error:", String(event.data.message || "").slice(0, 500));
@@ -136,6 +159,34 @@ export function wordIn(alias, text) {
   return m ? m.index + m[1].length : -1;
 }
 const aliases = (...xs) => [...new Set(xs.flat().map(normRef).filter(Boolean))].join("|") || null;
+
+// "outer-membrane", "outer_membrane", "outerMembrane" -> "outer membrane".
+export function idWords(id) {
+  return normRef(String(id ?? "").replace(/([a-z])([A-Z])/g, "$1 $2").replace(/[-_.]+/g, " "));
+}
+// The first words spoken after a cue, as one normalized string.
+const hintWords = (hint) => normRef(String(hint ?? "").replace(/\{[^}]*\}/g, " ")).split(" ").slice(0, 8).join(" ");
+// Names a speaker wouldn't use to mean one part: indexes ("f1", "r2c1"),
+// numbers and filler words.
+const NOT_A_NAME = /^(f|curve|line|pt|point|col|c|column|row|r|n|node|step|box|s|item|part|g|group|layer)\d+$|^r\d+c\d+$|^\d+$|^(the|this|that|these|those|here|there|and|now|look|see|its|our|your|one|all|top|bottom|left|right|main|root|svg|diagram|figure|scene|visual|demo|bg|background)$/;
+// Every part of an item that can be named: aliased parts (curves, cells,
+// boxes), elements with ids (svg and HTML diagrams, \htmlId terms, scene and
+// map objects) and short labels (svg text, table cells, flow boxes).
+export function namedParts(el) {
+  const out = [];
+  const add = (p, a) => { if (a && a.length >= 3 && !NOT_A_NAME.test(a)) out.push([p, a]); };
+  for (const p of el.querySelectorAll("[data-part]")) for (const a of p.dataset.part.split("|")) add(p, a);
+  for (const p of el.querySelectorAll("[id], [data-id]")) {
+    if (p === el || p.closest("defs, marker, clipPath, .katex-mathml")) continue;
+    for (const id of new Set([p.getAttribute("data-id"), p.id].filter(Boolean))) if (id.length <= 40) add(p, idWords(id));
+  }
+  for (const t of el.querySelectorAll("svg text, td, th, .wb-node, li")) {
+    if (t.closest(".katex-mathml")) continue;
+    const s = normRef(t.textContent);
+    if (s.length <= 40) add(t, s);
+  }
+  return out;
+}
 
 // ---------- plots ----------
 const CURVE_COLORS = ["var(--wb-blue)", "var(--wb-red)", "var(--wb-green)", "var(--wb-purple)", "var(--wb-orange)"];
@@ -496,6 +547,15 @@ export class Board {
       else frame?.addEventListener("load", send, { once: true });
       return true;
     }
+    // A whole HTML visual, with the words that follow: the visual looks for
+    // the element they name and highlights it; only if it finds none is the
+    // whole visual boxed.
+    const htmlFrame = !ref.includes(".") && !ref.includes("/") && hintWords(hint) ? target.el.querySelector?.("iframe.wb-html-frame") : null;
+    if (htmlFrame?.dataset?.ready === "true" && htmlFrame.contentWindow) {
+      target.el.scrollIntoView({ block: "nearest", behavior: "smooth" });
+      findInFrame(htmlFrame, hintWords(hint)).then((found) => { if (!found && target.el.isConnected) this._boxWhole(target); });
+      return true;
+    }
     // A place, route, area or country on a map: make it glow on the map
     // itself, so the highlight follows it when the map zooms.
     const feature = target.el.closest?.("svg.wb-map [data-id]");
@@ -510,6 +570,22 @@ export class Board {
       this._pointTimer = setTimeout(() => { this._unpoint?.(); this._unpoint = null; }, 3200);
       return true;
     }
+    return this._boxWhole(target, ref, hint);
+  }
+
+  _activityAnswer(frame, r) {
+    const status = frame.parentElement?.querySelector(".wb-html-status");
+    if (status) {
+      status.hidden = false;
+      status.className = "wb-html-status wb-feedback " + (r.correct === true ? "right" : r.correct === false ? "wrong" : "open");
+      status.textContent = r.correct === true ? "Correct · sent to your tutor" : r.correct === false ? "Not quite · sent to your tutor" : "Sent to your tutor";
+    }
+    this.onAnswer({ kind: "activity", type: "activity", ...r });
+  }
+
+  // Highlights a resolved target: a glow along a line or curve, else a
+  // highlighter box, scrolled into view first.
+  _boxWhole(target, ref = "", hint = "") {
     const sc = this.scroller.getBoundingClientRect();
     let r = this._rect(target);
     // Bring it into view first if it's off screen.
@@ -691,7 +767,7 @@ export class Board {
       const byId = el.querySelector(`[id="${CSS.escape(part)}"], .${CSS.escape(part)}, [data-id="${CSS.escape(part)}"], [data-label="${CSS.escape(part)}"]`);
       if (byId) return this._expand(byId);
     }
-    return this._part(el, part) || this._phrase(el, part) || this._fromHint(el, hint) || { el };
+    return this._part(el, part) || this._phrase(el, part) || this._looseId(el, part) || this._fromHint(el, hint) || { el };
   }
 
   // A table header stands for its whole column.
@@ -722,20 +798,27 @@ export class Board {
   }
 
   // The tutor pointed at a whole item, but its next words name a part
-  // ("{look:p1} this blue line"): point at that part instead.
+  // ("{look:p1} this blue line", "{look:fig} the left ventricle"): point at
+  // that part instead of boxing the whole item.
   _fromHint(el, hint) {
-    const words = normRef(hint).split(" ").slice(0, 8).join(" ");
+    const words = hintWords(hint);
     if (!words) return null;
     let best = null;
-    for (const p of el.querySelectorAll("[data-part]")) {
-      for (const a of p.dataset.part.split("|")) {
-        // Only things a speaker would say: colours and labels, not "f1"/"r2c1".
-        if (a.length < 3 || /^(f|curve|line|pt|point|col|c|column|row|r|n|node|step|box)\d+$|^r\d+c\d+$|^\d+$/.test(a)) continue;
-        const at = wordIn(a, words);
-        if (at >= 0 && (!best || at < best.at || (at === best.at && a.length > best.len))) best = { p, at, len: a.length };
-      }
+    for (const [p, a] of namedParts(el)) {
+      const at = wordIn(a, words);
+      if (at >= 0 && (!best || at < best.at || (at === best.at && a.length > best.len))) best = { p, at, len: a.length };
     }
     return best ? this._expand(best.p) : null;
+  }
+
+  // {look:fig.membrane} when the element is "outer-membrane" or labelled
+  // "Outer membrane": the named part, not the whole diagram.
+  _looseId(el, part) {
+    const want = idWords(part);
+    if (want.length < 3) return null;
+    const named = namedParts(el);
+    const hit = named.find(([, a]) => a === want) || named.find(([, a]) => wordIn(want, a) >= 0) || named.find(([, a]) => a.length >= 4 && wordIn(a, want) >= 0);
+    return hit ? this._expand(hit[0]) : null;
   }
 
   _codeLines(code, from, to) {
@@ -863,14 +946,19 @@ export class Board {
         frame.dataset.autoHeight = String(d.height == null);
         const status = h("div", { class: "wb-html-status", hidden: true });
         const id = a.id || d.id;
+        // A hands-on activity ("task": true): what the student does in it goes
+        // to the tutor as their answer (the visual calls tutor.submit).
+        frame._answer = (r) => this._activityAnswer(frame, { id: String(id || "activity"), q: d.caption || "", ...r });
+        const kicker = d.task ? h("div", { class: "wb-card-kicker" }, icon("sparkles"), "Your turn") : "";
         const existing = id && this.items.get(String(id));
         if (existing?.querySelector("iframe.wb-html-frame")) {
-          existing.replaceChildren(frame, status, d.caption ? rich(d.caption, "wb-cap", true) : "");
+          existing.classList.toggle("wb-activity", !!d.task);
+          existing.replaceChildren(kicker, frame, status, d.caption ? rich(d.caption, "wb-cap", true) : "");
           this.markActive(existing);
           existing._writeMs = 450;
           return existing;
         }
-        return this._append(h("figure", { class: "wb-figure wb-html" }, frame, status, d.caption ? rich(d.caption, "wb-cap", true) : null), a, opts);
+        return this._append(h("figure", { class: "wb-figure wb-html" + (d.task ? " wb-activity" : "") }, kicker || null, frame, status, d.caption ? rich(d.caption, "wb-cap", true) : null), a, opts);
       }
       case "plot": {
         const d = a.data || {};

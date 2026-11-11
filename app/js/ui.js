@@ -200,9 +200,16 @@ export function popMenu(anchor, items) {
   );
   document.body.appendChild(menu);
   const r = anchor.getBoundingClientRect();
-  const mr = menu.getBoundingClientRect();
-  let top = r.bottom + 6;
-  if (top + mr.height > window.innerHeight - 10) top = r.top - mr.height - 6;
+  // Below the button if it fits, else above; a long menu goes on the side
+  // with more room and scrolls, so it never runs off the window.
+  const below = window.innerHeight - 10 - (r.bottom + 6);
+  const above = r.top - 6 - 10;
+  let mr = menu.getBoundingClientRect();
+  const down = mr.height <= below || (mr.height > above && below >= above);
+  menu.style.maxHeight = `min(460px, 70vh, ${Math.max(120, Math.floor(down ? below : above))}px)`;
+  menu.style.overflowY = "auto";
+  mr = menu.getBoundingClientRect();
+  const top = down ? r.bottom + 6 : Math.max(10, r.top - 6 - mr.height);
   let left = Math.min(r.left, window.innerWidth - mr.width - 10);
   menu.style.top = top + "px";
   menu.style.left = Math.max(10, left) + "px";

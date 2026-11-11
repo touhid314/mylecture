@@ -103,6 +103,9 @@ body.light .st-home { background: #d9d4cb; }
 .st-pill b { color: var(--fg-2); font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .st-pill:hover { border-color: var(--line-2); color: var(--fg); }
 .st-pill .ico { width: 14px; height: 14px; }
+/* provider, model and thinking: the shared picker, as pills */
+.st-pill.st-pick { display: inline-block; line-height: 28px; white-space: nowrap; text-overflow: ellipsis; color: var(--fg-2); font-weight: 600; }
+.st-pill.st-pick-model { max-width: 240px; }
 .st-round { width: 40px; height: 40px; border-radius: 50%; border: 1px solid var(--line-2); background: var(--surface-2); display: grid; place-items: center; cursor: pointer; color: var(--fg-2); }
 .st-round:hover { color: var(--accent); border-color: var(--accent); }
 body.st-recording .st-round, body.st-recording .st-ctl.mic { background: var(--bad); border-color: var(--bad); color: #fff; }
@@ -402,6 +405,11 @@ body.st-recording .st-tile.you-tile { outline: 2px solid var(--good); outline-of
 .wb-html { width: 100%; }
 .wb-html-frame { display: block; width: 100%; border: 0; border-radius: 12px; background: #fff; }
 .wb-html-status { padding: 8px 12px; color: var(--wb-ink); font-size: 14px; }
+/* a hands-on activity: "Your turn" above it, the result under it */
+.wb-activity { align-items: stretch; }
+.wb-activity > .wb-card-kicker { align-self: flex-start; }
+.wb-html-status.right { color: var(--wb-green); font-weight: 600; }
+.wb-html-status.wrong { color: var(--wb-orange); font-weight: 600; }
 .wb-image.loading .wb-img { width: 420px; height: 260px; background: linear-gradient(90deg, var(--wb-line), rgba(127,127,127,.06), var(--wb-line)); background-size: 200% 100%; animation: shimmer 1.2s infinite linear; }
 @keyframes shimmer { from { background-position: 200% 0; } to { background-position: -200% 0; } }
 .wb-credit { font-size: 11px; color: var(--wb-muted); text-decoration: none; }
@@ -558,9 +566,12 @@ body.light .st-home .st-greet-avatar img[src$="assets/icon.png"], body.light .st
 /* ---------- attachments (paste, + button, drag-and-drop) ---------- */
 .st-ask .attachment-list { padding: 2px 4px 8px; }
 .st-ask .attachment-chip { background: var(--surface-2); border-color: var(--line-2); color: var(--fg); }
-.st-ask-bar .attachment-controls { flex: none; }
-.st-ask-bar .btn.attachment-add { width: 40px; height: 40px; border-radius: 50%; border: 1px solid var(--line-2); background: var(--surface-2); color: var(--fg-2); padding: 0; }
-.st-ask-bar .btn.attachment-add:hover:not(:disabled) { color: var(--accent); border-color: var(--accent); background: var(--surface-2); }
+/* + sits left of the question, as in Create's prompt */
+.st-ask-row { display: flex; align-items: flex-start; gap: 8px; }
+.st-ask-row .st-topic { flex: 1; min-width: 0; }
+.st-ask-row .attachment-controls, .st-ask-row .st-round { flex: none; }
+.st-ask-row .btn.attachment-add { width: 40px; height: 40px; border-radius: 50%; border: 1px solid var(--line-2); background: var(--surface-2); color: var(--fg-2); padding: 0; }
+.st-ask-row .btn.attachment-add:hover:not(:disabled) { color: var(--accent); border-color: var(--accent); background: var(--surface-2); }
 
 .st-call { position: relative; }
 .st-compose { position: relative; }

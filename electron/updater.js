@@ -86,7 +86,8 @@ export function createUpdater({
   async function checkManual() {
     const manifest = platform === "darwin" ? "latest-mac.yml" : platform === "linux" ? "latest-linux.yml" : "latest.yml";
     const response = await fetchImpl(`${feed}/${manifest}`, { cache: "no-store", credentials: "omit", redirect: "error" });
-    if (!response.ok) return;
+    // A failed request is an error, not "up to date".
+    if (!response.ok) throw new Error(`HTTP ${response.status} for ${manifest}`);
     const version = manifestVersion(await response.text());
     const file = version && manualDownloadName({ version, platform, arch });
     if (!file || compareVersions(version, current) <= 0) return;
@@ -100,7 +101,7 @@ export function createUpdater({
       cache: "no-store", credentials: "omit",
       headers: { accept: "application/vnd.github+json", "user-agent": "MyLecture-updater" },
     });
-    if (!response.ok) return;
+    if (!response.ok) throw new Error(`HTTP ${response.status} for the latest GitHub release`);
     const release = JSON.parse(await response.text());
     const version = String(release?.tag_name || "").replace(/^v/, "");
     const macArch = arch === "arm64" ? "arm64" : "x64";
@@ -110,15 +111,20 @@ export function createUpdater({
     set({ status: "available", version, command: MAC_INSTALL_COMMAND });
   }
 
+  // -> { status: "available" | "downloading" | "ready" | "latest" | "off" | "busy" | "error", version?, current, message? }
   async function check() {
-    if (mode === "off" || checking || state.status === "ready") return;
+    if (mode === "off") return { status: "off", current };
+    if (state.status === "ready" || state.status === "available" || state.status === "downloading") return { status: state.status, version: state.version, current };
+    if (checking) return { status: "busy", current };
     checking = true;
     try {
       if (mode === "auto") await auto.checkForUpdates();
       else if (mode === "command") await checkCommand();
       else await checkManual();
+      return ["available", "downloading", "ready"].includes(state.status) ? { status: state.status, version: state.version, current } : { status: "latest", current };
     } catch (error) {
       log("warn", "update.checkFailed", { error: String(error?.message || error) });
+      return { status: "error", current, message: String(error?.message || error) };
     } finally {
       checking = false;
     }

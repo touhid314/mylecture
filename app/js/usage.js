@@ -83,8 +83,12 @@ export class UsagePanel {
         : /claude|gpt/i.test(model) ? /claude|gpt/i.test(g.name) : /^gemini models$/i.test(g.name)) || result.groups[0];
       const percent = (n) => n == null ? "Unavailable" : `${n.toFixed(1)}% remaining`;
       const remaining = selected.buckets.map((b) => `${b.window === "weekly" ? (this.compact ? "W" : "Weekly") : b.window === "5h" ? "5h" : b.name} ${b.remaining == null ? "—" : b.remaining.toFixed(0) + "%"}`).join(" · ");
-      this.summary.textContent = remaining + (this.compact ? "" : " left");
       const least = Math.min(...selected.buckets.map((b) => b.remaining ?? 100));
+      // In a toolbar, only the tightest limit: it's the one that runs out
+      // first, and the model name next to it needs the room. All limits are
+      // in the tooltip and the popover.
+      const tightest = selected.buckets.filter((b) => b.remaining != null).sort((a, b) => a.remaining - b.remaining)[0];
+      this.summary.textContent = this.compact ? (tightest ? `${tightest.remaining.toFixed(0)}% left` : "Limits —") : remaining + " left";
       this.root.dataset.state = least < 10 ? "out" : least < 25 ? "low" : "ok";
       this.summary.setAttribute("aria-label", `Account usage remaining: ${remaining}`);
       this.summary.title = `Remaining: ${remaining}. Click for reset times and all limits.`;
@@ -99,7 +103,7 @@ export class UsagePanel {
             h("div", { class: "small muted" }, b.resetsAt ? `Resets ${new Date(b.resetsAt).toLocaleString()}` : "Reset time unavailable"))))),
         h("p", { class: "small muted" }, result.description),
         result.measuredAt ? h("div", { class: "small muted" }, `Provider snapshot: ${new Date(result.measuredAt).toLocaleString()}`) : null,
-        h("div", { class: "small muted" }, `Updated ${new Date(result.checkedAt).toLocaleTimeString()} · Refreshes every minute`),
+        h("div", { class: "small muted" }, `Updated ${new Date(result.checkedAt).toLocaleTimeString()}`),
       );
     } catch {
       if (request !== this.request || key !== usageKey(this.state.settings, this.source())) return;

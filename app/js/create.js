@@ -6,10 +6,10 @@
 //   right  Video Agent: generation settings + chat (new videos, changes, questions)
 import { markdownEl, renderInline, onFileLink } from "./markdown.js";
 import { connectPanel, anyConnected } from "./connect.js";
-import { showApiKeyDialog } from "./api-key.js";
 import { h, icon, fmtTime, fmtDate, toast, modal, popMenu, confirmBox, bus } from "./ui.js";
 import { Player } from "./player.js";
 import { UsagePanel } from "./usage.js";
+import { ModelPicker } from "./model-picker.js";
 import { AttachmentPicker, attachmentNames } from "./attachments.js";
 import { omniVoiceInstalled, showOmniVoiceDownloader } from "./omnivoice-download.js";
 import { openAddVoice, removeOwnVoice, isOwnVoice } from "./voice-add.js";
@@ -216,46 +216,8 @@ export class CreateView {
     this.videoControls = h("div", { class: "agent-video-controls" },
       h("label", { class: "agent-length-row" }, h("span", {}, "Target length"), this.lenRange, this.lenInput),
       h("div", { class: "agent-video-selects" }, this.arSelect, this.themeSelect, this.teachSelect, h("div", { class: "voice-control" }, this.voiceButton, this.voiceSelect)));
-    this.engineLabel = h("button", { class: "agent-option agent-provider", title: "Provider", "aria-label": "Choose provider", onclick: () => this._providerMenu() });
-    this.agentName = h("span", { class: "agent-name" });
-    this.modelName = h("button", { class: "agent-option agent-model-name", "aria-label": "Choose model", onclick: () => this._modelMenu() });
-    this.engineLabel.append(this.agentName);
-    this.thinkingLabel = h("button", { class: "agent-option agent-thinking", title: "Reasoning effort", "aria-label": "Choose reasoning effort", onclick: () => this._reasoningMenu() }, "Default");
+    this.picker = new ModelPicker({ state: this.state, scope: "create" });
     this.usage = new UsagePanel({ state: this.state, compact: true });
-    this.providerSelect = h("select", { class: "select sm", "aria-label": "Agent provider", onchange: () => {
-      const [engine, provider] = this.providerSelect.value.split(":");
-      this._saveAgentSettings(provider ? { engine, api: { provider, model: this.engineCatalog.apiProviders[provider]?.defaultModel || "", baseUrl: "" } } : { engine });
-    } });
-    this.modelSuggestions = h("datalist", { id: "agent-model-suggestions" });
-    this.modelInput = h("input", { class: "input sm", list: "agent-model-suggestions", "aria-label": "Custom model ID", placeholder: "Enter a model ID", hidden: true, onchange: () => {
-      const s = this.state.settings;
-      this._saveAgentSettings(s.engine === "api" ? { api: { model: this.modelInput.value.trim() } } : { models: { [s.engine]: this.modelInput.value.trim() } });
-    } });
-    this.modelSelect = h("select", { class: "select sm", "aria-label": "Agent model", onchange: () => {
-      const value = this.modelSelect.value;
-      this.modelInput.hidden = value !== "__custom";
-      if (value === "__custom") { this.modelInput.focus(); return; }
-      const s = this.state.settings;
-      this._saveAgentSettings(s.engine === "api" ? { api: { model: value } } : { models: { [s.engine]: value } });
-    } });
-    this.effortSelect = h("select", { class: "select sm", "aria-label": "Thinking level", onchange: () => this._setThinking(this.effortSelect.value) });
-    this.modelStatus = h("p", { class: "agent-model-status small faint", role: "status", "aria-live": "polite" }, "Loading provider models…");
-    this.refreshModelsBtn = h("button", { class: "agent-tool", title: "Refresh provider models and reasoning levels", "aria-label": "Refresh provider models", onclick: () => this._refreshEngineOptions({ force: true }) }, icon("refresh"));
-    this.apiKeyInput = h("input", { class: "input sm", type: "password", placeholder: "API key (leave blank to keep saved key)", "aria-label": "Provider API key" });
-    this.apiBaseInput = h("input", { class: "input sm", placeholder: "Optional custom base URL", "aria-label": "API base URL" });
-    this.apiControls = h("div", { class: "agent-api-controls" }, field("API key", this.apiKeyInput), field("Base URL", this.apiBaseInput),
-      h("button", { class: "btn sm", onclick: async () => {
-        try {
-          if (this.apiKeyInput.value.trim()) await window.ml.settings.setSecret(`api:${this.state.settings.api.provider}`, this.apiKeyInput.value.trim());
-          this.apiKeyInput.value = "";
-          if (await this._saveAgentSettings({ api: { baseUrl: this.apiBaseInput.value.trim() } })) toast("Connection saved", { kind: "good" });
-        } catch (e) { toast(friendly(e), { kind: "bad" }); }
-      } }, "Save connection"));
-    this.enginePanel = h("div", { class: "agent-options agent-model-options", hidden: true },
-      h("div", { class: "agent-options-head" }, h("b", { class: "grow" }, "Agent"), this.refreshModelsBtn, h("button", { class: "agent-tool", title: "Close agent settings", "aria-label": "Close agent settings", onclick: () => this._toggleEngineOptions(false) }, icon("x"))),
-      field("Provider", this.providerSelect), field("Model", h("div", {}, this.modelSelect, this.modelInput, this.modelSuggestions)), field("Thinking level", this.effortSelect), this.modelStatus, this.apiControls,
-      h("p", { class: "small faint" }, "Applies to the next request."));
-    this._syncEngineLabel();
     const right = h(
       "aside",
       { class: "ide-right", "data-drop-label": "Drop files to attach" },
@@ -264,33 +226,24 @@ export class CreateView {
       h(
         "div",
         { class: "ide-compose" },
-        this.enginePanel,
         this.modeNote,
         h("div", { class: "agent-box" },
           this.attachments.list,
           h("div", { class: "agent-prompt-row" }, this.attachments.controls, this.input, this.stopBtn, this.sendBtn),
           this.videoControls,
-          h("div", { class: "agent-toolbar" }, this.engineLabel, this.modelName, this.thinkingLabel, this.usage.root)),
+          h("div", { class: "agent-toolbar" }, ...this.picker.buttons, this.usage.root)),
       ),
     );
 
     this.attachments.dropTarget(right);
     this.root.append(left, center, right);
-    document.addEventListener("pointerdown", (e) => {
-      if (!this.enginePanel.hidden && !this.enginePanel.contains(e.target) && !this.engineLabel.contains(e.target) && !this.thinkingLabel.contains(e.target)) this._toggleEngineOptions(false);
-    });
-    document.addEventListener("keydown", (e) => {
-      if (e.key === "Escape" && !this.enginePanel.hidden) { this._toggleEngineOptions(false); this.engineLabel.focus(); }
-    });
     this.newLecture();
   }
 
   _syncSettingsSelects(s = this.state.settings) {
     if (s.lgTheme) this.themeSelect.value = s.lgTheme;
     if (s.lgTeachingStyle) this.teachSelect.value = s.lgTeachingStyle;
-    this._syncEngineLabel(s);
     if (this.voiceSelect) this._refreshVoiceOptions();
-    if (this.engineCatalog) this._refreshEngineOptions();
   }
 
   _setArtifactsOpen(open, height) {
@@ -310,63 +263,6 @@ export class CreateView {
       const project = await window.ml.ide.get(id);
       if (this.project?.lecture.id === id) { this.project.files = project.files; this._paintFiles(); }
     } catch {} finally { this._artifactsLoading = false; }
-  }
-
-  _syncEngineLabel(s = this.state.settings) {
-    if (!this.engineLabel) return;
-    const names = { "claude-code": "Claude", codex: "GPT", antigravity: "Gemini", api: { gemini: "Gemini API", compatible: "LiteLLM" }[s.api?.provider] || "API key" };
-    const configured = s.engine === "api" ? s.api?.model : s.models?.[s.engine];
-    const key = s.engine === "api" ? `api:${s.api.provider}` : s.engine;
-    const models = this._agentModels?.[key]?.models || [];
-    const native = models.find(m => m.id === configured || (configured && m.resolvedModel === configured)) ||
-      (!configured && models.find(m => m.isDefault || m.id === "default"));
-    const model = native ? modelLabel(native, models) : configured || (models.length ? modelLabel(defaultModel(models), models) : "");
-    const provider = names[s.engine] || s.engine || "Choose AI";
-    this.agentName.textContent = provider;
-    this.modelName.textContent = model || (s.engine ? "Loading models…" : "Choose a model");
-    this.modelName.title = configured || native?.resolvedModel || native?.id || model || "";
-    const effort = s.engine === "antigravity" ? native?.effort : s.codexEffort || native?.defaultEffort;
-    this.thinkingLabel.textContent = effort ? cap(effort) : "Standard";
-    this.thinkingLabel.title = `Reasoning effort: ${effort || "standard"}`;
-  }
-
-  _toggleEngineOptions(open = this.enginePanel.hidden) {
-    this.enginePanel.hidden = true;
-  }
-
-  async _providerMenu() {
-    try {
-      this.engineCatalog ||= await window.ml.engines.list();
-      const s = this.state.settings;
-      const subs = this.engineCatalog.engines.filter(e => e.id !== "api");
-      popMenu(this.engineLabel, [{ label: "Provider" },
-        ...subs.map(e => ({ text: `${e.name}${s.engine === e.id ? "  ✓" : ""}`, run: () => s.connected?.[e.id] ? this._saveAgentSettings({ engine: e.id }) : this._connectFirst(e.name) })),
-        "-",
-        { text: `Use with API key…${s.engine === "api" ? "  ✓" : ""}`, run: () => showApiKeyDialog(this.state, { onDone: () => this._refreshEngineOptions({ force: true }) }) }]);
-    } catch (e) { toast(friendly(e), { kind: "bad" }); }
-  }
-
-  _connectFirst(name) {
-    toast(`Connect ${name} first: Settings → Connect.`, { actions: [{ label: "Open Settings", run: () => bus.emit("navigate", { view: "settings" }) }] });
-  }
-
-  async _modelMenu() {
-    await this._refreshEngineOptions();
-    const s = this.state.settings;
-    const key = s.engine === "api" ? `api:${s.api.provider}` : s.engine;
-    const models = this._agentModels?.[key]?.models || [];
-    const choose = model => this._saveAgentSettings(s.engine === "api" ? { api: { model } } : { models: { [s.engine]: model } });
-    const def = defaultModel(models);
-    popMenu(this.modelName, [{ label: "Model" },
-      ...models.filter(m => m.id !== "default" || !models.some(x => x !== m && x.id === m.resolvedModel)).map(m => ({ text: modelLabel(m, models), run: () => choose(m === def ? "" : m.id) })).map((x, i, all) => all.findIndex((y) => y.text === x.text) === i ? x : null).filter(Boolean), "-",
-      { text: "Refresh models", run: async () => { await this._refreshEngineOptions({ force: true }); this._modelMenu(); } },
-      { label: this.modelStatus.textContent }]);
-  }
-
-  async _reasoningMenu() {
-    await this._refreshEngineOptions();
-    popMenu(this.thinkingLabel, [{ label: "Reasoning effort" }, ...Array.from(this.effortSelect.options).map(o => ({ text: o.textContent, run: () => this._setThinking(o.value) })),
-      ...(this.effortSelect.disabled ? [{ label: "Provider has not advertised additional levels" }] : [])]);
   }
 
   async _refreshVoiceOptions() {
@@ -466,89 +362,8 @@ export class CreateView {
     } catch (e) { toast(friendly(e), { kind: "bad" }); return false; }
   }
 
-  async _refreshEngineOptions({ force = false } = {}) {
-    if (!this.providerSelect) return;
-    const revision = this._engineRevision = (this._engineRevision || 0) + 1;
-    try {
-      this.engineCatalog ||= await window.ml.engines.list();
-      const s = this.state.settings, id = s.engine;
-      this.providerSelect.replaceChildren(
-        ...this.engineCatalog.engines.filter(e => e.id !== "api").map(e => h("option", { value: e.id }, e.name)),
-        ...Object.entries(this.engineCatalog.apiProviders).map(([key, v]) => h("option", { value: `api:${key}` }, `${v.label} API`)));
-      this.providerSelect.value = id === "api" ? `api:${s.api.provider}` : id;
-      const current = id === "api" ? s.api.model || "" : s.models?.[id] || "";
-      if (document.activeElement !== this.modelInput) this.modelInput.value = current;
-      this.apiControls.hidden = id !== "api";
-      this.apiBaseInput.value = s.api?.baseUrl || "";
-      this._agentModels ||= {};
-      const cacheKey = id === "api" ? `${id}:${s.api.provider}` : id;
-      if (this._displayedModelKey !== cacheKey) {
-        this._displayedModelKey = cacheKey;
-        this.modelSelect.replaceChildren(h("option", { value: current }, current || "Loading models…"), h("option", { value: "__custom" }, "Custom model ID…"));
-        this.modelSuggestions.replaceChildren();
-        this.effortSelect.replaceChildren(h("option", { value: "" }, "Standard"));
-        this.effortSelect.disabled = true;
-      }
-      // Only a connected subscription is asked for its models (that starts its tool).
-      if (id !== "api" && !s.connected?.[id]) {
-        this.modelStatus.textContent = id ? "Connect this account in Settings to see its models." : "";
-        this.modelStatus.classList.remove("error");
-        return;
-      }
-      const cached = this._agentModels[cacheKey];
-      // Ten minutes: each fetch starts the provider's CLI (Gemini's may ask to sign in).
-      const shouldFetch = force || !cached || Date.now() - cached.fetchedAt >= 600000;
-      if (shouldFetch) {
-        this._modelsLoading = true;
-        this.refreshModelsBtn.disabled = true;
-        this.modelStatus.textContent = "Checking provider models and reasoning levels…";
-        this.modelStatus.classList.remove("error");
-        this.modelSelect.disabled = true;
-        this.effortSelect.disabled = true;
-      }
-      const models = shouldFetch ? await window.ml.engines.models(id) : cached.models;
-      if (revision !== this._engineRevision) return;
-      const fetchedAt = shouldFetch ? Date.now() : cached.fetchedAt;
-      this._agentModels[cacheKey] = { models, fetchedAt };
-      this._syncEngineLabel();
-      this.modelSuggestions.replaceChildren(...models.filter(m => m.id).map(m => h("option", { value: m.id }, m.label || m.id)));
-      const def = defaultModel(models);
-      this.modelSelect.replaceChildren(...[h("option", { value: "" }, def ? modelLabel(def, models) : "Loading models…"),
-        ...models.filter(m => m.id && m.id !== "default" && m !== def && modelLabel(m, models) !== modelLabel(def, models)).map(m => h("option", { value: m.id }, modelLabel(m, models))),
-        current && !models.some(m => m.id === current) ? h("option", { value: current }, `${current} (saved)`): null,
-        h("option", { value: "__custom" }, "Custom model ID…")].filter(Boolean));
-      this.modelSelect.value = current === "default" ? "" : current;
-      this.modelInput.hidden = true;
-      const model = models.find(m => m.id === current) || models.find(m => current && m.resolvedModel === current) || (!current && models.find(m => m.isDefault || m.id === "default"));
-      const values = model?.efforts || [];
-      const selected = id === "antigravity" ? model?.effort || "" : s.codexEffort || "";
-      this.effortSelect.replaceChildren(...(id === "antigravity" && model?.effort ? [] : [h("option", { value: "" }, model?.defaultEffort ? cap(model.defaultEffort) : "Standard")]), ...values.filter(v => !(v === model?.defaultEffort && !(id === "antigravity" && model?.effort))).map(v => h("option", { value: v }, cap(v))));
-      const effective = selected && values.includes(selected) ? selected : "";
-      this.effortSelect.value = effective;
-      this.effortSelect.disabled = !values.length;
-      this.effortSelect.title = values.length ? "Supported levels reported by this provider" : "The provider has not advertised reasoning levels for this model";
-      this.modelStatus.textContent = `${models.length} models · ${model?.source || models[0]?.source || "Provider catalog"} · checked ${new Date(fetchedAt).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit" })}${values.length ? "" : " · reasoning levels not advertised"}`;
-      this.modelStatus.classList.remove("error");
-      if (id !== "antigravity" && effective !== (s.codexEffort || "")) await this._saveAgentSettings({ codexEffort: effective });
-    } catch (e) {
-      if (revision !== this._engineRevision) return;
-      this.modelStatus.textContent = `Could not refresh: ${friendly(e)}`;
-      this.modelStatus.classList.add("error");
-    } finally {
-      if (revision === this._engineRevision) { this._modelsLoading = false; this.refreshModelsBtn.disabled = false; this.modelSelect.disabled = false; }
-    }
-  }
-
-  _setThinking(level) {
-    const s = this.state.settings;
-    if (s.engine === "antigravity") {
-      const current = s.models?.antigravity || "";
-      const models = this._agentModels.antigravity?.models || [];
-      const model = models.find(m => m.id === current);
-      const next = model?.effortVariants?.find(v => v.level === level)?.model;
-      if (next) this._saveAgentSettings({ models: { antigravity: next } });
-      else if (!level) this._saveAgentSettings({ models: { antigravity: "" } });
-    } else this._saveAgentSettings({ codexEffort: level });
+  _refreshEngineOptions(opts) {
+    return this.picker?.refresh(opts);
   }
 
   _fit() {
@@ -1016,7 +831,6 @@ export class CreateView {
     this.sending = true;
     this.input.readOnly = true;
     this.attachments.setLocked(true);
-    this._toggleEngineOptions(false);
     const length = parseLength(this.lenInput.value) || "1:00";
     const aspect = this.arSelect.value;
     const projectId = this.project?.lecture?.id || null;
@@ -1539,17 +1353,3 @@ function workedFor(ms, items) {
 }
 
 // The model a provider uses when none is chosen, and how to name it.
-function defaultModel(models) {
-  return models.find((m) => m.isDefault) || models.find((m) => m.id === "default") || models[0] || null;
-}
-// Claude's "default" entry points at a real model (resolvedModel): use that model's name.
-function modelLabel(m, models = []) {
-  if (!m) return "";
-  if (m.id !== "default") return m.label || m.id;
-  const real = models.find((x) => x.id !== "default" && (x.id === m.resolvedModel || x.resolvedModel === m.resolvedModel));
-  return real ? real.label || real.id : prettyModelId(m.resolvedModel) || m.label;
-}
-function prettyModelId(id) {
-  if (!id) return "";
-  return id.replace(/^claude-/, "").split("-").map((p, i, a) => (/^\d+$/.test(p) && /^\d+$/.test(a[i - 1] || "") ? "." + p : (i ? " " : "") + p.charAt(0).toUpperCase() + p.slice(1))).join("");
-}

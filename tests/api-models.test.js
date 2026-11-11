@@ -129,3 +129,62 @@ test("Use with API key offers only providers verified end to end", async () => {
   await assert.rejects(verifyApiProvider({ provider: "compatible", apiKey: "x", baseUrl: "" }), /server address/);
   await assert.rejects(verifyApiProvider({ provider: "gemini", apiKey: "" }), /Enter an API key/);
 });
+
+// A LiteLLM server (like NaviGator) lists every model, but each key may use
+// only some: the others answer 403 "model ... is not available for this key".
+function litellm({ allowed = [], keyError = null } = {}) {
+  const asked = [];
+  const fetch = async (url, options) => {
+    if (String(url).endsWith("/models")) return json({ data: ["claude-haiku-5.5-thinking", "gemini-flash", "gpt-mini", "llama-big", "text-embedding"].map((id) => ({ id })) });
+    const model = JSON.parse(options.body).model;
+    asked.push(model);
+    if (keyError) return new Response(JSON.stringify({ error: { message: keyError } }), { status: 403 });
+    if (!allowed.includes(model)) return new Response(JSON.stringify({ error: { message: `The requested model '${model}' is not available for this API key, or the model name is invalid.` } }), { status: 403 });
+    return new Response('data: {"choices":[{"delta":{"content":"OK"}}]}\n\ndata: [DONE]\n\n', { status: 200, headers: { "content-type": "text/event-stream" } });
+  };
+  return { fetch, asked };
+}
+const uf = { provider: "compatible", apiKey: "k", baseUrl: "https://litellm.example" };
+
+test("a model the key may not use is skipped, and the next one is tested", async () => {
+  const { verifyApiProvider } = await import("../electron/engines/api.js");
+  const server = litellm({ allowed: ["llama-big"] });
+  await withFetch(server.fetch, async () => {
+    const r = await verifyApiProvider(uf);
+    assert.equal(r.model, "llama-big");
+    assert.deepEqual(server.asked, ["claude-haiku-5.5-thinking", "gemini-flash", "gpt-mini", "llama-big"]);
+    assert.ok(!r.models.some((m) => m.id === "text-embedding"));
+  });
+});
+
+test("the model the user picked is tested first", async () => {
+  const { verifyApiProvider } = await import("../electron/engines/api.js");
+  const server = litellm({ allowed: ["gpt-mini", "llama-big"] });
+  await withFetch(server.fetch, async () => {
+    assert.equal((await verifyApiProvider({ ...uf, model: "llama-big" })).model, "llama-big");
+    assert.deepEqual(server.asked, ["llama-big"]);
+  });
+});
+
+test("when no model answers, the list still comes back so one can be chosen", async () => {
+  const { verifyApiProvider } = await import("../electron/engines/api.js");
+  const server = litellm({ allowed: [] });
+  await withFetch(server.fetch, async () => {
+    const r = await verifyApiProvider(uf);
+    assert.equal(r.model, null);
+    assert.equal(r.models.length, 4);
+    assert.match(r.error, /None of the 4 models tried .* answered.*not available for this API key.*Choose a model/);
+  });
+});
+
+test("a key-level refusal stops the check instead of trying every model", async () => {
+  const { verifyApiProvider, keyLevelFailure } = await import("../electron/engines/api.js");
+  const server = litellm({ keyError: "Budget has been exceeded for this key" });
+  await withFetch(server.fetch, async () => {
+    await assert.rejects(verifyApiProvider(uf), /test request failed.*Budget has been exceeded/);
+    assert.equal(server.asked.length, 1);
+  });
+  assert.equal(keyLevelFailure(new Error("API HTTP 401: denied")), true);
+  assert.equal(keyLevelFailure(new Error('API HTTP 403: {"error":{"message":"The requested model \'x\' is not available"}}')), false);
+  assert.equal(keyLevelFailure(new Error("API HTTP 404: no such route")), false);
+});

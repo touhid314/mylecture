@@ -152,7 +152,7 @@ PICTURES ON THE BOARD (attached to this message, so you can see them now): ${boa
         try {
           res = await engine.generate({
           system: TUTOR_SYSTEM,
-          user: user + (workspace ? `\n\nLESSON WORKSPACE: ${workspace}\nYou may work independently here using your available native tools. Publish a finished HTML file with html#id: {"file":"relative/path.html"}. Keep teaching while producing small visuals incrementally.\nLOCAL PICTURES FOR HTML: ${JSON.stringify(files.filter((f) => /^image\//.test(f.mime || "")).map((f) => ({ name: f.name, url: `mylecture://app/tutor-file/${encodeURIComponent(req.sessionId)}/attachments/${encodeURIComponent(path.basename(f.path))}` })))}` : "") + research,
+          user: user + (workspace ? `\n\nLESSON WORKSPACE: ${workspace}\nAfter your first say line (never before it), you may use your native tools here when a visual needs them; inline html is usually faster. Publish a finished HTML file with html#id: {"file":"relative/path.html"}. Keep teaching while producing small visuals incrementally.\nLOCAL PICTURES FOR HTML: ${JSON.stringify(files.filter((f) => /^image\//.test(f.mime || "")).map((f) => ({ name: f.name, url: `mylecture://app/tutor-file/${encodeURIComponent(req.sessionId)}/attachments/${encodeURIComponent(path.basename(f.path))}` })))}` : "") + research,
           model,
           effort: s.tutorEffort || "low",
           signal: AbortSignal.any([abort.signal, stop.signal]),

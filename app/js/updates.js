@@ -45,8 +45,8 @@ function showCommand(state) {
   });
 }
 
-function show(state) {
-  if (!["ready", "available"].includes(state?.status) || !state.version || prompted === state.version) return;
+function show(state, { again = false } = {}) {
+  if (!["ready", "available"].includes(state?.status) || !state.version || (prompted === state.version && !again)) return;
   prompted = state.version;
   if (state.command) return showCommand(state);
   const auto = state.status === "ready";
@@ -63,6 +63,19 @@ function show(state) {
       { label: "Update now", primary: true, run: install },
     ],
   });
+}
+
+// Settings > About > Check for updates. Shows the update prompt (again, even
+// if it was dismissed this session) or says why there is nothing to install.
+export async function checkForUpdates() {
+  if (!window.ml?.updates?.check) return toast("Updates aren't available in this copy of MyLecture (a development build).", { kind: "bad" });
+  const r = await window.ml.updates.check().catch((e) => ({ status: "error", message: String(e?.message || e) }));
+  if (r.status === "available" || r.status === "ready") return show({ ...(await window.ml.updates.state()), ...r }, { again: true });
+  if (r.status === "downloading") return toast(`MyLecture ${r.version} is downloading. You'll be asked to restart when it's ready.`, { timeout: 7000 });
+  if (r.status === "latest") return toast(`You have the latest version (${r.current}).`);
+  if (r.status === "busy") return toast("Already checking for updates…");
+  if (r.status === "off") return toast("Updates aren't available in this copy of MyLecture (a development build).", { kind: "bad" });
+  toast("Couldn't check for updates. Check your internet connection and try again.", { kind: "bad", timeout: 7000 });
 }
 
 export async function initUpdates() {

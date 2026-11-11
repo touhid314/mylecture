@@ -309,7 +309,7 @@ function registerIpc() {
   });
   h("connect:services", () => SERVICES);
   // "Use with API key": check a key for real before it is saved.
-  h("api:verify", ({ provider, apiKey, baseUrl } = {}) => verifyApiProvider({ provider, apiKey: apiKey || getSecret(`api:${provider}`), baseUrl }));
+  h("api:verify", ({ provider, apiKey, baseUrl, model } = {}) => verifyApiProvider({ provider, apiKey: apiKey || getSecret(`api:${provider}`), baseUrl, model: typeof model === "string" ? model : "" }));
   h("connect:run", async (id, action, options = {}) => {
     log("info", "account.action", { provider: id, action });
     if (action === "install") return components.install(id).then(() => true);
@@ -583,6 +583,8 @@ function registerIpc() {
     return true;
   });
   h("update:state", () => updater?.state || { status: "idle", mode: "off" });
+  // The "Check for updates" button in Settings.
+  h("update:check", () => updater?.check() || { status: "off" });
   h("update:install", (options) => updater?.install({ force: !!options?.force }) || { ok: false });
   h("update:openTerminal", () => updater?.openTerminal() || { ok: false });
   h("shell:openExternal", (url) => (/^https?:\/\//.test(url) ? shell.openExternal(url) : null));
@@ -621,6 +623,9 @@ app.whenReady().then(() => {
     const headers = new Headers(res.headers);
     headers.set("Access-Control-Allow-Origin", "*");
     headers.set("Cache-Control", "no-cache");
+    // Our HTML (app and tutor visuals) is UTF-8: say so, rather than leave
+    // the browser to guess an encoding and garble "→" into "â†’".
+    if (/\.html?$/i.test(file)) headers.set("Content-Type", "text/html; charset=utf-8");
     headers.set("Accept-Ranges", "bytes");
     return new Response(res.body, { status: res.status, headers });
   });

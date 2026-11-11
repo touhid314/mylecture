@@ -6,8 +6,8 @@ import { Board, richHtml } from "./board.js";
 import { pictureRequest, sessionSnapshot } from "./pictures.js";
 import { Voice, Mic, cleanTranscript, cueTime } from "./speech.js";
 import { LESSONS_PER_PAGE, pageNumbers } from "./paging.js";
-import { engineLabel } from "../settings.js";
 import { UsagePanel } from "../usage.js";
+import { ModelPicker } from "../model-picker.js";
 import { AttachmentPicker, STUDY_EXTENSIONS, attachmentNames } from "../attachments.js";
 
 // Faint, half-erased notes left on the home board, so it reads as a board at a glance.
@@ -61,6 +61,7 @@ function voiceName(settings, catalog) {
 
 function describeAnswer(r) {
   const verdict = r.correct === true ? "correct" : r.correct === false ? "incorrect" : "not auto-graded (you judge it)";
+  if (r.kind === "activity") return `Activity ${r.id} ("${r.q || ""}") — the student did it on the board and submitted: "${r.answer}". Auto-check: ${verdict}.`;
   if (r.kind === "practice") return `Practice "${r.q || r.id}" (${r.id}) finished: ${r.answer}. Overall: ${r.correct ? "every step right on the first try" : "needed retries or hints on some steps"}.`;
   return `Question ${r.id} ("${r.q || ""}") — the student answered: "${r.answer}". Auto-check: ${verdict}.`;
 }
@@ -110,7 +111,8 @@ export class StudyView {
     this.homeMic = h("button", { class: "st-round ghost", title: "Hold to speak your question" }, icon("mic"));
     this._holdToTalk(this.homeMic, "home");
     this.startBtn = h("button", { class: "btn primary st-start", onclick: () => this.startFromHome() }, "Start lesson", icon("send"));
-    this.tutorBtn = h("button", { class: "st-pill", onclick: () => this._tutorMenu(this.tutorBtn) });
+    // The same provider, model and thinking picker as Create, for the tutor's own choice.
+    this.picker = new ModelPicker({ state: this.state, scope: "tutor", classes: { provider: "st-pill st-pick", model: "st-pill st-pick st-pick-model", thinking: "st-pill st-pick" } });
     this.voiceBtn = h("button", { class: "st-pill", onclick: () => this._voiceMenu(this.voiceBtn) });
     this.boardBtn = h("button", { class: "st-pill", onclick: () => this._boardMenu(this.boardBtn) });
     // Remaining account limits for the tutor's own engine and model.
@@ -129,7 +131,7 @@ export class StudyView {
           h("div", { class: "st-greet-bubble" }, h("span", { class: "live-dot" }), h("b", {}, "Your tutor is here."), " What shall we learn today?")),
         h("h1", {}, "Learn anything, ", h("span", { class: "ink" }, "one-on-one.")),
         h("p", { class: "st-sub" }, "Your tutor explains on this ", this.boardLabel, ", checks your understanding and gives you practice. Interrupt any time: hold ", h("kbd", {}, "Space"), " to talk, or type."),
-        h("div", { class: "st-ask" }, this.homeAttachments.list, this.topicInput, h("div", { class: "st-ask-bar" }, this.tutorBtn, this.usage.root, this.voiceBtn, this.boardBtn, h("div", { class: "grow" }), this.homeAttachments.controls, this.homeMic, this.startBtn)),
+        h("div", { class: "st-ask" }, this.homeAttachments.list, h("div", { class: "st-ask-row" }, this.homeAttachments.controls, this.topicInput, this.homeMic), h("div", { class: "st-ask-bar" }, ...this.picker.buttons, this.usage.root, this.voiceBtn, this.boardBtn, h("div", { class: "grow" }), this.startBtn)),
         h("div", { class: "st-chips" }, SUGGESTIONS.map(([q, tag]) => h("button", { class: "chip", onclick: () => this.start(q) }, h("span", { class: "faint" }, tag), q))),
       ),
       this.recent,
@@ -146,15 +148,12 @@ export class StudyView {
     } catch {}
     const choice = await window.ml.study.engine().catch(() => ({ engine: s.engine, model: "" }));
     this.engineChoice = choice;
-    const name = ENGINE_NAMES[choice.engine] || "No AI connected";
-    this.tutorBtn.replaceChildren(icon("sparkles"), h("span", {}, "Tutor model "), h("b", {}, choice.model ? `${name} · ${choice.model}` : name));
     this.tutorName = voiceName(s, this.voiceCatalog);
     this.voice?.setVoice(tutorVoice(s));
     this.voiceBtn.replaceChildren(icon("volume"), h("span", {}, "Voice "), h("b", {}, this.tutorName));
     const style = boardStyleOf(s);
     const styleName = style === "blackboard" ? "Blackboard" : "Whiteboard";
     this.boardBtn.replaceChildren(icon("edit"), h("span", {}, "Board "), h("b", {}, styleName));
-    this.tutorBtn.title = `Tutor model: ${this.tutorBtn.textContent.replace(/^Tutor model /, "")}`;
     this.voiceBtn.title = `Tutor voice: ${this.tutorName}`;
     this.boardBtn.title = `Board style: ${styleName}${s.boardStyle === "whiteboard" || s.boardStyle === "blackboard" ? "" : " (matches the app theme)"}`;
     if (this.tutorTileName) this.tutorTileName.textContent = this.tutorName;
@@ -162,42 +161,12 @@ export class StudyView {
     this.home.classList.toggle("blackboard", style === "blackboard");
     this.boardLabel.textContent = style;
     this.usage.refresh();
+    this.picker.refresh();
   }
 
   async _saveSettings(patch) {
     this.state.settings = await window.ml.settings.set(patch);
     bus.emit("settings-changed", this.state.settings);
-  }
-
-  async _tutorMenu(anchor) {
-    const s = this.state.settings;
-    const connected = ["claude-code", "codex", "antigravity", "api"].filter((id) => id === "api" ? s.apiKeys?.[s.api?.provider] || s.engine === "api" : s.connected?.[id]);
-    const items = [{ label: "Tutor model (latency matters: faster models answer sooner)" }];
-    items.push({ text: `${s.tutorEngine ? "" : "✓ "}Same as Create (${engineLabel(s)})`, run: () => this._saveSettings({ tutorEngine: "", tutorModel: "" }) });
-    for (const id of connected) {
-      items.push({ text: `${s.tutorEngine === id ? "✓ " : ""}${ENGINE_NAMES[id]}${s.tutorEngine === id && s.tutorModel ? ` · ${s.tutorModel}` : ""}…`, run: () => this._pickModel(anchor, id) });
-    }
-    items.push("-", { label: "Thinking" });
-    for (const [v, label] of [["low", "Fast (recommended)"], ["medium", "Balanced"], ["high", "Thorough (slower to start)"]]) items.push({ text: `${(s.tutorEffort || "low") === v ? "✓ " : ""}${label}`, run: () => this._saveSettings({ tutorEffort: v }) });
-    popMenu(anchor, items);
-  }
-
-  async _pickModel(anchor, engine) {
-    const menu = popMenu(anchor, [{ label: `${ENGINE_NAMES[engine]} models` }, { label: "Loading…" }]);
-    let models = [];
-    try {
-      models = await window.ml.engines.models(engine);
-    } catch (e) {
-      toast(friendly(e), { kind: "bad" });
-    }
-    if (!document.body.contains(menu)) return;
-    const fast = (m) => /haiku|flash|mini|lite|fast|spark/i.test(m.id + (m.label || ""));
-    const sorted = [...models].sort((a, b) => fast(b) - fast(a));
-    popMenu(anchor, [
-      { label: `${ENGINE_NAMES[engine]} models` },
-      { text: "Default model", run: () => this._saveSettings({ tutorEngine: engine, tutorModel: "" }) },
-      ...sorted.slice(0, 24).map((m) => ({ text: `${m.label || m.id}${fast(m) ? "  ⚡" : ""}`, run: () => this._saveSettings({ tutorEngine: engine, tutorModel: m.id }) })),
-    ]);
   }
 
   async _voiceMenu(anchor) {
@@ -1151,7 +1120,7 @@ export class Lesson {
         if (this.closed || this._interruptedSince(item)) return;
         const el = this._drawVisual(item);
         if (!el && a.type !== "page") break;
-        if (a.type === "ask" || a.type === "practice") {
+        if (a.type === "ask" || a.type === "practice" || (a.type === "html" && a.data?.task)) {
           if (this.writing) await this.writing;
           this.awaiting = a.data?.id || a.id || "q";
           setTimeout(() => el?._focus?.(), 200);

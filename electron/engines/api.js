@@ -60,8 +60,25 @@ export async function pickApiModel(c) {
   return id;
 }
 
-// Checks a key for real: lists models, then makes one short request.
-// Returns { models, model } or throws with the provider's own error.
+// A failure that no other model will fix: the key itself is invalid, out of
+// credit, or blocked. A 403 that names a model ("model X is not available for
+// this API key", as LiteLLM servers answer for models a key may not use) is
+// about that model only, so the next one is tried.
+export function keyLevelFailure(e) {
+  const text = String(e?.message || e);
+  if (/HTTP (401|402)\b/.test(text)) return true;
+  if (!/HTTP 403\b/.test(text)) return false;
+  return !/model/i.test(providerMessage(e).replace(/^.*?HTTP 403:?/, ""));
+}
+
+const TEST_MODELS = 8;
+const TEST_BUDGET_MS = 60000;
+
+// Checks a key for real: lists models, then makes one short request, trying
+// models until one answers (the one the user picked first, if any).
+// Returns { models, model } when a model answered; when the key lists models
+// but none answered, { models, model: null, error } so the user can still
+// pick one. Throws when the key or address itself is not accepted.
 export async function verifyApiProvider(config) {
   const c = { ...config };
   if (!OFFERED_API_PROVIDERS[c.provider]) throw new Error("That provider is not available.");
@@ -78,20 +95,29 @@ export async function verifyApiProvider(config) {
     throw new Error(`The key or address was not accepted. ${providerMessage(e)}`);
   }
   if (!models.length) throw new Error("The key works, but no chat models are available to it.");
-  const candidates = preferredModels(c, models).slice(0, 4);
+  const list = models.map((m) => ({ id: m.id, label: m.label || m.id }));
+  const picked = c.model && models.some((m) => m.id === c.model) ? [c.model] : [];
+  const candidates = [...new Set([...picked, ...preferredModels(c, models)])].slice(0, TEST_MODELS);
+  const deadline = Date.now() + TEST_BUDGET_MS;
+  const failed = [];
   let lastError = null;
   for (const model of candidates) {
+    const left = deadline - Date.now();
+    if (left < 2000) break;
     try {
-      const signal = AbortSignal.timeout(15000);
+      const signal = AbortSignal.timeout(Math.min(15000, left));
       await engine.generate({ system: "Reply with exactly: OK", user: "Say OK.", model, signal, onDelta: () => {} });
-      return { models: models.map((m) => ({ id: m.id, label: m.label || m.id })), model };
+      return { models: list, model, ...(failed.length ? { skipped: failed } : {}) };
     } catch (e) {
       lastError = e;
-      // A billing or key problem will not get better with another model.
-      if (/HTTP (401|402|403)\b/.test(String(e.message))) break;
+      failed.push(model);
+      log("info", "api.verify.model_failed", { provider: c.provider, model, error: providerMessage(e) });
+      // A key or billing problem will not get better with another model.
+      if (keyLevelFailure(e)) throw new Error(`The key was accepted, but a test request failed. ${providerMessage(e)}`);
     }
   }
-  throw new Error(`The key was accepted, but a test request failed. ${providerMessage(lastError)}`);
+  const tried = failed.length === 1 ? `${failed[0]} did not answer` : `None of the ${failed.length} models tried (${failed.join(", ")}) answered`;
+  return { models: list, model: null, error: `The key was accepted, but ${tried}. ${providerMessage(lastError)} Choose a model your key can use and press Check again.` };
 }
 
 async function* sse(res) {

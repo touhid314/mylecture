@@ -27,6 +27,7 @@ contextBridge.exposeInMainWorld("ml", {
   },
   updates: {
     state: () => invoke("update:state"),
+    check: () => invoke("update:check"),
     install: (options) => invoke("update:install", options),
     openTerminal: () => invoke("update:openTerminal"),
     onState: (fn) => on("update:state", fn),

@@ -2,6 +2,7 @@ import { connectPanel } from "./connect.js";
 import { showApiKeyDialog } from "./api-key.js";
 import { h, icon, toast, bus } from "./ui.js";
 import { showLiveLog } from "./logs.js";
+import { checkForUpdates } from "./updates.js";
 import { showInstaller } from "./install-dialog.js";
 import { openAddVoice, removeOwnVoice, isOwnVoice } from "./voice-add.js";
 
@@ -374,7 +375,13 @@ export class SettingsView {
           try { await window.ml.logs.openFolder(); }
           catch { toast("Could not open the logs folder.", { kind: "bad" }); }
         } }, icon("folder"), "Open logs folder"))),
-      h("div", { class: "set-row" }, h("div", { class: "set-label" }, h("b", {}, "About"), h("span", {}, `MyLecture ${this.state.info?.version || ""} · CC BY-NC 4.0 · free for non-commercial use`)), h("div", { class: "set-ctl" })),
+      h("div", { class: "set-row" }, h("div", { class: "set-label" }, h("b", {}, "About"), h("span", {}, `MyLecture ${this.state.info?.version || ""} · CC BY-NC 4.0 · free for non-commercial use`)), h("div", { class: "set-ctl" },
+        h("button", { class: "btn sm", onclick: async (e) => {
+          const b = e.currentTarget;
+          b.disabled = true;
+          b.textContent = "Checking…";
+          try { await checkForUpdates(); } finally { b.disabled = false; b.replaceChildren(icon("refresh"), "Check for updates"); }
+        } }, icon("refresh"), "Check for updates"))),
     );
   }
 }

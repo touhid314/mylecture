@@ -51,12 +51,24 @@ export async function showApiKeyDialog(state, { onDone } = {}) {
     checkBtn.disabled = true;
     result.className = "apikey-result small";
     result.replaceChildren(h("span", { class: "spin", style: { display: "inline-block", verticalAlign: "middle", marginRight: "6px" } }), "Checking the key with a short request…");
+    // A model chosen from an earlier check's list is tried first.
+    const chosen = !modelSelect.disabled && modelSelect.value ? modelSelect.value : "";
     try {
-      const r = await window.ml.api.verify({ provider, apiKey: keyInput.value.trim(), baseUrl: baseInput.value.trim() });
-      verified = { provider, ...r };
+      const r = await window.ml.api.verify({ provider, apiKey: keyInput.value.trim(), baseUrl: baseInput.value.trim(), model: chosen });
       modelSelect.replaceChildren(...r.models.map((m) => h("option", { value: m.id }, m.label || m.id)));
-      modelSelect.value = provider === s.api?.provider && r.models.some((m) => m.id === s.api?.model) ? s.api.model : r.model;
       modelSelect.disabled = false;
+      if (!r.model) {
+        // The key lists models, but the ones tried were refused: let the
+        // user pick one their key can use and check again.
+        verified = null;
+        modelSelect.value = r.models.some((m) => m.id === chosen) ? chosen : r.models[0]?.id || "";
+        result.className = "apikey-result small bad";
+        result.textContent = r.error;
+        return;
+      }
+      verified = { provider, ...r };
+      const saved = provider === s.api?.provider && r.models.some((m) => m.id === s.api?.model) ? s.api.model : "";
+      modelSelect.value = chosen && chosen === r.model ? chosen : saved || r.model;
       result.className = "apikey-result small good";
       result.textContent = `Works. ${r.models.length} models available; ${r.model} answered.`;
     } catch (e) {
