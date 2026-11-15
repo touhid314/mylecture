@@ -509,12 +509,23 @@ export function traceRoute(svg, id, { elapsed = 0 } = {}) {
   const places = [...svg.querySelectorAll(".wb-map-place[data-id]")];
   const stops = (g.dataset.stops || "").split(" ").filter(Boolean).map((sid) => places.find((e) => e.dataset.id === sid)).filter(Boolean)
     .map((e) => { const [x0, y0, x1, y1] = e.dataset.box.split(" ").map(Number); return { e, x: (x0 + x1) / 2, y: (y0 + y1) / 2 }; });
+  // How far along the path each stop is (its closest point). Stops light by progress, so a slow
+  // frame rate that jumps the traveller past a stop between frames still lights it on time.
+  for (const s of stops) {
+    let best = Infinity;
+    for (let i = 0; i <= 200; i++) {
+      const at = (L * i) / 200, q = path.getPointAtLength(at), d = Math.hypot(q.x - s.x, q.y - s.y);
+      if (d < best) { best = d; s.at = at; }
+    }
+  }
+  const ease = (k) => (k < 0.5 ? 2 * k * k : 1 - Math.pow(-2 * k + 2, 2) / 2);
   const light = (e) => { e.removeAttribute("opacity"); e.style.transition = "opacity .4s ease"; e.style.opacity = "1"; markShown(svg, e.dataset.id); };
   const follow = g.dataset.follow;
   const span = follow && follow !== "true" ? Number(follow) * SCALE : null;
   if (!follow && !elapsed) bringIntoView(svg, g);
   path.style.strokeDasharray = `${L} ${L}`;
-  path.style.strokeDashoffset = String(L);
+  // A resumed trace starts where it was, not from an empty line until the next frame.
+  path.style.strokeDashoffset = String(L * (1 - ease(Math.min(1, elapsed / dur))));
   path.style.opacity = "1";
   if (head) head.style.opacity = "1";
   if (stops[0]) light(stops[0].e);
@@ -524,12 +535,11 @@ export function traceRoute(svg, id, { elapsed = 0 } = {}) {
   return new Promise((done) => {
     const step = () => {
       if (g._trace !== token || !g.isConnected) return done(false); // (a redraw resumes it)
-      const k = Math.min(1, (performance.now() - t0) / dur), e = k < 0.5 ? 2 * k * k : 1 - Math.pow(-2 * k + 2, 2) / 2;
+      const k = Math.min(1, (performance.now() - t0) / dur), e = ease(k);
       path.style.strokeDashoffset = String(L * (1 - e));
       const p = path.getPointAtLength(L * e);
       if (head) head.style.transform = place(p.x, p.y);
-      const near = (svg._view?.[2] || W) / 50;
-      for (const s of stops) if (Math.hypot(s.x - p.x, s.y - p.y) < near && s.e.style.opacity !== "1") light(s.e);
+      for (const s of stops) if (L * e >= s.at && s.e.style.opacity !== "1") light(s.e);
       if (follow) {
         // The camera keeps the traveller in view at a steady zoom.
         const v = svg._view || [0, 0, W, H];
