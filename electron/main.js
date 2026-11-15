@@ -780,6 +780,15 @@ window.__RENDER_SECTION__=renderSection;renderSection(VIDEO_PLAN[0],0,0);
 </script></body></html>`);
     const browser = await lg.chromium.launch();
     try {
+      // Warm-up: the validator gives navigation a fixed 10 s, which a slow CI
+      // runner's first page load can exceed. Load the scene once with a long
+      // timeout so the timed check runs against a warm browser.
+      const warm = await browser.newPage({ viewport: { width: 1920, height: 1080 } });
+      try {
+        await warm.goto(pathToFileURL(path.join(dir, "index1.html")).href, { waitUntil: "load", timeout: 60000 });
+      } finally {
+        await warm.close();
+      }
       const v = await lg.validateHtmlInBrowser("index1.html", dir, browser, { width: 1920, height: 1080 });
       if (!String(v).includes("validation passed")) throw new Error(v);
     } finally {

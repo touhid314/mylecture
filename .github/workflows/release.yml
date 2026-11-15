@@ -97,12 +97,30 @@ jobs:
           fi
           npx electron-builder ${{ matrix.target }} --publish never $extra
 
-      # Launch the packaged app: it must boot into Create, synthesize speech with
-      # Kokoro, run the bundled ffmpeg and validate a scene in the bundled browser.
+      # The smoke test's speech models (Kokoro, Whisper), pinned and checksummed
+      # in the script, so the test never waits on a live Hugging Face download.
+      - name: Cache the smoke test's speech models
+        uses: actions/cache@v4
+        with:
+          path: ${{ runner.temp }}/smoke-models
+          key: smoke-models-${{ runner.os }}-${{ hashFiles('scripts/prefetch-models.mjs') }}
+
+      - name: Download the smoke test's speech models
+        timeout-minutes: 15
+        shell: bash
+        run: node scripts/prefetch-models.mjs "$RUNNER_TEMP/smoke-models"
+
+      # Launch the packaged app in a fresh profile seeded with those models: it
+      # must boot into Create, synthesize speech with Kokoro, run the bundled
+      # ffmpeg, validate a scene in the bundled browser, hear speech back with
+      # Whisper and draw the Study board. A timeout or download-type failure is
+      # retried once (logged as SMOKE_TEST_RETRY); anything else fails at once.
       - name: Smoke test the packaged app
+        timeout-minutes: 15
         shell: bash
         env:
           MYLECTURE_SMOKE_DEEP: "1"
+          MYLECTURE_SMOKE_MODELS: ${{ runner.temp }}/smoke-models
         run: node scripts/smoke-packaged.mjs
 
       - name: Install and exercise the packaged Hermes source

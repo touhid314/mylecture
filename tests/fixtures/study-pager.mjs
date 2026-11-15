@@ -37,12 +37,13 @@ app.whenReady().then(async () => {
         pages: [...view.recent.querySelectorAll('.st-pager-pages > *')].map((e) => e.textContent),
         current: view.recent.querySelector('.st-pager-num.on')?.textContent, count: view.recent.querySelector('.st-pager-count')?.textContent,
         prevDisabled: view.recent.querySelector('[aria-label="Previous page"]')?.disabled, nextDisabled: view.recent.querySelector('[aria-label="Next page"]')?.disabled });
-      const tick = () => new Promise((r) => setTimeout(r, 120));
+      // Wait for the list to actually show the page (a fixed delay races on slow machines).
+      const pageShown = async (n) => { for (let i = 0; i < 100 && state().current !== String(n); i++) await new Promise((r) => setTimeout(r, 50)); };
       await view.refreshRecent();
       const first = state();
-      view.recent.querySelector('[aria-label="Next page"]').click(); await tick();
+      view.recent.querySelector('[aria-label="Next page"]').click(); await pageShown(2);
       const second = state();
-      view.recent.querySelector('[aria-label="Page 3"]').click(); await tick();
+      view.recent.querySelector('[aria-label="Page 3"]').click(); await pageShown(3);
       const third = state();
       // Delete the only... the last lessons on page 3 until it's gone: back to page 2.
       for (const id of ['l31', 'l32', 'l33', 'l34', 'l35', 'l36', 'l37', 'l38', 'l39', 'l40', 'l41', 'l42']) await window.ml.study.remove(id);
