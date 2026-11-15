@@ -82,6 +82,10 @@ app.whenReady().then(async () => {
       const o = { waiting: getComputedStyle(line).opacity === '0' };
       board.reveal('m2.silk');
       await wait(1300);
+      // A slow machine runs the trace late: wait (while it's still drawing) for the first stop to light,
+      // then check the trace is mid-way and the last stop isn't lit yet.
+      const lit = (id) => svg2.querySelector('[data-id=' + id + ']').style.opacity === '1';
+      for (let i = 0; i < 40 && !lit('bagh') && !lit('xian'); i++) await wait(25);
       const L = line.getTotalLength();
       o.midDrawn = Number(line.style.strokeDashoffset) > 0 && Number(line.style.strokeDashoffset) < L;
       o.baghLit = svg2.querySelector('[data-id=bagh]').style.opacity === '1';

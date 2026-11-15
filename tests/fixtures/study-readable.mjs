@@ -22,7 +22,8 @@ const finish = (result) => { fs.writeFileSync(report, JSON.stringify(result)); a
 app.whenReady().then(async () => {
   const visual = prepareHtml({ html: `<body style="background:#fff;color:#111"><p id="a">Inline $x^2 + y^2 = z^2$ and \\(\\frac{a}{b}\\)</p><p id="money">Costs $5 and $10</p><div id="later"></div><script>
     setTimeout(()=>{document.getElementById('later').textContent='Added later: $\\\\sqrt{d}$';},50);
-    setTimeout(()=>parent.postMessage({test:'math',katex:document.querySelectorAll('.katex').length,money:document.getElementById('money').textContent,later:!!document.querySelector('#later .katex'),hasKatex:typeof window.katex},'*'),900);
+    // Report once the later text has rendered (up to 8 s), not at a fixed time a slow machine can miss.
+    const t0=Date.now();(function report(){if(!document.querySelector('#later .katex')&&Date.now()-t0<8000)return setTimeout(report,50);parent.postMessage({test:'math',katex:document.querySelectorAll('.katex').length,money:document.getElementById('money').textContent,later:!!document.querySelector('#later .katex'),hasKatex:typeof window.katex},'*');})();
   </script></body>` }, { workspace: temp, sessionId: "readable" });
   protocol.handle("mylecture", (req) => {
     const url = new URL(req.url);
@@ -61,6 +62,8 @@ app.whenReady().then(async () => {
       lesson._receive({turnId:'math'}, {type:'say',text:${JSON.stringify(String.raw`Use $\frac{du}{dx}$ then {look:prod} $u$ times $v$.`)}});
       const spoken = lesson.queue[0].action;
       await wait(1500);
+      // The HTML visual reports when its math has rendered; wait for it on slow machines.
+      for (let i = 0; i < 200 && !messages.some((m) => m.test === 'math'); i++) await wait(50);
       const fillOf = (sel) => { const t = document.querySelector(sel); return t && getComputedStyle(t).fill; };
       const scene = document.querySelector('svg.wb-scene');
       const sceneText = (id) => getComputedStyle(scene.querySelector('[data-id="' + id + '"] text')).fill;
