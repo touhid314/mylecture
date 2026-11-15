@@ -4,6 +4,7 @@
 //   <- {type:"progress", file, loaded, total} | {type:"ready"} | {type:"init-error", message}
 //   <- {type:"done", id, text} | {type:"error", id, message}
 import { env, pipeline } from "@huggingface/transformers";
+import { clearModelCache } from "./model-cache.js";
 
 const port = process.parentPort;
 let asr = null;
@@ -30,6 +31,8 @@ async function init({ cacheDir, model }) {
     .catch((e) => {
       loading = null;
       initError = String(e?.message || e);
+      // A truncated download would fail the same way on every retry: start over.
+      clearModelCache(cacheDir, model || "onnx-community/whisper-base.en");
       port.postMessage({ type: "init-error", message: String(e?.message || e) });
     });
   return loading;
