@@ -24,12 +24,15 @@ git tag "v$releaseVersion"
 git push origin main "v$releaseVersion"
 ```
 
-In GitHub Actions, wait for **Release** to finish successfully. The workflow:
+In GitHub Actions, wait for **Release** to finish successfully. The workflow runs these jobs, in parallel where they don't depend on each other:
 
-1. Installs dependencies and runs tests, including real MP4 aspect-ratio checks.
-2. Builds the Windows installer and portable app.
-3. Starts the packaged app and checks speech synthesis, bundled ffmpeg, and scene validation.
-4. Publishes the files to a GitHub Release.
+1. **Unit tests** on Windows, Apple silicon and Intel Macs (including real MP4 aspect-ratio checks), each in its own job alongside packaging.
+2. **Windows x64**, **macOS Apple silicon**, **macOS Intel**: package the app, then start the packaged app and check speech synthesis, speech recognition, bundled ffmpeg and scene validation, and install and exercise the packaged Hermes source. The Windows installer and the Mac DMG/ZIP are built from the same packaged app these checks run.
+3. **Windows x64 portable**: packages the portable app from the same commit in a separate job, because its single-file compression alone takes about three minutes.
+4. **GitHub Release**: only after every test and build job passes, publishes the files to a GitHub Release.
+5. **Update feed**: verifies the same files and publishes them to the in-app update feed (see below).
+
+Electron and electron-builder's tools, the pinned Hermes source zip and the smoke test's checksummed speech models are cached between runs; nothing that is checked is skipped because of a cache.
 
 Assets include `MyLecture-<version>-win-x64.exe`, the `-portable.exe`, the installer's `.blockmap`, and `latest.yml`. Try the installer and a representative video generation/render before announcing the release.
 
@@ -47,9 +50,19 @@ Download counts belong to individual assets. Save historical counts before delet
 
 ## Publish the in-app update feed
 
-Installed apps use a separate Cloudflare R2 update feed. Publishing a GitHub Release alone does not update that feed.
+Installed apps use a separate Cloudflare R2 update feed. The Release workflow's **Update feed** job publishes it automatically after the GitHub Release is created: it runs `scripts/publish-update.mjs` on the release files, which first verifies them (every file `latest.yml` lists must be present with its size and SHA-512, and the portable download must be there), then uploads the installers and `latest.yml` last.
 
-After the GitHub workflow succeeds, download the same verified assets into `dist/<version>/` and publish them:
+The job needs three repository secrets (**Settings > Secrets and variables > Actions > New repository secret**), the same values as in the website's local `.env`:
+
+- `R2_ACCESS_KEY_ID`
+- `R2_SECRET_ACCESS_KEY`
+- `R2_ENDPOINT` (the `https://<account-id>.r2.cloudflarestorage.com` endpoint)
+
+With none of them set, the job ends with a notice and does nothing; with only some set, it fails. GitHub masks secret values in logs, and the publisher never prints them. The job installs dependencies without running install scripts, and only its credential check and publish steps receive the secrets.
+
+### Publishing the feed by hand
+
+Without the secrets, or to republish, download the same verified assets into `dist/<version>/` and publish them:
 
 ```powershell
 $releaseVersion = node -p "require('./package.json').version"
@@ -57,9 +70,9 @@ gh release download "v$releaseVersion" --dir "dist/$releaseVersion" --clobber
 npm run release:publish
 ```
 
-The version in `package.json` must match the downloaded release. The publisher reads `dist/<version>/` (or `dist/` for a fresh local build), uploads binaries first and `latest.yml` last. Keep each release's files in its own `dist/<version>/` folder.
+The version in `package.json` must match the downloaded release. The publisher reads `dist/<version>/` (or `dist/` for a fresh local build, or the folder given with `--dir <folder>`). `node scripts/publish-update.mjs --check` runs only the verification. Keep each release's files in its own `dist/<version>/` folder.
 
-Maintainers need `R2_ACCESS_KEY_ID`, `R2_SECRET_ACCESS_KEY`, and `R2_ENDPOINT` in their environment or the sibling website's local `.env`. These are not required to run MyLecture and must never be committed or bundled.
+Maintainers publishing by hand need `R2_ACCESS_KEY_ID`, `R2_SECRET_ACCESS_KEY`, and `R2_ENDPOINT` in their environment or the sibling website's local `.env`. These are not required to run MyLecture and must never be committed or bundled.
 
 Installed apps check at startup and offer only higher versions. Installer builds can download updates in the background; portable builds open the matching download in a browser.
 

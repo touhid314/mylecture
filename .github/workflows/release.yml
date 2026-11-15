@@ -1,13 +1,16 @@
 # Builds MyLecture for Windows and macOS (Apple silicon and Intel), checks each
 # packaged app actually starts (and can speak, run ffmpeg and check scenes),
 # then publishes a GitHub Release with the installers when a version tag is
-# pushed. The website's Windows button redirects to the latest GitHub release;
-# Mac users install with scripts/install-mac.command, which downloads the
-# newest release's Mac zip. The in-app updater (Windows) uses
-# `npm run release:publish` (docs/RELEASING.md).
+# pushed, and then the in-app update feed (R2) if its credentials are set as
+# repository secrets. The website's Windows button redirects to the latest
+# GitHub release; Mac users install with scripts/install-mac.command, which
+# downloads the newest release's Mac zip. See docs/RELEASING.md.
 #
-#   git tag v1.0.0 && git push origin v1.0.0   -> GitHub Release with the installers
-#   Actions -> Release -> Run workflow          -> builds + smoke tests only (artifacts)
+#   git tag v1.0.0 && git push origin v1.0.0   -> GitHub Release + update feed
+#   Actions -> Release -> Run workflow          -> builds + checks only (artifacts)
+#
+# Unit tests run in their own job per platform, alongside packaging; the
+# Windows portable app is packaged in its own job, alongside the installer.
 name: Release
 
 on:
@@ -23,6 +26,43 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  test:
+    name: Unit tests (${{ matrix.name }})
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { name: Windows x64, os: windows-latest }
+          - { name: macOS Apple silicon, os: macos-latest }
+          - { name: macOS Intel, os: macos-15-intel }
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      # Electron's own download (npm ci, pretest); same cache as the build jobs.
+      - name: Cache Electron downloads
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/AppData/Local/electron/Cache
+            ~/AppData/Local/electron-builder/Cache
+            ~/Library/Caches/electron
+            ~/Library/Caches/electron-builder
+          key: electron-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('package-lock.json') }}
+          restore-keys: electron-${{ runner.os }}-${{ runner.arch }}-
+
+      - name: Install
+        run: npm ci
+
+      - name: Unit tests
+        run: npm test
+
   build:
     name: ${{ matrix.name }}
     runs-on: ${{ matrix.os }}
@@ -31,23 +71,39 @@ jobs:
       fail-fast: false
       matrix:
         include:
+          # The installer is what the website and the in-app updater hand out,
+          # so it is built from the same packaged app the checks below run.
           - name: Windows x64
+            id: windows-x64
             os: windows-latest
-            target: --win --x64
+            target: --win nsis --x64
+            checks: true
             artifacts: |
               dist/*.exe
               dist/*.exe.blockmap
               dist/latest.yml
+          # The portable app's single-file compression takes ~3 minutes on
+          # its own, so it is packaged in parallel from the same commit.
+          - name: Windows x64 portable
+            id: windows-x64-portable
+            os: windows-latest
+            target: --win portable --x64
+            checks: false
+            artifacts: dist/*-portable.exe
           # Ad-hoc signed, not notarized: installed with scripts/install-mac.command.
           - name: macOS Apple silicon
+            id: macos-arm64
             os: macos-latest
             target: --mac --arm64
+            checks: true
             artifacts: |
               dist/*.dmg
               dist/*.zip
           - name: macOS Intel
+            id: macos-x64
             os: macos-15-intel
             target: --mac --x64
+            checks: true
             artifacts: |
               dist/*.dmg
               dist/*.zip
@@ -59,16 +115,33 @@ jobs:
           node-version: 22
           cache: npm
 
+      # Electron, and electron-builder's NSIS, 7-Zip, dmgbuild and icon tools.
+      - name: Cache Electron downloads
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/AppData/Local/electron/Cache
+            ~/AppData/Local/electron-builder/Cache
+            ~/Library/Caches/electron
+            ~/Library/Caches/electron-builder
+          key: electron-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('package-lock.json') }}
+          restore-keys: electron-${{ runner.os }}-${{ runner.arch }}-
+
       - name: Install
         run: npm ci
-
-      - name: Unit tests
-        run: npm test
 
       - name: Version from tag
         if: startsWith(github.ref, 'refs/tags/v')
         shell: bash
         run: npm pkg set version="${GITHUB_REF_NAME#v}"
+
+      # Only the pinned release zip is cached (its version is in hermes.js);
+      # unpacking, trimming and adding wheels still run every time.
+      - name: Cache Hermes Agent's source release
+        uses: actions/cache@v4
+        with:
+          path: vendor/.cache/hermes-agent-*.zip
+          key: hermes-source-${{ runner.os }}-${{ hashFiles('electron/engines/hermes.js') }}
 
       - name: Bundle Hermes Agent's source
         run: node scripts/fetch-hermes.mjs
@@ -100,12 +173,14 @@ jobs:
       # The smoke test's speech models (Kokoro, Whisper), pinned and checksummed
       # in the script, so the test never waits on a live Hugging Face download.
       - name: Cache the smoke test's speech models
+        if: matrix.checks
         uses: actions/cache@v4
         with:
           path: ${{ runner.temp }}/smoke-models
           key: smoke-models-${{ runner.os }}-${{ hashFiles('scripts/prefetch-models.mjs') }}
 
       - name: Download the smoke test's speech models
+        if: matrix.checks
         timeout-minutes: 15
         shell: bash
         run: node scripts/prefetch-models.mjs "$RUNNER_TEMP/smoke-models"
@@ -116,6 +191,7 @@ jobs:
       # Whisper and draw the Study board. A timeout or download-type failure is
       # retried once (logged as SMOKE_TEST_RETRY); anything else fails at once.
       - name: Smoke test the packaged app
+        if: matrix.checks
         timeout-minutes: 15
         shell: bash
         env:
@@ -124,18 +200,21 @@ jobs:
         run: node scripts/smoke-packaged.mjs
 
       - name: Install and exercise the packaged Hermes source
+        if: matrix.checks
         timeout-minutes: 15
         run: node scripts/check-hermes.mjs --packaged
 
+      # Installers are already compressed; zipping them again only costs time.
       - uses: actions/upload-artifact@v4
         with:
-          name: MyLecture-${{ runner.os }}-${{ runner.arch }}
+          name: MyLecture-${{ matrix.id }}
           path: ${{ matrix.artifacts }}
           if-no-files-found: error
+          compression-level: 0
 
   release:
     name: GitHub Release
-    needs: build
+    needs: [test, build]
     if: startsWith(github.ref, 'refs/tags/v')
     runs-on: ubuntu-latest
     steps:
@@ -150,3 +229,70 @@ jobs:
           gh release create "$GITHUB_REF_NAME" artifacts/* \
             --repo "$GITHUB_REPOSITORY" --generate-notes \
             --title "MyLecture ${GITHUB_REF_NAME#v}"
+
+  # The in-app update feed: the same files, verified against latest.yml, then
+  # uploaded to R2 (installers first, latest.yml last). Needs the repository
+  # secrets R2_ACCESS_KEY_ID, R2_SECRET_ACCESS_KEY and R2_ENDPOINT; without
+  # them this job does nothing and the feed is published by hand.
+  update-feed:
+    name: Update feed
+    needs: release
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      contents: read
+    steps:
+      - name: Check for the update server's credentials
+        id: creds
+        shell: bash
+        env:
+          R2_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+          R2_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+          R2_ENDPOINT: ${{ secrets.R2_ENDPOINT }}
+        run: |
+          set_count=0; missing=""
+          for key in R2_ACCESS_KEY_ID R2_SECRET_ACCESS_KEY R2_ENDPOINT; do
+            if [ -n "${!key}" ]; then set_count=$((set_count + 1)); else missing="$missing $key"; fi
+          done
+          if [ "$set_count" = 0 ]; then
+            echo "::notice title=Update feed not published::No R2 secrets are set. Publish the feed by hand (docs/RELEASING.md)."
+            echo "publish=false" >> "$GITHUB_OUTPUT"
+          elif [ -n "$missing" ]; then
+            echo "::error title=Update feed not published::Missing repository secrets:$missing"
+            exit 1
+          else
+            echo "publish=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - uses: actions/checkout@v4
+        if: steps.creds.outputs.publish == 'true'
+
+      - uses: actions/setup-node@v4
+        if: steps.creds.outputs.publish == 'true'
+        with:
+          node-version: 22
+          cache: npm
+
+      # Only the S3 client is needed: no install scripts, no Electron download.
+      - name: Install
+        if: steps.creds.outputs.publish == 'true'
+        run: npm ci --ignore-scripts
+
+      - name: Version from tag
+        if: steps.creds.outputs.publish == 'true'
+        run: npm pkg set version="${GITHUB_REF_NAME#v}"
+
+      - uses: actions/download-artifact@v4
+        if: steps.creds.outputs.publish == 'true'
+        with:
+          path: release-files
+          merge-multiple: true
+
+      - name: Verify and publish to the update feed
+        if: steps.creds.outputs.publish == 'true'
+        env:
+          R2_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+          R2_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+          R2_ENDPOINT: ${{ secrets.R2_ENDPOINT }}
+        run: node scripts/publish-update.mjs --dir release-files
