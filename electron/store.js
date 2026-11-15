@@ -69,6 +69,10 @@ export const paths = {
   get tts() {
     return path.join(root(), "tts-cache");
   },
+  get themes() {
+    // The user's own video themes and edited built-in themes.
+    return path.join(root(), "themes");
+  },
   get tutor() {
     // Live tutor sessions (Study).
     return path.join(root(), "tutor-sessions");

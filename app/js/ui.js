@@ -101,15 +101,20 @@ export function toast(msg, { kind = "", timeout = 4500, actions = [] } = {}) {
   return el;
 }
 
-export function modal({ title, body, actions = [], onClose, width }) {
+// beforeClose: optional async guard; return false to keep the dialog open.
+export function modal({ title, body, actions = [], onClose, width, beforeClose }) {
   const root = document.getElementById("modal-root");
-  const close = () => {
+  let closed = false;
+  const close = async () => {
+    if (closed || (beforeClose && (await beforeClose()) === false)) return;
+    closed = true;
     back.remove();
     document.removeEventListener("keydown", onKey);
     onClose?.();
   };
+  // Escape closes only the topmost dialog (e.g. a confirmation over this one).
   const onKey = (e) => {
-    if (e.key === "Escape") close();
+    if (e.key === "Escape" && root.lastElementChild === back) close();
   };
   document.addEventListener("keydown", onKey);
   const m = h(

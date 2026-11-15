@@ -48,6 +48,12 @@ contextBridge.exposeInMainWorld("ml", {
     models: (id) => invoke("engines:models", id),
     test: (id) => invoke("engines:test", id),
   },
+  themes: {
+    list: () => invoke("themes:list"),
+    get: (id) => invoke("themes:get", id),
+    save: (theme) => invoke("themes:save", theme),
+    remove: (id) => invoke("themes:delete", id),
+  },
   tts: {
     status: () => invoke("tts:status"),
     voices: () => invoke("tts:voices"),

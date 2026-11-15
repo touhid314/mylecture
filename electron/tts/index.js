@@ -7,7 +7,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { SapiVoice } from "./sapi.js";
-import { OmniVoice, OMNIVOICE_VOICES } from "./omnivoice.js";
+import { OmniVoice, OMNIVOICE_VOICES, resolveVoiceId } from "./omnivoice.js";
 import { log } from "../logger.js";
 import { normalizeForSpeech, wavInfo, wavDuration, pcmToWav } from "./audio.js";
 export { OMNIVOICE_VOICES };
@@ -105,6 +105,22 @@ export class TTSService extends EventEmitter {
     return s.voiceEngine === "omnivoice" ? "omnivoice" : "kokoro";
   }
 
+  // A saved voice can be missing from this build (dev-only reference voices
+  // never ship) or deleted by the user. Narrate with an available voice rather
+  // than failing every line, which leaves a generation with no playable scenes.
+  _availableOmniVoice(voice) {
+    const voices = typeof this.omni?.voices === "function" ? this.omni.voices() : null;
+    const id = resolveVoiceId(voice);
+    if (!voices?.length || voices.some(([v]) => v === id)) return voice;
+    const fallback = voices.some(([v]) => v === "maruf") ? "maruf" : voices[0][0];
+    this._warnedVoices ||= new Set();
+    if (!this._warnedVoices.has(id)) {
+      this._warnedVoices.add(id);
+      log("warn", "tts.voiceFallback", { engine: "omnivoice", voice: id, fallback });
+    }
+    return fallback;
+  }
+
   keyFor(text, engine, voice, speed) {
     return crypto.createHash("sha1").update(`${engine}|${voice}|${speed}|${text}`).digest("hex").slice(0, 20);
   }
@@ -121,8 +137,9 @@ export class TTSService extends EventEmitter {
     const engine = opts.engine || this.activeEngine();
     const speed = opts.speed || s.voiceSpeed || 1;
     if (!["kokoro", "omnivoice", "system"].includes(engine)) throw new Error(`Unknown voice engine: ${engine}`);
-    const voice = engine === "kokoro" ? opts.voice || s.voice || "af_heart"
+    let voice = engine === "kokoro" ? opts.voice || s.voice || "af_heart"
       : engine === "omnivoice" ? opts.voice || s.omnivoiceVoice || "maruf" : opts.systemVoice || s.systemVoice || "";
+    if (engine === "omnivoice") voice = this._availableOmniVoice(voice);
     // Explicit regeneration gets a new file, preserving clips used elsewhere.
     const key = opts.force ? crypto.randomBytes(10).toString("hex") : this.keyFor(text, engine, voice, speed);
     const started = Date.now();

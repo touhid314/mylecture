@@ -124,4 +124,4 @@ In the app, install your chosen AI engine and voice from Settings, then connect 
 
 See [source setup and account sign-in](docs/GETTING_STARTED.md) for details. Developers can run `npm test` to validate changes; the [release guide](docs/RELEASING.md) covers Windows builds and publishing.
 
-**License:** [CC BY-NC 4.0](LICENSE): free to use, share, and adapt with attribution for non-commercial purposes. For commercial use, contact [support@mylecture.ai](mailto:support@mylecture.ai).
+**License:** [CC BY-NC 4.0](LICENSE): free to use, share, and adapt with attribution for non-commercial purposes. For commercial use, contact [touhid3.1416@gmail.com](mailto:touhid3.1416@gmail.com).

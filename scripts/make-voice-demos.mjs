@@ -2,7 +2,7 @@
 // never has to generate speech.
 //   node scripts/make-voice-demos.mjs [--force] [--only kokoro|omnivoice]
 // Output: electron/tts/demos/kokoro/<voice>.mp3 and
-//         electron/tts/voices/<voice>/demo.mp3 (and voices-dev/<voice>/demo.mp3).
+//         electron/tts/voices/<voice>/demo.mp3.
 // Uses the local models in MyLecture's userData (%APPDATA%/MyLecture/models).
 import fs from "node:fs";
 import crypto from "node:crypto";

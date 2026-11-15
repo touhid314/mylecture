@@ -724,3 +724,45 @@ body.light img[src$="assets/lockup.png"] { content: url("../assets/lockup-dark.p
 .install-log { margin: 10px 0 0; padding: 8px 10px; max-height: 120px; overflow: hidden; border-radius: 8px; background: rgba(127, 127, 127, .1); font: 11px/1.5 var(--mono, ui-monospace, Consolas, monospace); color: var(--muted); white-space: pre-wrap; overflow-wrap: anywhere; }
 .voice-group-label .voice-download { flex: none; width: auto; margin-left: auto; font-size: 11px; padding: 3px 10px; min-height: 0; text-transform: none; letter-spacing: 0; white-space: nowrap; }
 .voice-group-label .voice-quality { white-space: nowrap; }
+.voice-speed-row { position: sticky; top: -6px; z-index: 1; display: flex; align-items: center; gap: 10px; margin: -6px -6px 4px; padding: 10px 14px 10px 4px; background: inherit; border-bottom: 1px solid var(--line); }
+.voice-speed-row .voice-speed-label { padding: 0 0 0 6px; flex: none; }
+.voice-speed-row .voice-speed-range { flex: 1; min-width: 0; }
+.voice-speed-value { flex: none; width: 42px; text-align: right; font-size: 12px; font-variant-numeric: tabular-nums; color: var(--muted); }
+
+/* Video themes: sample-slide preview and the theme manager */
+.tp { container-type: inline-size; position: relative; aspect-ratio: 16 / 9; width: 100%; overflow: hidden; border-radius: 10px; border: 1px solid var(--line); display: grid; grid-template-columns: 1.15fr 1fr; align-items: center; gap: 4%; padding: 6%; box-sizing: border-box; line-height: 1.25; }
+.tp-text { min-width: 0; }
+.tp-title { font-size: 7.2cqw; font-weight: 700; letter-spacing: -.02em; }
+.tp-sub { font-size: 3.6cqw; margin-top: 1.4cqw; }
+.tp-eq { font-size: 4cqw; margin-top: 4cqw; font-weight: 600; }
+.tp-list { list-style: none; padding: 0; margin: 3.4cqw 0 0; font-size: 3.2cqw; display: grid; gap: 1.6cqw; }
+.tp-list li { display: flex; align-items: center; gap: 1.6cqw; }
+.tp-dot { width: 1.6cqw; height: 1.6cqw; border-radius: 50%; flex: none; }
+.tp-chart { width: 100%; height: auto; }
+.tp.compact { grid-template-columns: 1fr .8fr; padding: 7%; border-radius: 6px; }
+.tp.compact .tp-title { font-size: 8.5cqw; }
+.tp.compact .tp-sub { font-size: 6cqw; }
+
+.tm { display: grid; grid-template-columns: 236px minmax(0, 1fr); gap: 20px; min-height: 0; }
+.tm-list { display: flex; flex-direction: column; gap: 8px; max-height: 70vh; overflow-y: auto; padding: 2px 6px 2px 2px; }
+.tm-item { display: grid; grid-template-columns: 1fr auto; gap: 6px 8px; align-items: center; text-align: left; padding: 8px; border-radius: 10px; border: 1px solid var(--line); background: var(--surface-2); color: var(--fg); cursor: pointer; }
+.tm-item .tp { grid-column: 1 / -1; }
+.tm-item:hover { border-color: var(--line-2); }
+.tm-item.active { border-color: var(--accent); box-shadow: 0 0 0 2px var(--accent-soft); }
+.tm-item-name { font-size: 13px; font-weight: 600; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.tm-item-kind { font-size: 11px; color: var(--muted); }
+.tm-new { grid-template-columns: auto 1fr; border-style: dashed; background: none; padding: 14px 10px; }
+.tm-new-plus { display: grid; place-items: center; width: 26px; height: 26px; border-radius: 8px; background: var(--surface-2); }
+.tm-editor { display: flex; flex-direction: column; gap: 12px; min-width: 0; }
+.tm-editor-head { display: flex; align-items: center; gap: 10px; }
+.tm-editor-head .input { flex: 1; font-size: 16px; font-weight: 600; }
+.tm-preview .tp { max-width: 560px; }
+.tm-note { margin: -4px 0 0; }
+.tm-field { display: flex; flex-direction: column; gap: 6px; }
+.tm-label { font-size: 12px; font-weight: 600; color: var(--muted); }
+.tm-colors { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; }
+.tm-color { display: flex; align-items: center; gap: 8px; font-size: 12px; padding: 4px 8px 4px 4px; border: 1px solid var(--line); border-radius: 8px; cursor: pointer; }
+.tm-color-input { width: 30px; height: 26px; padding: 0; border: 0; border-radius: 6px; background: none; cursor: pointer; flex: none; }
+.tm-instructions { min-height: 220px; resize: vertical; font: 12px/1.5 ui-monospace, Consolas, monospace; }
+.tm-actions { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; position: sticky; bottom: 0; padding: 10px 0 2px; background: var(--surface); }
+@media (max-width: 760px) { .tm { grid-template-columns: 1fr; } .tm-list { flex-direction: row; max-height: none; overflow-x: auto; } .tm-item { width: 170px; flex: none; } }

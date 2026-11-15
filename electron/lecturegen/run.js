@@ -17,6 +17,7 @@ import { fileURLToPath, pathToFileURL } from "node:url";
 import { AsyncLocalStorage } from "node:async_hooks";
 import { writePlaybackSnapshot } from "../scene-readiness.js";
 import { attachmentContext } from "../attachments.js";
+import { listThemes, themeInstructions } from "./themes.js";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 export const RESOURCES = path.join(here, "resources");
@@ -130,7 +131,8 @@ function firstLine(body) {
 }
 const AUTO_OPTION = { id: "auto", name: "Auto", description: "No preset — the agent decides" };
 export function lecturegenCatalog() {
-  return { themes: [AUTO_OPTION, ...listCatalog("themes")], teachingStyles: [AUTO_OPTION, ...listCatalog("teaching-styles")] };
+  const themes = listThemes().map(({ id, name, description, look, builtin, edited }) => ({ id, name, description, look, builtin, edited }));
+  return { themes: [AUTO_OPTION, ...themes], teachingStyles: [AUTO_OPTION, ...listCatalog("teaching-styles")] };
 }
 
 // Same as lecturegen.ts resolveStyleResource().
@@ -146,6 +148,11 @@ export function resolveStyleResource(value, folder, fallbackFile = "default.md")
       : "No specific teaching style was requested. Teach in the way that best suits the topic.";
   }
   if (trimmed.includes("\n") || trimmed.startsWith("#")) return trimmed;
+  // Themes include the user's own and edited built-ins.
+  if (folder === "themes") {
+    const text = themeInstructions(trimmed);
+    if (text) return text;
+  }
   const filename = trimmed.toLowerCase().endsWith(".md") ? trimmed : `${trimmed}.md`;
   const byId = path.join(RESOURCES, folder, filename);
   if (fs.existsSync(byId) && fs.statSync(byId).isFile()) return fs.readFileSync(byId, "utf8").trim();

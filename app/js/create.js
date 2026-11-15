@@ -13,8 +13,10 @@ import { ModelPicker } from "./model-picker.js";
 import { AttachmentPicker, attachmentNames } from "./attachments.js";
 import { omniVoiceInstalled, showOmniVoiceDownloader } from "./omnivoice-download.js";
 import { openAddVoice, removeOwnVoice, isOwnVoice } from "./voice-add.js";
+import { openThemeManager } from "./themes.js";
 
 const TL = window.MLTimeline;
+const MANAGE_THEMES = "__manage-themes";
 const LENGTH_PRESETS = ["0:15", "0:30", "0:45", ...Array.from({ length: 10 }, (_, i) => `${i + 1}:00`)];
 
 function parseLength(v) {
@@ -185,7 +187,13 @@ export class CreateView {
     } });
     this.arSelect = h("select", { class: "select sm", "aria-label": "Video aspect", title: "Aspect ratio", onchange: e => { this._fit(); this._saveAgentSettings({ aspect: e.target.value }); } }, [["16:9", "Landscape"], ["9:16", "Portrait"], ["1:1", "Square"]].map(([v, label]) => h("option", { value: v, title: label }, v)));
     const styles = this.state.info?.styles || { themes: [], teachingStyles: [] };
-    this.themeSelect = h("select", { class: "select sm", "aria-label": "Video theme", title: "Visual theme", onchange: e => this._saveAgentSettings({ lgTheme: e.target.value }) }, styles.themes.map((o) => h("option", { value: o.id, title: o.description }, o.name)));
+    this.themeSelect = h("select", { class: "select sm", "aria-label": "Video theme", title: "Visual theme", onchange: e => {
+      if (e.target.value !== MANAGE_THEMES) return void this._saveAgentSettings({ lgTheme: e.target.value });
+      const previous = this.state.settings.lgTheme || "auto";
+      e.target.value = previous;
+      this.manageThemes(previous);
+    } });
+    this._themeOptions(styles.themes);
     this.teachSelect = h("select", { class: "select sm", "aria-label": "Teaching style", title: "Teaching style", onchange: e => this._saveAgentSettings({ lgTeachingStyle: e.target.value }) }, styles.teachingStyles.map((o) => h("option", { value: o.id, title: o.description }, o.name)));
     this._syncSettingsSelects();
     this.input = h("textarea", { class: "ide-input", rows: 2, "aria-label": "Message the Video Agent", placeholder: "What video do you want to make? What do you want to teach?" });
@@ -212,7 +220,7 @@ export class CreateView {
       this._saveAgentSettings({ voiceEngine: engine, ...(engine === "kokoro" ? { voice } : { omnivoiceVoice: voice }) });
     } });
     this.voiceSelect.hidden = true;
-    this.voiceButton = h("button", { class: "select sm voice-picker-button", "aria-label": "Choose voice", "aria-haspopup": "menu", onclick: () => this._voiceMenu() }, "Voice");
+    this.voiceButton = h("button", { class: "select sm voice-picker-button", "aria-label": "Choose voice", "aria-haspopup": "menu", onclick: () => this._voiceMenu({ speed: true }) }, "Voice");
     this.videoControls = h("div", { class: "agent-video-controls" },
       h("label", { class: "agent-length-row" }, h("span", {}, "Target length"), this.lenRange, this.lenInput),
       h("div", { class: "agent-video-selects" }, this.arSelect, this.themeSelect, this.teachSelect, h("div", { class: "voice-control" }, this.voiceButton, this.voiceSelect)));
@@ -238,6 +246,29 @@ export class CreateView {
     this.attachments.dropTarget(right);
     this.root.append(left, center, right);
     this.newLecture();
+  }
+
+  // The theme menu: Auto, built-in and the user's own themes, then the editor.
+  _themeOptions(themes) {
+    const value = this.themeSelect.value || this.state.settings.lgTheme;
+    this.themeSelect.replaceChildren(
+      ...themes.map((o) => h("option", { value: o.id, title: o.description }, o.name)),
+      h("option", { value: MANAGE_THEMES, title: "Edit themes, preview them, or make your own" }, "Edit themes…"));
+    this.themeSelect.value = themes.some((t) => t.id === value) ? value : "auto";
+  }
+
+  async manageThemes(selected = this.themeSelect.value) {
+    try {
+      await openThemeManager({
+        selected,
+        onChange: (themes) => {
+          this._themeOptions([{ id: "auto", name: "Auto", description: "No preset — the agent decides" }, ...themes]);
+          // A deleted theme falls back to Auto in the menu; keep the setting in step.
+          if (this.themeSelect.value !== (this.state.settings.lgTheme || "auto")) this._saveAgentSettings({ lgTheme: this.themeSelect.value });
+        },
+        onUse: (id) => { this.themeSelect.value = id; this._saveAgentSettings({ lgTheme: id }); },
+      });
+    } catch (e) { toast(friendly(e), { kind: "bad" }); }
   }
 
   _syncSettingsSelects(s = this.state.settings) {
@@ -282,7 +313,8 @@ export class CreateView {
     } catch (e) { toast(friendly(e), { kind: "bad" }); }
   }
 
-  async _voiceMenu({ anchor = this.voiceButton, value, onSelect } = {}) {
+  // speed: show the narration speed slider (Settings › Speaking speed) on top.
+  async _voiceMenu({ anchor = this.voiceButton, value, onSelect, speed = false } = {}) {
     await this._refreshVoiceOptions();
     const selected = value ?? this.voiceSelect.value;
     const choose = onSelect || ((key) => {
@@ -292,6 +324,17 @@ export class CreateView {
     const menu = popMenu(anchor, []);
     menu.classList.add("voice-menu");
     menu.setAttribute("role", "menu");
+    if (speed) {
+      const current = Number(this.state.settings.voiceSpeed) || 1;
+      const label = h("span", { class: "voice-speed-value" }, `${current.toFixed(2)}×`);
+      const slider = h("input", { type: "range", class: "ide-range voice-speed-range", min: "0.7", max: "1.4", step: "0.05", value: String(current), "aria-label": "Narration speed", "aria-valuetext": `${current.toFixed(2)} times` });
+      slider.oninput = () => {
+        label.textContent = `${Number(slider.value).toFixed(2)}×`;
+        slider.setAttribute("aria-valuetext", `${Number(slider.value).toFixed(2)} times`);
+      };
+      slider.onchange = () => this._saveAgentSettings({ voiceSpeed: Number(slider.value) });
+      menu.append(h("div", { class: "voice-speed-row", title: "Narration speed for new scenes. Use Change voice to re-record existing ones." }, h("span", { class: "menu-label voice-speed-label" }, "Speed"), slider, label));
+    }
     const omniReady = await omniVoiceInstalled();
     for (const [engine, label, quality] of [["kokoro", "Kokoro", "Fast"], ["omnivoice", "OmniVoice", "Higher quality"]]) {
       // OmniVoice not installed yet: offer the download instead of its voices.
@@ -341,10 +384,16 @@ export class CreateView {
       } }, icon("plus"), "Add your own voice…")));
     }
     // Reposition after adding the voice rows so the dropdown fits the viewport.
+    // popMenu sized the empty menu for the space below the anchor; size it
+    // again for its real content, on the side with more room.
     const bounds = anchor.getBoundingClientRect();
+    const above = bounds.top - 6 - 8, below = innerHeight - bounds.bottom - 6 - 8;
+    const up = above >= below;
+    menu.style.maxHeight = `${Math.max(160, Math.floor(Math.min(560, up ? above : below)))}px`;
     const rect = menu.getBoundingClientRect();
-    menu.style.top = Math.max(8, bounds.top - rect.height - 6) + "px";
+    menu.style.top = (up ? Math.max(8, bounds.top - rect.height - 6) : bounds.bottom + 6) + "px";
     menu.style.left = Math.max(8, Math.min(bounds.right - rect.width, innerWidth - rect.width - 8)) + "px";
+    menu.querySelector(".voice-menu-row.selected")?.scrollIntoView({ block: "center" });
     return menu;
   }
 

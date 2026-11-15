@@ -169,3 +169,18 @@ test("the voice engine receives spoken math instead of LaTeX source", async t =>
   assert.deepEqual(submitted, ["Choose u, then calculate the derivative of u with respect to x."]);
   assert.equal(clip.spokenText, submitted[0]);
 });
+
+test("an OmniVoice voice missing from this build falls back instead of failing narration", async t => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "mylecture-tts-fallback-"));
+  t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
+  const tts = service({ voiceEngine: "omnivoice", omnivoiceVoice: "voice-not-in-release" }, dir);
+  const used = [];
+  tts.omni.voices = () => [["maruf", "Maruf"], ["adam", "Adam"]];
+  tts.omni.synth = async (_text, file, { voice }) => {
+    used.push(voice);
+    fs.writeFileSync(file, pcmToWav(new Int16Array(2400).fill(500), 24000));
+  };
+  assert.equal((await tts.synth("Hello there")).engine, "omnivoice");
+  await tts.synth("Explicit voice", { voice: "adam" });
+  assert.deepEqual(used, ["maruf", "adam"]);
+});

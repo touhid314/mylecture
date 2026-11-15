@@ -14,6 +14,9 @@
 import { createRequire } from "node:module";
 
 export const MAC_INSTALL_COMMAND = "curl -fsSL https://raw.githubusercontent.com/touhid314/mylecture/main/scripts/install-mac.command | bash";
+// The update button's command: the same installer, told which version to fetch
+// from the update server, so GitHub's download counts are new installs only.
+export const macUpdateCommand = version => /^\d{1,4}\.\d{1,4}\.\d{1,4}$/.test(String(version)) ? `${MAC_INSTALL_COMMAND} -s -- --update ${version}` : MAC_INSTALL_COMMAND;
 export const GITHUB_LATEST_RELEASE = "https://api.github.com/repos/touhid314/mylecture/releases/latest";
 
 
@@ -108,7 +111,7 @@ export function createUpdater({
     const hasBuild = (release?.assets || []).some(a => new RegExp(`-mac-${macArch}\\.zip$`).test(String(a?.name)));
     if (!version || release?.draft || release?.prerelease || !hasBuild || compareVersions(version, current) <= 0) return;
     log("info", "update.available", { version, mode: "command" });
-    set({ status: "available", version, command: MAC_INSTALL_COMMAND });
+    set({ status: "available", version, command: macUpdateCommand(version) });
   }
 
   // -> { status: "available" | "downloading" | "ready" | "latest" | "off" | "busy" | "error", version?, current, message? }

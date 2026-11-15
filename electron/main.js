@@ -1,5 +1,6 @@
 import { app, BrowserWindow, ipcMain, protocol, net, shell, dialog, Menu, nativeTheme } from "electron";
 import { lecturegenCatalog } from "./lecturegen/run.js";
+import { setUserThemesDir, getTheme, saveTheme, deleteTheme } from "./lecturegen/themes.js";
 import path from "node:path";
 import fs from "node:fs";
 import { execFileSync } from "node:child_process";
@@ -429,6 +430,11 @@ function registerIpc() {
     const r = await tts.synth(DEMO_TEXT, { engine, voice, speed: 1 });
     return { url: audioUrl(r.key), saved: false };
   });
+  // Video themes: built-in ones can be edited (and reset); users add their own.
+  h("themes:list", () => lecturegenCatalog().themes);
+  h("themes:get", (id) => getTheme(id));
+  h("themes:save", (theme) => saveTheme(theme));
+  h("themes:delete", (id) => deleteTheme(id));
   h("tts:removeVoice", (id) => {
     tts.omni.removeVoice(id);
     const s = getSettings();
@@ -630,6 +636,7 @@ app.whenReady().then(() => {
     return new Response(res.body, { status: res.status, headers });
   });
 
+  setUserThemesDir(paths.themes);
   setHermesToolsDir(path.join(app.getPath("userData"), "tools"));
   engines = createEngines(apiConfig);
   tts = new TTSService({ cacheDir: paths.tts, modelDir: paths.models, voicesDir: paths.voices, getSettings });

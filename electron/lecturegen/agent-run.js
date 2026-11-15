@@ -468,6 +468,7 @@ export async function runAgentTurn({ lec, workspaceDir, engine, model, effort, t
   });
   const processed = new Map(); // file -> { html, scene }
   const failed = new Map(); // file -> { html, validation }
+  const reported = new Set(); // narration failures already shown to the user
   const lastSeen = new Map(); // file -> html at the previous scan (stability check)
   let agentDone = false;
   let title = "";
@@ -527,8 +528,13 @@ export async function runAgentTurn({ lec, workspaceDir, engine, model, effort, t
       } catch (e) {
         if (e?.aborted || signal.aborted) throw e;
         processed.delete(file);
-        failed.set(file, { html, validation: `Narration failed: ${e.message || e}`, phase: "narration" });
-        log?.(`${file}: Narration failed: ${e.message || e}`);
+        const message = `Narration failed: ${e.message || e}`;
+        // Show it in the agent's activity once per version of the scene.
+        const report = `${file}
+${message}
+${html}`;
+        if (!reported.has(report)) { reported.add(report); say(`Scene ${i + 1}: ${message}`); }
+        failed.set(file, { html, validation: message, phase: "narration" });
         if (!final) break;
         continue;
       }

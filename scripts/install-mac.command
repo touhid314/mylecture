@@ -10,18 +10,30 @@
 # notarized).
 #
 # Options: --no-open (do not start MyLecture afterwards)
+#          --update <version> (used by the app's update button: download that
+#            version from MyLecture's update server rather than GitHub, so
+#            GitHub's download counts only count new installs)
 # Environment: MYLECTURE_ZIP_URL=<url> installs that zip instead of the newest build.
 set -euo pipefail
 
 REPO="touhid314/mylecture"
 APP_NAME="MyLecture"
+UPDATE_FEED="https://mylecture-server.touhid3-1416.workers.dev/updates"
 OPEN_AFTER=1
-for arg in "$@"; do
-  case "$arg" in
+UPDATE_VERSION=""
+while [ $# -gt 0 ]; do
+  case "$1" in
     --no-open) OPEN_AFTER=0 ;;
-    *) echo "Unknown option: $arg" >&2; exit 2 ;;
+    --update)
+      [ $# -ge 2 ] || { echo "--update needs a version" >&2; exit 2; }
+      UPDATE_VERSION="$2"; shift ;;
+    *) echo "Unknown option: $1" >&2; exit 2 ;;
   esac
+  shift
 done
+if [ -n "${UPDATE_VERSION}" ] && ! printf '%s' "${UPDATE_VERSION}" | grep -Eq '^[0-9]{1,4}\.[0-9]{1,4}\.[0-9]{1,4}$'; then
+  echo "Invalid version: ${UPDATE_VERSION}" >&2; exit 2
+fi
 
 say() { printf '\n\033[1m%s\033[0m\n' "$*"; }
 fail() { printf '\n\033[31mMyLecture could not be installed: %s\033[0m\n' "$*" >&2; exit 1; }
@@ -36,13 +48,18 @@ if [ "${arch}" = "arm64" ] || [ "$(sysctl -in sysctl.proc_translated 2>/dev/null
 else
   ARCH="x64"; CHIP="Intel"
 fi
-say "Installing MyLecture for ${CHIP}..."
+if [ -n "${UPDATE_VERSION}" ]; then say "Updating MyLecture to ${UPDATE_VERSION} for ${CHIP}..."; else say "Installing MyLecture for ${CHIP}..."; fi
 
 # The latest release's build for this chip. github.com/.../releases/latest
 # redirects to the newest release's tag; unlike the GitHub API it is not rate
 # limited (the API allows 60 requests an hour per address, which shared school
 # or office networks can exceed). The API is only a fallback.
 url="${MYLECTURE_ZIP_URL:-}"
+# An update comes from the update server; GitHub is the fallback if it is unreachable.
+if [ -z "${url}" ] && [ -n "${UPDATE_VERSION}" ]; then
+  candidate="${UPDATE_FEED}/MyLecture-${UPDATE_VERSION}-mac-${ARCH}.zip"
+  if curl -fsSIL -o /dev/null "${candidate}" 2>/dev/null; then url="${candidate}"; fi
+fi
 if [ -z "${url}" ]; then
   latest="$(curl -fsSL -o /dev/null -w '%{url_effective}' "https://github.com/${REPO}/releases/latest" 2>/dev/null || true)"
   tag="${latest##*/tag/}"

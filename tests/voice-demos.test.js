@@ -13,7 +13,7 @@ const KOKORO = [...src.slice(src.indexOf("KOKORO_VOICES"), src.indexOf("];", src
 test("every bundled voice ships a saved demo, so play never generates", () => {
   assert(KOKORO.length >= 10);
   for (const v of KOKORO) assert(fs.existsSync(kokoroDemoFile(v)), `missing Kokoro demo: ${v}`);
-  // Voices that ship (electron/tts/voices); dev-only voices in voices-dev get their demo on first play.
+  // Every bundled voice (electron/tts/voices).
   const shipped = OMNIVOICE_VOICES.filter(([id]) => fs.existsSync(new URL(`../electron/tts/voices/${id}/reference.wav`, import.meta.url)));
   assert(shipped.length >= 4);
   for (const [id, name] of shipped) {

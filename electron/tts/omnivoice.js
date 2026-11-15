@@ -12,7 +12,7 @@ const here = path.dirname(fileURLToPath(import.meta.url));
 const ALL_VOICES = [
   ["maruf", "Maruf"], ["haroon", "Haroon"], ["ovi", "Ovi"], ["onik", "Onik"],
   ["adam", "Adam"], ["alex", "Alex"], ["arabella", "Arabella"],
-  ["bradford", "Bradford"], ["cassidy", "Cassidy"],
+  ["bradford", "Bradford"], ["cassidy", "Cassidy"], ["chris", "Chris"],
   ["christopher", "Christopher"], ["christopher-2", "Christopher 2"],
   ["david-castlemore", "David Castlemore"], ["declan-sage", "Declan Sage"],
   ["frederick-surrey", "Frederick Surrey"], ["hope", "Hope"],
@@ -21,16 +21,13 @@ const ALL_VOICES = [
   ["john-doe", "John Doe"], ["jon", "Jon"], ["mark", "Mark"], ["mark-2", "Mark 2"],
   ["michael-c-vincent", "Michael C. Vincent"], ["nassim", "Nassim"],
   ["peter", "Peter"], ["spuds-oxley", "Spuds Oxley"],
-  ["johnny-harris", "Johnny Harris"],
 ];
 // Saved settings may name voices that were renamed or removed.
 export const VOICE_ALIASES = { "american-male-1": "haroon", "american-male-2": "ovi", "american-male-3": "onik", mike: "maruf" };
 export const resolveVoiceId = (id) => VOICE_ALIASES[id] || id;
-// Reference voices ship in electron/tts/voices. Voices that must not ship in
-// releases (e.g. clones of real people) live in voices-dev/ at the repo root,
-// which packaging never includes; they are offered only when present.
-const VOICE_DIRS = [path.join(here, "voices"), path.resolve(here, "../../voices-dev")];
-const voiceDir = (id) => VOICE_DIRS.map((d) => path.join(d, id)).find((d) => fs.existsSync(path.join(d, "reference.wav")));
+// Reference voices ship in electron/tts/voices.
+const VOICES_DIR = path.join(here, "voices");
+const voiceDir = (id) => { const d = path.join(VOICES_DIR, id); return fs.existsSync(path.join(d, "reference.wav")) ? d : null; };
 export const OMNIVOICE_VOICES = ALL_VOICES.filter(([id]) => voiceDir(id));
 // Folder of a bundled or user voice (holds reference.wav, transcript.txt, demo.mp3).
 export function omniVoiceFolder(id, customDir) {

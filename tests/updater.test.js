@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { EventEmitter } from "node:events";
-import { compareVersions, manifestVersion, updateMode, manualDownloadName, createUpdater, MAC_INSTALL_COMMAND, GITHUB_LATEST_RELEASE } from "../electron/updater.js";
+import { compareVersions, manifestVersion, updateMode, manualDownloadName, createUpdater, MAC_INSTALL_COMMAND, macUpdateCommand, GITHUB_LATEST_RELEASE } from "../electron/updater.js";
 
 test("version comparison and manifest parsing", () => {
   assert.equal(compareVersions("0.2.0", "0.1.9"), 1);
@@ -65,6 +65,10 @@ test("Windows installer builds download in the background, then install on Updat
   assert.deepEqual(t.auto.installs, [[true, true]]);
 });
 
+test("the Mac update command only carries a plain release version", () => {
+  for (const bad of ["0.2.0-beta", "0.2.0; rm -rf ~", "", undefined]) assert.equal(macUpdateCommand(bad), MAC_INSTALL_COMMAND);
+});
+
 test("a running job asks for confirmation before installing", async () => {
   const t = harness({ busy: true });
   await t.updater.start();
@@ -79,7 +83,9 @@ test("macOS prompts with the install command when the latest release has a build
     assert.equal(mac.fetched[0], GITHUB_LATEST_RELEASE);
     assert.equal(mac.updater.state.status, "available");
     assert.equal(mac.updater.state.version, "0.2.0");
-    assert.equal(mac.updater.state.command, MAC_INSTALL_COMMAND);
+    // The update downloads that version from the update server, not GitHub.
+    assert.equal(mac.updater.state.command, `${MAC_INSTALL_COMMAND} -s -- --update 0.2.0`);
+    assert.equal(mac.updater.state.command, macUpdateCommand("0.2.0"));
     assert.match(MAC_INSTALL_COMMAND, /install-mac\.command \| bash$/);
     assert.deepEqual(await mac.updater.openTerminal(), { ok: true });
     assert.match(mac.paths[0], /Terminal\.app$/);
